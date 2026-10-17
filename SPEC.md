@@ -1,13 +1,14 @@
 # haskell-reviewer — Specification
 
-Status: **v1.0 — approved**. The rationale for every decision is in
-[DECISIONS.md](DECISIONS.md) (D-01 to D-47). Items to verify during
+Status: **v1.1 — approved**: v1.0 plus the architecture and tech stack
+(§11). The rationale for every decision is in
+[DECISIONS.md](DECISIONS.md) (D-01 to D-74). Items to verify during
 implementation, none of which block this spec, are in
 [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md). Per §10.3 the spec may be revised
 from benchmarks; every revision is logged in DECISIONS.md.
 
-This document specifies *behaviour*. Implementation is discussed only at the
-level needed to show feasibility (§11).
+§1–§10 specify *behaviour*. §11 gives the high-level architecture and the
+tech stack, with no low-level implementation details.
 
 ---
 
@@ -52,10 +53,9 @@ haskell-reviewer [ROOT] [--diff REVSPEC] [options]
 ```
 
 - `ROOT` (default: current directory) is the project root: normally a
-  directory containing `cabal.project`, `stack.yaml`, or a single `*.cabal`
-  file. When both `cabal.project` and `stack.yaml` exist, `cabal.project`
-  is used unless `--stack` is given. Any other directory is accepted in
-  degraded form (§8). In diff mode
+  directory containing `cabal.project` or `*.cabal` files. **Stack is not
+  supported** (D-66): `stack.yaml` is never read. Any other directory is
+  accepted in degraded form (§8). In diff mode
   the project structure is determined **separately for each side**, so a
   change to `.cabal` files (new modules, changed extensions or source dirs)
   is reflected correctly.
@@ -87,10 +87,9 @@ protect against other local users and DNS-rebinding attacks.
   unused.
 - It exits on **Ctrl-C / SIGTERM**, or when no browser tab has been
   connected for **5 minutes** (`--idle-exit MINUTES`; `0` turns this off).
-  The connection is tracked with a heartbeat from the page every ≤ 30 s.
-  The server tolerates gaps of several minutes, because browsers throttle
-  timers in background tabs. A tab that is reopened within the idle timeout
-  reconnects to the same session.
+  A browser counts as connected while its event stream is open (§11.6.2,
+  D-52). There is no separate heartbeat. A tab that is reopened within the
+  idle timeout reconnects to the same session.
 - **Exit codes**: `0` normal exit (including idle exit), `1` internal error,
   `2` bad usage or invalid input (unknown revision, not a git repo when
   `--diff` is given, unreadable ROOT).
@@ -110,7 +109,8 @@ In browse mode there is exactly one side.
 ### 2.3 Project model
 
 - **Packages**: every local package listed in `cabal.project`
-  (`packages:` globs) or `stack.yaml`, or else the single `.cabal` file.
+  (`packages:` globs). Without `cabal.project`, the `*.cabal` files in ROOT,
+  as cabal itself does.
   **Hpack is not supported** (D-41). A package that has `package.yaml`
   but no `.cabal` file on a side is treated as a directory without a
   project (§8), and the banner says so. Hpack users can commit the
@@ -138,7 +138,7 @@ In browse mode there is exactly one side.
      versions);
   2. HIE files (exact package);
   3. the component's `build-depends`, plus a module lookup in the local
-     Cabal/Stack package index on disk (read-only, no network);
+     Cabal package index on disk (read-only, no network);
   4. otherwise a **Hoogle search link** for the name.
 
   The link is labelled with how it was found, like every other heuristic
@@ -170,6 +170,11 @@ Rules:
   identical on that side. The check is by content, not by revision, so HIE
   files from a working-tree build also serve a committed side wherever the
   files agree.
+- **Only the user's own build output is trusted** (D-56). A `.hie` file
+  that is part of a snapshot (tracked in git, or present in the base or
+  head revision) is never used, since a change under review could ship
+  forged ones. HIE reading runs in a separate, resource-limited process
+  (§11.4.6).
 - Every place that shows semantic information marks heuristic results
   visibly (e.g. a dotted underline on a link, with a tooltip saying "resolved
   heuristically").
@@ -185,7 +190,8 @@ Rules:
   deterministic assumptions, since no build plan exists:
   - `os(…)` / `arch(…)` conditionals and the platform macros follow the
     **host** platform.
-  - Cabal flags take their **default** values.
+  - Cabal flags take their `.cabal` **default** values, unless
+    `cabal.project` sets them (D-67).
   - `MIN_VERSION_pkg(…)` evaluates to **true**. `__GLASGOW_HASKELL__` and
     `MIN_VERSION_GLASGOW_HASKELL(…)` are both derived from the **detected
     project GHC version** (§7.1), falling back to the parser's version, so
@@ -322,6 +328,12 @@ The whole file, syntax-highlighted (§5.6), with line numbers.
   syntactic tier, and labelled accordingly.
 - A gutter outline shows the top-level declarations, with a link from each
   back to the docs view.
+- **Find in file** (D-70): `f`, or a toolbar button, opens a find bar that
+  searches the whole file, with a match count announced to screen readers.
+  Long files are virtualised, so the browser's own find (Ctrl-F, left
+  untouched) sees only the lines on screen. The toolbar says so
+  permanently: "Browser find sees only visible lines — press f to search
+  the whole file".
 - In diff mode, changed lines carry gutter markers, and a "show diff here"
   action switches to the diff view at the same place.
 
@@ -334,7 +346,11 @@ Available in diff mode only. It shows the textual diff file by file.
 - Both sides are syntax-highlighted (§5.6) and navigable: identifiers link to the
   definition on *their own side* (a base-side line links into the base
   snapshot).
-- Renames and copies, as detected by git, are shown as such.
+- Renames are detected the way git does by default (exact match, then
+  content similarity ≥ 50 %) and shown as such. Copies are not detected:
+  a copied file shows as added (D-74).
+- **Find in file** (`f`, or a toolbar button) searches the whole file on
+  both sides, as in §4.4.
 - Option to ignore whitespace-only changes.
 
 ### 4.6 Expanded (semantic) diff view
@@ -489,6 +505,7 @@ also has a UI control, so nothing is lost with shortcuts off.
 | `g d` | Go to definition of the identifier under the cursor/focus |
 | `g r` | Find references |
 | `s` | Toggle the inline source of the focused declaration |
+| `f` | Find in file (source and diff views) |
 | `1` `2` `3` `4` | Docs · Source · Diff · Expanded diff (`3`/`4` diff mode only) |
 | `u` | Toggle unified / side-by-side |
 | `b` | Switch side (base/head) |
@@ -822,6 +839,11 @@ as not configured (§8), with the reason.
 - One user config: `$XDG_CONFIG_HOME/haskell-reviewer/config.toml` (on macOS
   the same XDG path, defaulting to `~/.config`). It holds the LLM provider,
   endpoint, model, key source, the deny-list and UI defaults.
+- UI choices made in the page and "remembered across sessions" (theme
+  override, diff layout, "exported only", single-key shortcuts) are stored
+  by the tool in `$XDG_STATE_HOME/haskell-reviewer/ui.json` (D-68). They
+  take precedence over the config's UI defaults. The tool never rewrites
+  `config.toml`.
 - There is **no per-project configuration** of any kind (D-15): no file in
   the project, and no per-project section in the user config. The project
   under review cannot influence the tool, and there is only one place to
@@ -848,7 +870,7 @@ Therefore:
   GHC's. It is used for every project, whatever its GHC version. The GHC
   version the project targets is still determined, in this order: `--ghc
   X.Y` (CLI flags always win, §7); HIE files found; `with-compiler` in
-  `cabal.project`; the Stack resolver; otherwise the parser's own version. It is used for `__GLASGOW_HASKELL__` (§3.1) and for the HIE step
+  `cabal.project`; otherwise the parser's own version. It is used for `__GLASGOW_HASKELL__` (§3.1) and for the HIE step
   below. Code the newest parser rejects (rare syntax removed in newer GHCs)
   falls back to text-only display (§3.1), and the banner says why.
 - **Precise tier through companion extractors**: a small, separate
@@ -857,8 +879,9 @@ Therefore:
   versioned index format** that the main binary reads. The companions are
   *our* code, not project code, so running them does not break §9.1.
 - Companions are optional and installed only for the versions the user
-  needs. They are discovered next to the main binary or on `PATH`. Releases
-  ship companions for the **three most recent GHC major series**.
+  needs. They are discovered next to the main binary or on `PATH`. The
+  **three most recent GHC major series** are supported, and each companion
+  is built from source with its GHC (`make install-hie`, §11.8).
 - When `.hie` files are found but the matching companion is missing,
   those modules use the syntactic tier, and the header hint names the
   companion to install.
@@ -874,7 +897,10 @@ Therefore:
 
 | Situation | Behaviour |
 |-----------|-----------|
-| ROOT has no cabal/stack project | Treated as a single implicit package; module names inferred from paths; banner shown. |
+| ROOT has no `cabal.project` and no `*.cabal` file | Treated as a single implicit package; module names inferred from paths; banner shown. |
+| ROOT has `stack.yaml` but no `cabal.project` | `stack.yaml` is ignored (D-66). The `*.cabal` files in ROOT are used, else the row above applies. The banner says Stack is not supported and that a one-line `cabal.project` (`packages: */*.cabal`) fixes it. |
+| A `.hie` file is part of a snapshot (tracked or committed) | Ignored (D-56); the header hint says why. |
+| HIE companion crashes, times out or returns bad output | Syntactic tier for the affected modules; the reason is in the header hint. |
 | Package has `package.yaml` but no `.cabal` (Hpack) | Not supported (D-41): that package is treated as plain directories with a banner explaining how to generate the `.cabal` file. |
 | Generated module source (`.hsc`, `.x`, `.y`, `.chs`) | Plain text, "generated: not indexed" (§2.3). |
 | `--diff` but not a git repo | Error, exit code 2. |
@@ -916,7 +942,8 @@ Because a build runs arbitrary code (TH, custom `Setup.hs`), the tool **never
 builds**, not even on request. The precise tier comes only from HIE files the
 user has already produced, e.g. by building with `-fwrite-ide-info
 -hiedir=…`. They are discovered in the usual `dist-newstyle` / `.stack-work`
-locations, or given with `--hie-dir DIR` (repeatable). The docs and the
+locations, or given with `--hie-dir DIR` (repeatable). HIE files that are
+part of a snapshot are never used (§3, D-56). The docs and the
 "precise tier unavailable" hint explain how to produce them.
 
 ---
@@ -977,27 +1004,421 @@ find-references, and inferred types on hover.
 
 ---
 
-## 11. Implementation sketch (high level, non-normative)
+## 11. Architecture and tech stack
 
-- **Language**: Haskell. This gives direct access to the GHC parser
-  (`ghc-lib-parser`, newest version only) and, in the companions, to the
-  `ghc` library for reading HIE files (§7.1).
-- **Backend**: one process. It indexes each side into an in-memory model
-  (packages → modules → declarations, with an identifier table), computes the
-  semantic diff, and serves a JSON API and static assets.
-- **Frontend**: a single-page app bundled into the binary. Rendering is done
-  on the client from structured data (declarations, tokens with link
-  targets), not from server-rendered HTML.
-- **Semantic diff**: declarations are matched as described in §4.6, using
-  *(module, namespace, name)* keys, then *(namespace, name)* across modules for moves,
-  and then a similarity pass over the remaining removed/added pairs for
-  renames. Hunks are mapped to declaration extents through line ranges on each side.
-- **Distribution**: one main binary, plus optional per-GHC HIE companions,
-  for Linux (x86_64, aarch64) and macOS (aarch64, x86_64) (D-17). Windows
-  is not supported in v1.
-- **LLM bridge**: the same main binary, run in an MCP-bridge mode, serves
-  the §6.2 tools to the `claude-cli` backend. It connects back to the main
-  process over a local socket with a per-session secret.
+This section fixes the high-level architecture and the tech stack
+(D-48 to D-74). It gives no low-level details such as module layouts,
+exact types or endpoint lists. Those are settled in code. Like the rest of
+the spec, it can change from benchmarks (§10.3).
+
+### 11.1 Overview
+
+```
+ browser tabs ──┐
+                ├─ SharedWorker ──── SSE (one per browser) ─────┐
+                └─ fetch: JSON / CBOR, POST for actions ────────┤
+                                                                ▼
+                                           haskell-reviewer (main process)
+     git cat-file --batch + plumbing ◄──────────┤
+     haskell-reviewer-hie (short-lived) ◄───────┤  CBOR on stdout
+     LLM HTTP (anthropic, openai-compatible) ◄──┤
+     claude CLI ──stdio MCP──► haskell-reviewer mcp-bridge ──unix socket──┘
+```
+
+- **One main process** does all the work: it reads snapshots, indexes them,
+  computes diffs, serves the UI and runs LLM threads. There is no daemon
+  (§2.1).
+- **Helper processes** are all short-lived or tied to the session: `git`
+  (read-only, §11.4.1), HIE companions (§11.4.6), and for `claude-cli` the
+  `claude` binary plus our own MCP bridge (§11.6.3).
+- **The browser** gets structured data and renders everything itself
+  (§11.7). The server never sends HTML apart from the static app shell.
+
+### 11.2 Repository and packages
+
+(D-58) One monorepo:
+
+| Path | What | Builds with |
+|------|------|-------------|
+| `haskell-reviewer/` | Main package: library (all logic) and executable (thin `main`). | GHC 9.10, 9.12, 9.14 (D-64) |
+| `haskell-reviewer-index/` | Neutral, versioned index format (§7.1): types plus CBOR codecs. Small, few dependencies. | The same 3 GHCs |
+| `haskell-reviewer-hie/` | The HIE companion executable. It links the `ghc` library of the GHC that builds it. | Each supported GHC, one build each |
+| `web/` | Frontend (SolidJS + TypeScript), one npm package. | Node (pinned), only to change the frontend |
+| `web/dist/` | The **built** frontend bundle, committed (D-65). | Embedded in the main binary |
+
+The main library splits into layers. Lower layers never import upper ones:
+
+1. **Core** (pure): project model, CPP evaluator, extraction of our own
+   module model from the GHC AST, resolution, line diff, semantic diff,
+   similarity, search scoring, rich text, containment rules.
+2. **Effects** (handles, D-63): git access, file system, companions, LLM
+   transports, clock. Each is a record of functions, so tests can plug in
+   fakes (a fake git, a scripted LLM).
+3. **Session**: snapshot generations, the indexing scheduler, LLM threads,
+   preferences (§11.5).
+4. **Server**: HTTP routing, security headers, wire encoding, SSE (§11.6).
+
+### 11.3 Tech stack
+
+| Concern | Choice | Notes |
+|---------|--------|-------|
+| Backend language | Haskell (GHC 9.10–9.14) | Direct access to the GHC parser and HIE files. |
+| Program style | Plain `IO` plus the handle pattern; pure core | No effect library (D-63). |
+| Haskell parser | `ghc-lib-parser`, newest supported GHC only (9.14 today) | D-35. |
+| HIE reading | `ghc` library, inside the companions only | D-35, D-57. |
+| `.cabal` files | `Cabal-syntax` | The reference parser: conditionals, common stanzas (D-67). |
+| `cabal.project` | Our own small parser | Only the fields we need (§11.4.2). |
+| CPP | Our own evaluator | Keeps positions and excluded regions (D-55). |
+| Markdown | `commonmark` (+ `commonmark-extensions`) | Parsed into our rich-text AST (D-59). |
+| Haddock markup | `haddock-library` | Same AST. |
+| HTTP server | `warp` + `wai`, small hand-written router | D-49. |
+| Compression | gzip middleware (`wai-extra`) | For responses above a size threshold. |
+| Static assets | `file-embed` | The bundle is compiled into the binary. |
+| Concurrency | `stm`, `async` | §11.5. |
+| Wire formats | `aeson` (JSON), `cborg` (CBOR) | D-51. |
+| Index and cache format | `cborg` / `serialise`, versioned | D-57. |
+| Hashing | `crypton` | Git object ids (SHA-1 or SHA-256) for working-tree files, cache keys. |
+| CLI parsing | `optparse-applicative` | |
+| Config | `toml-parser` | `config.toml` (§7). |
+| Anthropic API | `claude` package (Hackage) | Typed streaming, including tool-input deltas (D-62). |
+| OpenAI-compatible API | `openai` package: request types and the raw event stream; our own decoder for streamed tool-call deltas | Its typed `ToolCall` lacks the delta `index`. We use the **Chat Completions** API, since that is what local servers implement (D-62). |
+| MCP (bridge) | Our own minimal stdio JSON-RPC server | Only `initialize`, `tools/list`, `tools/call`, `ping` (D-62). |
+| Frontend | TypeScript (strict), SolidJS, Solid Router | D-48. |
+| Frontend build | Vite; ESLint + Prettier; Vitest | |
+| Styling | Plain CSS with custom properties (themes, design tokens); system font stacks; no CSS framework, no bundled fonts | D-48. |
+| CBOR in the browser | `cbor-x`, **no-eval build** | CSP forbids `eval` (D-51). |
+| Virtual scrolling | A headless virtualiser (TanStack Virtual) | All source and diff views (D-70). |
+| Haskell tests | `tasty`, `hedgehog`, `tasty-golden` | §11.9. |
+| Browser tests | Playwright + axe-core | §11.9. |
+| CI | GitHub Actions | §11.9. |
+| License | BSD-3-Clause | D-73. |
+
+Third-party API packages sit behind our own provider interface (§11.6.3),
+so replacing one touches only its adapter.
+
+### 11.4 Backend pipeline
+
+From the revisions to what the UI shows:
+
+```
+revspec ─► git layer ─► snapshot (file list + blobs, per side)
+                           │
+                           ├─► project model (.cabal, cabal.project)
+                           │
+                           ├─► per module: CPP ─► lex + parse ─► module model   (shared across sides)
+                           │                                        │
+                           │                          resolution (per side) ◄── HIE index (companions)
+                           │
+                           └─► line diff + renames ─► semantic diff (§4.6)
+```
+
+#### 11.4.1 Git layer
+
+(D-53) Git is used **only as a read-only object store**.
+- One long-lived `git cat-file --batch` per session reads blobs and trees.
+  A few plumbing commands do the rest: `rev-parse --verify`,
+  `merge-base`, `ls-tree`, and `ls-files` (for the tracked and
+  untracked-but-not-ignored files of a working-tree side). There is no
+  `git diff` and no `git status`. Nothing writes to `.git`: no index
+  refresh, no temporary index, no new objects.
+- Hardening, for every call: a clean environment, `GIT_OPTIONAL_LOCKS=0`
+  (no index refresh), `GIT_NO_LAZY_FETCH=1` (a partial clone never goes to
+  the network), `-c core.fsmonitor=false` (repo config could otherwise run a
+  command), and `--end-of-options` before any user-given revision. Git's own
+  `safe.directory` check is respected, and a refusal is reported as is.
+- Working-tree files are read from disk. Their object ids are computed in
+  process, with the repo's object format, so unchanged files are recognised
+  across sides without asking git.
+- Submodules are not entered. A submodule shows as one entry with its
+  commit id. Git LFS files show as their pointer text.
+
+#### 11.4.2 Project model
+
+(D-66, D-67)
+- `.cabal` files are parsed with `Cabal-syntax`. Conditionals are resolved
+  with the host platform and the flag values below, as in §3.1.
+- `cabal.project` is parsed by our own parser, which reads only
+  `packages:`, `with-compiler:`, `flags:` (global and per `package`
+  stanza), and `import:` of files **inside the snapshot**. Remote imports
+  are ignored, with a warning. `cabal.project.local` and
+  `cabal.project.freeze` are ignored, because they are per-user or not
+  relevant.
+- **Flag values**: `.cabal` default < `cabal.project` < `--flag`. The
+  header tooltip shows where each value came from.
+- Stack is not supported. `stack.yaml` is never read (§2, §8).
+
+#### 11.4.3 CPP
+
+(D-55) Our own evaluator implements what §3.1 needs: `#if`/`#ifdef`/`#elif`
+expressions, `#define` (object- and function-like), `#undef`, `#include`
+inside the snapshot, and `#error` / `#warning` shown as notes. Its output is
+the text GHC sees, plus a **position map** back to the original file and
+the list of excluded regions. These feed the greyed-out display and the
+CPP token class (§5.6). Unknown or unsupported constructs produce a warning
+on the module, never a crash.
+
+#### 11.4.4 Parsing and the module model
+
+(D-61) Each module is lexed and parsed once with `ghc-lib-parser`, and at
+once converted into **our own compact module model**. The GHC AST is then
+dropped, since keeping ASTs for two sides of a large project would break
+the memory budget (§10.2). The model holds:
+- header, exports, imports, extensions in effect;
+- declarations with namespace, name, extent (a set of ranges, §4.3), head
+  tokens, Haddock (as rich text, §11.4.9), and flags (exported, orphan, …);
+- the token stream (class, span, occurrence id), used for highlighting,
+  links, hover and the similarity metric;
+- an occurrence table: for each identifier span, its binder or its target
+  candidates, resolved in the next step.
+
+Anything the model lacks is recomputed by parsing again on demand.
+
+**Sharing across sides.** The parse result is keyed by *(blob id,
+effective parse settings)*. The settings are the language, the extensions,
+a hash of the CPP environment, and the hashes of included files. Equal keys
+share one result, so in diff mode an unchanged module is parsed and stored
+once. The source text is also stored once per blob. Resolution depends on
+the imports of each side, so it stays per side, and it is cheap compared
+with parsing.
+
+#### 11.4.5 Resolution
+
+Per side, the occurrence table is resolved against the side's module
+graph: import-directed at the syntactic tier (§3), and replaced by the HIE
+index at the precise tier. The results are a definition target for each
+occurrence, and the per-side tables built from them: name → declarations,
+and a reverse-reference table for find-references and "Affected". The
+reverse table is built in the background, and is marked *partial* until it
+is complete (§10.2).
+
+#### 11.4.6 HIE companions
+
+(D-56, D-57)
+- **Discovery** looks under `dist-newstyle/`, `.stack-work/` and every
+  `--hie-dir`. Companions are found as `haskell-reviewer-hie*` next to the
+  main binary or on `PATH`. Each is asked which GHC version it handles
+  (`--ghc-version`), and the answer is cached per binary (path, size,
+  mtime).
+- **Trust rule** (§3, §9.3): a `.hie` file that is part of a snapshot,
+  meaning tracked in git or present in the base or head revision, is
+  **never used**. A malicious change could commit `.hie` files with forged
+  types, or files made to crash the GHC deserialiser. Only build output the
+  user produced is trusted. In browse mode without git there is no way to
+  tell, so files under the discovery paths are used.
+- **Protocol**: the main process starts a companion in batch mode with a
+  list of `.hie` paths on stdin. The companion writes one CBOR record per
+  file to stdout, in the neutral format of `haskell-reviewer-index`, with a
+  magic header and a format version.
+- **Limits**: each companion runs with an RTS heap cap and a per-file
+  timeout. On a crash, a timeout or bad output, the affected modules use the
+  syntactic tier, and the header says why.
+- **Cache**: `$XDG_CACHE_HOME/haskell-reviewer/hie/<format version>/`, one
+  file per `.hie`, keyed by its content hash. Files are written atomically
+  (temporary file, then rename), and entries unused for 30 days are pruned
+  at start-up.
+
+#### 11.4.7 Line diff and renames
+
+(D-54) All diffs are computed **in process**, from the two snapshots.
+Commit-to-commit and commit-to-working-tree therefore take the same code
+path.
+- **File pairing**: files with equal paths; then renames, first by exact
+  blob match, then by content similarity ≥ 50 % among the remaining
+  added/removed files, the way git does by default. Copies are not
+  detected (§4.5).
+- **Hunks**: histogram diff (as `git diff --histogram`), with a Myers
+  fallback for inputs where histogram degrades. Context is unlimited,
+  because both full texts are at hand, so "expand context" costs nothing.
+- **Ignore whitespace** re-runs the diff on normalised lines.
+
+#### 11.4.8 Semantic diff
+
+As in §4.6: declarations are matched by *(module, namespace, name)*, then
+by *(namespace, name)* across modules for moves, then by the similarity
+pass (§4.6.1) for renames. Hunks are mapped to declaration extents through
+line ranges on each side. Classification compares the head-token and body
+token streams of the module model, so it needs no new parse. The changed
+modules on both sides are indexed first (§10.2), so this view is ready
+early.
+
+#### 11.4.9 Rich text
+
+(D-59) LLM Markdown (`commonmark`) and project Haddock (`haddock-library`)
+are parsed **on the server** into one small rich-text AST. The AST cannot
+express raw HTML, so sanitising (§6.4, §9.2) is structural rather than a
+filter. Identifier and `path:line` references are resolved on the server
+into links. While an answer streams, the server re-parses the text received
+so far and sends the new AST.
+
+#### 11.4.10 Search
+
+(D-69) Global search (§4.7) runs on the server, against a per-side name
+table that grows while indexing. It uses an fzf-like scorer and returns a
+capped list. The client debounces keystrokes. Results that come from an
+incomplete index are labelled *partial*.
+
+### 11.5 State and concurrency
+
+(D-60)
+- **Snapshot generations.** Each side has a current *generation*: an
+  immutable file list, plus one slot per module (`pending`, `parsing`,
+  `ready`, `failed`). Slots are held in STM. A request reads one
+  generation from start to end, so it never sees a mix of two.
+- **Scheduler.** A priority queue feeds a pool of parse workers (about one
+  per core, `-threaded`). The priorities are: modules a request is waiting
+  for, then changed modules in diff mode, then the rest. A request for a
+  module that isn't ready raises its priority and waits for it.
+- **Reload** (§5.2) builds a new generation and swaps it in atomically.
+  Unchanged blobs hit the shared parse results (§11.4.4), so a reload
+  re-parses only what changed.
+- **GC.** Finished module models are immutable and long-lived. Keeping
+  major GC pauses short enough for the < 100 ms target (with compact
+  regions or the non-moving collector) is decided by benchmark (Q-GC).
+- **Session state** also lives in STM: LLM threads, budgets (§6.5), SSE
+  clients and preferences.
+- **Files the tool writes** (§9.1): the HIE cache (`$XDG_CACHE_HOME`), UI
+  preferences (`$XDG_STATE_HOME/haskell-reviewer/ui.json`, D-68), and a
+  private temporary directory for the `claude-cli` working directory and
+  the bridge socket, removed on exit. It writes nothing else, and never
+  anything inside ROOT.
+
+### 11.6 Server and protocols
+
+#### 11.6.1 HTTP server
+
+(D-49) `warp` on `127.0.0.1`. In front of every route, middleware does the
+following:
+- checks the `Host` header and the session token (§2), comparing the token
+  in constant time;
+- sets the security headers: the CSP and `Referrer-Policy` of §9.2,
+  `X-Content-Type-Options: nosniff`, and `Cache-Control: no-store` for API
+  responses (hashed static assets are cached as immutable);
+- gzips large responses.
+
+The router is a plain pattern match on path segments. The API is small, so
+a framework would cost more than it saves.
+
+#### 11.6.2 Browser protocol
+
+- **Reads** are `GET` requests. Small or structural payloads (module tree,
+  search results, threads, prefs) are JSON. **Token-heavy** payloads (docs
+  pages, full source, inline source, diff, expanded diff) are **CBOR**
+  (D-51). Every response carries its snapshot generation id, and the client
+  caches by *(generation, resource)*.
+- **Actions** (ask, stop, reload, set preference, …) are `POST` requests
+  with JSON bodies.
+- **Push** (D-52): exactly **one SSE connection per browser**, held by a
+  **SharedWorker** that passes events on to all tabs. Browsers allow only
+  about 6 HTTP/1.1 connections per origin, and plain HTTP on localhost
+  gives no HTTP/2, so one SSE stream per tab would hang the UI after a few
+  tabs. The events are indexing progress, generation changes, LLM stream
+  updates and notices. If SharedWorker is missing, each tab opens its own
+  stream, and a notice warns about the connection limit.
+- **Liveness**: a tab is connected while the SSE stream is open. The idle
+  timer of §2.1 starts when the server has no open stream, so no separate
+  heartbeat is needed.
+- **Contract** (D-50): the types are hand-written on both sides. The
+  Haskell test suite writes a **golden fixture** for every endpoint (CBOR
+  fixtures have a JSON dump next to them for readable diffs). The TypeScript
+  tests feed the fixtures to the **runtime decoders**, which production
+  also uses, so a bad payload fails loudly at the boundary.
+
+#### 11.6.3 LLM engine
+
+(D-62)
+- **Provider interface**: one neutral conversation model (messages, tool
+  calls, tool results, usage, stop reasons) and one streaming interface.
+  The adapters are `anthropic` (the `claude` package), `openai-compatible`
+  (the `openai` package plus our delta decoder) and `claude-cli`.
+- **Tool loop**: for the two API backends, our loop runs model turns,
+  executes tool calls and enforces the budgets (§6.5). The `claude-cli`
+  backend runs its own loop and reaches the same tools through the bridge.
+- **Single choke point**: every tool, the manifest and the anchor read the
+  project through one **LLM view** of a snapshot. That view applies the
+  visible set and the deny-list (§6.2). Nothing else can produce bytes for
+  the model, so a new tool cannot forget the rules.
+- **claude-cli**: the CLI runs as a subprocess with stream-JSON input and
+  output, with the flags of §6.8. Its MCP config starts
+  `haskell-reviewer mcp-bridge`, a hidden subcommand of the same binary.
+  The bridge speaks minimal MCP over stdio, and relays each call over a
+  Unix socket in the private temp directory (mode 0700), authenticated with
+  a per-session secret. All checks and budgets are enforced in the main
+  process, never in the bridge.
+- **Cancellation**: "stop" cancels the thread's `async`. That closes the
+  HTTP stream, or sends an interrupt to the CLI.
+
+### 11.7 Frontend
+
+(D-48)
+- **SolidJS** single-page app. Fine-grained reactivity without a virtual
+  DOM keeps updates cheap on large token views. Routing follows §4.1's URL
+  shapes.
+- **Rendering**: everything is built from the structured data: token
+  streams, declaration models and the rich-text AST. `innerHTML` and its
+  relatives are banned by a lint rule, and checked in CI.
+- **Virtualisation** (D-70): every source and diff view is virtualised,
+  so only the visible lines are in the DOM. Rows carry ARIA row indexes,
+  so assistive tech knows where it is in the file. Our own **find in file**
+  (`f`, plus a toolbar button) searches the whole file on the client, and
+  announces the match count in a live region. The browser's Ctrl-F is left
+  alone, and the toolbar shows a permanent hint that it only sees the
+  visible lines (§4.4, §4.5).
+- **Styling**: plain CSS with custom properties. Themes and the WCAG
+  contrast pairs (§5.4) are defined once, as design tokens. System font
+  stacks only.
+- **Preferences** (theme, layout, "exported only", shortcuts) are read from
+  and written to the server (D-68). The port changes on every run, so
+  `localStorage` would forget them.
+- **Bundle**: the CI checks that the bundle contains no `eval` or `new
+  Function`, since the CSP blocks them. This is why the `cbor-x` no-eval
+  build is used.
+
+### 11.8 Build, install and distribution
+
+(D-64, D-65)
+- **Source only in v1.** There is no Hackage release and there are no
+  prebuilt binaries. Installation:
+  - `make install` builds and installs the main binary. It needs only GHC
+    and `cabal`, since the frontend bundle is committed.
+  - `make install-hie GHC=ghc-9.10` builds the companion with that GHC and
+    installs it as `haskell-reviewer-hie-9.10`. `--version` and the header
+    hint (§7.1) print the exact command for a missing companion.
+  - `make web` rebuilds the frontend bundle. It needs Node, pinned through
+    the lockfile and an engines field.
+- The main binary builds with GHC 9.10, 9.12 and 9.14, so users can use the
+  GHC they already have. It is linked with `-threaded`.
+- Platforms: Linux and macOS (D-17).
+
+### 11.9 Quality
+
+(D-71, D-72)
+- **Unit and property tests** (`tasty`, `hedgehog`) on the pure core: CPP
+  evaluator, line diff, similarity, classification, path containment,
+  rich-text sanitising.
+- **Golden tests on fixture repos.** Scripts build small git repos with
+  fixed authors and dates. The tests check the index, the change list, the
+  manifest and the API fixtures (§11.6.2). Cases include CPP, TH, renames,
+  moves, instances and deriving, a monorepo ROOT, Hpack and Stack-only
+  repos, and parse failures.
+- **Security regression suite**: path escapes and symlinks; deny-list
+  leaks through every LLM tool, the manifest and the anchor; token and
+  `Host` checks; security headers; malicious Haddock and Markdown; `.hie`
+  files tracked in git; companion crash and timeout; git config that tries
+  to run commands.
+- **Browser end-to-end tests** (Playwright) with axe-core checks in both
+  themes: keyboard flows, URL routing, the SharedWorker connection, find in
+  file.
+- **CI** (GitHub Actions): Linux and macOS × GHC 9.10/9.12/9.14 for the
+  Haskell packages; one web job (type check, lint, Vitest, bundle
+  reproducibility, no-eval check); one end-to-end job.
+- **Benchmarks** (`make bench`) run on pinned reference projects, a typical
+  one and a 2,000-module one. They measure the §10 targets and memory. They
+  are run by hand and before each release, not in CI, because shared
+  runners are too noisy. Results feed the D-36 decisions.
+- **Diagnostics**: `--verbose` and `--debug` raise the stderr log level.
+  `--trace-file PATH` writes timing spans (indexing phases, request
+  latency) as JSON lines. Project code is never logged at the default level.
+  There is no telemetry of any kind.
 
 ---
 
@@ -1020,3 +1441,8 @@ find-references, and inferred types on hover.
 - Replaceable system prompt; heuristic prompt-injection scanning (D-37, D-39).
 - Hpack (`package.yaml`) support (D-41).
 - Remote images or raw HTML in rendered content (D-46).
+- Stack support; reading `stack.yaml` (D-66).
+- Hackage releases and prebuilt binaries in v1; install is from source
+  (D-65).
+- Detection of copied files in the diff (D-74).
+- Bundled fonts and CSS frameworks (D-48).
