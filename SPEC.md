@@ -2,7 +2,7 @@
 
 Status: **v1.1 — approved**: v1.0 plus the architecture and tech stack
 (§11). The rationale for every decision is in
-[DECISIONS.md](DECISIONS.md) (D-01 to D-74). Items to verify during
+[DECISIONS.md](DECISIONS.md) (D-01 to D-75). Items to verify during
 implementation, none of which block this spec, are in
 [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md). Per §10.3 the spec may be revised
 from benchmarks; every revision is logged in DECISIONS.md.
@@ -88,7 +88,8 @@ protect against other local users and DNS-rebinding attacks.
 - It exits on **Ctrl-C / SIGTERM**, or when no browser tab has been
   connected for **5 minutes** (`--idle-exit MINUTES`; `0` turns this off).
   A browser counts as connected while its event stream is open (§11.6.2,
-  D-52). There is no separate heartbeat. A tab that is reopened within the
+  D-52). The page sends no heartbeat; the server sends a keep-alive on the
+  stream. A tab that is reopened within the
   idle timeout reconnects to the same session.
 - **Exit codes**: `0` normal exit (including idle exit), `1` internal error,
   `2` bad usage or invalid input (unknown revision, not a git repo when
@@ -172,8 +173,10 @@ Rules:
   files agree.
 - **Only the user's own build output is trusted** (D-56). A `.hie` file
   that is part of a snapshot (tracked in git, or present in the base or
-  head revision) is never used, since a change under review could ship
-  forged ones. HIE reading runs in a separate, resource-limited process
+  head revision), or reached through a symlink in the snapshot, is never
+  used, since a change under review could ship forged ones. Without git
+  (browse mode only) this can't be checked: HIE files are used, and the
+  banner says so. HIE reading runs in a separate, resource-limited process
   (§11.4.6).
 - Every place that shows semantic information marks heuristic results
   visibly (e.g. a dotted underline on a link, with a tooltip saying "resolved
@@ -330,7 +333,7 @@ The whole file, syntax-highlighted (§5.6), with line numbers.
   back to the docs view.
 - **Find in file** (D-70): `f`, or a toolbar button, opens a find bar that
   searches the whole file, with a match count announced to screen readers.
-  Long files are virtualised, so the browser's own find (Ctrl-F, left
+  Views are virtualised (§11.7), so the browser's own find (Ctrl-F, left
   untouched) sees only the lines on screen. The toolbar says so
   permanently: "Browser find sees only visible lines — press f to search
   the whole file".
@@ -529,6 +532,9 @@ also has a UI control, so nothing is lost with shortcuts off.
 - Contrast ≥ 4.5:1 for text in both themes, including syntax-highlighting
   and diff colours.
 - `prefers-reduced-motion` turns off animated transitions.
+- Virtualised views (§11.7) can't be read top to bottom with a screen
+  reader's virtual cursor. Instead, `j`/`k`, `n`/`p` and find in file move
+  focus and scroll, and the focused line is announced.
 - Text scales to 200% without loss of function. Side-by-side diffs fall
   back to unified below a minimum width.
 
@@ -584,7 +590,9 @@ also has a UI control, so nothing is lost with shortcuts off.
 - The `y` key copies the focused item's primary identifier.
 - Every copy gives brief visual feedback ("Copied"), and the same message
   is announced to screen readers. Copying never includes UI chrome such as
-  line numbers or gutter markers. A plain text selection in the source and
+  line numbers or gutter markers. Views are virtualised (§11.7), so a
+  copied selection is built from the file's text, not from the DOM, and a
+  long selection copies every line it spans. A plain text selection in the source and
   diff views copies only the code.
 
 ---
@@ -828,7 +836,8 @@ enforced by the MCP bridge. Token usage is taken from the CLI's result
 events. Subscription rate-limit errors appear inline as ordinary backend
 errors.
 
-**Detection.** The configured binary path, or else `claude` on `PATH`, is
+**Detection.** The configured binary path, or else `claude` on `PATH`
+(looked up as in §11.4.1, never inside ROOT), is
 checked at start-up. If it is missing or not signed in, the LLM is reported
 as not configured (§8), with the reason.
 
@@ -869,7 +878,7 @@ Therefore:
 - **The main binary contains exactly one parser**: the newest supported
   GHC's. It is used for every project, whatever its GHC version. The GHC
   version the project targets is still determined, in this order: `--ghc
-  X.Y` (CLI flags always win, §7); HIE files found; `with-compiler` in
+  X.Y` (CLI flags always win, §7); trusted HIE files (§3); `with-compiler` in
   `cabal.project`; otherwise the parser's own version. It is used for `__GLASGOW_HASKELL__` (§3.1) and for the HIE step
   below. Code the newest parser rejects (rare syntax removed in newer GHCs)
   falls back to text-only display (§3.1), and the banner says why.
@@ -898,7 +907,7 @@ Therefore:
 | Situation | Behaviour |
 |-----------|-----------|
 | ROOT has no `cabal.project` and no `*.cabal` file | Treated as a single implicit package; module names inferred from paths; banner shown. |
-| ROOT has `stack.yaml` but no `cabal.project` | `stack.yaml` is ignored (D-66). The `*.cabal` files in ROOT are used, else the row above applies. The banner says Stack is not supported and that a one-line `cabal.project` (`packages: */*.cabal`) fixes it. |
+| ROOT has `stack.yaml` but no `cabal.project` | `stack.yaml` is ignored (D-66). The `*.cabal` files in ROOT are used, else the row above applies. The banner says Stack is not supported. Committing a `cabal.project` fixes it for later revisions. |
 | A `.hie` file is part of a snapshot (tracked or committed) | Ignored (D-56); the header hint says why. |
 | HIE companion crashes, times out or returns bad output | Syntactic tier for the affected modules; the reason is in the header hint. |
 | Package has `package.yaml` but no `.cabal` (Hpack) | Not supported (D-41): that package is treated as plain directories with a banner explaining how to generate the `.cabal` file. |
@@ -930,8 +939,10 @@ Therefore:
 (D-46) The page holds the session token and renders untrusted content: the
 project's code and Haddock, and LLM answers. So:
 - a strict **Content-Security-Policy**: `default-src 'self'; img-src 'self'
-  data:; connect-src 'self'; script-src 'self'`, with no inline scripts and no
-  remote resources of any kind;
+  data:; connect-src 'self'; script-src 'self'; object-src 'none';
+  base-uri 'none'; form-action 'none'; frame-ancestors 'none'`, with no
+  inline scripts and no remote resources of any kind. The SharedWorker
+  (§11.6.2) falls under `default-src 'self'`;
 - `Referrer-Policy: no-referrer`, so the token in the URL never leaks;
 - all untrusted text is rendered as text, and Markdown/Haddock through a
   sanitiser that allows no raw HTML (§6.4).
@@ -941,8 +952,8 @@ project's code and Haddock, and LLM answers. So:
 Because a build runs arbitrary code (TH, custom `Setup.hs`), the tool **never
 builds**, not even on request. The precise tier comes only from HIE files the
 user has already produced, e.g. by building with `-fwrite-ide-info
--hiedir=…`. They are discovered in the usual `dist-newstyle` / `.stack-work`
-locations, or given with `--hie-dir DIR` (repeatable). HIE files that are
+-hiedir=…`. They are discovered in `dist-newstyle`, or given with
+`--hie-dir DIR` (repeatable); Stack users pass `.stack-work` this way. HIE files that are
 part of a snapshot are never used (§3, D-56). The docs and the
 "precise tier unavailable" hint explain how to produce them.
 
@@ -1007,7 +1018,7 @@ find-references, and inferred types on hover.
 ## 11. Architecture and tech stack
 
 This section fixes the high-level architecture and the tech stack
-(D-48 to D-74). It gives no low-level details such as module layouts,
+(D-48 to D-75). It gives no low-level details such as module layouts,
 exact types or endpoint lists. Those are settled in code. Like the rest of
 the spec, it can change from benchmarks (§10.3).
 
@@ -1081,7 +1092,7 @@ The main library splits into layers. Lower layers never import upper ones:
 | CLI parsing | `optparse-applicative` | |
 | Config | `toml-parser` | `config.toml` (§7). |
 | Anthropic API | `claude` package (Hackage) | Typed streaming, including tool-input deltas (D-62). |
-| OpenAI-compatible API | `openai` package: request types and the raw event stream; our own decoder for streamed tool-call deltas | Its typed `ToolCall` lacks the delta `index`. We use the **Chat Completions** API, since that is what local servers implement (D-62). |
+| OpenAI-compatible API | `openai` package: request types and the raw event stream; our own decoder for streamed tool-call deltas | Its typed `ToolCall` lacks the delta `index` (D-62). |
 | MCP (bridge) | Our own minimal stdio JSON-RPC server | Only `initialize`, `tools/list`, `tools/call`, `ping` (D-62). |
 | Frontend | TypeScript (strict), SolidJS, Solid Router | D-48. |
 | Frontend build | Vite; ESLint + Prettier; Vitest | |
@@ -1121,14 +1132,30 @@ revspec ─► git layer ─► snapshot (file list + blobs, per side)
   untracked-but-not-ignored files of a working-tree side). There is no
   `git diff` and no `git status`. Nothing writes to `.git`: no index
   refresh, no temporary index, no new objects.
-- Hardening, for every call: a clean environment, `GIT_OPTIONAL_LOCKS=0`
-  (no index refresh), `GIT_NO_LAZY_FETCH=1` (a partial clone never goes to
-  the network), `-c core.fsmonitor=false` (repo config could otherwise run a
-  command), and `--end-of-options` before any user-given revision. Git's own
-  `safe.directory` check is respected, and a refusal is reported as is.
-- Working-tree files are read from disk. Their object ids are computed in
-  process, with the repo's object format, so unchanged files are recognised
-  across sides without asking git.
+- Hardening, for every call:
+  - a minimal environment that keeps `HOME` and `XDG_CONFIG_HOME` (so the
+    user's `safe.directory` still applies) and drops every other `GIT_*`;
+  - `GIT_OPTIONAL_LOCKS=0`: no index refresh;
+  - `GIT_NO_LAZY_FETCH=1`: a partial clone never goes to the network;
+  - `GIT_NO_REPLACE_OBJECTS=1`: `refs/replace` can't swap content;
+  - `GIT_TERMINAL_PROMPT=0`: never prompt;
+  - `-c core.fsmonitor=false`: repo config can't run a command;
+  - `--end-of-options` before any user-given revision.
+
+  Git's `safe.directory` refusal is reported as is. The minimum git version
+  is 2.44 (for `GIT_NO_LAZY_FETCH`), checked at start-up (exit code 2).
+- **Helper lookup**: `git`, `claude` and the companions are looked up only
+  in absolute `PATH` entries, and a binary inside ROOT is never run. A
+  change under review can't add a binary that we then start (§9.1).
+- **Working-tree side** (D-75): git's clean filters (CRLF, `ident`,
+  encodings, LFS) mean a file on disk can differ from its blob and still be
+  unchanged. So git says which tracked files are clean: `ls-files -s`
+  gives their blob ids, and `diff-files --name-only` lists the dirty ones.
+  Both are read-only with the settings above. Clean files are read from
+  git objects. Only dirty and untracked files are read from disk; their ids
+  are computed in process, with the EOL rules of `.gitattributes` applied.
+  A dirty file under any other filter (e.g. LFS) is shown as its on-disk
+  text, with a "filtered file" note.
 - Submodules are not entered. A submodule shows as one entry with its
   commit id. Git LFS files show as their pointer text.
 
@@ -1143,8 +1170,10 @@ revspec ─► git layer ─► snapshot (file list + blobs, per side)
   are ignored, with a warning. `cabal.project.local` and
   `cabal.project.freeze` are ignored, because they are per-user or not
   relevant.
-- **Flag values**: `.cabal` default < `cabal.project` < `--flag`. The
-  header tooltip shows where each value came from.
+- **Flag values**: `.cabal` default < `cabal.project` (`flags:`) <
+  `--flag`. The header tooltip shows where each value came from. Flags set
+  only through `constraints:` are not read, and automatic flags
+  (`manual: False`) keep their default, since there is no solver.
 - Stack is not supported. `stack.yaml` is never read (§2, §8).
 
 #### 11.4.3 CPP
@@ -1194,26 +1223,24 @@ is complete (§10.2).
 #### 11.4.6 HIE companions
 
 (D-56, D-57)
-- **Discovery** looks under `dist-newstyle/`, `.stack-work/` and every
-  `--hie-dir`. Companions are found as `haskell-reviewer-hie*` next to the
-  main binary or on `PATH`. Each is asked which GHC version it handles
+- **Discovery** looks under `dist-newstyle/` and every `--hie-dir`.
+  Companions are found as `haskell-reviewer-hie*` next to the main binary
+  or on `PATH` (§11.4.1). Each is asked which GHC version it handles
   (`--ghc-version`), and the answer is cached per binary (path, size,
   mtime).
-- **Trust rule** (§3, §9.3): a `.hie` file that is part of a snapshot,
-  meaning tracked in git or present in the base or head revision, is
-  **never used**. A malicious change could commit `.hie` files with forged
-  types, or files made to crash the GHC deserialiser. Only build output the
-  user produced is trusted. In browse mode without git there is no way to
-  tell, so files under the discovery paths are used.
+- **Trust rule**: as in §3. The check uses real paths: a `.hie` file whose
+  real path, or any parent directory, is tracked or a symlink in the
+  snapshot is rejected. The rule applies to `--hie-dir` too.
 - **Protocol**: the main process starts a companion in batch mode with a
   list of `.hie` paths on stdin. The companion writes one CBOR record per
   file to stdout, in the neutral format of `haskell-reviewer-index`, with a
   magic header and a format version.
-- **Limits**: each companion runs with an RTS heap cap and a per-file
-  timeout. On a crash, a timeout or bad output, the affected modules use the
-  syntactic tier, and the header says why.
+- **Limits**: each companion runs with an RTS heap cap (it is built with
+  `-rtsopts`) and a per-file timeout. If it crashes or times out, the file
+  at fault uses the syntactic tier, and a new companion carries on with the
+  rest. Bad output is treated the same way. The header says why.
 - **Cache**: `$XDG_CACHE_HOME/haskell-reviewer/hie/<format version>/`, one
-  file per `.hie`, keyed by its content hash. Files are written atomically
+  file per `.hie`, keyed by its content hash and the companion's version. Files are written atomically
   (temporary file, then rename), and entries unused for 30 days are pruned
   at start-up.
 
@@ -1225,7 +1252,9 @@ path.
 - **File pairing**: files with equal paths; then renames, first by exact
   blob match, then by content similarity ≥ 50 % among the remaining
   added/removed files, the way git does by default. Copies are not
-  detected (§4.5).
+  detected (§4.5). Like git's `diff.renameLimit`, the similarity step is
+  capped (1,000 files per side by default); above that, only exact
+  renames are found, and a notice says so.
 - **Hunks**: histogram diff (as `git diff --histogram`), with a Myers
   fallback for inputs where histogram degrades. Context is unlimited,
   because both full texts are at hand, so "expand context" costs nothing.
@@ -1247,8 +1276,8 @@ early.
 are parsed **on the server** into one small rich-text AST. The AST cannot
 express raw HTML, so sanitising (§6.4, §9.2) is structural rather than a
 filter. Identifier and `path:line` references are resolved on the server
-into links. While an answer streams, the server re-parses the text received
-so far and sends the new AST.
+into links. While an answer streams, the server re-parses at most every
+100 ms, and sends only the blocks that changed since the last update.
 
 #### 11.4.10 Search
 
@@ -1271,16 +1300,16 @@ incomplete index are labelled *partial*.
 - **Reload** (§5.2) builds a new generation and swaps it in atomically.
   Unchanged blobs hit the shared parse results (§11.4.4), so a reload
   re-parses only what changed.
-- **GC.** Finished module models are immutable and long-lived. Keeping
-  major GC pauses short enough for the < 100 ms target (with compact
-  regions or the non-moving collector) is decided by benchmark (Q-GC).
+- **GC.** Big indexes may cause long GC pauses. Benchmarks pick the fix:
+  compact regions or the non-moving GC (Q-GC).
 - **Session state** also lives in STM: LLM threads, budgets (§6.5), SSE
   clients and preferences.
-- **Files the tool writes** (§9.1): the HIE cache (`$XDG_CACHE_HOME`), UI
-  preferences (`$XDG_STATE_HOME/haskell-reviewer/ui.json`, D-68), and a
-  private temporary directory for the `claude-cli` working directory and
-  the bridge socket, removed on exit. It writes nothing else, and never
-  anything inside ROOT.
+- **Files the tool writes** (§1): the HIE cache (`$XDG_CACHE_HOME`), UI
+  preferences (`$XDG_STATE_HOME`, default `~/.local/state`, also on macOS;
+  D-68), a private temporary directory for the `claude-cli` working
+  directory and the bridge socket (removed on exit), and the
+  `--trace-file` if given. Nothing else, and nothing inside ROOT unless
+  the user points `--trace-file` there.
 
 ### 11.6 Server and protocols
 
@@ -1292,8 +1321,9 @@ following:
   in constant time;
 - sets the security headers: the CSP and `Referrer-Policy` of §9.2,
   `X-Content-Type-Options: nosniff`, and `Cache-Control: no-store` for API
-  responses (hashed static assets are cached as immutable);
-- gzips large responses.
+  responses. Static assets also live under the token path, and their
+  hashed names let the browser cache them as immutable;
+- gzips large responses, except the event stream.
 
 The router is a plain pattern match on path segments. The API is small, so
 a framework would cost more than it saves.
@@ -1307,16 +1337,22 @@ a framework would cost more than it saves.
   caches by *(generation, resource)*.
 - **Actions** (ask, stop, reload, set preference, …) are `POST` requests
   with JSON bodies.
-- **Push** (D-52): exactly **one SSE connection per browser**, held by a
-  **SharedWorker** that passes events on to all tabs. Browsers allow only
-  about 6 HTTP/1.1 connections per origin, and plain HTTP on localhost
-  gives no HTTP/2, so one SSE stream per tab would hang the UI after a few
-  tabs. The events are indexing progress, generation changes, LLM stream
-  updates and notices. If SharedWorker is missing, each tab opens its own
-  stream, and a notice warns about the connection limit.
-- **Liveness**: a tab is connected while the SSE stream is open. The idle
-  timer of §2.1 starts when the server has no open stream, so no separate
-  heartbeat is needed.
+- **Push** (D-52): **one SSE connection per browser**, held by a
+  **SharedWorker** that passes events on to all tabs.
+  - Why: browsers allow about 6 HTTP/1.1 connections per origin, and
+    plain HTTP gives no HTTP/2. One stream per tab would hang the UI after
+    a few tabs.
+  - Events: indexing progress, generation changes, LLM stream updates,
+    notices.
+  - Fallback: without SharedWorker, each tab opens its own stream, and a
+    notice warns about the limit.
+- **Liveness**: a browser is connected while its SSE stream is open. The
+  server writes a keep-alive comment every 15 s, so a closed tab is noticed
+  within seconds, and the idle timer of §2.1 starts when no stream is open.
+  The stream route has no Warp timeout and is never gzipped.
+- **Reconnect**: events carry ids. After a reconnect the worker refetches
+  the state it shows (index progress, open LLM threads), so a lost event
+  costs nothing.
 - **Contract** (D-50): the types are hand-written on both sides. The
   Haskell test suite writes a **golden fixture** for every endpoint (CBOR
   fixtures have a JSON dump next to them for readable diffs). The TypeScript
@@ -1329,7 +1365,9 @@ a framework would cost more than it saves.
 - **Provider interface**: one neutral conversation model (messages, tool
   calls, tool results, usage, stop reasons) and one streaming interface.
   The adapters are `anthropic` (the `claude` package), `openai-compatible`
-  (the `openai` package plus our delta decoder) and `claude-cli`.
+  (the `openai` package plus our delta decoder) and `claude-cli`. The
+  OpenAI-compatible adapter uses the Chat Completions API, since that is
+  what local servers implement (Q-OPENAI-COMPAT).
 - **Tool loop**: for the two API backends, our loop runs model turns,
   executes tool calls and enforces the budgets (§6.5). The `claude-cli`
   backend runs its own loop and reaches the same tools through the bridge.
@@ -1342,7 +1380,9 @@ a framework would cost more than it saves.
   `haskell-reviewer mcp-bridge`, a hidden subcommand of the same binary.
   The bridge speaks minimal MCP over stdio, and relays each call over a
   Unix socket in the private temp directory (mode 0700), authenticated with
-  a per-session secret. All checks and budgets are enforced in the main
+  a per-session secret. The secret is passed in a mode-0600 file in that
+  directory, never on a command line (other users can read argv). The
+  directory path is kept short for the macOS socket path limit. All checks and budgets are enforced in the main
   process, never in the bridge.
 - **Cancellation**: "stop" cancels the thread's `async`. That closes the
   HTTP stream, or sends an interrupt to the CLI.
@@ -1350,8 +1390,8 @@ a framework would cost more than it saves.
 ### 11.7 Frontend
 
 (D-48)
-- **SolidJS** single-page app. Fine-grained reactivity without a virtual
-  DOM keeps updates cheap on large token views. Routing follows §4.1's URL
+- **SolidJS** single-page app. No virtual DOM, so big token views update
+  fast. Routing follows §4.1's URL
   shapes.
 - **Rendering**: everything is built from the structured data: token
   streams, declaration models and the rich-text AST. `innerHTML` and its
@@ -1399,11 +1439,12 @@ a framework would cost more than it saves.
   fixed authors and dates. The tests check the index, the change list, the
   manifest and the API fixtures (§11.6.2). Cases include CPP, TH, renames,
   moves, instances and deriving, a monorepo ROOT, Hpack and Stack-only
-  repos, and parse failures.
+  repos, CRLF and LFS files, and parse failures.
 - **Security regression suite**: path escapes and symlinks; deny-list
   leaks through every LLM tool, the manifest and the anchor; token and
   `Host` checks; security headers; malicious Haddock and Markdown; `.hie`
-  files tracked in git; companion crash and timeout; git config that tries
+  files tracked in git or behind a tracked symlink; a helper binary
+  planted in ROOT; companion crash and timeout; git config that tries
   to run commands.
 - **Browser end-to-end tests** (Playwright) with axe-core checks in both
   themes: keyboard flows, URL routing, the SharedWorker connection, find in

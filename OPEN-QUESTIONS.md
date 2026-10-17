@@ -25,3 +25,5 @@ is updated if needed (§10.3).
 - **Q-OPENAI-COMPAT**: Check that the `openai` package's raw stream and our
   delta decoder work with Ollama, llama.cpp and vLLM, not only OpenAI
   (§11.6.3).
+- **Q-SSE**: Check SharedWorker + SSE keep-alive and reconnect on the
+  three browsers, including background-tab throttling (§11.6.2).
