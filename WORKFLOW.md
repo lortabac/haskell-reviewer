@@ -26,10 +26,14 @@ Always pass `model` when starting an agent.
 
 - Planners and reviewers (both kinds): `opus`.
 - Implementers: the coordinator rates each task when it writes the goal file.
-  Simple, mechanical tasks (small changes, clear plan, code like what's
-  already there) get `sonnet`. Tricky ones (new design, hard types, subtle
-  logic, many modules) get `opus`. When in doubt, `opus`.
-- Never `fable`, unless the human asks for it.
+  Simple, mechanical tasks (small changes, code like what's already there)
+  get `sonnet`. Tricky ones (new design, hard types, subtle logic, many
+  modules) get `opus`. When in doubt, `opus`. This is a first guess: check it
+  again after the plan. Every implementer for the task uses its `Model`,
+  including the ones that fix, rebase or start over in a new session.
+- If a `sonnet` implementer can't get the build and tests green, switch the
+  task to `opus` and note why before you stop and ask.
+- Never `fable`, for any agent, unless the human asks for it.
 
 ## Files
 
@@ -86,8 +90,7 @@ Put the question in the task's notes.
 
 `Model` is the implementer's model (see [Models](#models)). The human can
 change it when approving the file. If the plan shows the task is harder or
-easier than expected, the coordinator can change it too, and says why in the
-notes.
+easier than expected, the coordinator can change it too. Note why.
 
 Acceptance criteria come in two kinds: things an agent can check (build,
 tests, a command's output) and a short "how to test" for the human.
@@ -117,8 +120,8 @@ For each task:
    unmerged one waits until the human merges it.
 3. **Implement.** Give the plan to an implementer, using the task's `Model`.
    It works only inside the worktree, builds and runs the tests, then stages
-   everything with `git add -A` (no commit). It reports what it did and **anything that
-   differs from the plan, and why**.
+   everything with `git add -A` (no commit). It reports what it did and
+   **anything that differs from the plan, and why**.
 4. **Review.** Start both reviews at the same time, each with a fresh agent:
    - Correctness review. Input: task, acceptance criteria, plan, the
      implementer's report. Reads `git diff --cached` in the worktree.
@@ -216,7 +219,8 @@ human says so.
 
 ## 7. Prompt templates
 
-Fill in the `<...>` parts. Add anything else the agent needs to know.
+Fill in the `<...>` parts. Add anything else the agent needs to know. Pass
+`model` (see [Models](#models)).
 
 ### Planner
 
