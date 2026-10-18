@@ -1,0 +1,5 @@
+.goals/
+.worktrees/
+.cabal-home/
+dist-newstyle/
+cabal.project.local*
