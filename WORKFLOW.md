@@ -90,11 +90,12 @@ For each task:
    criteria and the relevant spec sections. The plan lists the files to
    touch, the steps, and the tests to add. If the plan needs something in
    [Stop and ask](#4-stop-and-ask), stop.
-2. **Worktree.** From the main repo root, branch from the latest master:
+2. **Worktree.** From the main repo root, branch from local `master`:
    ```
-   git fetch origin
-   git worktree add .worktrees/<goal>-<task> -b <branch> origin/master
+   git worktree add .worktrees/<goal>-<task> -b <branch> master
    ```
+   Agents can't reach the remote from the sandbox. The human pulls into
+   `master` after each merge.
    Never branch from an unmerged task branch. A task that depends on an
    unmerged one waits until the human merges it.
 3. **Implement.** Give the plan to an implementer. It works only inside the
@@ -129,11 +130,11 @@ For each task:
 
 - **Human finds a problem.** Fix it on the same branch with a short loop:
   implement, review, verify, commit (a new commit). Hand off again.
-- **Human merges.** Set the task to `done`. Remove the worktree
+- **Human merges and pulls.** Set the task to `done`. Remove the worktree
   (`git worktree remove`) and the local branch (`git branch -D`, since the
   merge may be a squash). Go on to the next task.
 - **Branch conflicts with the new master.** Ask the implementer to rebase on
-  `origin/master`, then verify again. If the conflict wasn't trivial, review
+  `master` (after the human has pulled), then verify again. If the conflict wasn't trivial, review
   again too. Hand off again.
 - **Human changes the plan.** Update the goal file first, then go on.
 
