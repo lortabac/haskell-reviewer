@@ -20,6 +20,17 @@ else.
 - **Style reviewer.** Fresh, read-only agent. Checks Haskell code and Haddock
   comments against `STYLE.md`.
 
+### Models
+
+Always pass `model` when starting an agent.
+
+- Planners and reviewers (both kinds): `opus`.
+- Implementers: the coordinator rates each task when it writes the goal file.
+  Simple, mechanical tasks (small changes, clear plan, code like what's
+  already there) get `sonnet`. Tricky ones (new design, hard types, subtle
+  logic, many modules) get `opus`. When in doubt, `opus`.
+- Never `fable`, unless the human asks for it.
+
 ## Files
 
 | File | What | Tracked |
@@ -57,6 +68,7 @@ Source: ROADMAP.md § M1
 Status: todo | planning | implementing | reviewing | waiting-human | blocked | done
 Depends on: —
 Branch: m1/t01-module-headers
+Model: sonnet | opus
 
 Acceptance:
 - `cabal build all` and `cabal test all` pass.
@@ -71,6 +83,11 @@ Notes:
 
 `blocked` means the coordinator asked the human something and is waiting.
 Put the question in the task's notes.
+
+`Model` is the implementer's model (see [Models](#models)). The human can
+change it when approving the file. If the plan shows the task is harder or
+easier than expected, the coordinator can change it too, and says why in the
+notes.
 
 Acceptance criteria come in two kinds: things an agent can check (build,
 tests, a command's output) and a short "how to test" for the human.
@@ -98,9 +115,9 @@ For each task:
    `master` after each merge.
    Never branch from an unmerged task branch. A task that depends on an
    unmerged one waits until the human merges it.
-3. **Implement.** Give the plan to an implementer. It works only inside the
-   worktree, builds and runs the tests, then stages everything with
-   `git add -A` (no commit). It reports what it did and **anything that
+3. **Implement.** Give the plan to an implementer, using the task's `Model`.
+   It works only inside the worktree, builds and runs the tests, then stages
+   everything with `git add -A` (no commit). It reports what it did and **anything that
    differs from the plan, and why**.
 4. **Review.** Start both reviews at the same time, each with a fresh agent:
    - Correctness review. Input: task, acceptance criteria, plan, the
