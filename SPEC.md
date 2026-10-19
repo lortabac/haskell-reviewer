@@ -2,7 +2,7 @@
 
 Status: **v1.1 — approved**: v1.0 plus the architecture and tech stack
 (§11). The rationale for every decision is in
-[DECISIONS.md](DECISIONS.md) (D-01 to D-75). Items to verify during
+[DECISIONS.md](DECISIONS.md) (D-01 to D-76). Items to verify during
 implementation, none of which block this spec, are in
 [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md). Per §10.3 the spec may be revised
 from benchmarks; every revision is logged in DECISIONS.md.
@@ -1018,7 +1018,7 @@ find-references, and inferred types on hover.
 ## 11. Architecture and tech stack
 
 This section fixes the high-level architecture and the tech stack
-(D-48 to D-75). It gives no low-level details such as module layouts,
+(D-48 to D-76). It gives no low-level details such as module layouts,
 exact types or endpoint lists. Those are settled in code. Like the rest of
 the spec, it can change from benchmarks (§10.3).
 
@@ -1452,10 +1452,12 @@ a framework would cost more than it saves.
 - **CI** (GitHub Actions): Linux and macOS × GHC 9.10/9.12/9.14 for the
   Haskell packages; one web job (type check, lint, Vitest, bundle
   reproducibility, no-eval check); one end-to-end job.
-- **Benchmarks** (`make bench`) run on pinned reference projects, a typical
-  one and a 2,000-module one. They measure the §10 targets and memory. They
-  are run by hand and before each release, not in CI, because shared
-  runners are too noisy. Results feed the D-36 decisions.
+- **Benchmarks** (`make bench`) run on three pinned reference projects: a
+  small one, a typical one and a 2,000-module one. They measure the §10
+  targets and memory. They are run by hand and before each release, not in
+  CI, because shared runners are too noisy. CI only does a smoke run on the
+  small project: it checks that the harness works, with no timing checks
+  (D-76). Results feed the D-36 decisions.
 - **Diagnostics**: `--verbose` and `--debug` raise the stderr log level.
   `--trace-file PATH` writes timing spans (indexing phases, request
   latency) as JSON lines. Project code is never logged at the default level.
