@@ -43,7 +43,7 @@ Always pass `model` when starting an agent.
 | `ROADMAP.md` | Global plan, milestones | yes |
 | `DECISIONS.md` | Every decision, with rationale (D-NN) | yes |
 | `OPEN-QUESTIONS.md` | Open questions (Q-NAME) | yes |
-| `STYLE.md` | Haskell and Haddock style (coming later) | yes |
+| `STYLE.md` | Haskell and Haddock style | yes |
 | `.goals/<goal>.md` | Tasks for one goal, with status | no |
 | `.worktrees/<goal>-<task>/` | One worktree per task | no |
 
