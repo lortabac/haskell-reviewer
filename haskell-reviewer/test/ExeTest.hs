@@ -1,29 +1,72 @@
 -- | Tests that run the real binary.
+--
+-- A normal run serves until a signal, so those tests start the binary,
+-- wait for the URL line on stderr, poke it, and stop it with a signal.
+-- Every run passes --no-open, except the tests of the opener, which
+-- control PATH.
 module ExeTest (tests) where
 
-import Control.Exception (finally)
-import Control.Monad (unless, when)
-import Data.List (isInfixOf)
+import Control.Concurrent (threadDelay)
+import Control.Exception (IOException, bracket, finally, try)
+import Control.Monad (unless, void, when)
+import Data.ByteString (ByteString)
+import Data.ByteString qualified as BS
+import Data.ByteString.Char8 qualified as Char8
+import Data.Char (isDigit, toLower)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Data.List (isInfixOf, isPrefixOf)
 import Data.Text qualified as Text
+import GHC.Clock (getMonotonicTime)
 import HaskellReviewer.App.Version (toolVersion)
+import HaskellReviewer.Effects.Browser (openerName)
+import Network.Socket qualified as Socket
+import Network.Socket.ByteString qualified as Socket.BS
+import Numeric qualified
 import System.Directory qualified as Dir
 import System.Environment (getEnvironment, lookupEnv)
 import System.Exit (ExitCode (..))
 import System.FilePath ((</>))
+import System.IO (Handle, hGetContents', hGetLine, hIsEOF)
 import System.IO.Temp (withSystemTempDirectory)
-import System.Process (CreateProcess (..), proc, readCreateProcessWithExitCode)
+import System.Posix.Signals (Signal, sigINT, sigKILL, sigTERM, signalProcess)
+import System.Process
+  ( CreateProcess (..),
+    ProcessHandle,
+    StdStream (CreatePipe),
+    createProcess,
+    getPid,
+    proc,
+    readCreateProcessWithExitCode,
+    waitForProcess,
+  )
+import System.Timeout (timeout)
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit
+  ( Assertion,
+    assertBool,
+    assertFailure,
+    testCase,
+    testCaseInfo,
+    (@?=),
+  )
 
 tests :: TestTree
 tests =
   testGroup
     "Executable"
-    [ testCase "temp dir as ROOT: exit 0" $
-        withTemp $ \dir -> do
-          (code, _) <- runExe [dir]
-          code @?= ExitSuccess,
-      testCase "--help: exit 0, flags on stderr" $ do
+    [ quickExitTests,
+      serverTests,
+      signalTests,
+      openerTests
+    ]
+
+-- * Runs that exit at once
+
+quickExitTests :: TestTree
+quickExitTests =
+  testGroup
+    "quick exit"
+    [ testCase "--help: exit 0, flags on stderr" $ do
         (code, err) <- runExe ["--help"]
         code @?= ExitSuccess
         assertContains "--port" err,
@@ -67,23 +110,6 @@ tests =
               (code, err) <- runExe [sub]
               code @?= ExitFailure 2
               assertContains "cannot read ROOT" err,
-      testCase "--trace-file: one startup span" $
-        withTemp $ \dir -> do
-          let file = dir </> "t.jsonl"
-          (code, _) <- runExe ["--trace-file", file, dir]
-          code @?= ExitSuccess
-          contents <- readFile file
-          case lines contents of
-            [line] -> assertContains "\"name\":\"startup\"" line
-            ls -> assertFailure ("expected one line, got " <> show ls),
-      testCase "--trace-file /dev/full: exit 0 with a warning" $ do
-        -- Linux only: elsewhere, nothing to do.
-        hasDevFull <- Dir.doesPathExist "/dev/full"
-        when hasDevFull $
-          withTemp $ \dir -> do
-            (code, err) <- runExe ["--trace-file", "/dev/full", dir]
-            code @?= ExitSuccess
-            assertContains "haskell-reviewer: warning: trace file:" err,
       testCase "--trace-file in a missing dir: exit 2" $
         withTemp $ \dir -> do
           (code, err) <- runExe ["--trace-file", dir </> "missing" </> "t.jsonl", dir]
@@ -98,8 +124,442 @@ tests =
         let cEnv = ("LC_ALL", "C") : filter ((/= "LC_ALL") . fst) env
         (code, err) <- runExeWith (\p -> p {env = Just cEnv}) [root]
         code @?= ExitFailure 2
-        assertContains "ROOT does not exist: /no/such/d" err
+        assertContains "ROOT does not exist: /no/such/d" err,
+      testCase "busy --port: exit 2" $
+        withTemp $ \dir ->
+          bracket busySocket Socket.close $ \s -> do
+            port <- show <$> Socket.socketPort s
+            (code, err) <- runExe ["--no-open", "--port", port, dir]
+            code @?= ExitFailure 2
+            assertContains
+              ("haskell-reviewer: cannot listen on 127.0.0.1:" <> port <> ": ")
+              err
     ]
+
+-- * HTTP
+
+serverTests :: TestTree
+serverTests =
+  testGroup
+    "server"
+    [ testCaseInfo "start-up: URL printed and accepting connections" $
+        withTemp $ \dir -> do
+          t0 <- getMonotonicTime
+          withServer id [dir] $ \server -> do
+            -- Connected means accepting: the URL line comes after listen.
+            r <- httpGet server (goodHost server) (tokenPath server)
+            t1 <- getMonotonicTime
+            r.status @?= 200
+            let ms = round ((t1 - t0) * 1000) :: Int
+            -- The target is checked by eye (and by benchmarks later):
+            -- test machines are too noisy for a hard limit. Only a hang
+            -- fails.
+            assertBool ("start-up took " <> show ms <> " ms") (ms < 5000)
+            pure ("URL + accepting in " <> show ms <> " ms (target < 300 ms)"),
+      testCase "right token: 200 with the security headers" $
+        withTemp $ \dir -> withServer id [dir] $ \server -> do
+          r <- httpGet server (goodHost server) (tokenPath server)
+          r.status @?= 200
+          lookup "content-type" r.headers @?= Just "text/html; charset=utf-8"
+          assertSecurityHeaders r,
+      testCase "localhost Host: 200" $
+        withTemp $ \dir -> withServer id [dir] $ \server -> do
+          r <- httpGet server (Just ("localhost:" <> show server.port)) (tokenPath server)
+          r.status @?= 200,
+      testCase "HEAD: 200, no body" $
+        withTemp $ \dir -> withServer id [dir] $ \server -> do
+          r <- httpRequest server "HEAD" (goodHost server) (tokenPath server)
+          r.status @?= 200
+          r.body @?= "",
+      testCase "no token, wrong token, wrong length: 404" $
+        withTemp $ \dir -> withServer id [dir] $ \server -> do
+          let wrong = map (\c -> if c == 'A' then 'B' else 'A') server.token
+          mapM_
+            ( \path -> do
+                r <- httpGet server (goodHost server) path
+                (path, r.status) @?= (path, 404)
+                r.body @?= "not found"
+                assertSecurityHeaders r
+            )
+            [ "/",
+              "/" <> wrong <> "/",
+              "/" <> take 31 server.token <> "/",
+              "/" <> server.token <> "A/",
+              "/" <> server.token <> "/nope"
+            ],
+      testCase "bad Host, missing Host, other port: 403" $
+        withTemp $ \dir -> withServer id [dir] $ \server -> do
+          let other = show (if server.port == 65535 then 1 else server.port + 1)
+          mapM_
+            ( \host -> do
+                r <- httpGet server host (tokenPath server)
+                (host, r.status) @?= (host, 403)
+                assertSecurityHeaders r
+            )
+            [ Just ("evil.com:" <> show server.port),
+              Nothing,
+              Just ("127.0.0.1:" <> other),
+              Just "127.0.0.1"
+            ],
+      testCase "warp's own error response has the security headers" $
+        withTemp $ \dir -> withServer id [dir] $ \server -> do
+          -- Headers over warp's 50 KB limit: warp answers by itself.
+          let huge = "X-Big: " <> BS.replicate 60000 97 <> "\r\n"
+          r <-
+            rawHttp server.port $
+              requestBytes "GET" (goodHost server) (tokenPath server) huge
+          r.status @?= 400
+          assertSecurityHeaders r
+    ]
+
+-- * Signals and trace file
+
+signalTests :: TestTree
+signalTests =
+  testGroup
+    "signals"
+    [ testCase "SIGTERM: exit 0" $
+        withTemp $ \dir -> withServer id [dir] $ \server -> do
+          (code, _) <- stopServer server sigTERM
+          code @?= ExitSuccess,
+      testCase "SIGINT: exit 0" $
+        withTemp $ \dir -> withServer id [dir] $ \server -> do
+          (code, _) <- stopServer server sigINT
+          code @?= ExitSuccess,
+      testCase "two quick SIGTERMs: exit 0" $
+        withTemp $ \dir -> withServer id [dir] $ \server -> do
+          -- The second one may hit the forced exit path. Both exit 0.
+          getPid server.process >>= mapM_ (signalProcess sigTERM)
+          (code, _) <- stopServer server sigTERM
+          code @?= ExitSuccess,
+      testCase "--trace-file: one startup span" $
+        withTemp $ \dir -> do
+          let file = dir </> "t.jsonl"
+          withServer id ["--trace-file", file, dir] $ \server -> do
+            (code, _) <- stopServer server sigTERM
+            code @?= ExitSuccess
+          contents <- readFile file
+          case lines contents of
+            [line] -> assertContains "\"name\":\"startup\"" line
+            ls -> assertFailure ("expected one line, got " <> show ls),
+      testCase "--trace-file /dev/full: exit 0 with a warning" $ do
+        -- Linux only: elsewhere, nothing to do.
+        hasDevFull <- Dir.doesPathExist "/dev/full"
+        when hasDevFull $
+          withTemp $ \dir ->
+            withServer id ["--trace-file", "/dev/full", dir] $ \server -> do
+              (code, err) <- stopServer server sigTERM
+              code @?= ExitSuccess
+              assertContains "haskell-reviewer: warning: trace file:" err
+    ]
+
+-- * Browser opener
+
+openerTests :: TestTree
+openerTests =
+  testGroup
+    "opener"
+    [ testCase "opens the URL, opener output not on our stdout" $
+        withTemp $ \dir -> do
+          let bin = dir </> "bin"
+              root = dir </> "root"
+              marker = dir </> "marker"
+          Dir.createDirectory bin
+          Dir.createDirectory root
+          writeOpener bin marker
+          withServerOpen bin [root] $ \server -> do
+            opened <- waitForFile marker server.url
+            opened @?= server.url
+            (code, _) <- stopServer server sigTERM
+            code @?= ExitSuccess,
+      testCase "opener inside ROOT is not run" $
+        withTemp $ \root -> do
+          let bin = root </> "bin"
+              marker = root </> "marker"
+          Dir.createDirectory bin
+          writeOpener bin marker
+          withServerOpen bin [root] $ \server -> do
+            waitForLine
+              server
+              ("haskell-reviewer: warning: cannot open the browser:" `isPrefixOf`)
+            (code, _) <- stopServer server sigTERM
+            code @?= ExitSuccess
+          ran <- Dir.doesPathExist marker
+          assertBool "planted opener ran" (not ran)
+    ]
+
+-- | An opener script that writes junk on stdout and stderr, and its
+-- first argument to the marker file.
+writeOpener :: FilePath -> FilePath -> IO ()
+writeOpener bin marker = do
+  let script = bin </> openerName
+  writeFile script $
+    unlines
+      [ "#!/bin/sh",
+        "echo opener stdout",
+        "echo opener stderr >&2",
+        "printf '%s' \"$1\" > '" <> marker <> "'"
+      ]
+  perms <- Dir.getPermissions script
+  Dir.setPermissions script (Dir.setOwnerExecutable True perms)
+
+-- | Run without --no-open, with only the given dir on PATH.
+withServerOpen :: FilePath -> [String] -> (Server -> IO a) -> IO a
+withServerOpen bin args action = do
+  env <- getEnvironment
+  let env' = ("PATH", bin) : filter ((/= "PATH") . fst) env
+  withServerRaw (\p -> p {env = Just env'}) args action
+
+-- | Wait up to 5 s for the file to hold the expected text. Gives back
+-- what it holds at the end.
+waitForFile :: FilePath -> String -> IO String
+waitForFile file expected = go (50 :: Int)
+  where
+    go n = do
+      exists <- Dir.doesPathExist file
+      contents <- if exists then readFile' file else pure ""
+      if contents == expected || n == 0
+        then pure contents
+        else threadDelay 100000 >> go (n - 1)
+    readFile' f = Char8.unpack <$> BS.readFile f
+
+-- * Running the binary
+
+-- | A running server.
+data Server = Server
+  { process :: ProcessHandle,
+    port :: Int,
+    token :: String,
+    url :: String,
+    stdout :: Handle,
+    stderr :: Handle,
+    -- | stderr lines read so far, oldest first.
+    seen :: IORef [String]
+  }
+
+-- | Start the binary with --no-open, wait for the URL line, run the
+-- action. The process is killed at the end if still there.
+withServer :: (CreateProcess -> CreateProcess) -> [String] -> (Server -> IO a) -> IO a
+withServer tweak args = withServerRaw tweak ("--no-open" : args)
+
+withServerRaw :: (CreateProcess -> CreateProcess) -> [String] -> (Server -> IO a) -> IO a
+withServerRaw tweak args action = do
+  exe <- findExe
+  let cp = (tweak (proc exe args)) {std_out = CreatePipe, std_err = CreatePipe}
+  bracket (createProcess cp) kill $ \case
+    (_, Just out, Just err, ph) -> do
+      seen <- newIORef []
+      found <- timeout 10000000 (readUrl err seen)
+      url <- case found of
+        Just (Just url) -> pure url
+        Just Nothing -> do
+          ls <- readIORef seen
+          assertFailure ("exited before the URL line; stderr: " <> show ls)
+        Nothing -> assertFailure "no URL line within 10 s"
+      (port, token) <- case parseUrl url of
+        Just pt -> pure pt
+        Nothing -> assertFailure ("bad URL: " <> url)
+      action
+        Server
+          { process = ph,
+            port = port,
+            token = token,
+            url = url,
+            stdout = out,
+            stderr = err,
+            seen = seen
+          }
+    _ -> assertFailure "no pipes"
+  where
+    kill (_, _, _, ph) = do
+      pid <- getPid ph
+      mapM_ (\p -> try @IOException (signalProcess sigKILL p)) pid
+      void (waitForProcess ph)
+
+-- | Read stderr up to the URL line. 'Nothing' at end of file.
+readUrl :: Handle -> IORef [String] -> IO (Maybe String)
+readUrl h seen = do
+  line <- nextLine h seen
+  case line of
+    Nothing -> pure Nothing
+    Just l -> case stripPrefix' urlPrefix l of
+      Just url -> pure (Just url)
+      Nothing -> readUrl h seen
+
+urlPrefix :: String
+urlPrefix = "haskell-reviewer: serving at "
+
+-- | Read stderr until a line matches, for up to 10 s.
+waitForLine :: Server -> (String -> Bool) -> Assertion
+waitForLine server match = do
+  found <- timeout 10000000 go
+  case found of
+    Just True -> pure ()
+    _ -> do
+      ls <- readIORef server.seen
+      assertFailure ("line not found on stderr: " <> show ls)
+  where
+    go = do
+      line <- nextLine server.stderr server.seen
+      case line of
+        Nothing -> pure False
+        Just l | match l -> pure True
+        Just _ -> go
+
+nextLine :: Handle -> IORef [String] -> IO (Maybe String)
+nextLine h seen = do
+  eof <- hIsEOF h
+  if eof
+    then pure Nothing
+    else do
+      l <- hGetLine h
+      modifyIORef' seen (<> [l])
+      pure (Just l)
+
+-- | Send a signal, wait for the exit (10 s at most). Checks that stdout
+-- is empty. Gives back the exit code and all of stderr.
+stopServer :: Server -> Signal -> IO (ExitCode, String)
+stopServer server sig = do
+  pid <- getPid server.process
+  case pid of
+    Just p -> signalProcess sig p
+    Nothing -> assertFailure "process already gone"
+  code <- timeout 10000000 (waitForProcess server.process)
+  case code of
+    Nothing -> assertFailure "no exit within 10 s of the signal"
+    Just c -> do
+      rest <- hGetContents' server.stderr
+      out <- hGetContents' server.stdout
+      out @?= ""
+      before <- readIORef server.seen
+      pure (c, unlines before <> rest)
+
+-- | Split the session URL (@http:\/\/127.0.0.1:PORT\/TOKEN\/@) into port
+-- and token.
+parseUrl :: String -> Maybe (Int, String)
+parseUrl url = do
+  rest <- stripPrefix' "http://127.0.0.1:" url
+  let (digits, afterPort) = span isDigit rest
+  path <- stripPrefix' "/" afterPort
+  let (token, end) = break (== '/') path
+  if null digits || end /= "/" then Nothing else Just (read digits, token)
+
+stripPrefix' :: String -> String -> Maybe String
+stripPrefix' prefix s
+  | prefix `isPrefixOf` s = Just (drop (length prefix) s)
+  | otherwise = Nothing
+
+tokenPath :: Server -> String
+tokenPath server = "/" <> server.token <> "/"
+
+goodHost :: Server -> Maybe String
+goodHost server = Just ("127.0.0.1:" <> show server.port)
+
+-- | A socket listening on a free port of 127.0.0.1.
+busySocket :: IO Socket.Socket
+busySocket = do
+  s <- Socket.socket Socket.AF_INET Socket.Stream Socket.defaultProtocol
+  Socket.bind s (Socket.SockAddrInet 0 (Socket.tupleToHostAddress (127, 0, 0, 1)))
+  Socket.listen s 1
+  pure s
+
+-- * Raw HTTP
+
+data HttpResponse = HttpResponse
+  { status :: Int,
+    -- | Names in lower case.
+    headers :: [(String, ByteString)],
+    body :: ByteString
+  }
+
+httpGet :: Server -> Maybe String -> String -> IO HttpResponse
+httpGet server = httpRequest server "GET"
+
+httpRequest :: Server -> ByteString -> Maybe String -> String -> IO HttpResponse
+httpRequest server method host path =
+  rawHttp server.port (requestBytes method host path "")
+
+-- | An HTTP/1.1 request with @Connection: close@, plus extra header lines.
+requestBytes :: ByteString -> Maybe String -> String -> ByteString -> ByteString
+requestBytes method host path extra =
+  method
+    <> " "
+    <> Char8.pack path
+    <> " HTTP/1.1\r\n"
+    <> maybe "" (\h -> "Host: " <> Char8.pack h <> "\r\n") host
+    <> extra
+    <> "Connection: close\r\n\r\n"
+
+-- | Send the bytes, read the answer up to EOF (10 s at most).
+rawHttp :: Int -> ByteString -> IO HttpResponse
+rawHttp port req = do
+  result <- timeout 10000000 $
+    bracket open Socket.close $ \s -> do
+      Socket.BS.sendAll s req
+      readAll s mempty
+  case result of
+    Nothing -> assertFailure "no HTTP answer within 10 s"
+    Just bytes -> case parseResponse bytes of
+      Just r -> pure r
+      Nothing -> assertFailure ("bad HTTP answer: " <> show bytes)
+  where
+    open = do
+      s <- Socket.socket Socket.AF_INET Socket.Stream Socket.defaultProtocol
+      Socket.connect s addr
+      pure s
+    addr =
+      Socket.SockAddrInet
+        (fromIntegral port)
+        (Socket.tupleToHostAddress (127, 0, 0, 1))
+    readAll s acc = do
+      chunk <- Socket.BS.recv s 65536
+      if BS.null chunk then pure acc else readAll s (acc <> chunk)
+
+-- | Status line, headers and body (chunked or not).
+parseResponse :: ByteString -> Maybe HttpResponse
+parseResponse bytes = do
+  let (head', rest) = BS.breakSubstring "\r\n\r\n" bytes
+  statusLine : headerLines <- Just (splitCrlf head')
+  _ : code : _ <- Just (Char8.words statusLine)
+  (status, _) <- Char8.readInt code
+  let headers = map header headerLines
+      raw = BS.drop 4 rest
+  body <- case lookup "transfer-encoding" headers of
+    Just "chunked" -> dechunk raw
+    _ -> Just raw
+  pure HttpResponse {status = status, headers = headers, body = body}
+  where
+    dechunk s = do
+      let (sizeLine, afterSize) = BS.breakSubstring "\r\n" s
+      size <- readHex (Char8.unpack sizeLine)
+      let chunk = BS.take size (BS.drop 2 afterSize)
+      if size == 0
+        then Just ""
+        else (chunk <>) <$> dechunk (BS.drop (size + 4) afterSize)
+    readHex str = case Numeric.readHex str of
+      [(n, "")] -> Just n
+      _ -> Nothing
+    header l =
+      let (name, value) = Char8.break (== ':') l
+       in (map toLower (Char8.unpack name), Char8.dropWhile (== ' ') (BS.drop 1 value))
+    splitCrlf s
+      | BS.null s = []
+      | otherwise =
+          let (l, r) = BS.breakSubstring "\r\n" s
+           in l : splitCrlf (BS.drop 2 r)
+
+assertSecurityHeaders :: HttpResponse -> Assertion
+assertSecurityHeaders r = do
+  lookup "content-security-policy" r.headers
+    @?= Just
+      "default-src 'self'; img-src 'self' data:; connect-src 'self'; \
+      \script-src 'self'; object-src 'none'; base-uri 'none'; \
+      \form-action 'none'; frame-ancestors 'none'"
+  lookup "referrer-policy" r.headers @?= Just "no-referrer"
+  lookup "x-content-type-options" r.headers @?= Just "nosniff"
+  lookup "cache-control" r.headers @?= Just "no-store"
+
+-- * Helpers
 
 withTemp :: (FilePath -> IO a) -> IO a
 withTemp = withSystemTempDirectory "haskell-reviewer-test"
@@ -108,13 +568,16 @@ runExe :: [String] -> IO (ExitCode, String)
 runExe = runExeWith id
 
 -- | Run the binary, check that stdout is empty, give back the exit code
--- and stderr.
+-- and stderr. Fails (and kills it) after 10 s.
 runExeWith :: (CreateProcess -> CreateProcess) -> [String] -> IO (ExitCode, String)
 runExeWith tweak args = do
   exe <- findExe
-  (code, out, err) <- readCreateProcessWithExitCode (tweak (proc exe args)) ""
-  out @?= ""
-  pure (code, err)
+  result <- timeout 10000000 (readCreateProcessWithExitCode (tweak (proc exe args)) "")
+  case result of
+    Nothing -> assertFailure ("no exit within 10 s: " <> show args)
+    Just (code, out, err) -> do
+      out @?= ""
+      pure (code, err)
 
 -- | @HASKELL_REVIEWER_EXE@ if set, else the binary on PATH (cabal puts it
 -- there through build-tool-depends).

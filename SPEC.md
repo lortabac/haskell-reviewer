@@ -1089,7 +1089,7 @@ The main library splits into layers. Lower layers never import upper ones:
 | Concurrency | `stm`, `async` | §11.5. |
 | Wire formats | `aeson` (JSON), `cborg` (CBOR) | D-51. |
 | Index and cache format | `cborg` / `serialise`, versioned | D-57. |
-| Hashing | `crypton` | Git object ids (SHA-1 or SHA-256) for working-tree files, cache keys. |
+| Hashing | `crypton` (+ `ram`) | Git object ids (SHA-1 or SHA-256) for working-tree files, cache keys. Also the session token. |
 | CLI parsing | `optparse-applicative` | |
 | Config | `toml-parser` | `config.toml` (§7). |
 | Anthropic API | `claude` package (Hackage) | Typed streaming, including tool-input deltas (D-62). |

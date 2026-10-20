@@ -20,7 +20,11 @@ install: build
 # ship with GHC. Those differ between GHC versions, so with them pinned the
 # file would only work with one GHC (we support three, D-64, D-77).
 #
-# How we find them: in the build plan (dist-newstyle/cache/plan.json),
+# Flag lines (`pkg +a -b`) are dropped too. Pinning a flag cabal picks
+# by itself (like zlib's pkg-config) breaks the solve on machines where
+# the other value is needed. Version pins are enough.
+#
+# How we find boot packages: in the build plan (dist-newstyle/cache/plan.json),
 # cabal marks packages that come installed with GHC as "pre-existing".
 # Needs jq. Stops if base is not in the list (jq or plan.json went wrong).
 #
@@ -40,6 +44,7 @@ freeze:
 	  function add(e, name) { \
 	    sub(/^[ \t]+/, "", e); sub(/,[ \t]*$$/, "", e); if (e == "") return; \
 	    name = e; sub(/[ \t].*/, "", name); sub(/^any\./, "", name); \
+	    if (e ~ /^[^ \t]+[ \t]+[-+]/) return; \
 	    if (!(name in isboot)) kept[++n] = e \
 	  } \
 	  function flush(i) { \
