@@ -12,7 +12,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # Pinned: macos-latest's ld can't read its own SDK (arm64e.x1 in .tbd
+        # files). Go back to macos-latest once the image is fixed.
+        os: [ubuntu-latest, macos-15]
         ghc: ['9.10', '9.12', '9.14']
 
     steps:
@@ -38,8 +40,8 @@ jobs:
         id: cache
         with:
           path: ${{ steps.setup.outputs.cabal-store }}
-          key: ${{ runner.os }}-ghc-${{ steps.setup.outputs.ghc-version }}-${{ hashFiles('dist-newstyle/cache/plan.json') }}
-          restore-keys: ${{ runner.os }}-ghc-${{ steps.setup.outputs.ghc-version }}-
+          key: ${{ matrix.os }}-ghc-${{ steps.setup.outputs.ghc-version }}-${{ hashFiles('dist-newstyle/cache/plan.json') }}
+          restore-keys: ${{ matrix.os }}-ghc-${{ steps.setup.outputs.ghc-version }}-
 
       - name: Build dependencies
         run: cabal build all --only-dependencies
@@ -49,7 +51,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: ${{ steps.setup.outputs.cabal-store }}
-          key: ${{ runner.os }}-ghc-${{ steps.setup.outputs.ghc-version }}-${{ hashFiles('dist-newstyle/cache/plan.json') }}
+          key: ${{ matrix.os }}-ghc-${{ steps.setup.outputs.ghc-version }}-${{ hashFiles('dist-newstyle/cache/plan.json') }}
 
       - name: Build
         run: make build
