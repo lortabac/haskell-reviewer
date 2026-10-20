@@ -10,23 +10,7 @@ import {
   entryKinds,
   fileViewKinds,
 } from "./files";
-
-const files = import.meta.glob<unknown>("../../../fixtures/api/*.json", {
-  eager: true,
-  import: "default",
-});
-
-const fixtures = new Map(
-  Object.entries(files).map(([file, json]) => [
-    file.replace(/^.*\//, "").replace(/\.json$/, ""),
-    json,
-  ]),
-);
-
-function fixture(name: string): unknown {
-  if (!fixtures.has(name)) throw new Error(`no fixture ${name}`);
-  return fixtures.get(name);
-}
+import { fixture, fixtures } from "../../test/fixtures";
 
 // Every fixture, with the decoder for it. One per file view kind.
 const decoders: Record<string, (value: unknown) => unknown> = {

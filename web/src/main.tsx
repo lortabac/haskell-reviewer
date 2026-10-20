@@ -6,6 +6,7 @@ import { ConnectionContext } from "./events/ConnectionNotice";
 import type { Status } from "./events/protocol";
 import "./styles/tokens.css";
 import "./styles/frame.css";
+import "./styles/files.css";
 
 const root = document.getElementById("root");
 if (root === null) {
