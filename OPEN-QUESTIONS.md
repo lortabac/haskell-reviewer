@@ -27,3 +27,6 @@ is updated if needed (§10.3).
   (§11.6.3).
 - **Q-SSE**: Check SharedWorker + SSE keep-alive and reconnect on the
   three browsers, including background-tab throttling (§11.6.2).
+  Not checked yet: EventSource inside a SharedWorker on Safari. Known:
+  Chrome's Memory Saver discards idle tabs, which closes their stream, so
+  the tool may idle-exit while the tab still looks open (D-80).

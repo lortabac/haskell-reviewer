@@ -18,6 +18,10 @@ export default defineConfig({
     // No data: URLs for assets.
     assetsInlineLimit: 0,
   },
+  // Classic (iife) workers: module SharedWorkers are not supported
+  // everywhere yet. A classic worker can't use import, so Vite bundles
+  // it into one file.
+  worker: { format: "iife" },
   test: {
     environment: "happy-dom",
   },

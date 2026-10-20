@@ -53,6 +53,12 @@ const banned = [
       "NewExpression:matches([callee.name='DOMParser'], [callee.property.name='DOMParser'])",
     message: rawHtml,
   },
+  // Workers load code only through imports, which Vite bundles.
+  {
+    selector:
+      "CallExpression:matches([callee.name='importScripts'], [callee.property.name='importScripts'])",
+    message: "No importScripts: import the code instead.",
+  },
   {
     selector: `JSXAttribute[name.name=${htmlNames}]`,
     message: "No raw HTML: use text.",

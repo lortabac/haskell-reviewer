@@ -1,7 +1,16 @@
 module HaskellReviewer.App.RunTest (tests) where
 
-import Control.Concurrent (threadDelay)
-import Control.Concurrent.MVar (isEmptyMVar, newEmptyMVar, readMVar, tryPutMVar)
+import Control.Concurrent (forkIO, killThread, threadDelay)
+import Control.Concurrent.Async (async, poll, wait)
+import Control.Concurrent.MVar
+  ( MVar,
+    isEmptyMVar,
+    newEmptyMVar,
+    putMVar,
+    readMVar,
+    takeMVar,
+    tryPutMVar,
+  )
 import Control.Exception (AsyncException (..), throwIO, try)
 import Control.Monad (forever, void)
 import Data.ByteString qualified as BS
@@ -13,12 +22,20 @@ import Data.Time.Clock (UTCTime (..))
 import HaskellReviewer.App.Run (Deps (..), run)
 import HaskellReviewer.Core.Address (Port (..), Token, tokenFromBytes, tokenText)
 import HaskellReviewer.Core.Root (Root (..))
-import HaskellReviewer.Effects.Clock (Clock (..), MonotonicTime (..), Nanoseconds (..))
+import HaskellReviewer.Effects.Clock
+  ( Clock (..),
+    Microseconds (..),
+    MonotonicTime (..),
+    Nanoseconds (..),
+  )
 import HaskellReviewer.Effects.FileSystem (RootError (..))
 import HaskellReviewer.Effects.Shutdown (Shutdown (..))
 import HaskellReviewer.Effects.Trace (Span (..), TraceFileError (..), Tracer (..))
 import HaskellReviewer.Server.Listen (ListenError (..), Listener (..))
+import Network.Wai (Application, Request (..), defaultRequest, responseToStream)
+import Network.Wai.Internal (ResponseReceived (..))
 import System.Exit (ExitCode (..))
+import System.Timeout (timeout)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 
@@ -197,8 +214,117 @@ tests =
       testCase "usage error: exit 2" $ do
         fake <- newFake
         code <- run fake.deps ["--bogus"]
-        code @?= ExitFailure 2
+        code @?= ExitFailure 2,
+      idleTests
     ]
+
+-- * Idle exit
+
+-- | A "minute" here is 100 ms: short, but with room for slow machines.
+-- The URL line must come before the timer fires.
+idleTests :: TestTree
+idleTests =
+  testGroup
+    "idle exit"
+    [ testCase "no tab: exit 0 with a line, all closed" $ do
+        fake <- newFake
+        stop <- newEmptyMVar
+        let deps = idleDeps fake stop (\ready _ -> ready >> blockForever)
+        code <-
+          timeout 5_000_000 (run deps ["--idle-exit", "1", "--trace-file", "t.jsonl"])
+        code @?= Just ExitSuccess
+        readIORef fake.console
+          >>= ( @?=
+                  [ "haskell-reviewer: serving at " <> fakeUrl,
+                    "haskell-reviewer: no browser tab for 1 minute, exiting"
+                  ]
+              )
+        readIORef fake.closed >>= (@?= True)
+        readIORef fake.listenerClosed >>= (@?= True),
+      testCase "plural minutes" $ do
+        fake <- newFake
+        stop <- newEmptyMVar
+        let deps = idleDeps fake stop (\ready _ -> ready >> blockForever)
+        code <- timeout 5_000_000 (run deps ["--idle-exit", "3"])
+        code @?= Just ExitSuccess
+        out <- readIORef fake.console
+        drop (length out - 1) out
+          @?= ["haskell-reviewer: no browser tab for 3 minutes, exiting"],
+      testCase "--idle-exit 0: no idle exit, a signal still stops it" $ do
+        fake <- newFake
+        stop <- newEmptyMVar
+        let deps = idleDeps fake stop (\ready _ -> ready >> blockForever)
+        running <- async (run deps ["--idle-exit", "0"])
+        threadDelay 1_000_000
+        poll running >>= assertRunning
+        putMVar stop ()
+        code <- timeout 5_000_000 (wait running)
+        code @?= Just ExitSuccess
+        readIORef fake.console >>= (@?= ["haskell-reviewer: serving at " <> fakeUrl]),
+      testCase "an open stream keeps it alive; closing it starts the timer" $ do
+        fake <- newFake
+        stop <- newEmptyMVar
+        opened <- newEmptyMVar
+        streamThread <- newEmptyMVar
+        let serve ready app = do
+              ready
+              t <- forkIO (openStream app opened)
+              putMVar streamThread t
+              blockForever
+            deps = idleDeps fake stop serve
+        -- 5 "minutes" (500 ms) to get the stream open.
+        running <- async (run deps ["--idle-exit", "5"])
+        t <- takeMVar streamThread
+        counted <- timeout 5_000_000 (takeMVar opened)
+        counted @?= Just ()
+        threadDelay 1_500_000
+        poll running >>= assertRunning
+        killThread t
+        code <- timeout 5_000_000 (wait running)
+        code @?= Just ExitSuccess
+        out <- readIORef fake.console
+        drop 1 out @?= ["haskell-reviewer: no browser tab for 5 minutes, exiting"]
+    ]
+
+-- | Fake deps with a 100 ms minute, the given serve, and a stop signal
+-- the test sends.
+idleDeps :: Fake -> MVar () -> (IO () -> Application -> IO ()) -> Deps
+idleDeps fake stop serve =
+  (fake.deps)
+    { idleMinute = Microseconds 100_000,
+      listen = \_ _ -> pure (Right fake.listener {serve = serve}),
+      installShutdown =
+        pure
+          Shutdown
+            { wait = readMVar stop,
+              stopped = not <$> isEmptyMVar stop
+            }
+    }
+
+-- | Open the event stream on the app, like a browser tab, and keep it
+-- open. Writes go nowhere. The MVar is filled at the first write: the
+-- stream is counted as open by then.
+openStream :: Application -> MVar () -> IO ()
+openStream app opened = do
+  let req =
+        defaultRequest
+          { requestMethod = "GET",
+            requestHeaderHost = Just "127.0.0.1:4321",
+            pathInfo = [tokenText fakeToken, "api", "events"]
+          }
+  ResponseReceived <- app req $ \resp -> do
+    let (_, _, withBody) = responseToStream resp
+    withBody (\body -> body (\_ -> void (tryPutMVar opened ())) (pure ()))
+    pure ResponseReceived
+  pure ()
+
+blockForever :: IO ()
+blockForever = forever (threadDelay 1_000_000)
+
+assertRunning :: Maybe a -> Assertion
+assertRunning = \case
+  Nothing -> pure ()
+  Just _ -> assertFailure "run exited too early"
 
 data Fake = Fake
   { deps :: Deps,
@@ -266,7 +392,10 @@ newFake = do
                 Shutdown
                   { wait = readMVar stop,
                     stopped = not <$> isEmptyMVar stop
-                  }
+                  },
+            -- A real minute: the default idle exit (5 min) never
+            -- fires in these tests.
+            idleMinute = Microseconds 60_000_000
           }
   pure
     Fake

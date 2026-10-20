@@ -48,8 +48,12 @@ library
     HaskellReviewer.Effects.Shutdown
     HaskellReviewer.Effects.Trace
 
+    -- Session
+    HaskellReviewer.Session.Clients
+
     -- Server
     HaskellReviewer.Server.Assets
+    HaskellReviewer.Server.Events
     HaskellReviewer.Server.Listen
     HaskellReviewer.Server.Router
     HaskellReviewer.Server.Security
@@ -75,6 +79,7 @@ library
     , optparse-applicative  >=0.18   && <0.20
     , process               >=1.6.19 && <1.7
     , ram                   >=0.21   && <0.23
+    , stm                   >=2.5.1  && <2.6
     , text                  >=2.1    && <2.2
     , time                  >=1.12   && <1.16
     , unix                  >=2.8    && <2.9
@@ -104,12 +109,15 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Effects.HelperTest
     HaskellReviewer.Effects.TraceTest
     HaskellReviewer.Server.AssetsTest
+    HaskellReviewer.Server.EventsTest
     HaskellReviewer.Server.RouterTest
+    HaskellReviewer.Session.ClientsTest
 
   ghc-options:        -threaded
   build-tool-depends: haskell-reviewer:haskell-reviewer
   build-depends:
     , aeson
+    , async
     , base
     , bytestring
     , directory
@@ -125,3 +133,4 @@ test-suite haskell-reviewer-test
     , time
     , unix
     , wai
+    , warp

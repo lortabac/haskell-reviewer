@@ -1343,13 +1343,15 @@ a framework would cost more than it saves.
   - Why: browsers allow about 6 HTTP/1.1 connections per origin, and
     plain HTTP gives no HTTP/2. One stream per tab would hang the UI after
     a few tabs.
+  - URL: `GET /<token>/api/events`. On open the server sends a `hello`
+    event (the only event in M0).
   - Events: indexing progress, generation changes, LLM stream updates,
     notices.
   - Fallback: without SharedWorker, each tab opens its own stream, and a
     notice warns about the limit.
 - **Liveness**: a browser is connected while its SSE stream is open. The
   server writes a keep-alive comment every 15 s, so a closed tab is noticed
-  within seconds, and the idle timer of §2.1 starts when no stream is open.
+  within about 30 s, and the idle timer of §2.1 starts when no stream is open.
   The stream route has no Warp timeout and is never gzipped.
 - **Reconnect**: events carry ids. After a reconnect the worker refetches
   the state it shows (index progress, open LLM threads), so a lost event

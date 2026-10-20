@@ -12,17 +12,21 @@ import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
 import HaskellReviewer.Core.Address (Port, Token)
 import HaskellReviewer.Server.Assets (Asset (..), lookupAsset, shellFor)
-import HaskellReviewer.Server.Security (checkAccess, notFound, withSecurityHeaders)
+import HaskellReviewer.Server.Events (EventStream, eventsApp)
+import HaskellReviewer.Server.Security
+  ( checkAccess,
+    methodNotAllowed,
+    notFound,
+    withSecurityHeaders,
+  )
 import Network.HTTP.Types
   ( Header,
-    hAllow,
     hCacheControl,
     hContentLength,
     hContentType,
     methodGet,
     methodHead,
     status200,
-    status405,
   )
 import Network.Wai (Application, Request (..), Response, responseLBS)
 
@@ -36,7 +40,11 @@ Paths below are what the router sees, after the token.
 - assets/<name>: a file of the bundle, exact name. Hashed names, so they
   are cached as immutable (Note [Caching] in
   "HaskellReviewer.Server.Security").
+- api/events: the event stream (Note [Event stream] in
+  "HaskellReviewer.Server.Events"). GET only (405 otherwise, HEAD too).
 - Anything else: 404. index.html itself is not served under its name.
+  So are api, api/x and api/events/x: the api/ namespace has only the
+  routes listed here.
 
 Shell and assets accept GET and HEAD only (405 otherwise).
 -}
@@ -44,8 +52,9 @@ Shell and assets accept GET and HEAD only (405 otherwise).
 -- | The whole app. Paths are relative to the token: the router never
 -- sees it. See Note [Request checks] in "HaskellReviewer.Server.Security"
 -- and Note [Routes].
-application :: Port -> Token -> Application
-application port token = withSecurityHeaders (checkAccess port token (router shell))
+application :: Port -> Token -> EventStream -> Application
+application port token events =
+  withSecurityHeaders (checkAccess port token (router shell events))
   where
     -- Built once per session, not per request.
     shell = shellResponse token
@@ -53,17 +62,18 @@ application port token = withSecurityHeaders (checkAccess port token (router she
 -- * Internal
 
 -- | Matches on the path after the token. See Note [Routes].
-router :: Response -> Application
-router shell req respond = case req.pathInfo of
+router :: Response -> EventStream -> Application
+router shell events req respond = case req.pathInfo of
   path
     | isShellPath path -> getOnly shell
   ["assets", name]
     | Just asset <- lookupAsset name -> getOnly (assetResponse asset)
+  ["api", "events"] -> eventsApp events req respond
   _ -> respond notFound
   where
     getOnly r
       | req.requestMethod == methodGet || req.requestMethod == methodHead = respond r
-      | otherwise = respond methodNotAllowed
+      | otherwise = respond (methodNotAllowed "GET, HEAD")
 
 isShellPath :: [Text] -> Bool
 isShellPath = \case
@@ -93,10 +103,3 @@ okWithLength headers body =
     status200
     ((hContentLength, Char8.pack (show (BS.length body))) : headers)
     (LBS.fromStrict body)
-
-methodNotAllowed :: Response
-methodNotAllowed =
-  responseLBS
-    status405
-    [(hContentType, "text/plain; charset=utf-8"), (hAllow, "GET, HEAD")]
-    "method not allowed"

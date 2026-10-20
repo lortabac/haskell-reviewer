@@ -11,8 +11,12 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
 import HaskellReviewer.Core.Address (Port (..), Token, tokenFromBytes, tokenText)
+import HaskellReviewer.Effects.Clock (Microseconds (..))
+import HaskellReviewer.Effects.Log (LogLevel (..), newLogger)
+import HaskellReviewer.Server.Events (EventStream (..))
 import HaskellReviewer.Server.Router (application)
 import HaskellReviewer.Server.Security (addSecurityHeaders, contentSecurityPolicy)
+import HaskellReviewer.Session.Clients (newClients)
 import Network.HTTP.Types (Header, Status (..), hContentType, status500)
 import Network.Wai
   ( Request (..),
@@ -179,7 +183,11 @@ tests =
             ["assets", ".."],
             ["assets", "..", "index.html"],
             ["nope"],
+            ["api"],
+            ["api", ""],
             ["api", "x"],
+            ["api", "events", "x"],
+            ["api", "events", ""],
             ["index.html"]
           ]
     ]
@@ -213,9 +221,16 @@ request method host path =
 
 call :: Request -> IO Result
 call req = do
+  clients <- newClients
+  let events =
+        EventStream
+          { clients = clients,
+            keepAlive = Microseconds 1000000,
+            logger = newLogger LevelInfo (\_ -> pure ())
+          }
   saved <- newIORef Nothing
   ResponseReceived <-
-    application port token req $ \resp -> do
+    application port token events req $ \resp -> do
       writeIORef saved (Just resp)
       pure ResponseReceived
   readIORef saved >>= \case
