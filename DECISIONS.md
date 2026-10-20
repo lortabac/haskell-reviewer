@@ -1,5 +1,7 @@
 # Decision log
 
+Round: the spec review round (1–9), or the milestone (e.g. M0) for decisions taken during implementation.
+
 | ID | Decision | Rationale | Round |
 |----|----------|-----------|-------|
 | D-01 | Local web app: a single binary serves a UI on `127.0.0.1` and the browser opens it. | Hackage-like rendering, links, side-by-side diffs and text selection need a rich UI. A browser gives these without per-toolkit work. *(Amended by D-35: plus optional HIE companions.)* | 1 |
@@ -72,8 +74,9 @@
 | D-68 | UI preferences stored in `$XDG_STATE_HOME/haskell-reviewer/ui.json`. | Random ports give a new origin each run, so `localStorage` forgets. | 9 |
 | D-69 | Global search runs on the server, debounced. | Nothing large in the browser; follows progressive indexing. | 9 |
 | D-70 | Source and diff views are always virtualised; own find in file on `f`; Ctrl-F untouched, with a permanent hint. | Performance on big files; honesty about partial native find. | 9 |
-| D-71 | Tests: unit/property, golden fixture repos, security regressions, Playwright + axe-core. Benchmarks via `make bench`, not in CI. | Covers logic, real repos, security and a11y; shared CI runners are too noisy for timings. | 9 |
+| D-71 | Tests: unit/property, golden fixture repos, security regressions, Playwright + axe-core. Benchmarks via `make bench`, not in CI. | Covers logic, real repos, security and a11y; shared CI runners are too noisy for timings. *(Amended by D-76: smoke run in CI.)* | 9 |
 | D-72 | CI on GitHub Actions (Linux, macOS × 3 GHCs). Diagnostics: `--verbose`, `--debug`, `--trace-file`; no telemetry. | Common for Haskell projects; trace files give data for performance work without telemetry. | 9 |
 | D-73 | License BSD-3-Clause. | Haskell norm; fits all dependencies. | 9 |
 | D-74 | No copy detection in the diff; renames only. | Matches git's default; costly on big trees. | 9 |
 | D-75 | Working-tree side: git (`ls-files -s`, `diff-files`) says which tracked files are clean; only dirty and untracked files are read from disk, with EOL rules applied. Helpers are looked up only in absolute `PATH` entries outside ROOT. Git ≥ 2.44. | Clean filters (CRLF, LFS) make raw hashes wrong; a PR must not plant a binary we run. | 9 |
+| D-76 | CI runs a smoke run of `make bench` on the small reference project: it checks that the harness works, with no timing checks. | Catches a broken harness early; timings stay out of CI (D-71). | M0 |
