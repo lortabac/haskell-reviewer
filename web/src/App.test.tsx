@@ -1,33 +1,48 @@
-import { render } from "solid-js/web";
-import { afterEach, describe, expect, it } from "vitest";
-import { App } from "./App";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fixture, stubFetch } from "../test/fixtures";
+import { mountAppAt, unmountApp } from "../test/mount";
 
-let dispose: (() => void) | undefined;
-
-function mountAt(path: string): HTMLElement {
-  window.history.replaceState(null, "", path);
-  const root = document.createElement("div");
-  document.body.append(root);
-  dispose = render(() => <App />, root);
-  return root;
-}
+beforeEach(() => {
+  stubFetch({
+    "/tok/api/files/tree": [200, fixture("files")],
+    "/tok/api/file/tree/a.hs": [200, fixture("file-text")],
+  });
+});
 
 afterEach(() => {
-  dispose?.();
-  document.body.replaceChildren();
+  unmountApp();
+  vi.unstubAllGlobals();
 });
 
 describe("App routing under the token", () => {
   it.each(["/tok", "/tok/"])("%s shows Home", (path) => {
-    const main = mountAt(path).querySelector("main");
-    expect(main?.textContent).toContain("Nothing here yet");
+    const main = mountAppAt(path).querySelector("main");
+    expect(main?.textContent).toContain("Pick a file in the sidebar.");
   });
 
-  it.each(["/tok/src/tree/a.hs", "/tok/changes"])(
+  it("/tok/src/tree/a.hs shows the file view", async () => {
+    const main = mountAppAt("/tok/src/tree/a.hs").querySelector("main");
+    expect(main?.querySelector("h1")?.textContent).toBe("a.hs");
+    await vi.waitFor(() => {
+      expect(main?.querySelector(".file-code")?.textContent).toContain(
+        "module Main",
+      );
+    });
+  });
+
+  it.each(["/tok/changes", "/tok/src/tree", "/tok/src/tree/a%2Fb"])(
     "%s shows NotFound",
     (path) => {
-      const main = mountAt(path).querySelector("main");
+      const main = mountAppAt(path).querySelector("main");
       expect(main?.textContent).toContain("Not found in this snapshot");
     },
   );
+
+  it("the sidebar is in the Files nav", async () => {
+    const nav = mountAppAt("/tok").querySelector("nav");
+    expect(nav?.getAttribute("aria-label")).toBe("Files");
+    await vi.waitFor(() => {
+      expect(nav?.querySelector("button")?.textContent).toBe("app");
+    });
+  });
 });

@@ -29,6 +29,8 @@ a {
 
 /* Header on top, sidebar left, main view right. */
 .frame {
+  /* The sidebar's height leaves room for it. */
+  --header-height: 2.75rem;
   display: grid;
   grid-template-areas:
     "header header"
@@ -40,6 +42,7 @@ a {
 
 .frame-header {
   grid-area: header;
+  min-height: var(--header-height);
   display: flex;
   align-items: center;
   gap: var(--space-3);
@@ -64,9 +67,21 @@ a {
 
 .frame-sidebar {
   grid-area: sidebar;
-  padding: var(--space-2);
   background: var(--color-surface);
   border-right: 1px solid var(--color-border);
+}
+
+/* The sidebar content stays in view while the page scrolls, with its
+   own scroll bar. */
+.frame-sidebar-content {
+  position: sticky;
+  top: 0;
+  /* At the top of the page the header is above it: without the minus
+     the end of the list would be off screen. dvh: mobile toolbars;
+     vh for older browsers. */
+  max-height: calc(100vh - var(--header-height));
+  max-height: calc(100dvh - var(--header-height));
+  padding: var(--space-2);
   overflow: auto;
 }
 

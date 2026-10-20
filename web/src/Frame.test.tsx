@@ -23,7 +23,7 @@ describe("Frame", () => {
       "haskell-reviewer",
     );
     const nav = root.querySelector("nav");
-    expect(nav?.getAttribute("aria-label")).toBe("Modules");
+    expect(nav?.getAttribute("aria-label")).toBe("Files");
     const main = root.querySelector("main");
     expect(main?.id).toBe("main");
     expect(main?.textContent).toBe("hello");

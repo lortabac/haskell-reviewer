@@ -1,0 +1,103 @@
+/* Sidebar file tree. */
+.file-tree,
+.file-tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.file-tree ul {
+  padding-left: var(--space-3);
+}
+
+.tree-folder,
+.tree-file {
+  display: block;
+  width: 100%;
+  padding: 0 var(--space-1);
+  font: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.tree-folder {
+  background: none;
+  border: none;
+  color: var(--color-fg);
+  cursor: pointer;
+}
+
+/* Disclosure arrow. The "/ ''" part hides it from screen readers:
+   aria-expanded already says it. */
+.tree-folder::before {
+  content: "▸" / "";
+  display: inline-block;
+  width: 1em;
+}
+
+.tree-folder[aria-expanded="true"]::before {
+  content: "▾" / "";
+}
+
+/* Files line up with folder names, after the arrow. */
+.tree-file {
+  padding-left: calc(1em + var(--space-1));
+  text-decoration: none;
+}
+
+.tree-file:hover {
+  text-decoration: underline;
+}
+
+.tree-file[aria-current="page"] {
+  background: var(--color-border);
+  color: var(--color-fg);
+  font-weight: 600;
+}
+
+.tree-marker {
+  color: var(--color-muted);
+  font-size: 0.85em;
+}
+
+/* Muted text on the current item's background is too faint. */
+.tree-file[aria-current="page"] .tree-marker {
+  color: inherit;
+}
+
+/* File view. */
+.file-path {
+  font-family: var(--font-mono);
+  font-size: 1.25rem;
+  overflow-wrap: anywhere;
+}
+
+/* Gutter and code side by side. Same font and line height, so the
+   lines match. Only the code scrolls sideways. */
+.file-text {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.file-gutter,
+.file-code {
+  margin: 0;
+  padding: var(--space-2);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  white-space: pre;
+  tab-size: 8;
+}
+
+.file-gutter {
+  color: var(--color-muted);
+  text-align: right;
+  border-right: 1px solid var(--color-border);
+  user-select: none;
+}
+
+.file-code {
+  overflow-x: auto;
+}
