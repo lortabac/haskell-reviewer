@@ -91,6 +91,21 @@ for (const name of assets) {
   }
 }
 
+// The events SharedWorker (src/events) must be its own file, loaded by
+// URL. Vite could inline it as a blob: or data: URL, which the CSP
+// blocks: then no other js file names it.
+const workers = assets.filter((name) => /^events\.worker-.*\.js$/.test(name));
+if (workers.length === 0) fail("no events.worker-*.js asset");
+for (const worker of workers) {
+  const used = assets.some(
+    (name) =>
+      name !== worker &&
+      name.endsWith(".js") &&
+      readFileSync(join(dist, "assets", name), "utf8").includes(worker),
+  );
+  if (!used) fail(`no js asset refers to assets/${worker}`);
+}
+
 if (problems.length > 0) {
   for (const p of problems) console.error(`check-bundle: ${p}`);
   process.exit(1);

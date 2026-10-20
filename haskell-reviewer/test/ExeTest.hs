@@ -218,6 +218,27 @@ serverTests =
               Just ("127.0.0.1:" <> other),
               Just "127.0.0.1"
             ],
+      testCase "event stream: headers and hello within 5 s" $
+        withTemp $ \dir -> withServer id [dir] $ \server -> do
+          -- No Connection: close, like a browser. The stream never ends,
+          -- so read only up to the first event.
+          let req =
+                "GET "
+                  <> Char8.pack (tokenPath server)
+                  <> "api/events HTTP/1.1\r\nHost: 127.0.0.1:"
+                  <> Char8.pack (show server.port)
+                  <> "\r\n\r\n"
+          -- Up to the end of the first chunk.
+          bytes <- rawHttpUntil server.port req "data: {}\n\n\r\n"
+          -- Add the last chunk, so the body parses.
+          case parseResponse (bytes <> "0\r\n\r\n") of
+            Nothing -> assertFailure ("bad HTTP answer: " <> show bytes)
+            Just r -> do
+              r.status @?= 200
+              lookup "content-type" r.headers @?= Just "text/event-stream"
+              lookup "transfer-encoding" r.headers @?= Just "chunked"
+              assertSecurityHeaders r
+              r.body @?= "id: 1\nevent: hello\ndata: {}\n\n",
       testCase "warp's own error response has the security headers" $
         withTemp $ \dir -> withServer id [dir] $ \server -> do
           -- Headers over warp's 50 KB limit: warp answers by itself.
@@ -531,6 +552,34 @@ rawHttp port req = do
     readAll s acc = do
       chunk <- Socket.BS.recv s 65536
       if BS.null chunk then pure acc else readAll s (acc <> chunk)
+
+-- | Send the bytes, read until the answer holds the text (5 s at most).
+-- For answers that don't end, like the event stream.
+rawHttpUntil :: Int -> ByteString -> ByteString -> IO ByteString
+rawHttpUntil port req needle = do
+  result <- timeout 5000000 $
+    bracket open Socket.close $ \s -> do
+      Socket.BS.sendAll s req
+      readUntil s mempty
+  case result of
+    Nothing -> assertFailure ("not seen within 5 s: " <> show needle)
+    Just bytes -> pure bytes
+  where
+    open = do
+      s <- Socket.socket Socket.AF_INET Socket.Stream Socket.defaultProtocol
+      Socket.connect s addr
+      pure s
+    addr =
+      Socket.SockAddrInet
+        (fromIntegral port)
+        (Socket.tupleToHostAddress (127, 0, 0, 1))
+    readUntil s acc
+      | needle `BS.isInfixOf` acc = pure acc
+      | otherwise = do
+          chunk <- Socket.BS.recv s 65536
+          if BS.null chunk
+            then assertFailure ("closed before " <> show needle <> ": " <> show acc)
+            else readUntil s (acc <> chunk)
 
 -- | Status line, headers and body (chunked or not).
 parseResponse :: ByteString -> Maybe HttpResponse

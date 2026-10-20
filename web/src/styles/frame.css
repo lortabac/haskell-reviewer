@@ -52,6 +52,16 @@ a {
   font-weight: 600;
 }
 
+/* Connection notices, at the right of the header. */
+.connection-notices {
+  margin-left: auto;
+}
+
+.connection-notice {
+  margin: 0;
+  color: var(--color-fg);
+}
+
 .frame-sidebar {
   grid-area: sidebar;
   padding: var(--space-2);

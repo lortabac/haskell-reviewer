@@ -77,8 +77,9 @@ data CliResult
 defaultIdleExit :: Minutes
 defaultIdleExit = Minutes 5
 
--- | Upper limit for @--idle-exit@: one week. Keeps the later timer code
--- far from any overflow.
+-- | Upper limit for @--idle-exit@: one week. Keeps the timer far from any
+-- overflow: a week in microseconds (about 6e11) fits easily in a 64-bit
+-- 'Int'. We only support 64-bit platforms.
 maxIdleExit :: Minutes
 maxIdleExit = Minutes 10080
 

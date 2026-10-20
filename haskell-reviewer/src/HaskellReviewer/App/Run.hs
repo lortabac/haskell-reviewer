@@ -33,6 +33,8 @@ import HaskellReviewer.App.Cli
   ( Browser (..),
     CliResult (..),
     Command (..),
+    IdleExit (..),
+    Minutes (..),
     Options (..),
     parseArgs,
   )
@@ -46,7 +48,13 @@ import HaskellReviewer.Core.Address
   )
 import HaskellReviewer.Core.Root (Root (..))
 import HaskellReviewer.Effects.Browser qualified as Browser
-import HaskellReviewer.Effects.Clock (Clock (..), MonotonicTime, elapsed, systemClock)
+import HaskellReviewer.Effects.Clock
+  ( Clock (..),
+    Microseconds (..),
+    MonotonicTime,
+    elapsed,
+    systemClock,
+  )
 import HaskellReviewer.Effects.FileSystem (RootError, renderRootError)
 import HaskellReviewer.Effects.FileSystem qualified as FileSystem
 import HaskellReviewer.Effects.Log (Logger, logDebug, logVerbose, newLogger)
@@ -59,6 +67,7 @@ import HaskellReviewer.Effects.Trace
     openFileTracer,
     renderTraceFileError,
   )
+import HaskellReviewer.Server.Events (EventStream (..), keepAliveInterval)
 import HaskellReviewer.Server.Listen
   ( ListenError,
     Listener (..),
@@ -66,6 +75,7 @@ import HaskellReviewer.Server.Listen
     renderListenError,
   )
 import HaskellReviewer.Server.Router (application)
+import HaskellReviewer.Session.Clients (newClients, waitIdle)
 import System.Environment (getArgs)
 import System.Exit (ExitCode (..), exitWith)
 import System.IO (hSetEncoding, stderr, utf8)
@@ -76,7 +86,8 @@ The library has layers. Lower layers never import upper ones:
 
 1. Core (HaskellReviewer.Core.*): pure code.
 2. Effects (HaskellReviewer.Effects.*): handles for IO (clock, files, ...).
-3. Session: state shared while the server runs (not there yet).
+3. Session (HaskellReviewer.Session.*): state shared while the server
+   runs, in STM (SPEC §11.5).
 4. Server (HaskellReviewer.Server.*): HTTP.
 5. App (HaskellReviewer.App.*): CLI parsing and wiring. Imports all
    layers; none imports it.
@@ -88,8 +99,8 @@ The executable is just `main = Run.main`. See SPEC §11.2.
 
 SPEC §2.1:
 
-- 0: normal exit, --help, --version, SIGINT (Ctrl-C), SIGTERM. See
-  Note [Shutdown].
+- 0: normal exit, --help, --version, SIGINT (Ctrl-C), SIGTERM, idle
+  exit. See Note [Shutdown].
 - 1: internal error, i.e. a bug. Any exception we didn't expect ends up
   here. We print "haskell-reviewer: internal error: " and the exception,
   instead of GHC's default output. Warp stopping on its own counts too.
@@ -106,19 +117,24 @@ signal handler replaces GHC's UserInterrupt (Note [Shutdown]).
 
 Right after parsing the command line, we catch SIGINT and SIGTERM
 (installShutdownHandlers), so Ctrl-C during start-up also exits 0. Then
-the main thread races "wait for a signal" against warp. The signal wins:
-race kills warp's accept loop, we close the socket and the trace file, and
-exit 0. If a signal came during start-up, we don't listen at all (or,
-if it came while listening, skip the URL line, the startup span and the
-browser) and exit 0. A start-up error (exit 2) still wins over such a
-signal: we report it as usual.
+the main thread races "wait for a stop" against warp. A stop is a signal,
+or the idle timeout (Note [Idle exit] in "HaskellReviewer.Session.Clients";
+off with --idle-exit 0). When it wins, race kills warp's accept loop, we
+close the socket and the trace file, and exit 0. An idle exit also prints
+a line on stderr. The idle timer starts with the race, so a browser that
+never connects ends the process too.
+
+If a signal came during start-up, we don't listen at all (or, if it came
+while listening, skip the URL line, the startup span and the browser) and
+exit 0. A start-up error (exit 2) still wins over such a signal: we report
+it as usual.
 
 A second signal exits at once (exitImmediately, still code 0), with no
 clean-up. So a stuck shutdown can't trap the user.
 
 There is no graceful drain: requests still in flight are cut. Fine for a
-local tool, and the event stream (SSE, later) never ends, so a drain would
-wait on it forever anyway.
+local tool, and the event stream never ends, so a drain would wait on it
+forever anyway.
 
 The browser opener is never waited for or killed (see
 HaskellReviewer.Effects.Browser).
@@ -139,7 +155,9 @@ data Deps = Deps
     -- | Open the URL in the browser. Must not block or throw.
     openBrowser :: Logger -> Root -> Text -> IO (),
     -- | Catch the stop signals.
-    installShutdown :: IO Shutdown
+    installShutdown :: IO Shutdown,
+    -- | How long a minute is, for --idle-exit. Tests make it short.
+    idleMinute :: Microseconds
   }
 
 -- | The real world.
@@ -156,7 +174,8 @@ newRealDeps = do
         newToken = tokenFromBytes <$> getRandomBytes tokenByteCount,
         listen = openListener,
         openBrowser = Browser.openBrowser,
-        installShutdown = installShutdownHandlers
+        installShutdown = installShutdownHandlers,
+        idleMinute = Microseconds 60_000_000
       }
 
 -- | Bad input found at start-up. All exit with code 2.
@@ -260,12 +279,45 @@ serve deps logger opts root tracer shutdown t0 w0 = do
                     Span {name = "startup", start = w0, duration = elapsed t0 t1}
                   when (opts.browser == OpenBrowser) $
                     deps.openBrowser logger root url
-              app = application listener.port token
-          result <-
-            race shutdown.wait (listener.serve ready app) `finally` listener.close
+          clients <- newClients
+          let events =
+                EventStream
+                  { clients = clients,
+                    keepAlive = keepAliveInterval,
+                    logger = logger
+                  }
+              app = application listener.port token events
+              waitStop = case opts.idleExit of
+                IdleExitOff -> StopSignal <$ shutdown.wait
+                IdleExitAfter m ->
+                  either (const StopSignal) (const (StopIdle m))
+                    <$> race
+                      shutdown.wait
+                      (waitIdle clients (idleTimeout deps.idleMinute m))
+          result <- race waitStop (listener.serve ready app) `finally` listener.close
           case result of
-            Left () -> pure ExitSuccess
+            Left StopSignal -> pure ExitSuccess
+            Left (StopIdle m) -> do
+              deps.console (idleExitMessage m)
+              pure ExitSuccess
             Right () -> throwIO (userError "the HTTP server stopped")
+
+-- | Why the server stopped.
+data StopReason
+  = StopSignal
+  | -- | No tab for this long.
+    StopIdle Minutes
+
+idleTimeout :: Microseconds -> Minutes -> Microseconds
+idleTimeout (Microseconds minute) (Minutes m) = Microseconds (minute * m)
+
+idleExitMessage :: Minutes -> Text
+idleExitMessage (Minutes m) =
+  "haskell-reviewer: no browser tab for " <> minutes <> ", exiting"
+  where
+    minutes
+      | m == 1 = "1 minute"
+      | otherwise = Text.pack (show m) <> " minutes"
 
 openTracerFor :: Deps -> Logger -> Options -> IO (Either TraceFileError Tracer)
 openTracerFor deps logger opts = case opts.traceFile of

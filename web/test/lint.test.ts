@@ -62,6 +62,8 @@ const banned: [string, string][] = [
   ["document['writeln']('x');", "no-restricted-syntax"],
   ["document.execCommand('insertHTML', false, 'x');", "no-restricted-syntax"],
   ["new window.DOMParser();", "no-restricted-syntax"],
+  ["importScripts('x.js');", "no-restricted-syntax"],
+  ["self.importScripts('x.js');", "no-restricted-syntax"],
 ];
 
 const clean = "export const A = () => <div class='x'>{'text'}</div>;\n";

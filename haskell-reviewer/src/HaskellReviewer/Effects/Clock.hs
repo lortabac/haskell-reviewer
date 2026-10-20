@@ -4,6 +4,7 @@ module HaskellReviewer.Effects.Clock
     Clock (..),
     MonotonicTime (..),
     Nanoseconds (..),
+    Microseconds (..),
 
     -- * Handles
     systemClock,
@@ -32,6 +33,11 @@ newtype MonotonicTime = MonotonicTime Word64
 -- | A duration in nanoseconds. A newtype so it can't be mixed up with
 -- other units.
 newtype Nanoseconds = Nanoseconds Word64
+  deriving (Eq, Ord, Show)
+
+-- | A duration in microseconds, the unit of 'threadDelay' and
+-- 'Control.Concurrent.STM.registerDelay'. An 'Int', like theirs.
+newtype Microseconds = Microseconds Int
   deriving (Eq, Ord, Show)
 
 -- | The real clock.

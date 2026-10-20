@@ -9,7 +9,9 @@ import HaskellReviewer.Core.RootTest qualified
 import HaskellReviewer.Effects.HelperTest qualified
 import HaskellReviewer.Effects.TraceTest qualified
 import HaskellReviewer.Server.AssetsTest qualified
+import HaskellReviewer.Server.EventsTest qualified
 import HaskellReviewer.Server.RouterTest qualified
+import HaskellReviewer.Session.ClientsTest qualified
 import Test.Tasty (defaultMain, testGroup)
 
 main :: IO ()
@@ -27,6 +29,8 @@ main = do
         HaskellReviewer.Effects.HelperTest.tests,
         HaskellReviewer.Effects.TraceTest.tests,
         HaskellReviewer.Server.AssetsTest.tests,
+        HaskellReviewer.Server.EventsTest.tests,
         HaskellReviewer.Server.RouterTest.tests,
+        HaskellReviewer.Session.ClientsTest.tests,
         ExeTest.tests
       ]

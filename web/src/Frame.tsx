@@ -1,4 +1,5 @@
 import type { JSX, ParentProps } from "solid-js";
+import { ConnectionNotice } from "./events/ConnectionNotice";
 
 // The page frame (SPEC §4.1): header, sidebar, main view.
 // No router hooks here, so tests can render it alone.
@@ -17,6 +18,7 @@ export function Frame(props: ParentProps): JSX.Element {
       </a>
       <header class="frame-header">
         <span class="app-name">haskell-reviewer</span>
+        <ConnectionNotice />
       </header>
       <nav class="frame-sidebar" aria-label="Modules" />
       <main id="main" class="frame-main" tabindex="-1">

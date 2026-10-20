@@ -12,12 +12,21 @@ module HaskellReviewer.Server.Security
     -- * Error responses
     notFound,
     forbidden,
+    methodNotAllowed,
   )
 where
 
 import Data.ByteString (ByteString)
 import HaskellReviewer.Core.Address (Port, Token, hostAllowed, tokenMatches)
-import Network.HTTP.Types (Header, hCacheControl, hContentType, status403, status404)
+import Network.HTTP.Types
+  ( Header,
+    hAllow,
+    hCacheControl,
+    hContentType,
+    status403,
+    status404,
+    status405,
+  )
 import Network.Wai
   ( Middleware,
     Request (..),
@@ -105,6 +114,11 @@ notFound = responseLBS status404 [plainText] "not found"
 -- | 403, for a bad Host header.
 forbidden :: Response
 forbidden = responseLBS status403 [plainText] "forbidden: bad Host header"
+
+-- | 405, with the methods the route takes (e.g. @GET, HEAD@) in @Allow@.
+methodNotAllowed :: ByteString -> Response
+methodNotAllowed allow =
+  responseLBS status405 [plainText, (hAllow, allow)] "method not allowed"
 
 -- * Internal
 
