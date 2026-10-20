@@ -17,6 +17,11 @@ jobs:
         os: [ubuntu-latest, macos-15]
         ghc: ['9.10', '9.12', '9.14']
 
+    env:
+      # A missing API fixture fails the golden tests instead of being
+      # written. See Note [API fixtures] in HaskellReviewer.Server.Wire.
+      TASTY_NO_CREATE: 'true'
+
     steps:
       - uses: actions/checkout@v7
 
@@ -55,6 +60,13 @@ jobs:
 
       - name: Build
         run: make build
+
+      # The tests need git 2.44 or newer. macOS has Apple's older git in
+      # /usr/bin; Homebrew's should come first on PATH.
+      - name: Git version
+        run: |
+          command -v git
+          git --version
 
       - name: Test
         run: make test

@@ -34,7 +34,7 @@ describe("startWorker", () => {
     connect(s, a);
     connect(s, b);
     expect(FakeSource.sources.map((x) => x.url)).toEqual(["/tok/api/events"]);
-    FakeSource.sources[0]?.fire("hello");
+    FakeSource.sources[0]?.hello();
     expect(a.got).toContainEqual({ type: "hello" });
     expect(b.got).toContainEqual({ type: "hello" });
   });

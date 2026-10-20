@@ -1,0 +1,1 @@
+{"generation":1,"kind":"text","text":"module Main (main) where\r\n\r\n-- <script>alert(1)</script>\r\nmain :: IO ()\r\nmain = putStrLn \"héllo, wörld → ✓\"\r\n"}

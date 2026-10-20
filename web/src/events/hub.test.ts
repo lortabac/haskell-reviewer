@@ -40,7 +40,7 @@ describe("createHub", () => {
     hub.add(b);
     expect(only().url).toBe("/tok/api/events");
     only().fire("open", 1);
-    only().fire("hello");
+    only().hello();
     const expected = [
       { type: "status", status: "connecting" },
       { type: "status", status: "open" },
@@ -48,6 +48,18 @@ describe("createHub", () => {
     ];
     expect(a.got).toEqual(expected);
     expect(b.got).toEqual(expected);
+  });
+
+  it("a hello with bad data is not passed on", () => {
+    const hub = createHub("/tok/api/events", FakeSource);
+    const a = listener();
+    hub.add(a);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    only().hello("[");
+    only().hello("[]");
+    expect(a.got).toEqual([{ type: "status", status: "connecting" }]);
+    expect(error).toHaveBeenCalledTimes(2);
+    error.mockRestore();
   });
 
   it("a late listener gets the current status", () => {

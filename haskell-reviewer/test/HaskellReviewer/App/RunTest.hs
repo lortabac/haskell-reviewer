@@ -1,7 +1,8 @@
 module HaskellReviewer.App.RunTest (tests) where
 
+import ApiSupport (ApiResult (..), callApp)
 import Control.Concurrent (forkIO, killThread, threadDelay)
-import Control.Concurrent.Async (async, poll, wait)
+import Control.Concurrent.Async (async, poll, wait, withAsync)
 import Control.Concurrent.MVar
   ( MVar,
     isEmptyMVar,
@@ -15,20 +16,24 @@ import Control.Exception (AsyncException (..), throwIO, try)
 import Control.Monad (forever, void)
 import Data.ByteString qualified as BS
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef)
+import Data.Maybe (isNothing)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Time.Calendar (fromGregorian)
 import Data.Time.Clock (UTCTime (..))
 import HaskellReviewer.App.Run (Deps (..), run)
 import HaskellReviewer.Core.Address (Port (..), Token, tokenFromBytes, tokenText)
-import HaskellReviewer.Core.Root (Root (..))
+import HaskellReviewer.Core.FileList (FileList (..), ListSource (..), mkFileList)
+import HaskellReviewer.Core.Git (GitVersion (..))
+import HaskellReviewer.Core.Root (CanonicalRoot (..), Root (..))
 import HaskellReviewer.Effects.Clock
   ( Clock (..),
     Microseconds (..),
     MonotonicTime (..),
     Nanoseconds (..),
   )
-import HaskellReviewer.Effects.FileSystem (RootError (..))
+import HaskellReviewer.Effects.FileSystem (ListError (..), Lister (..), RootError (..))
+import HaskellReviewer.Effects.Git (GitError (..), TooOld (..))
 import HaskellReviewer.Effects.Shutdown (Shutdown (..))
 import HaskellReviewer.Effects.Trace (Span (..), TraceFileError (..), Tracer (..))
 import HaskellReviewer.Server.Listen (ListenError (..), Listener (..))
@@ -97,6 +102,24 @@ tests =
         listenerClosed @?= True
         opened <- readIORef fake.opened
         opened @?= [fakeUrl],
+      testCase "git too old: exit 2, no listen, tracer closed" $ do
+        fake <- newFake
+        let deps =
+              (fake.deps)
+                { probeFiles = \_ _ ->
+                    pure . Left . GitTooOld $
+                      TooOld {exe = "/usr/bin/git", version = GitVersion 2 43 0},
+                  listen = \_ _ -> assertFailure "listen called"
+                }
+        code <- run deps ["--trace-file", "t.jsonl"]
+        code @?= ExitFailure 2
+        out <- readIORef fake.console
+        out
+          @?= [ "haskell-reviewer: git at /usr/bin/git is version 2.43.0; \
+                \need 2.44 or newer"
+              ]
+        readIORef fake.closed >>= (@?= True),
+      listingTests,
       testCase "--port is passed to listen" $ do
         fake <- newFake
         ports <- newIORef []
@@ -218,6 +241,92 @@ tests =
       idleTests
     ]
 
+-- * Listing
+
+listingTests :: TestTree
+listingTests =
+  testGroup
+    "listing"
+    [ testCase "files are listed after the URL line"
+        $ withRunning
+          ( \fake -> fakeLister $ do
+              fake.deps.console "listing"
+              pure (Right (mkFileList FromDisk 0 []))
+          )
+        $ \fake _ -> do
+          ok <- waitFor 5 ((>= 2) . length <$> readIORef fake.console)
+          assertBool "not listed" ok
+          out <- readIORef fake.console
+          take 2 out @?= ["haskell-reviewer: serving at " <> fakeUrl, "listing"],
+      testCase "listing fails: a line, 500, no exit" $
+        withRunning (\_ -> fakeLister (pure (Left (ListCrashed "boom")))) $
+          \fake app -> do
+            r <- getFiles app
+            r.status @?= 500
+            r.body @?= "cannot list files"
+            out <- readIORef fake.console
+            out
+              @?= [ "haskell-reviewer: serving at " <> fakeUrl,
+                    "haskell-reviewer: cannot list files: boom"
+                  ],
+      testCase "lister throws: a line, 500, no hang" $
+        withRunning (\_ -> fakeLister (ioError (userError "boom"))) $ \fake app -> do
+          r <- timeout 5_000_000 (getFiles app)
+          fmap (.status) r @?= Just 500
+          out <- readIORef fake.console
+          drop 1 out @?= ["haskell-reviewer: cannot list files: user error (boom)"],
+      testCase "a request before the list is done waits, then 200" $ do
+        release <- newEmptyMVar
+        let lister _ = fakeLister $ do
+              readMVar release
+              pure (Right (mkFileList FromDisk 0 []))
+        withRunning lister $ \_ app ->
+          withAsync (getFiles app) $ \request -> do
+            threadDelay 200_000
+            early <- poll request
+            assertBool "answered before the list was done" (isNothing early)
+            putMVar release ()
+            r <- timeout 5_000_000 (wait request)
+            fmap (.status) r @?= Just 200,
+      testCase "warnings for skipped names and the cap" $ do
+        let big = (mkFileList FromDisk 3 []) {truncated = True}
+        withRunning (\_ -> fakeLister (pure (Right big))) $ \fake app -> do
+          _ <- getFiles app
+          ok <- waitFor 5 ((== 3) . length <$> readIORef fake.console)
+          assertBool "no lines" ok
+          out <- readIORef fake.console
+          drop 1 out
+            @?= [ "haskell-reviewer: skipped 3 file name(s) that are not UTF-8",
+                  "haskell-reviewer: more than 100000 files under ROOT; \
+                  \listing the first 100000"
+                ]
+    ]
+
+-- | Run with this lister until the action is done, then stop with a
+-- signal. The action gets the app warp would serve.
+withRunning :: (Fake -> Lister) -> (Fake -> Application -> IO a) -> IO a
+withRunning mkLister action = do
+  fake <- newFake
+  stop <- newEmptyMVar
+  appVar <- newEmptyMVar
+  let serve ready app = ready >> putMVar appVar app >> blockForever
+      deps =
+        (idleDeps fake stop serve)
+          { probeFiles = \_ _ -> pure (Right (mkLister fake))
+          }
+  withAsync (run deps ["--idle-exit", "0"]) $ \running -> do
+    app <- timeout 5_000_000 (takeMVar appVar)
+    result <- maybe (assertFailure "not ready") (action fake) app
+    putMVar stop ()
+    code <- timeout 5_000_000 (wait running)
+    code @?= Just ExitSuccess
+    pure result
+
+-- | GET api/files/tree on the app.
+getFiles :: Application -> IO ApiResult
+getFiles app =
+  callApp app "GET" "127.0.0.1:4321" [tokenText fakeToken, "api", "files", "tree"]
+
 -- * Idle exit
 
 -- | A "minute" here is 100 ms: short, but with room for slow machines.
@@ -318,6 +427,23 @@ openStream app opened = do
     pure ResponseReceived
   pure ()
 
+-- | A listing that never ends.
+neverDone :: IO (Either ListError FileList)
+neverDone = Left (ListCrashed "") <$ blockForever
+
+-- | A lister for a fake ROOT.
+fakeLister :: IO (Either ListError FileList) -> Lister
+fakeLister action =
+  Lister {root = CanonicalRoot "/abs/x" "/abs/x", list = action}
+
+-- | Poll every 20 ms, up to the given seconds.
+waitFor :: Double -> IO Bool -> IO Bool
+waitFor secs check = go (ceiling (secs * 50) :: Int)
+  where
+    go n = do
+      ok <- check
+      if ok || n <= 0 then pure ok else threadDelay 20_000 >> go (n - 1)
+
 blockForever :: IO ()
 blockForever = forever (threadDelay 1_000_000)
 
@@ -386,6 +512,8 @@ newFake = do
             openTracer = \_ _ -> pure (Right tracer),
             newToken = pure fakeToken,
             listen = \_ _ -> pure (Right listener),
+            -- Never done: no line or span from the listing.
+            probeFiles = \_ _ -> pure (Right (fakeLister neverDone)),
             openBrowser = \_ _ url -> modifyIORef' opened (<> [url]),
             installShutdown =
               pure

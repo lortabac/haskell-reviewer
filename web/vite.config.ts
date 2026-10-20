@@ -24,5 +24,9 @@ export default defineConfig({
   worker: { format: "iife" },
   test: {
     environment: "happy-dom",
+    // The persistent module cache keeps the import.meta.glob list of
+    // src/api/fixtures.test.ts, so an added or removed fixture would go
+    // unseen. The whole run takes a few seconds anyway.
+    fsModuleCache: false,
   },
 });

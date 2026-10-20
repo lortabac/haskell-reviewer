@@ -17,9 +17,11 @@ import Data.Text qualified as Text
 import GHC.Clock (getMonotonicTime)
 import HaskellReviewer.Core.Address (Port (..), Token, tokenFromBytes, tokenText)
 import HaskellReviewer.Effects.Clock (Microseconds (..))
+import HaskellReviewer.Effects.FileSystem (ListError (..), ReadError (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), newLogger)
+import HaskellReviewer.Server.Api (FilesApi (..))
 import HaskellReviewer.Server.Events (EventStream (..), keepAliveFrame, renderEvent)
-import HaskellReviewer.Server.Router (application)
+import HaskellReviewer.Server.Router (Routes (..), application)
 import HaskellReviewer.Server.Security (contentSecurityPolicy)
 import HaskellReviewer.Session.Clients (EventId (..), newClients, openCount)
 import Network.HTTP.Types (Header, Status (..))
@@ -152,7 +154,7 @@ call :: EventStream -> Request -> IO Response
 call events req = do
   saved <- newIORef Nothing
   ResponseReceived <-
-    application (Port 8080) token events req $ \resp -> do
+    application (Port 8080) token (routesFor events) req $ \resp -> do
       writeIORef saved (Just resp)
       pure ResponseReceived
   readIORef saved >>= \case
@@ -210,7 +212,7 @@ withWarp :: EventStream -> (Int -> IO a) -> IO a
 withWarp events action =
   bracket open Socket.close $ \sock -> do
     port <- fromIntegral <$> Socket.socketPort sock
-    let app = application (Port (fromIntegral port)) token events
+    let app = application (Port (fromIntegral port)) token (routesFor events)
         settings =
           Warp.setTimeout 1
             . Warp.setOnException (\_ _ -> pure ())
@@ -302,6 +304,19 @@ goodHost = Just "127.0.0.1:8080"
 
 streamPath :: [Text]
 streamPath = [tokenText token, "api", "events"]
+
+-- | The routes, with file routes that never list.
+routesFor :: EventStream -> Routes
+routesFor events =
+  Routes
+    { events = events,
+      files =
+        FilesApi
+          { snapshot = pure (Left (ListCrashed "no files here")),
+            readEntry = \_ _ _ -> pure (Left ReadGone),
+            logger = newLogger LevelInfo (\_ -> pure ())
+          }
+    }
 
 newEvents :: Microseconds -> IO EventStream
 newEvents keepAlive = do

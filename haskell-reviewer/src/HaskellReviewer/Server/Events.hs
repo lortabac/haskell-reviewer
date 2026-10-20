@@ -24,6 +24,7 @@ import Data.Text qualified as Text
 import HaskellReviewer.Effects.Clock (Microseconds (..))
 import HaskellReviewer.Effects.Log (Logger, logVerbose)
 import HaskellReviewer.Server.Security (methodNotAllowed)
+import HaskellReviewer.Server.Wire (helloPayload)
 import HaskellReviewer.Session.Clients
   ( Clients,
     EventId (..),
@@ -92,7 +93,7 @@ eventsApp es req respond
             let stream = withClient es.clients $ do
                   logCount "event stream opened"
                   hello <- nextEventId es.clients
-                  write (renderEvent hello "hello" "{}")
+                  write (renderEvent hello "hello" helloPayload)
                   flush
                   forever $ do
                     threadDelay delay
