@@ -1,0 +1,36 @@
+{
+  "name": "haskell-reviewer-web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "packageManager": "npm@10.9.7",
+  "engines": {
+    "node": ">=22.22.2 <23"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "check:bundle": "node scripts/check-bundle.mjs"
+  },
+  "dependencies": {
+    "@solidjs/router": "1.0.0",
+    "solid-js": "1.9.17"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.13.0",
+    "eslint-plugin-solid": "0.18.1",
+    "happy-dom": "21.0.3",
+    "prettier": "3.9.10",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.0",
+    "vite": "8.3.4",
+    "vite-plugin-solid": "2.11.14",
+    "vitest": "5.0.5"
+  }
+}

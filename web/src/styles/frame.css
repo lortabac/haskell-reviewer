@@ -1,0 +1,99 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  line-height: 1.5;
+}
+
+code,
+pre,
+kbd {
+  font-family: var(--font-mono);
+}
+
+a {
+  color: var(--color-link);
+}
+
+:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Header on top, sidebar left, main view right. */
+.frame {
+  display: grid;
+  grid-template-areas:
+    "header header"
+    "sidebar main";
+  grid-template-columns: minmax(12rem, 18rem) 1fr;
+  grid-template-rows: auto 1fr;
+  min-height: 100vh;
+}
+
+.frame-header {
+  grid-area: header;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.app-name {
+  font-weight: 600;
+}
+
+.frame-sidebar {
+  grid-area: sidebar;
+  padding: var(--space-2);
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  overflow: auto;
+}
+
+.frame-main {
+  grid-area: main;
+  padding: var(--space-3) var(--space-4);
+  min-width: 0;
+}
+
+/* The main view gets focus from the skip link: no ring on the whole area. */
+.frame-main:focus {
+  outline: none;
+}
+
+/* Off screen until focused. */
+.skip-link {
+  position: absolute;
+  left: var(--space-2);
+  top: -10rem;
+  z-index: 10;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg);
+  color: var(--color-link);
+  border: 1px solid var(--color-border);
+}
+
+.skip-link:focus {
+  top: var(--space-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

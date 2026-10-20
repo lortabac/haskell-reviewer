@@ -48,6 +48,13 @@ check, so rejections get them too. Warp's own error responses (bad
 request, ...) get them in "HaskellReviewer.Server.Listen".
 -}
 
+{- Note [Caching]
+
+'addSecurityHeaders' adds Cache-Control: no-store to every response that
+has no Cache-Control of its own. Only the hashed assets set one
+(immutable, see Note [Routes] in "HaskellReviewer.Server.Router").
+-}
+
 -- | The CSP of SPEC §9.2, exactly.
 contentSecurityPolicy :: ByteString
 contentSecurityPolicy =
@@ -55,21 +62,26 @@ contentSecurityPolicy =
   \script-src 'self'; object-src 'none'; base-uri 'none'; \
   \form-action 'none'; frame-ancestors 'none'"
 
--- | Headers on every response. @Referrer-Policy: no-referrer@ keeps the
--- token in the URL from leaking.
+-- | Headers forced on every response. @Referrer-Policy: no-referrer@
+-- keeps the token in the URL from leaking.
 securityHeaders :: [Header]
 securityHeaders =
   [ ("Content-Security-Policy", contentSecurityPolicy),
     ("Referrer-Policy", "no-referrer"),
-    ("X-Content-Type-Options", "nosniff"),
-    (hCacheControl, "no-store")
+    ("X-Content-Type-Options", "nosniff")
   ]
 
 -- | Add 'securityHeaders' to a response. A header with the same name
--- already there is replaced, not doubled.
+-- already there is replaced, not doubled. Also adds
+-- @Cache-Control: no-store@ if the response has no Cache-Control.
+-- See Note [Caching].
 addSecurityHeaders :: Response -> Response
 addSecurityHeaders = mapResponseHeaders $ \hs ->
-  securityHeaders <> filter (\(name, _) -> name `notElem` names) hs
+  let rest = filter (\(name, _) -> name `notElem` names) hs
+      cache
+        | any ((== hCacheControl) . fst) rest = []
+        | otherwise = [(hCacheControl, "no-store")]
+   in securityHeaders <> cache <> rest
   where
     names = map fst securityHeaders
 

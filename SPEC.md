@@ -1324,7 +1324,7 @@ following:
   `X-Content-Type-Options: nosniff`, and `Cache-Control: no-store` for API
   responses. Static assets also live under the token path, and their
   hashed names let the browser cache them as immutable;
-- gzips large responses, except the event stream.
+- gzips large responses, except the event stream (from M1).
 
 The router is a plain pattern match on path segments. The API is small, so
 a framework would cost more than it saves.

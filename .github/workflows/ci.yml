@@ -63,3 +63,56 @@ jobs:
         run: |
           make install BINDIR="$RUNNER_TEMP/bin"
           "$RUNNER_TEMP/bin/haskell-reviewer" --version
+
+  web:
+    name: ${{ matrix.os }} / web
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS too: the committed dist must match a build with the darwin
+        # native packages (rolldown, lightningcss).
+        os: [ubuntu-latest, macos-15]
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format
+        run: npm run format:check
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      # web/dist is committed. A rebuild must give the same files.
+      - name: Bundle is up to date
+        run: |
+          if [ -n "$(git status --porcelain -- dist)" ]; then
+            echo "web/dist differs from a fresh build. Run 'make web' and commit."
+            git status --porcelain -- dist
+            git diff --stat -- dist
+            exit 1
+          fi
+
+      - name: Check bundle (CSP, no eval)
+        run: npm run check:bundle
