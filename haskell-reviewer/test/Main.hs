@@ -8,6 +8,7 @@ import HaskellReviewer.Core.AddressTest qualified
 import HaskellReviewer.Core.RootTest qualified
 import HaskellReviewer.Effects.HelperTest qualified
 import HaskellReviewer.Effects.TraceTest qualified
+import HaskellReviewer.Server.AssetsTest qualified
 import HaskellReviewer.Server.RouterTest qualified
 import Test.Tasty (defaultMain, testGroup)
 
@@ -25,6 +26,7 @@ main = do
         HaskellReviewer.Core.RootTest.tests,
         HaskellReviewer.Effects.HelperTest.tests,
         HaskellReviewer.Effects.TraceTest.tests,
+        HaskellReviewer.Server.AssetsTest.tests,
         HaskellReviewer.Server.RouterTest.tests,
         ExeTest.tests
       ]

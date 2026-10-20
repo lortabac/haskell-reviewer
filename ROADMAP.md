@@ -95,7 +95,7 @@ safe. Almost no features.
 - HTTP server (D-49, §11.6.1): `warp` + `wai`, hand-written router, on
   `127.0.0.1`. Random token in the URL (constant-time compare), `Host`
   check, CSP, `no-referrer`, `nosniff`, `no-store` on the API (§2,
-  §9.2); gzip for large responses.
+  §9.2).
 - Event stream (D-52, §11.6.2): SSE, one per browser through a
   SharedWorker; per-tab fallback with a notice. Open stream = connected;
   15 s keep-alive; event ids, refetch after reconnect. Idle exit when no
@@ -188,6 +188,8 @@ users. It tests the core idea: *types first*.
   defaults. First used by "exported only" and the theme override.
 - CBOR for token-heavy payloads (D-51, §11.6.2), with the `cbor-x` no-eval
   build.
+- gzip for large responses, except the event stream (§11.6.1, D-79). The
+  first large payloads come here.
 - Progressive indexing: snapshot generations in STM, priority-queue parse
   workers (D-60, §11.5); requested module jumps the queue, progress in the
   header (§10.2).
@@ -594,7 +596,7 @@ Every section of SPEC.md and the milestone(s) that deliver it.
 | §11.4.9 | Rich text | Haddock M1; Markdown M6 |
 | §11.4.10 | Search | M1 |
 | §11.5 | State, concurrency | M1; reload M3; LLM state M6 |
-| §11.6.1 | HTTP server | M0 |
+| §11.6.1 | HTTP server | M0 (gzip: M1) |
 | §11.6.2 | Browser protocol | M0 (CBOR M1) |
 | §11.6.3 | LLM engine | M6; bridge M7 |
 | §11.7 | Frontend | M0; preferences and CBOR M1; find in file, virtualisation M2 |

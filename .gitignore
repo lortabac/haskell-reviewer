@@ -3,3 +3,4 @@
 .cabal-home/
 dist-newstyle/
 cabal.project.local*
+web/node_modules/

@@ -9,6 +9,13 @@ copyright:     (c) 2026 Lorenzo Tabacchini
 category:      Development
 build-type:    Simple
 
+-- See Note [Embedded bundle] in HaskellReviewer.Server.Assets. A new file
+-- kind needs its glob here and its type in contentTypeFor, together.
+extra-source-files:
+  ../web/dist/assets/*.css
+  ../web/dist/assets/*.js
+  ../web/dist/index.html
+
 common shared
   default-language:   GHC2024
   default-extensions:
@@ -42,6 +49,7 @@ library
     HaskellReviewer.Effects.Trace
 
     -- Server
+    HaskellReviewer.Server.Assets
     HaskellReviewer.Server.Listen
     HaskellReviewer.Server.Router
     HaskellReviewer.Server.Security
@@ -60,6 +68,7 @@ library
     , bytestring            >=0.12   && <0.13
     , crypton               >=2.0    && <2.3
     , directory             >=1.3.8  && <1.4
+    , file-embed            >=0.0.16 && <0.1
     , filepath              >=1.5    && <1.6
     , http-types            >=0.12.4 && <0.13
     , network               >=3.2    && <3.3
@@ -94,6 +103,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.RootTest
     HaskellReviewer.Effects.HelperTest
     HaskellReviewer.Effects.TraceTest
+    HaskellReviewer.Server.AssetsTest
     HaskellReviewer.Server.RouterTest
 
   ghc-options:        -threaded

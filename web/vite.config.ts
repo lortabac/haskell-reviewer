@@ -1,0 +1,24 @@
+import { defineConfig } from "vitest/config";
+import solid from "vite-plugin-solid";
+
+// The server serves the bundle under /<token>/. Asset refs stay relative
+// ("./assets/...") and the server rewrites them in index.html. A <base>
+// tag would be simpler, but the CSP has base-uri 'none'.
+export default defineConfig({
+  plugins: [solid()],
+  base: "./",
+  // No public/ dir: every file in dist must have a hashed name.
+  publicDir: false,
+  build: {
+    outDir: "dist",
+    emptyOutDir: true,
+    sourcemap: false,
+    // The polyfill is an inline script. The CSP blocks it.
+    modulePreload: { polyfill: false },
+    // No data: URLs for assets.
+    assetsInlineLimit: 0,
+  },
+  test: {
+    environment: "happy-dom",
+  },
+});

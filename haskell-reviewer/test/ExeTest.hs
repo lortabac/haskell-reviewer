@@ -162,6 +162,23 @@ serverTests =
           r.status @?= 200
           lookup "content-type" r.headers @?= Just "text/html; charset=utf-8"
           assertSecurityHeaders r,
+      testCase "an asset of the shell: 200, cached as immutable" $
+        withTemp $ \dir -> withServer id [dir] $ \server -> do
+          shell <- httpGet server (goodHost server) (tokenPath server)
+          let prefix = Char8.pack (tokenPath server <> "assets/")
+              (_, rest) = BS.breakSubstring prefix shell.body
+              path = Char8.unpack (Char8.takeWhile (/= '"') rest)
+          assertBool "no asset ref in the shell" (not (BS.null rest))
+          r <- httpGet server (goodHost server) path
+          r.status @?= 200
+          lookup "cache-control" r.headers
+            @?= Just "private, max-age=31536000, immutable"
+          lookup "x-content-type-options" r.headers @?= Just "nosniff"
+          lookup "content-length" r.headers
+            @?= Just (Char8.pack (show (BS.length r.body)))
+          h <- httpRequest server "HEAD" (goodHost server) path
+          lookup "content-length" h.headers @?= lookup "content-length" r.headers
+          h.body @?= "",
       testCase "localhost Host: 200" $
         withTemp $ \dir -> withServer id [dir] $ \server -> do
           r <- httpGet server (Just ("localhost:" <> show server.port)) (tokenPath server)

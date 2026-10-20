@@ -2,7 +2,7 @@ CABAL ?= cabal
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 
-.PHONY: build test install freeze
+.PHONY: build test install freeze web
 
 build:
 	$(CABAL) build all
@@ -10,8 +10,13 @@ build:
 test:
 	$(CABAL) test all --test-show-details=direct
 
+# Rebuild the frontend bundle. Needs Node (version in web/.nvmrc).
+# web/dist is committed: commit it after this.
+web:
+	cd web && npm ci && npm run build && npm run check:bundle
+
 # Not `cabal install`: it builds from an sdist, which would miss files
-# outside the package (like ../web/dist later). Copy the built binary.
+# outside the package (like ../web/dist). Copy the built binary.
 install: build
 	install -d "$(BINDIR)"
 	install -m 0755 "$$($(CABAL) list-bin exe:haskell-reviewer)" "$(BINDIR)/haskell-reviewer"
