@@ -76,7 +76,7 @@ safe. Almost no features.
 **In**
 - Monorepo (§11.2, D-58). M0 has `haskell-reviewer` and `web/`; the index
   and hie packages come in M8. Library layers: core, effects (handles,
-  D-63), session, server. BSD-3 (D-73).
+  D-63), session, server, app (CLI and wiring). BSD-3 (D-73).
 - Builds with GHC 9.10, 9.12 and 9.14 (D-64). `make install` from source,
   with `web/dist/` committed, needs only GHC and `cabal`; `make web`
   rebuilds the bundle with pinned Node (D-65, §11.8).

@@ -1,0 +1,58 @@
+-- | Logger handle. Logs go to stderr (stdout is unused, see SPEC §2.1).
+module HaskellReviewer.Effects.Log
+  ( -- * Types
+    LogLevel (..),
+    Logger (..),
+
+    -- * Handles
+    newLogger,
+
+    -- * Operations
+    logInfo,
+    logVerbose,
+    logDebug,
+  )
+where
+
+import Control.Monad (when)
+import Data.Text (Text)
+
+-- | How much to log. Ordered: a logger at 'LevelDebug' also prints
+-- verbose and info messages.
+data LogLevel
+  = -- | Default: progress and warnings only.
+    LevelInfo
+  | -- | @--verbose@.
+    LevelVerbose
+  | -- | @--debug@.
+    LevelDebug
+  deriving (Eq, Ord, Show)
+
+-- | Where log messages go.
+newtype Logger = Logger
+  { -- | Write a message at the given level. May drop it.
+    emit :: LogLevel -> Text -> IO ()
+  }
+
+-- | A logger that keeps messages at or below the given level and passes
+-- them to the given writer, one line each.
+--
+-- No lock: lines from several threads may mix. Fine while we have one
+-- thread.
+newLogger :: LogLevel -> (Text -> IO ()) -> Logger
+newLogger threshold write =
+  Logger
+    { emit = \level msg -> when (level <= threshold) (write msg)
+    }
+
+-- | Log at 'LevelInfo'.
+logInfo :: Logger -> Text -> IO ()
+logInfo logger = logger.emit LevelInfo
+
+-- | Log at 'LevelVerbose'.
+logVerbose :: Logger -> Text -> IO ()
+logVerbose logger = logger.emit LevelVerbose
+
+-- | Log at 'LevelDebug'.
+logDebug :: Logger -> Text -> IO ()
+logDebug logger = logger.emit LevelDebug

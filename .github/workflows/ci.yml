@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  haskell:
+    name: ${{ matrix.os }} / GHC ${{ matrix.ghc }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        ghc: ['9.10', '9.12', '9.14']
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: haskell-actions/setup@v2
+        id: setup
+        with:
+          ghc-version: ${{ matrix.ghc }}
+          cabal-version: latest
+
+      # Warnings are errors in CI only. In cabal.project.local, so that
+      # `make install` below reuses the same build.
+      - name: Turn warnings into errors
+        run: |
+          printf 'package haskell-reviewer\n  ghc-options: -Werror\n' > cabal.project.local
+
+      - name: Plan
+        run: cabal build all --dry-run
+
+      - name: Restore cabal store
+        uses: actions/cache/restore@v6
+        id: cache
+        with:
+          path: ${{ steps.setup.outputs.cabal-store }}
+          key: ${{ runner.os }}-ghc-${{ steps.setup.outputs.ghc-version }}-${{ hashFiles('dist-newstyle/cache/plan.json') }}
+          restore-keys: ${{ runner.os }}-ghc-${{ steps.setup.outputs.ghc-version }}-
+
+      - name: Build dependencies
+        run: cabal build all --only-dependencies
+
+      - name: Save cabal store
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ steps.setup.outputs.cabal-store }}
+          key: ${{ runner.os }}-ghc-${{ steps.setup.outputs.ghc-version }}-${{ hashFiles('dist-newstyle/cache/plan.json') }}
+
+      - name: Build
+        run: make build
+
+      - name: Test
+        run: make test
+
+      - name: Install
+        run: |
+          make install BINDIR="$RUNNER_TEMP/bin"
+          "$RUNNER_TEMP/bin/haskell-reviewer" --version

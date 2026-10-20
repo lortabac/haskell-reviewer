@@ -80,3 +80,4 @@ Round: the spec review round (1–9), or the milestone (e.g. M0) for decisions t
 | D-74 | No copy detection in the diff; renames only. | Matches git's default; costly on big trees. | 9 |
 | D-75 | Working-tree side: git (`ls-files -s`, `diff-files`) says which tracked files are clean; only dirty and untracked files are read from disk, with EOL rules applied. Helpers are looked up only in absolute `PATH` entries outside ROOT. Git ≥ 2.44. | Clean filters (CRLF, LFS) make raw hashes wrong; a PR must not plant a binary we run. | 9 |
 | D-76 | CI runs a smoke run of `make bench` on the small reference project: it checks that the harness works, with no timing checks. | Catches a broken harness early; timings stay out of CI (D-71). | M0 |
+| D-77 | Dependencies pinned in a committed `cabal.project.freeze` (`make freeze`), minus the packages that ship with GHC. | Reproducible builds; one file works for GHC 9.10, 9.12 and 9.14 (D-64). | M0 |
