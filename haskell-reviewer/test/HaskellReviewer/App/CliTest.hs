@@ -2,6 +2,7 @@ module HaskellReviewer.App.CliTest (tests) where
 
 import Data.Text qualified as Text
 import HaskellReviewer.App.Cli
+import HaskellReviewer.Core.Address (Port (..))
 import HaskellReviewer.Effects.Log (LogLevel (..))
 import System.Exit (ExitCode (..))
 import Test.Tasty (TestTree, testGroup)

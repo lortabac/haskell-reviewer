@@ -2,8 +2,13 @@
 module HaskellReviewer.Core.Root
   ( -- * Types
     Root (..),
+
+    -- * Paths
+    isWithin,
   )
 where
+
+import System.FilePath (splitDirectories)
 
 -- | The directory the tool reviews (ROOT on the command line).
 --
@@ -13,3 +18,13 @@ where
 -- a pure smart constructor, and tests need fake roots.
 newtype Root = Root {path :: FilePath}
   deriving (Eq, Show)
+
+-- | @path \`isWithin\` dir@: is @path@ equal to @dir@ or below it?
+--
+-- Compares whole components, so @\/a\/bc@ is not within @\/a\/b@. Doesn't
+-- touch the disk: pass canonical paths if symlinks or @..@ matter.
+isWithin :: FilePath -> FilePath -> Bool
+isWithin path dir = dirParts == take (length dirParts) pathParts
+  where
+    dirParts = splitDirectories dir
+    pathParts = splitDirectories path

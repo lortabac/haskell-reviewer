@@ -7,11 +7,13 @@ module HaskellReviewer.App.Run
     -- * Running
     main,
     run,
-    realDeps,
+    newRealDeps,
     renderStartupError,
   )
 where
 
+import Control.Concurrent.Async (race)
+import Control.Concurrent.MVar (newMVar, withMVar)
 import Control.Exception
   ( SomeAsyncException,
     SomeException,
@@ -21,16 +23,34 @@ import Control.Exception
     fromException,
     throwIO,
   )
+import Control.Monad (unless, when)
+import Crypto.Random (getRandomBytes)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as Text.IO
-import HaskellReviewer.App.Cli (CliResult (..), Command (..), Options (..), parseArgs)
+import Data.Time.Clock (UTCTime)
+import HaskellReviewer.App.Cli
+  ( Browser (..),
+    CliResult (..),
+    Command (..),
+    Options (..),
+    parseArgs,
+  )
 import HaskellReviewer.App.Version (versionText)
+import HaskellReviewer.Core.Address
+  ( Port,
+    Token,
+    sessionUrl,
+    tokenByteCount,
+    tokenFromBytes,
+  )
 import HaskellReviewer.Core.Root (Root (..))
-import HaskellReviewer.Effects.Clock (Clock (..), elapsed, systemClock)
+import HaskellReviewer.Effects.Browser qualified as Browser
+import HaskellReviewer.Effects.Clock (Clock (..), MonotonicTime, elapsed, systemClock)
 import HaskellReviewer.Effects.FileSystem (RootError, renderRootError)
 import HaskellReviewer.Effects.FileSystem qualified as FileSystem
 import HaskellReviewer.Effects.Log (Logger, logDebug, logVerbose, newLogger)
+import HaskellReviewer.Effects.Shutdown (Shutdown (..), installShutdownHandlers)
 import HaskellReviewer.Effects.Trace
   ( Span (..),
     TraceFileError,
@@ -39,6 +59,13 @@ import HaskellReviewer.Effects.Trace
     openFileTracer,
     renderTraceFileError,
   )
+import HaskellReviewer.Server.Listen
+  ( ListenError,
+    Listener (..),
+    openListener,
+    renderListenError,
+  )
+import HaskellReviewer.Server.Router (application)
 import System.Environment (getArgs)
 import System.Exit (ExitCode (..), exitWith)
 import System.IO (hSetEncoding, stderr, utf8)
@@ -50,7 +77,7 @@ The library has layers. Lower layers never import upper ones:
 1. Core (HaskellReviewer.Core.*): pure code.
 2. Effects (HaskellReviewer.Effects.*): handles for IO (clock, files, ...).
 3. Session: state shared while the server runs (not there yet).
-4. Server: HTTP (not there yet).
+4. Server (HaskellReviewer.Server.*): HTTP.
 5. App (HaskellReviewer.App.*): CLI parsing and wiring. Imports all
    layers; none imports it.
 
@@ -61,41 +88,82 @@ The executable is just `main = Run.main`. See SPEC §11.2.
 
 SPEC §2.1:
 
-- 0: normal exit, --help, --version.
+- 0: normal exit, --help, --version, SIGINT (Ctrl-C), SIGTERM. See
+  Note [Shutdown].
 - 1: internal error, i.e. a bug. Any exception we didn't expect ends up
   here. We print "haskell-reviewer: internal error: " and the exception,
-  instead of GHC's default output.
-- 2: bad usage or bad input (unknown flag, bad ROOT, bad trace file). These
-  are errors as data, never exceptions.
+  instead of GHC's default output. Warp stopping on its own counts too.
+- 2: bad usage or bad input (unknown flag, bad ROOT, bad trace file, port
+  we can't listen on). These are errors as data, never exceptions. They
+  win over a signal that came during start-up.
 
-The catch-all in 'run' lets async exceptions (Ctrl-C, killThread) and
-ExitCode through untouched: they are not bugs.
+The catch-all in 'run' lets async exceptions (killThread, ...) and
+ExitCode through untouched: they are not bugs. Ctrl-C isn't one: our
+signal handler replaces GHC's UserInterrupt (Note [Shutdown]).
+-}
+
+{- Note [Shutdown]
+
+Right after parsing the command line, we catch SIGINT and SIGTERM
+(installShutdownHandlers), so Ctrl-C during start-up also exits 0. Then
+the main thread races "wait for a signal" against warp. The signal wins:
+race kills warp's accept loop, we close the socket and the trace file, and
+exit 0. If a signal came during start-up, we don't listen at all (or,
+if it came while listening, skip the URL line, the startup span and the
+browser) and exit 0. A start-up error (exit 2) still wins over such a
+signal: we report it as usual.
+
+A second signal exits at once (exitImmediately, still code 0), with no
+clean-up. So a stuck shutdown can't trap the user.
+
+There is no graceful drain: requests still in flight are cut. Fine for a
+local tool, and the event stream (SSE, later) never ends, so a drain would
+wait on it forever anyway.
+
+The browser opener is never waited for or killed (see
+HaskellReviewer.Effects.Browser).
 -}
 
 -- | Everything 'run' needs from the outside world. Tests plug in fakes.
 data Deps = Deps
-  { -- | Write one line on stderr.
+  { -- | Write one line on stderr. Called from several threads.
     console :: Text -> IO (),
     clock :: Clock,
     checkRoot :: FilePath -> IO (Either RootError Root),
     -- | Open a trace file. The logger is for warnings while writing.
-    openTracer :: Logger -> FilePath -> IO (Either TraceFileError Tracer)
+    openTracer :: Logger -> FilePath -> IO (Either TraceFileError Tracer),
+    -- | A fresh random session token.
+    newToken :: IO Token,
+    -- | Open the listening socket, on the given port or a free one.
+    listen :: Logger -> Maybe Port -> IO (Either ListenError Listener),
+    -- | Open the URL in the browser. Must not block or throw.
+    openBrowser :: Logger -> Root -> Text -> IO (),
+    -- | Catch the stop signals.
+    installShutdown :: IO Shutdown
   }
 
 -- | The real world.
-realDeps :: Deps
-realDeps =
-  Deps
-    { console = Text.IO.hPutStrLn stderr,
-      clock = systemClock,
-      checkRoot = FileSystem.checkRoot,
-      openTracer = openFileTracer
-    }
+newRealDeps :: IO Deps
+newRealDeps = do
+  -- Lines from warp's threads and the browser opener must not mix.
+  lock <- newMVar ()
+  pure
+    Deps
+      { console = \line -> withMVar lock (\_ -> Text.IO.hPutStrLn stderr line),
+        clock = systemClock,
+        checkRoot = FileSystem.checkRoot,
+        openTracer = openFileTracer,
+        newToken = tokenFromBytes <$> getRandomBytes tokenByteCount,
+        listen = openListener,
+        openBrowser = Browser.openBrowser,
+        installShutdown = installShutdownHandlers
+      }
 
 -- | Bad input found at start-up. All exit with code 2.
 data StartupError
   = BadRoot RootError
   | BadTraceFile TraceFileError
+  | BadListen ListenError
   deriving (Eq, Show)
 
 -- | Message for the user, with the program name in front.
@@ -104,6 +172,7 @@ renderStartupError err =
   "haskell-reviewer: " <> case err of
     BadRoot e -> renderRootError e
     BadTraceFile e -> renderTraceFileError e
+    BadListen e -> renderListenError e
 
 -- | The real program.
 main :: IO ()
@@ -112,7 +181,8 @@ main = do
   -- (exit 1 instead of 2). Bytes that aren't valid in the locale show up
   -- as U+FFFD, since Text can't hold them.
   hSetEncoding stderr utf8
-  getArgs >>= run realDeps >>= exitWith
+  deps <- newRealDeps
+  getArgs >>= run deps >>= exitWith
 
 -- | Run with the given arguments and return the exit code.
 -- See Note [Exit codes].
@@ -142,6 +212,7 @@ startUp deps args = do
       deps.console versionText
       pure ExitSuccess
     CliCommand (Run opts) -> do
+      shutdown <- deps.installShutdown
       let logger = newLogger opts.logLevel deps.console
       rootResult <- deps.checkRoot opts.root
       case rootResult of
@@ -153,15 +224,48 @@ startUp deps args = do
             Right tracer -> do
               logVerbose logger ("root: " <> Text.pack root.path)
               logDebug logger ("options: " <> Text.pack (show opts))
-              t1 <- deps.clock.monotonic
-              let startup =
-                    Span
-                      { name = "startup",
-                        start = w0,
-                        duration = elapsed t0 t1
-                      }
-              tracer.record startup `finally` tracer.close
-              pure ExitSuccess
+              serve deps logger opts root tracer shutdown t0 w0
+                `finally` tracer.close
+
+-- | Listen, print the URL, serve until a signal. See Note [Shutdown].
+serve ::
+  Deps ->
+  Logger ->
+  Options ->
+  Root ->
+  Tracer ->
+  Shutdown ->
+  MonotonicTime ->
+  UTCTime ->
+  IO ExitCode
+serve deps logger opts root tracer shutdown t0 w0 = do
+  stoppedEarly <- shutdown.stopped
+  if stoppedEarly
+    then pure ExitSuccess
+    else do
+      token <- deps.newToken
+      listenResult <- deps.listen logger opts.port
+      case listenResult of
+        Left e -> startupFailed deps (BadListen e)
+        Right listener -> do
+          let url = sessionUrl listener.port token
+              -- Runs once warp accepts connections. Skipped if a signal
+              -- came meanwhile: we are about to stop.
+              ready = do
+                stopping <- shutdown.stopped
+                unless stopping $ do
+                  deps.console ("haskell-reviewer: serving at " <> url)
+                  t1 <- deps.clock.monotonic
+                  tracer.record
+                    Span {name = "startup", start = w0, duration = elapsed t0 t1}
+                  when (opts.browser == OpenBrowser) $
+                    deps.openBrowser logger root url
+              app = application listener.port token
+          result <-
+            race shutdown.wait (listener.serve ready app) `finally` listener.close
+          case result of
+            Left () -> pure ExitSuccess
+            Right () -> throwIO (userError "the HTTP server stopped")
 
 openTracerFor :: Deps -> Logger -> Options -> IO (Either TraceFileError Tracer)
 openTracerFor deps logger opts = case opts.traceFile of

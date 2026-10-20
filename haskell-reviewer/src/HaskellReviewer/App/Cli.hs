@@ -3,7 +3,6 @@ module HaskellReviewer.App.Cli
   ( -- * Types
     Command (..),
     Options (..),
-    Port (..),
     Browser (..),
     IdleExit (..),
     Minutes (..),
@@ -20,7 +19,7 @@ where
 import Data.Char (isDigit)
 import Data.Text (Text)
 import Data.Text qualified as Text
-import Data.Word (Word16)
+import HaskellReviewer.Core.Address (Port (..))
 import HaskellReviewer.Effects.Log (LogLevel (..))
 import Options.Applicative qualified as Opt
 import System.Exit (ExitCode (..))
@@ -46,14 +45,6 @@ data Options = Options
     -- | Where to write timing spans, if anywhere.
     traceFile :: Maybe FilePath
   }
-  deriving (Eq, Show)
-
--- | A TCP port, 1 to 65535.
---
--- The constructor is exported, so the range is not enforced by the type.
--- It is checked where ports come in (the CLI parser); a smart constructor
--- for one call site isn't worth it.
-newtype Port = Port Word16
   deriving (Eq, Show)
 
 -- | Open the browser at start-up or not (@--no-open@).

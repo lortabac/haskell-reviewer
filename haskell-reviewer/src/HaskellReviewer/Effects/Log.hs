@@ -37,8 +37,8 @@ newtype Logger = Logger
 -- | A logger that keeps messages at or below the given level and passes
 -- them to the given writer, one line each.
 --
--- No lock: lines from several threads may mix. Fine while we have one
--- thread.
+-- No lock here: the writer must be safe to call from several threads (the
+-- real console in "HaskellReviewer.App.Run" takes a lock).
 newLogger :: LogLevel -> (Text -> IO ()) -> Logger
 newLogger threshold write =
   Logger
