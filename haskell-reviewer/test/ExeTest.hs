@@ -14,7 +14,7 @@ import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as Char8
 import Data.Char (isDigit, toLower)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
-import Data.List (isInfixOf, isPrefixOf)
+import Data.List (isInfixOf, isPrefixOf, sort)
 import Data.Text qualified as Text
 import GHC.Clock (getMonotonicTime)
 import HaskellReviewer.App.Version (toolVersion)
@@ -25,7 +25,7 @@ import Numeric qualified
 import System.Directory qualified as Dir
 import System.Environment (getEnvironment, lookupEnv)
 import System.Exit (ExitCode (..))
-import System.FilePath ((</>))
+import System.FilePath (takeDirectory, (</>))
 import System.IO (Handle, hGetContents', hGetLine, hIsEOF)
 import System.IO.Temp (withSystemTempDirectory)
 import System.Posix.Signals (Signal, sigINT, sigKILL, sigTERM, signalProcess)
@@ -49,6 +49,7 @@ import Test.Tasty.HUnit
     testCaseInfo,
     (@?=),
   )
+import TestSupport (git, withCanonicalTemp, writeScript)
 
 tests :: TestTree
 tests =
@@ -56,6 +57,8 @@ tests =
     "Executable"
     [ quickExitTests,
       serverTests,
+      filesTests,
+      gitTests,
       signalTests,
       openerTests
     ]
@@ -250,6 +253,317 @@ serverTests =
           assertSecurityHeaders r
     ]
 
+-- * File routes
+
+filesTests :: TestTree
+filesTests =
+  testGroup
+    "files"
+    [ testCase "path escapes and unlisted files: 404, no-store, nosniff" $
+        withCanonicalTemp $ \dir -> do
+          git dir ["init", "-q"]
+          writeFile (dir </> ".gitignore") ".env\n"
+          writeFile (dir </> ".env") "SECRET=1\n"
+          Dir.createDirectory (dir </> "a")
+          writeFile (dir </> "a" </> "b") "b\n"
+          withServer id [dir] $ \server -> do
+            let base = tokenPath server <> "api/file/tree/"
+            ok <- httpGet server (goodHost server) (base <> "a/b")
+            ok.status @?= 200
+            mapM_
+              ( \path -> do
+                  r <- httpGet server (goodHost server) (base <> path)
+                  (path, r.status) @?= (path, 404)
+                  r.body @?= "not found"
+                  assertSecurityHeaders r
+              )
+              [ "..%2F..%2Fetc%2Fpasswd",
+                "../../etc/passwd",
+                "%2e%2e/%2e%2e/etc/passwd",
+                "a/%2e%2e/a/b",
+                "a%2Fb",
+                "a%00b",
+                "a/b%00",
+                "/etc/passwd",
+                "a//b",
+                "a/b/",
+                "a",
+                "",
+                "not/listed",
+                ".env",
+                ".git/config"
+              ],
+      testCase "a <script> file: JSON text, nosniff" $
+        withCanonicalTemp $ \dir -> do
+          writeFile (dir </> "x.html") "<script>alert(1)</script>\n"
+          withServer id [dir] $ \server -> do
+            r <- getPath server "api/file/tree/x.html"
+            r.status @?= 200
+            lookup "content-type" r.headers @?= Just "application/json"
+            r.body
+              @?= "{\"generation\":1,\"kind\":\"text\",\"text\":\"<script>alert(1)</script>\\n\"}"
+            assertSecurityHeaders r,
+      testCase "file list: ignored files are not in it" $
+        withCanonicalTemp $ \dir -> do
+          git dir ["init", "-q"]
+          writeFile (dir </> ".gitignore") ".env\n"
+          writeFile (dir </> ".env") ""
+          writeFile (dir </> "a.hs") ""
+          withServer id [dir] $ \server -> do
+            r <- getPath server "api/files/tree"
+            r.status @?= 200
+            r.body
+              @?= "{\"generation\":1,\"source\":\"git\",\"entries\":[\
+                  \{\"path\":\".gitignore\",\"kind\":\"file\"},\
+                  \{\"path\":\"a.hs\",\"kind\":\"file\"}],\
+                  \\"skippedNames\":0,\"truncated\":false}"
+    ]
+
+-- * git
+
+gitTests :: TestTree
+gitTests =
+  testGroup
+    "git"
+    [ testCase "git planted in ROOT, only one on PATH: not run, from disk" $
+        withCanonicalTemp $ \dir -> do
+          let marker = dir </> "marker"
+              root = dir </> "root"
+          Dir.createDirectoryIfMissing True (root </> "bin")
+          plantGit (root </> "bin") marker
+          env <- envWith [("PATH", root </> "bin")] []
+          withServer (withEnv env) [root] $ \server -> do
+            r <- getPath server "api/files/tree"
+            assertContains "\"source\":\"disk\"" (Char8.unpack r.body)
+          assertNoMarker marker,
+      testCase "git planted in ROOT, real git after it: real one used" $
+        withCanonicalTemp $ \dir -> do
+          let marker = dir </> "marker"
+              root = dir </> "root"
+          Dir.createDirectoryIfMissing True (root </> "bin")
+          git root ["init", "-q"]
+          plantGit (root </> "bin") marker
+          gitDir <- realGitDir
+          env <- envWith [("PATH", root </> "bin" <> ":" <> gitDir)] []
+          withServer (withEnv env) [root] $ \server -> do
+            r <- getPath server "api/files/tree"
+            assertContains "\"source\":\"git\"" (Char8.unpack r.body)
+          assertNoMarker marker,
+      testCase "git too old: exit 2" $
+        withCanonicalTemp $ \dir -> do
+          let bin = dir </> "bin"
+          Dir.createDirectory bin
+          exe <- writeScript bin "git" ["echo 'git version 2.43.0'"]
+          env <- envWith [("PATH", bin)] []
+          Dir.createDirectory (dir </> "root")
+          (code, err) <- runExeWith (withEnv env) ["--no-open", dir </> "root"]
+          code @?= ExitFailure 2
+          assertContains
+            ( "haskell-reviewer: git at "
+                <> exe
+                <> " is version 2.43.0; need 2.44 or newer"
+            )
+            err,
+      testCase "git version unreadable: exit 2" $
+        withCanonicalTemp $ \dir -> do
+          let bin = dir </> "bin"
+          Dir.createDirectory bin
+          exe <- writeScript bin "git" ["echo 'not git'"]
+          env <- envWith [("PATH", bin)] []
+          Dir.createDirectory (dir </> "root")
+          (code, err) <- runExeWith (withEnv env) ["--no-open", dir </> "root"]
+          code @?= ExitFailure 2
+          assertContains
+            ("haskell-reviewer: cannot read the version of git at " <> exe <> ": not git")
+            err,
+      testCase "hardened env and flags reach git" $
+        withCanonicalTemp $ \dir -> do
+          let bin = dir </> "bin"
+              root = dir </> "root"
+              envLog = dir </> "env.log"
+              argLog = dir </> "args.log"
+          Dir.createDirectory bin
+          Dir.createDirectory root
+          git root ["init", "-q"]
+          writeFile (root </> "a.hs") ""
+          real <- realGit
+          _ <-
+            writeScript
+              bin
+              "git"
+              [ "/usr/bin/env >> '" <> envLog <> "'",
+                "echo \"$*\" >> '" <> argLog <> "'",
+                "exec '" <> real <> "' \"$@\""
+              ]
+          gitDir <- realGitDir
+          env <-
+            envWith
+              [("PATH", bin <> ":" <> gitDir)]
+              [ ("GIT_DIR", "/nope"),
+                ("GIT_WORK_TREE", "/nope"),
+                ("GIT_CONFIG_PARAMETERS", "'core.fsmonitor=touch /tmp/x'"),
+                ("GIT_CONFIG_COUNT", "1"),
+                ("GIT_CONFIG_KEY_0", "core.pager"),
+                ("GIT_CONFIG_VALUE_0", "touch /tmp/x"),
+                ("GIT_INDEX_FILE", "/nope"),
+                ("LANG", "fr_FR.UTF-8"),
+                ("PAGER", "touch /tmp/x")
+              ]
+          withServer (withEnv env) [root] $ \server -> do
+            r <- getPath server "api/files/tree"
+            assertContains "\"path\":\"a.hs\"" (Char8.unpack r.body)
+          envs <- lines <$> readFile envLog
+          args <- lines <$> readFile argLog
+          let names = map (takeWhile (/= '=')) envs
+          mapM_
+            (\bad -> assertBool (bad <> " reached git") (bad `notElem` names))
+            [ "GIT_DIR",
+              "GIT_WORK_TREE",
+              "GIT_CONFIG_PARAMETERS",
+              "GIT_CONFIG_COUNT",
+              "GIT_CONFIG_KEY_0",
+              "GIT_INDEX_FILE",
+              "LANG",
+              "PAGER"
+            ]
+          mapM_
+            (\good -> assertBool (good <> " missing") (good `elem` envs))
+            [ "LC_ALL=C",
+              "GIT_OPTIONAL_LOCKS=0",
+              "GIT_NO_LAZY_FETCH=1",
+              "GIT_NO_REPLACE_OBJECTS=1",
+              "GIT_TERMINAL_PROMPT=0"
+            ]
+          -- --version, rev-parse, two ls-files.
+          length args @?= 4
+          mapM_
+            ( \a ->
+                assertBool
+                  ("flags missing: " <> a)
+                  ( "--no-pager -c core.fsmonitor=false -c core.untrackedCache=false \
+                    \-c core.hooksPath=/dev/null -c safe.bareRepository=explicit "
+                      `isPrefixOf` a
+                  )
+            )
+            args,
+      testCase "hostile repo config: nothing runs, .git unchanged" $
+        withCanonicalTemp $ \dir -> do
+          let root = dir </> "root"
+              hooks = dir </> "hooks"
+              marker = dir </> "marker"
+          Dir.createDirectory root
+          Dir.createDirectory hooks
+          touch <- writeScript dir "touch-marker" ["echo \"$0 $*\" >> '" <> marker <> "'"]
+          mapM_
+            (\h -> writeScript hooks h ["echo hook " <> h <> " >> '" <> marker <> "'"])
+            [ "pre-commit",
+              "post-checkout",
+              "post-index-change",
+              "fsmonitor-watchman",
+              "reference-transaction",
+              "post-merge"
+            ]
+          git root ["init", "-q"]
+          writeFile (root </> "a.hs") "a\n"
+          writeFile (root </> "b.hs") "b\n"
+          git root ["add", "a.hs", "b.hs"]
+          mapM_
+            (\(k, v) -> git root ["config", k, v])
+            [ ("core.fsmonitor", touch),
+              ("core.hooksPath", hooks),
+              ("core.pager", touch),
+              ("pager.ls-files", touch),
+              ("alias.ls-files", "!" <> touch),
+              ("diff.external", touch),
+              ("core.untrackedCache", "true"),
+              ("core.splitIndex", "true"),
+              ("core.sshCommand", touch),
+              ("core.askPass", touch)
+            ]
+          -- A stale index: git status would refresh it.
+          threadDelay 1_100_000
+          writeFile (root </> "a.hs") "changed\n"
+          writeFile (root </> "new.hs") ""
+          before <- snapshotDir (root </> ".git")
+          withServer id [root] $ \server -> do
+            r <- getPath server "api/files/tree"
+            r.status @?= 200
+            assertContains "\"path\":\"new.hs\"" (Char8.unpack r.body)
+            f <- getPath server "api/file/tree/a.hs"
+            f.status @?= 200
+          after <- snapshotDir (root </> ".git")
+          assertNoMarker marker
+          after @?= before
+          lock <- Dir.doesPathExist (root </> ".git" </> "index.lock")
+          assertBool "index.lock left" (not lock)
+    ]
+
+-- | A git script that writes the marker if run.
+plantGit :: FilePath -> FilePath -> IO ()
+plantGit bin marker = do
+  _ <-
+    writeScript
+      bin
+      "git"
+      [ "echo planted >> '" <> marker <> "'",
+        "echo 'git version 2.99.0'"
+      ]
+  pure ()
+
+assertNoMarker :: FilePath -> Assertion
+assertNoMarker marker = do
+  ran <- Dir.doesPathExist marker
+  unless (not ran) $ do
+    what <- readFile marker
+    assertFailure ("something ran: " <> what)
+
+-- | The real git, from our PATH.
+realGit :: IO FilePath
+realGit =
+  Dir.findExecutable "git"
+    >>= maybe (assertFailure "git not found on PATH") Dir.canonicalizePath
+
+realGitDir :: IO FilePath
+realGitDir = takeDirectory <$> realGit
+
+-- | Our environment, plus the given variables. Both lists win over
+-- ours; they are two only to keep the call sites readable (what we
+-- replace, what we add).
+envWith :: [(String, String)] -> [(String, String)] -> IO [(String, String)]
+envWith set extra = do
+  env <- getEnvironment
+  let names = map fst (set <> extra)
+  pure (set <> extra <> filter ((`notElem` names) . fst) env)
+
+-- | One file, as seen by 'snapshotDir'.
+data FileState = FileState
+  { path :: FilePath,
+    size :: Integer,
+    mtime :: String,
+    contents :: ByteString
+  }
+  deriving (Eq, Show)
+
+-- | Every file under a dir.
+snapshotDir :: FilePath -> IO [FileState]
+snapshotDir dir = do
+  entries <- Dir.listDirectory dir
+  concat
+    <$> mapM
+      ( \name -> do
+          let p = dir </> name
+          isLink <- Dir.pathIsSymbolicLink p
+          isDir <- Dir.doesDirectoryExist p
+          if isDir && not isLink
+            then snapshotDir p
+            else do
+              size <- Dir.getFileSize p
+              mtime <- show <$> Dir.getModificationTime p
+              bytes <- BS.readFile p
+              pure [FileState {path = p, size = size, mtime = mtime, contents = bytes}]
+      )
+      (sort entries)
+
 -- * Signals and trace file
 
 signalTests :: TestTree
@@ -270,16 +584,24 @@ signalTests =
           getPid server.process >>= mapM_ (signalProcess sigTERM)
           (code, _) <- stopServer server sigTERM
           code @?= ExitSuccess,
-      testCase "--trace-file: one startup span" $
+      testCase "--trace-file: startup and files spans" $
         withTemp $ \dir -> do
           let file = dir </> "t.jsonl"
-          withServer id ["--trace-file", file, dir] $ \server -> do
+              root = dir </> "root"
+          Dir.createDirectory root
+          withServer id ["--trace-file", file, root] $ \server -> do
+            r <- getPath server "api/files/tree"
+            r.status @?= 200
+            -- The span is written just after the list is ready.
+            _ <- waitForFile' file ((== 2) . length . lines)
             (code, _) <- stopServer server sigTERM
             code @?= ExitSuccess
           contents <- readFile file
           case lines contents of
-            [line] -> assertContains "\"name\":\"startup\"" line
-            ls -> assertFailure ("expected one line, got " <> show ls),
+            [startup, files] -> do
+              assertContains "\"name\":\"startup\"" startup
+              assertContains "\"name\":\"files\"" files
+            ls -> assertFailure ("expected two lines, got " <> show ls),
       testCase "--trace-file /dev/full: exit 0 with a warning" $ do
         -- Linux only: elsewhere, nothing to do.
         hasDevFull <- Dir.doesPathExist "/dev/full"
@@ -329,17 +651,15 @@ openerTests =
 -- | An opener script that writes junk on stdout and stderr, and its
 -- first argument to the marker file.
 writeOpener :: FilePath -> FilePath -> IO ()
-writeOpener bin marker = do
-  let script = bin </> openerName
-  writeFile script $
-    unlines
-      [ "#!/bin/sh",
-        "echo opener stdout",
+writeOpener bin marker =
+  void $
+    writeScript
+      bin
+      openerName
+      [ "echo opener stdout",
         "echo opener stderr >&2",
         "printf '%s' \"$1\" > '" <> marker <> "'"
       ]
-  perms <- Dir.getPermissions script
-  Dir.setPermissions script (Dir.setOwnerExecutable True perms)
 
 -- | Run without --no-open, with only the given dir on PATH.
 withServerOpen :: FilePath -> [String] -> (Server -> IO a) -> IO a
@@ -348,18 +668,22 @@ withServerOpen bin args action = do
   let env' = ("PATH", bin) : filter ((/= "PATH") . fst) env
   withServerRaw (\p -> p {env = Just env'}) args action
 
--- | Wait up to 5 s for the file to hold the expected text. Gives back
+-- | Wait up to 5 s for the file's text to pass the check. Gives back
 -- what it holds at the end.
-waitForFile :: FilePath -> String -> IO String
-waitForFile file expected = go (50 :: Int)
+waitForFile' :: FilePath -> (String -> Bool) -> IO String
+waitForFile' file ok = go (50 :: Int)
   where
     go n = do
       exists <- Dir.doesPathExist file
-      contents <- if exists then readFile' file else pure ""
-      if contents == expected || n == 0
+      contents <- if exists then Char8.unpack <$> BS.readFile file else pure ""
+      if ok contents || n == 0
         then pure contents
         else threadDelay 100000 >> go (n - 1)
-    readFile' f = Char8.unpack <$> BS.readFile f
+
+-- | Wait up to 5 s for the file to hold the expected text. Gives back
+-- what it holds at the end.
+waitForFile :: FilePath -> String -> IO String
+waitForFile file expected = waitForFile' file (== expected)
 
 -- * Running the binary
 
@@ -383,7 +707,12 @@ withServer tweak args = withServerRaw tweak ("--no-open" : args)
 withServerRaw :: (CreateProcess -> CreateProcess) -> [String] -> (Server -> IO a) -> IO a
 withServerRaw tweak args action = do
   exe <- findExe
-  let cp = (tweak (proc exe args)) {std_out = CreatePipe, std_err = CreatePipe}
+  let cp =
+        (tweak (proc exe args))
+          { std_out = CreatePipe,
+            std_err = CreatePipe,
+            close_fds = True
+          }
   bracket (createProcess cp) kill $ \case
     (_, Just out, Just err, ph) -> do
       seen <- newIORef []
@@ -486,6 +815,14 @@ stripPrefix' :: String -> String -> Maybe String
 stripPrefix' prefix s
   | prefix `isPrefixOf` s = Just (drop (length prefix) s)
   | otherwise = Nothing
+
+-- | GET a path under the token.
+getPath :: Server -> String -> IO HttpResponse
+getPath server p = httpGet server (goodHost server) (tokenPath server <> p)
+
+-- | Run with this environment.
+withEnv :: [(String, String)] -> CreateProcess -> CreateProcess
+withEnv env p = p {env = Just env}
 
 tokenPath :: Server -> String
 tokenPath server = "/" <> server.token <> "/"
@@ -638,7 +975,8 @@ runExe = runExeWith id
 runExeWith :: (CreateProcess -> CreateProcess) -> [String] -> IO (ExitCode, String)
 runExeWith tweak args = do
   exe <- findExe
-  result <- timeout 10000000 (readCreateProcessWithExitCode (tweak (proc exe args)) "")
+  let cp = (tweak (proc exe args)) {close_fds = True}
+  result <- timeout 10000000 (readCreateProcessWithExitCode cp "")
   case result of
     Nothing -> assertFailure ("no exit within 10 s: " <> show args)
     Just (code, out, err) -> do

@@ -1135,12 +1135,20 @@ revspec ─► git layer ─► snapshot (file list + blobs, per side)
   refresh, no temporary index, no new objects.
 - Hardening, for every call:
   - a minimal environment that keeps `HOME` and `XDG_CONFIG_HOME` (so the
-    user's `safe.directory` still applies) and drops every other `GIT_*`;
+    user's `safe.directory` still applies), sets `LC_ALL=C` and a `PATH`
+    with only the absolute entries outside ROOT, and drops everything
+    else, every other `GIT_*` included;
   - `GIT_OPTIONAL_LOCKS=0`: no index refresh;
   - `GIT_NO_LAZY_FETCH=1`: a partial clone never goes to the network;
   - `GIT_NO_REPLACE_OBJECTS=1`: `refs/replace` can't swap content;
   - `GIT_TERMINAL_PROMPT=0`: never prompt;
-  - `-c core.fsmonitor=false`: repo config can't run a command;
+  - `--no-pager`, `-c core.fsmonitor=false`, `-c core.hooksPath=/dev/null`:
+    repo config can't run a command;
+  - `-c core.untrackedCache=false`: no cache to write;
+  - `-c safe.bareRepository=explicit`: a bare repo planted in the tree
+    is not used;
+  - a time limit, 30 s at start-up and 120 s for `ls-files` (a FIFO in
+    the tree can block git): then it is killed;
   - `--end-of-options` before any user-given revision.
 
   Git's `safe.directory` refusal is reported as is. The minimum git version

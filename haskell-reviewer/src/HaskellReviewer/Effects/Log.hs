@@ -11,11 +11,16 @@ module HaskellReviewer.Effects.Log
     logInfo,
     logVerbose,
     logDebug,
+
+    -- * Messages
+    exceptionMessage,
   )
 where
 
+import Control.Exception (SomeException (..), displayException)
 import Control.Monad (when)
 import Data.Text (Text)
+import Data.Text qualified as Text
 
 -- | How much to log. Ordered: a logger at 'LevelDebug' also prints
 -- verbose and info messages.
@@ -56,3 +61,11 @@ logVerbose logger = logger.emit LevelVerbose
 -- | Log at 'LevelDebug'.
 logDebug :: Logger -> Text -> IO ()
 logDebug logger = logger.emit LevelDebug
+
+-- | The message of an exception, on one line, for the user.
+--
+-- We unwrap the 'SomeException': on GHC 9.10 its displayException
+-- adds a backtrace block, which is noise in a log line.
+exceptionMessage :: SomeException -> Text
+exceptionMessage (SomeException inner) =
+  Text.unwords (Text.lines (Text.pack (displayException inner)))

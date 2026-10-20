@@ -1,9 +1,15 @@
+import { decodeHello, parseEventData } from "../api/events";
 import type { Status, WorkerMessage } from "./protocol";
+
+// What we use of an event: the data, for named events.
+export interface EventLike {
+  readonly data?: unknown;
+}
 
 // What we use of EventSource. Tests pass a fake.
 export interface SourceLike {
   readonly readyState: number;
-  addEventListener(type: string, listener: () => void): void;
+  addEventListener(type: string, listener: (event: EventLike) => void): void;
   close(): void;
 }
 
@@ -63,7 +69,16 @@ export function createHub(url: string, Source: SourceCtor): Hub {
     stopTimer();
     setStatus("open");
   });
-  source.addEventListener("hello", () => broadcast({ type: "hello" }));
+  source.addEventListener("hello", (event) => {
+    // A bad payload is a bug on one side: say so, don't pass it on.
+    try {
+      decodeHello(parseEventData(event.data));
+    } catch (err) {
+      console.error(err);
+      return;
+    }
+    broadcast({ type: "hello" });
+  });
   source.addEventListener("error", () => {
     if (status === "ended") return;
     if (source.readyState === CLOSED) {

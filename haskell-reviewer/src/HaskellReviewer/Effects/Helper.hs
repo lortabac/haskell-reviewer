@@ -3,10 +3,14 @@ module HaskellReviewer.Effects.Helper
   ( -- * Lookup
     findHelper,
     findHelperIn,
+
+    -- * PATH for helpers
+    safePathDirs,
   )
 where
 
 import Control.Exception (IOException, try)
+import Control.Monad (filterM)
 import Data.Maybe (fromMaybe)
 import HaskellReviewer.Core.Root (Root (..), isWithin)
 import System.Directory qualified as Dir
@@ -53,6 +57,21 @@ findHelperIn dirs root name = do
                   _ -> go rest
               _ -> go rest
   go dirs
+
+-- | The @PATH@ entries a helper may see: absolute and outside ROOT,
+-- with the same checks as 'findHelper'. As given, not resolved. Used to
+-- build the @PATH@ of a helper's environment.
+safePathDirs :: Root -> [FilePath] -> IO [FilePath]
+safePathDirs root dirs = do
+  rootDir <- fromMaybe root.path <$> canonical root.path
+  let ok dir
+        | not (isAbsolute dir) = pure False
+        | otherwise = do
+            canonDir <- canonical dir
+            pure $ case canonDir of
+              Just d -> not (d `isWithin` rootDir)
+              Nothing -> False
+  filterM ok dirs
 
 -- * Internal
 

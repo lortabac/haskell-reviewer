@@ -12,9 +12,11 @@ import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
 import HaskellReviewer.Core.Address (Port (..), Token, tokenFromBytes, tokenText)
 import HaskellReviewer.Effects.Clock (Microseconds (..))
+import HaskellReviewer.Effects.FileSystem (ListError (..), ReadError (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), newLogger)
+import HaskellReviewer.Server.Api (FilesApi (..))
 import HaskellReviewer.Server.Events (EventStream (..))
-import HaskellReviewer.Server.Router (application)
+import HaskellReviewer.Server.Router (Routes (..), application)
 import HaskellReviewer.Server.Security (addSecurityHeaders, contentSecurityPolicy)
 import HaskellReviewer.Session.Clients (newClients)
 import Network.HTTP.Types (Header, Status (..), hContentType, status500)
@@ -188,6 +190,9 @@ tests =
             ["api", "x"],
             ["api", "events", "x"],
             ["api", "events", ""],
+            ["api", "files"],
+            ["api", "file"],
+            ["api", "files", "tree", "x"],
             ["index.html"]
           ]
     ]
@@ -230,12 +235,21 @@ call req = do
           }
   saved <- newIORef Nothing
   ResponseReceived <-
-    application port token events req $ \resp -> do
+    application port token Routes {events = events, files = noFiles} req $ \resp -> do
       writeIORef saved (Just resp)
       pure ResponseReceived
   readIORef saved >>= \case
     Nothing -> assertFailure "no response"
     Just resp -> collect resp
+
+-- | File routes that never list. ApiTest covers them.
+noFiles :: FilesApi
+noFiles =
+  FilesApi
+    { snapshot = pure (Left (ListCrashed "no files here")),
+      readEntry = \_ _ _ -> pure (Left ReadGone),
+      logger = newLogger LevelInfo (\_ -> pure ())
+    }
 
 collect :: Response -> IO Result
 collect resp = do
