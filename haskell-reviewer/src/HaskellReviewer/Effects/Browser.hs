@@ -11,7 +11,6 @@ import Control.Exception
   ( SomeAsyncException,
     SomeException,
     bracketOnError,
-    displayException,
     fromException,
     throwIO,
     try,
@@ -21,7 +20,7 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import HaskellReviewer.Core.Root (Root)
 import HaskellReviewer.Effects.Helper (findHelper)
-import HaskellReviewer.Effects.Log (Logger, logInfo)
+import HaskellReviewer.Effects.Log (Logger, exceptionMessage, logInfo)
 import System.Exit (ExitCode (..))
 import System.IO (IOMode (ReadWriteMode), hClose, openFile)
 import System.Info qualified
@@ -54,7 +53,7 @@ openBrowser logger root url = void $ forkIO $ do
     Right (Right ()) -> pure ()
     Left e
       | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
-      | otherwise -> warn (Text.pack (displayException e))
+      | otherwise -> warn (exceptionMessage e)
   where
     run = do
       found <- findHelper root openerName

@@ -12,6 +12,7 @@ import HaskellReviewer.Core.RootTest qualified
 import HaskellReviewer.Effects.FileSystemTest qualified
 import HaskellReviewer.Effects.GitTest qualified
 import HaskellReviewer.Effects.HelperTest qualified
+import HaskellReviewer.Effects.LogTest qualified
 import HaskellReviewer.Effects.TraceTest qualified
 import HaskellReviewer.Server.ApiGoldenTest qualified
 import HaskellReviewer.Server.ApiTest qualified
@@ -40,6 +41,7 @@ main = do
         HaskellReviewer.Effects.FileSystemTest.tests,
         HaskellReviewer.Effects.GitTest.tests,
         HaskellReviewer.Effects.HelperTest.tests,
+        HaskellReviewer.Effects.LogTest.tests,
         HaskellReviewer.Effects.TraceTest.tests,
         HaskellReviewer.Server.ApiGoldenTest.tests,
         HaskellReviewer.Server.ApiTest.tests,

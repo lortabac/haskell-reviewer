@@ -125,6 +125,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Effects.FileSystemTest
     HaskellReviewer.Effects.GitTest
     HaskellReviewer.Effects.HelperTest
+    HaskellReviewer.Effects.LogTest
     HaskellReviewer.Effects.TraceTest
     HaskellReviewer.Server.ApiGoldenTest
     HaskellReviewer.Server.ApiTest

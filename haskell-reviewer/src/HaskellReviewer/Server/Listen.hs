@@ -10,13 +10,13 @@ module HaskellReviewer.Server.Listen
   )
 where
 
-import Control.Exception (SomeException, bracketOnError, displayException, try)
+import Control.Exception (SomeException, bracketOnError, try)
 import Control.Monad (when)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import GHC.IO.Exception (IOException (..))
 import HaskellReviewer.Core.Address (Port (..))
-import HaskellReviewer.Effects.Log (Logger, logVerbose)
+import HaskellReviewer.Effects.Log (Logger, exceptionMessage, logVerbose)
 import HaskellReviewer.Server.Security (addSecurityHeaders)
 import Network.Socket qualified as Socket
 import Network.Wai (Application)
@@ -95,7 +95,7 @@ openListener logger wanted = do
     logException :: SomeException -> IO ()
     logException e =
       when (Warp.defaultShouldDisplayException e) $
-        logVerbose logger ("warp: " <> Text.pack (displayException e))
+        logVerbose logger ("warp: " <> exceptionMessage e)
 
 -- * Internal
 

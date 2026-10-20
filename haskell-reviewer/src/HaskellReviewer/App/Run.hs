@@ -24,7 +24,6 @@ import Control.Exception
   ( SomeAsyncException,
     SomeException,
     catch,
-    displayException,
     finally,
     fromException,
     throwIO,
@@ -73,7 +72,14 @@ import HaskellReviewer.Effects.FileSystem
   )
 import HaskellReviewer.Effects.FileSystem qualified as FileSystem
 import HaskellReviewer.Effects.Git (GitError, renderGitError)
-import HaskellReviewer.Effects.Log (Logger, logDebug, logInfo, logVerbose, newLogger)
+import HaskellReviewer.Effects.Log
+  ( Logger,
+    exceptionMessage,
+    logDebug,
+    logInfo,
+    logVerbose,
+    newLogger,
+  )
 import HaskellReviewer.Effects.Shutdown (Shutdown (..), installShutdownHandlers)
 import HaskellReviewer.Effects.Trace
   ( Span (..),
@@ -264,7 +270,7 @@ internalError deps e
   | Just (_ :: ExitCode) <- fromException e = throwIO e
   | otherwise = do
       deps.console
-        ("haskell-reviewer: internal error: " <> Text.pack (displayException e))
+        ("haskell-reviewer: internal error: " <> exceptionMessage e)
       pure (ExitFailure 1)
 
 startUp :: Deps -> [String] -> IO ExitCode
@@ -393,7 +399,7 @@ runListing deps logger tracer lister slot = do
           _ <- fill (Left (ListCrashed "the listing was stopped"))
           throwIO e
       | otherwise -> do
-          let err = ListCrashed (Text.pack (displayException e))
+          let err = ListCrashed (exceptionMessage e)
           filled <- fill (Left err)
           when filled (report (Left err) (Nanoseconds 0))
   where
