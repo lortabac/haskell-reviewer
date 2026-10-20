@@ -1068,6 +1068,7 @@ The main library splits into layers. Lower layers never import upper ones:
 3. **Session**: snapshot generations, the indexing scheduler, LLM threads,
    preferences (§11.5).
 4. **Server**: HTTP routing, security headers, wire encoding, SSE (§11.6).
+5. **App**: CLI parsing and wiring. Imports all layers; none imports it.
 
 ### 11.3 Tech stack
 
@@ -1099,7 +1100,7 @@ The main library splits into layers. Lower layers never import upper ones:
 | Styling | Plain CSS with custom properties (themes, design tokens); system font stacks; no CSS framework, no bundled fonts | D-48. |
 | CBOR in the browser | `cbor-x`, **no-eval build** | CSP forbids `eval` (D-51). |
 | Virtual scrolling | A headless virtualiser (TanStack Virtual) | All source and diff views (D-70). |
-| Haskell tests | `tasty`, `hedgehog`, `tasty-golden` | §11.9. |
+| Haskell tests | `tasty`, `tasty-hunit`, `hedgehog`, `tasty-golden`, `temporary` | §11.9. |
 | Browser tests | Playwright + axe-core | §11.9. |
 | CI | GitHub Actions | §11.9. |
 | License | BSD-3-Clause | D-73. |
