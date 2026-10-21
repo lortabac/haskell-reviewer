@@ -466,18 +466,25 @@ gitTests =
             )
             args,
       -- See Note [No inherited fds] in "HaskellReviewer.Effects.Spawn".
-      -- We start the binary through sh, with close_fds off, a soft fd
+      -- We start the binary through bash, with close_fds off, a soft fd
       -- limit of 8192 and a plain fd 5000 open (above the cap). Its gits
       -- must still see only 0-2 (plus ls's own /dev/fd, 3) and a soft
       -- limit of at most 4096. Fails if main skips prepareSpawning.
+      -- bash, not sh: dash (Ubuntu's sh) only takes one-digit fds in
+      -- redirections.
       testCaseInfo "git inherits no fds and a capped limit" $ do
         lim <- getResourceLimit ResourceOpenFiles
+        hasBash <- Dir.doesFileExist "/bin/bash"
         let room = case lim.hardLimit of
               ResourceLimit h -> h >= 8192
               ResourceLimitInfinity -> True
               ResourceLimitUnknown -> False
-        if not room
-          then pure "skipped: hard fd limit below 8192"
+        if not hasBash || not room
+          then
+            pure $
+              if hasBash
+                then "skipped: hard fd limit below 8192"
+                else "skipped: no /bin/bash"
           else withCanonicalTemp $ \dir -> do
             let bin = dir </> "bin"
                 root = dir </> "root"
@@ -501,7 +508,7 @@ gitTests =
             let shell = "ulimit -S -n 8192; exec 5000</dev/null; exec \"$0\" \"$@\""
                 viaShell p = case p.cmdspec of
                   RawCommand exe given ->
-                    p {cmdspec = RawCommand "/bin/sh" (["-c", shell, exe] <> given)}
+                    p {cmdspec = RawCommand "/bin/bash" (["-c", shell, exe] <> given)}
                   ShellCommand _ -> p
                 tweak p = viaShell (withEnv env p) {close_fds = False}
                 args = ["--trace-file", dir </> "trace.jsonl", root]
