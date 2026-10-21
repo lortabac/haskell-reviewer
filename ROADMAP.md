@@ -616,3 +616,7 @@ Every section of SPEC.md and the milestone(s) that deliver it.
 | Q-SSE | M0 |
 | Q-GC | measured in M1, re-checked in M3 |
 | Q-OPENAI-COMPAT | M6 |
+| Q-HIE-SIZE | M8 |
+| Q-HIE-UNIT | M8 |
+| Q-HIE-STANZA | M8 |
+| Q-HIE-PATCH | M8 |

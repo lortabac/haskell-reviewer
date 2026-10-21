@@ -2,7 +2,7 @@
 
 Status: **v1.1 — approved**: v1.0 plus the architecture and tech stack
 (§11). The rationale for every decision is in
-[DECISIONS.md](DECISIONS.md) (D-01 to D-84). Items to verify during
+[DECISIONS.md](DECISIONS.md) (D-01 to D-88). Items to verify during
 implementation, none of which block this spec, are in
 [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md). Per §10.3 the spec may be revised
 from benchmarks; every revision is logged in DECISIONS.md.
@@ -170,7 +170,7 @@ for each side and each module:
 | Tier | Source | Gives |
 |------|--------|-------|
 | **Syntactic** | Parsing with the bundled GHC parser (§7.1), using the project's language edition and extensions | Declarations, signatures, Haddock comments, exports, imports, local scoping. Cross-module resolution is *import-directed*: exact when, after following explicit import and export lists, exactly one candidate remains; heuristic otherwise. |
-| **Precise** | `.hie` files from a prior build whose recorded sources match this side (see rules) | Exact resolution of every identifier, types of identifiers (including inferred types of bindings without signatures) and of some expressions, instance resolution, references. |
+| **Precise** | `.hie` files from a prior build whose recorded sources match this side (see rules) | Exact resolution of every identifier, types of identifiers at their binding and, where different, at each use (including inferred types of bindings without signatures); no expression types. Instance resolution, references. |
 
 Rules:
 - The syntactic tier is always available, needs no build, and works on
@@ -274,9 +274,13 @@ back/forward, new tabs and copy-paste between tabs work. Shape:
 `<module>` uses the identity rules of §2.3. `<decl>` is
 `<namespace>:<name>`, where the namespace is `type`, `class`, `con`,
 `field`, `val`, `pat` or `inst`. This tells the type `Foo` apart from the
-constructor `Foo`. Instances use `inst:<Class>:<Head>`, with the head
+constructor `Foo`. Fields always use `field:<Parent>.<name>`, where the
+parent is the field's type (e.g. `field:Config.port`), the pattern synonym
+for pattern synonym record fields, or the instance's first constructor
+for data instance fields. So duplicate record fields never clash (D-88). Instances use `inst:<Class>:<Head>`, with the head
 printed as in §4.6 and percent-encoded. The `<decl-id>` used by `/changes`
-is the same `<namespace>:<name>` qualified by its module. An
+is the same `<decl>` (fields and instances included) qualified by its
+module. An
 unresolvable URL shows a "not found in this snapshot" page with a search box
 prefilled from the URL, never a blank page.
 
@@ -1239,6 +1243,10 @@ the memory budget (§10.2). The model holds:
 - an occurrence table: for each identifier span, its binder or its target
   candidates, resolved in the next step.
 
+Spans: lines and columns are 1-based, columns count code points (a tab is
+one column), and the end is exclusive. The HIE index uses the same rule
+(D-87).
+
 Anything the model lacks is recomputed by parsing again on demand.
 
 **Sharing across sides.** The parse result is keyed by *(blob id,
@@ -1266,7 +1274,8 @@ is complete (§10.2).
   Companions are found as `haskell-reviewer-hie*` next to the main binary
   or on `PATH` (§11.4.1). Each is asked which GHC version it handles
   (`--ghc-version`), and the answer is cached per binary (path, size,
-  mtime).
+  mtime). The main binary reads the `.hie` header (GHC version) itself to
+  pick the companion.
 - **Trust rule**: as in §3. The check uses real paths: a `.hie` file whose
   real path, or any parent directory, is tracked or a symlink in the
   snapshot is rejected. The rule applies to `--hie-dir` too.
@@ -1278,7 +1287,7 @@ is complete (§10.2).
   `-rtsopts`) and a per-file timeout. If it crashes or times out, the file
   at fault uses the syntactic tier, and a new companion carries on with the
   rest. Bad output is treated the same way. The header says why.
-- **Cache**: `$XDG_CACHE_HOME/haskell-reviewer/hie/<format version>/`, one
+- **Cache**: `$XDG_CACHE_HOME/haskell-reviewer/hie/<format major>/`, one
   file per `.hie`, keyed by its content hash and the companion's version. Files are written atomically
   (temporary file, then rename), and entries unused for 30 days are pruned
   at start-up.
