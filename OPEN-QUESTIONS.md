@@ -37,3 +37,18 @@ is updated if needed (§10.3).
   Not checked yet: EventSource inside a SharedWorker on Safari. Known:
   Chrome's Memory Saver discards idle tabs, which closes their stream, so
   the tool may idle-exit while the tab still looks open (D-80).
+- **Q-HIE-SIZE**: Measure the index size and decode time on pandoc and
+  wire-server built with `-fwrite-ide-info`, against the guess of 10–20 KB
+  per module (D-87). Are types at uses and local types worth keeping?
+- **Q-HIE-UNIT**: Which unit ids does cabal give executables, test suites
+  and sub-libraries, with cabal 3.14/3.16 and GHC 9.10–9.14? Does the
+  `-inplace-<comp>` pattern hold without `plan.json`, and with
+  `--hie-dir`? (Matching a `.hie` to a component, D-87.)
+- **Q-HIE-STANZA**: A `.hie` file doesn't record extensions, flags or
+  cpp-options. How do we check "same build-relevant stanza" (§3)? Option:
+  compare the side's stanza with the working tree's, and require the
+  `.hie` to be newer than the `.cabal` file.
+- **Q-HIE-PATCH**: `readHieFile` rejects other patch levels of the same
+  series (`hieVersion` 9122 vs 9124). Check `readHieFileWithVersion` with
+  a series-only check. Else, one companion per exact GHC version (a §7.1
+  change).
