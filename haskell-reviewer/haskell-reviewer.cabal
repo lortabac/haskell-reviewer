@@ -102,7 +102,10 @@ executable haskell-reviewer
   import:         shared
   hs-source-dirs: app
   main-is:        Main.hs
-  ghc-options:    -threaded
+  -- -rtsopts: the benchmark harness needs +RTS -t/--machine-readable to
+  -- read memory stats (see haskell-reviewer-bench, D-85). This also
+  -- means a user can pass +RTS options to the real binary.
+  ghc-options:    -threaded -rtsopts
   build-depends:
     , base
     , haskell-reviewer
@@ -110,10 +113,20 @@ executable haskell-reviewer
 test-suite haskell-reviewer-test
   import:             shared
   type:               exitcode-stdio-1.0
-  hs-source-dirs:     test
+
+  -- ../bench/src: the benchmark harness's pure modules, so they get
+  -- unit tests too. Not ../bench/app: that's the harness's own IO code
+  -- and has its own Main.hs, which would clash with this one.
+  hs-source-dirs:     test ../bench/src
   main-is:            Main.hs
   other-modules:
     ApiSupport
+    Bench.Projects
+    Bench.ProjectsTest
+    Bench.RtsStats
+    Bench.RtsStatsTest
+    Bench.Stats
+    Bench.StatsTest
     ExeTest
     HaskellReviewer.App.CliTest
     HaskellReviewer.App.RunTest
@@ -159,3 +172,37 @@ test-suite haskell-reviewer-test
     , unix
     , wai
     , warp
+
+-- The benchmark harness (SPEC §10, §11.9; D-76, D-85). Runs the product
+-- binary against the pinned reference projects (bench/projects.txt,
+-- D-82). `bench/src` is pure (also reachable from the test-suite, for
+-- unit tests); `bench/app` runs processes and does IO, so it's only
+-- reachable from here.
+benchmark haskell-reviewer-bench
+  import:         shared
+  type:           exitcode-stdio-1.0
+  hs-source-dirs: ../bench/app ../bench/src
+  main-is:        Main.hs
+  other-modules:
+    Bench.Http
+    Bench.Machine
+    Bench.Projects
+    Bench.Report
+    Bench.RtsStats
+    Bench.Run
+    Bench.Stats
+
+  ghc-options:    -threaded
+  build-depends:
+    , aeson
+    , base
+    , bytestring
+    , directory
+    , filepath
+    , network
+    , optparse-applicative
+    , process
+    , temporary
+    , text
+    , time
+    , unix

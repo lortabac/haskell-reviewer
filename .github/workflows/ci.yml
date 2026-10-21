@@ -76,6 +76,20 @@ jobs:
           make install BINDIR="$RUNNER_TEMP/bin"
           "$RUNNER_TEMP/bin/haskell-reviewer" --version
 
+      # Smoke test only (D-76): checks the benchmark harness itself
+      # works, on the small reference project, with no timing checks.
+      # One GHC is enough; the harness doesn't depend on which.
+      - name: Cache the small reference project
+        if: matrix.ghc == '9.14'
+        uses: actions/cache@v6
+        with:
+          path: bench/projects/optparse-applicative
+          key: bench-${{ runner.os }}-${{ hashFiles('bench/projects.txt') }}
+
+      - name: Benchmark harness smoke test
+        if: matrix.ghc == '9.14'
+        run: make bench-smoke
+
   web:
     name: ${{ matrix.os }} / web
     runs-on: ${{ matrix.os }}

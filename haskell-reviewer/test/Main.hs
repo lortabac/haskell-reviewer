@@ -1,5 +1,8 @@
 module Main (main) where
 
+import Bench.ProjectsTest qualified
+import Bench.RtsStatsTest qualified
+import Bench.StatsTest qualified
 import ExeTest qualified
 import GHC.IO.Encoding (setLocaleEncoding, utf8)
 import HaskellReviewer.App.CliTest qualified
@@ -31,7 +34,10 @@ main = do
   defaultMain $
     testGroup
       "haskell-reviewer"
-      [ HaskellReviewer.App.CliTest.tests,
+      [ Bench.ProjectsTest.tests,
+        Bench.RtsStatsTest.tests,
+        Bench.StatsTest.tests,
+        HaskellReviewer.App.CliTest.tests,
         HaskellReviewer.App.RunTest.tests,
         HaskellReviewer.Core.AddressTest.tests,
         HaskellReviewer.Core.FileListTest.tests,
