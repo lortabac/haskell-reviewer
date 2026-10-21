@@ -52,6 +52,7 @@ library
     HaskellReviewer.Effects.Log
     HaskellReviewer.Effects.PosixAt
     HaskellReviewer.Effects.Shutdown
+    HaskellReviewer.Effects.Spawn
     HaskellReviewer.Effects.Trace
 
     -- Session
@@ -139,11 +140,13 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Effects.GitTest
     HaskellReviewer.Effects.HelperTest
     HaskellReviewer.Effects.LogTest
+    HaskellReviewer.Effects.SpawnTest
     HaskellReviewer.Effects.TraceTest
     HaskellReviewer.Server.ApiGoldenTest
     HaskellReviewer.Server.ApiTest
     HaskellReviewer.Server.AssetsTest
     HaskellReviewer.Server.EventsTest
+    HaskellReviewer.Server.ListenTest
     HaskellReviewer.Server.RouterTest
     HaskellReviewer.Session.ClientsTest
     HaskellReviewer.Session.SnapshotTest

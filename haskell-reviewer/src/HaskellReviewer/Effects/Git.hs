@@ -87,7 +87,9 @@ index come from someone else. Git must only read. Every call:
   - -c core.hooksPath=/dev/null: no hooks, ever;
   - -c safe.bareRepository=explicit: a bare repo planted in the tree
     is not picked up.
-- has stdin on /dev/null and no inherited fds.
+- has stdin on /dev/null and no inherited fds (close_fds; see
+  Note [No inherited fds] in "HaskellReviewer.Effects.Spawn" for why
+  that stays cheap).
 - has a time limit: 30 s at start-up ('gitProbeTimeLimit'), 120 s for
   ls-files ('gitListTimeLimit'). A FIFO in the tree (named
   .gitignore, say, or set as core.excludesFile) makes git block in
@@ -410,6 +412,8 @@ runGit (Microseconds limit) git args = do
                 std_in = UseHandle devNull,
                 std_out = CreatePipe,
                 std_err = CreatePipe,
+                -- Cheap: see Note [No inherited fds] in
+                -- "HaskellReviewer.Effects.Spawn".
                 close_fds = True
               }
       bracket (createProcess cp) cleanUp $ \case

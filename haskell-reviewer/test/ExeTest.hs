@@ -28,9 +28,16 @@ import System.Exit (ExitCode (..))
 import System.FilePath (takeDirectory, (</>))
 import System.IO (Handle, hGetContents', hGetLine, hIsEOF)
 import System.IO.Temp (withSystemTempDirectory)
+import System.Posix.Resource
+  ( Resource (ResourceOpenFiles),
+    ResourceLimit (..),
+    ResourceLimits (..),
+    getResourceLimit,
+  )
 import System.Posix.Signals (Signal, sigINT, sigKILL, sigTERM, signalProcess)
 import System.Process
-  ( CreateProcess (..),
+  ( CmdSpec (..),
+    CreateProcess (..),
     ProcessHandle,
     StdStream (CreatePipe),
     createProcess,
@@ -244,11 +251,23 @@ serverTests =
               r.body @?= "id: 1\nevent: hello\ndata: {}\n\n",
       testCase "warp's own error response has the security headers" $
         withTemp $ \dir -> withServer id [dir] $ \server -> do
-          -- Headers over warp's 50 KB limit: warp answers by itself.
-          let huge = "X-Big: " <> BS.replicate 60000 97 <> "\r\n"
-          r <-
-            rawHttp server.port $
-              requestBytes "GET" (goodHost server) (tokenPath server) huge
+          -- Headers over warp's 50 KiB limit: warp answers by itself.
+          -- Exactly one byte over, no line end: warp reads all we send
+          -- before it answers. Unread bytes would make the kernel reset
+          -- the connection on close, and the reset can beat the answer
+          -- (see Note [Loopback MSS]). Depends on warp's default limit
+          -- (settingsMaxTotalHeaderLength, 50 KiB): if it changes,
+          -- change the size here.
+          let start =
+                Char8.pack
+                  ( "GET "
+                      <> tokenPath server
+                      <> " HTTP/1.1\r\nHost: 127.0.0.1:"
+                      <> show server.port
+                      <> "\r\nX-Big: "
+                  )
+              huge = start <> BS.replicate (50 * 1024 + 1 - BS.length start) 97
+          r <- rawHttp server.port huge
           r.status @?= 400
           assertSecurityHeaders r
     ]
@@ -446,6 +465,62 @@ gitTests =
                   )
             )
             args,
+      -- See Note [No inherited fds] in "HaskellReviewer.Effects.Spawn".
+      -- We start the binary through sh, with close_fds off, a soft fd
+      -- limit of 8192 and a plain fd 5000 open (above the cap). Its gits
+      -- must still see only 0-2 (plus ls's own /dev/fd, 3) and a soft
+      -- limit of at most 4096. Fails if main skips prepareSpawning.
+      testCaseInfo "git inherits no fds and a capped limit" $ do
+        lim <- getResourceLimit ResourceOpenFiles
+        let room = case lim.hardLimit of
+              ResourceLimit h -> h >= 8192
+              ResourceLimitInfinity -> True
+              ResourceLimitUnknown -> False
+        if not room
+          then pure "skipped: hard fd limit below 8192"
+          else withCanonicalTemp $ \dir -> do
+            let bin = dir </> "bin"
+                root = dir </> "root"
+                -- One file per call: the two ls-files run at once.
+                fdDir = dir </> "fds"
+            Dir.createDirectory bin
+            Dir.createDirectory fdDir
+            Dir.createDirectory root
+            git root ["init", "-q"]
+            writeFile (root </> "a.hs") ""
+            real <- realGit
+            _ <-
+              writeScript
+                bin
+                "git"
+                [ "{ ulimit -n; /bin/ls /dev/fd; } > '" <> fdDir <> "'/$$",
+                  "exec '" <> real <> "' \"$@\""
+                ]
+            gitDir <- realGitDir
+            env <- envWith [("PATH", bin <> ":" <> gitDir)] []
+            let shell = "ulimit -S -n 8192; exec 5000</dev/null; exec \"$0\" \"$@\""
+                viaShell p = case p.cmdspec of
+                  RawCommand exe given ->
+                    p {cmdspec = RawCommand "/bin/sh" (["-c", shell, exe] <> given)}
+                  ShellCommand _ -> p
+                tweak p = viaShell (withEnv env p) {close_fds = False}
+                args = ["--trace-file", dir </> "trace.jsonl", root]
+            withServer tweak args $ \server -> do
+              r <- getPath server "api/files/tree"
+              assertContains "\"path\":\"a.hs\"" (Char8.unpack r.body)
+            files <- Dir.listDirectory fdDir
+            calls <- mapM (fmap lines . readFile . (fdDir </>)) files
+            -- --version, rev-parse, two ls-files.
+            length calls @?= 4
+            mapM_
+              ( \case
+                  limit : fds -> do
+                    assertBool ("fd limit " <> limit) (read limit <= (4096 :: Int))
+                    fds @?= ["0", "1", "2", "3"]
+                  [] -> assertFailure "empty log"
+              )
+              calls
+            pure "",
       testCase "hostile repo config: nothing runs, .git unchanged" $
         withCanonicalTemp $ \dir -> do
           let root = dir </> "root"
@@ -700,7 +775,8 @@ data Server = Server
   }
 
 -- | Start the binary with --no-open, wait for the URL line, run the
--- action. The process is killed at the end if still there.
+-- action. The process is killed at the end if still there. The tweak
+-- goes last, so it can turn close_fds off (it must keep the pipes).
 withServer :: (CreateProcess -> CreateProcess) -> [String] -> (Server -> IO a) -> IO a
 withServer tweak args = withServerRaw tweak ("--no-open" : args)
 
@@ -708,11 +784,12 @@ withServerRaw :: (CreateProcess -> CreateProcess) -> [String] -> (Server -> IO a
 withServerRaw tweak args action = do
   exe <- findExe
   let cp =
-        (tweak (proc exe args))
-          { std_out = CreatePipe,
-            std_err = CreatePipe,
-            close_fds = True
-          }
+        tweak
+          (proc exe args)
+            { std_out = CreatePipe,
+              std_err = CreatePipe,
+              close_fds = True
+            }
   bracket (createProcess cp) kill $ \case
     (_, Just out, Just err, ph) -> do
       seen <- newIORef []

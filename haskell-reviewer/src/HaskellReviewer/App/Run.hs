@@ -81,6 +81,11 @@ import HaskellReviewer.Effects.Log
     newLogger,
   )
 import HaskellReviewer.Effects.Shutdown (Shutdown (..), installShutdownHandlers)
+import HaskellReviewer.Effects.Spawn
+  ( SpawnSetup,
+    prepareSpawning,
+    renderSpawnSetup,
+  )
 import HaskellReviewer.Effects.Trace
   ( Span (..),
     TraceFileError,
@@ -208,12 +213,14 @@ data Deps = Deps
     -- | Catch the stop signals.
     installShutdown :: IO Shutdown,
     -- | How long a minute is, for --idle-exit. Tests make it short.
-    idleMinute :: Microseconds
+    idleMinute :: Microseconds,
+    -- | What 'prepareSpawning' did, for the debug log.
+    spawnSetup :: SpawnSetup
   }
 
 -- | The real world.
-newRealDeps :: IO Deps
-newRealDeps = do
+newRealDeps :: SpawnSetup -> IO Deps
+newRealDeps spawnSetup = do
   -- Lines from warp's threads and the browser opener must not mix.
   lock <- newMVar ()
   pure
@@ -227,7 +234,8 @@ newRealDeps = do
         probeFiles = FileSystem.probeFiles,
         openBrowser = Browser.openBrowser,
         installShutdown = installShutdownHandlers,
-        idleMinute = Microseconds 60_000_000
+        idleMinute = Microseconds 60_000_000,
+        spawnSetup = spawnSetup
       }
 
 -- | Bad input found at start-up. All exit with code 2.
@@ -250,11 +258,14 @@ renderStartupError err =
 -- | The real program.
 main :: IO ()
 main = do
+  -- First, before anything spawns: see Note [No inherited fds] in
+  -- "HaskellReviewer.Effects.Spawn".
+  spawnSetup <- prepareSpawning
   -- Always UTF-8: with LC_ALL=C, printing a non-ASCII path would throw
   -- (exit 1 instead of 2). Bytes that aren't valid in the locale show up
   -- as U+FFFD, since Text can't hold them.
   hSetEncoding stderr utf8
-  deps <- newRealDeps
+  deps <- newRealDeps spawnSetup
   getArgs >>= run deps >>= exitWith
 
 -- | Run with the given arguments and return the exit code.
@@ -297,6 +308,7 @@ startUp deps args = do
             Right tracer -> do
               logVerbose logger ("root: " <> Text.pack root.path)
               logDebug logger ("options: " <> Text.pack (show opts))
+              logDebug logger (renderSpawnSetup deps.spawnSetup)
               probed <- deps.probeFiles logger root
               case probed of
                 Left e -> startupFailed deps (BadGit e) `finally` tracer.close

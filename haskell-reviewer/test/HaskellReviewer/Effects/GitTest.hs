@@ -2,10 +2,11 @@
 -- with fake gits.
 module HaskellReviewer.Effects.GitTest (tests) where
 
-import Control.Exception (IOException, try)
+import Control.Exception (IOException, bracket, finally, try)
 import Control.Monad (when)
 import Data.Either (isLeft)
 import Data.Text qualified as Text
+import HaskellReviewer.Core.Address (Port (..))
 import HaskellReviewer.Core.Git (GitVersion (..))
 import HaskellReviewer.Core.Root (Root (..))
 import HaskellReviewer.Effects.Clock (Microseconds (..))
@@ -25,12 +26,22 @@ import HaskellReviewer.Effects.Git
     renderGitError,
   )
 import HaskellReviewer.Effects.Log (LogLevel (..), Logger, newLogger)
+import HaskellReviewer.Effects.Spawn (spawnFdCap)
+import HaskellReviewer.Server.Listen (Listener (..), openListener)
+import Network.Socket qualified as Socket
 import System.Directory qualified as Dir
 import System.FilePath (takeDirectory, (</>))
+import System.IO (IOMode (WriteMode), hClose, openFile)
 import System.Posix.Signals (nullSignal, signalProcess)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
-import TestSupport (gitSetup, withCanonicalTemp, writeExecutable, writeScript)
+import TestSupport
+  ( gitSetup,
+    withCanonicalTemp,
+    withFdLock,
+    writeExecutable,
+    writeScript,
+  )
 
 tests :: TestTree
 tests =
@@ -197,6 +208,34 @@ tests =
       testCase "real git: not a repo, from disk" $
         withDirs $
           \root _ -> probeReal root >>= assertDisk,
+      -- See Note [No inherited fds] in "HaskellReviewer.Effects.Spawn".
+      -- The shell keeps the script open on a high fd, close-on-exec, so
+      -- ls doesn't see it. ls itself has /dev/fd open (3) while it lists.
+      testCase "git inherits no fds" $
+        withDirs $ \root bin -> do
+          let out = bin </> "fds"
+          _ <- fakeGitLogging bin ("{ echo ==; /bin/ls /dev/fd; } >> '" <> out <> "'")
+          -- Plain openFile: not close-on-exec.
+          bracket (openFile (bin </> "open") WriteMode) hClose $ \_ ->
+            withListener $ \port ->
+              withClient port $ do
+                r <- withFdLock (probeIn [bin] root)
+                assertDisk r
+          calls <- splitCalls . lines <$> readFile out
+          -- --version and rev-parse.
+          length calls @?= 2
+          mapM_ (@?= ["0", "1", "2", "3"]) calls,
+      testCase "children get a capped fd limit" $
+        withDirs $ \root bin -> do
+          let out = bin </> "limit"
+          _ <- fakeGitLogging bin ("ulimit -n > '" <> out <> "'")
+          r <- withFdLock (probeIn [bin] root)
+          assertDisk r
+          limit <- filter (/= '\n') <$> readFile out
+          case reads limit of
+            [(n, "")] ->
+              assertBool ("limit " <> limit) (n <= spawnFdCap)
+            _ -> assertFailure ("limit " <> limit),
       testCase "git inside ROOT is not used" $
         withDirs $ \root _ -> do
           let planted = root.path </> "bin"
@@ -244,3 +283,42 @@ withDirs action =
 
 fakeGit :: FilePath -> [String] -> IO FilePath
 fakeGit bin = writeScript bin "git"
+
+-- | A git 2.50 that runs the given line first. ROOT is not a repo.
+fakeGitLogging :: FilePath -> String -> IO FilePath
+fakeGitLogging bin line =
+  fakeGit
+    bin
+    [ line,
+      "case \"$*\" in",
+      "  *--version*) echo 'git version 2.50.0' ;;",
+      "  *) echo 'fatal: not a git repository (or any of the parent \
+      \directories): .git' >&2; exit 128 ;;",
+      "esac"
+    ]
+
+-- | Split the output of several calls, each starting with "==".
+splitCalls :: [String] -> [[String]]
+splitCalls = \case
+  "==" : rest -> let (call, more) = break (== "==") rest in call : splitCalls more
+  _ -> []
+
+-- | A listening socket, open while the action runs.
+withListener :: (Port -> IO a) -> IO a
+withListener action = do
+  opened <- openListener quiet Nothing
+  case opened of
+    Left e -> assertFailure (show e)
+    Right l -> action l.port `finally` l.close
+
+-- | A client connected to the port, open while the action runs.
+withClient :: Port -> IO a -> IO a
+withClient (Port p) action =
+  bracket open Socket.close (const action)
+  where
+    open = do
+      s <- Socket.socket Socket.AF_INET Socket.Stream Socket.defaultProtocol
+      Socket.connect
+        s
+        (Socket.SockAddrInet (fromIntegral p) (Socket.tupleToHostAddress (127, 0, 0, 1)))
+      pure s

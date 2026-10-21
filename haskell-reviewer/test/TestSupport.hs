@@ -13,9 +13,13 @@ module TestSupport
     -- * Scripts
     writeScript,
     writeExecutable,
+
+    -- * Fds
+    withFdLock,
   )
 where
 
+import Control.Concurrent.MVar (MVar, newMVar, withMVar)
 import Control.Exception (bracket)
 import Control.Monad (unless, void)
 import Data.ByteString qualified as BS
@@ -29,6 +33,7 @@ import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..))
 import System.FilePath (splitSearchPath, (</>))
 import System.IO.Temp (withSystemTempDirectory)
+import System.IO.Unsafe (unsafePerformIO)
 import System.Posix.IO
   ( OpenFileFlags (..),
     OpenMode (WriteOnly),
@@ -132,3 +137,15 @@ writeExecutable file text =
       unless (BS.null bytes) $ do
         n <- fdWrite fd bytes
         writeAll fd (BS.drop (fromIntegral n) bytes)
+
+-- * Fds
+
+-- | Tests run in parallel. The Spawn tests change the fd limit and
+-- open a plain fd above the cap for a moment; the tests that check
+-- what a child inherits must not run meanwhile. Both take this lock.
+withFdLock :: IO a -> IO a
+withFdLock action = withMVar fdLock (const action)
+
+fdLock :: MVar ()
+fdLock = unsafePerformIO (newMVar ())
+{-# NOINLINE fdLock #-}

@@ -35,11 +35,13 @@ import HaskellReviewer.Effects.Clock
 import HaskellReviewer.Effects.FileSystem (ListError (..), Lister (..), RootError (..))
 import HaskellReviewer.Effects.Git (GitError (..), TooOld (..))
 import HaskellReviewer.Effects.Shutdown (Shutdown (..))
+import HaskellReviewer.Effects.Spawn (SoftLimit (..), SpawnSetup (..))
 import HaskellReviewer.Effects.Trace (Span (..), TraceFileError (..), Tracer (..))
 import HaskellReviewer.Server.Listen (ListenError (..), Listener (..))
 import Network.Wai (Application, Request (..), defaultRequest, responseToStream)
 import Network.Wai.Internal (ResponseReceived (..))
 import System.Exit (ExitCode (..))
+import System.Posix.Resource (ResourceLimit (..))
 import System.Timeout (timeout)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
@@ -264,6 +266,8 @@ listingTests =
             r <- getFiles app
             r.status @?= 500
             r.body @?= "cannot list files"
+            -- The line comes after the slot is filled: wait for it.
+            _ <- waitFor 5 ((>= 2) . length <$> readIORef fake.console)
             out <- readIORef fake.console
             out
               @?= [ "haskell-reviewer: serving at " <> fakeUrl,
@@ -273,6 +277,7 @@ listingTests =
         withRunning (\_ -> fakeLister (ioError (userError "boom"))) $ \fake app -> do
           r <- timeout 5_000_000 (getFiles app)
           fmap (.status) r @?= Just 500
+          _ <- waitFor 5 ((>= 2) . length <$> readIORef fake.console)
           out <- readIORef fake.console
           drop 1 out @?= ["haskell-reviewer: cannot list files: user error (boom)"],
       testCase "a request before the list is done waits, then 200" $ do
@@ -523,7 +528,8 @@ newFake = do
                   },
             -- A real minute: the default idle exit (5 min) never
             -- fires in these tests.
-            idleMinute = Microseconds 60_000_000
+            idleMinute = Microseconds 60_000_000,
+            spawnSetup = Marked 0 (KeptAt (ResourceLimit 1024))
           }
   pure
     Fake
