@@ -2,10 +2,11 @@
 -- with fake gits.
 module HaskellReviewer.Effects.GitTest (tests) where
 
-import Control.Exception (IOException, try)
+import Control.Exception (IOException, bracket, finally, try)
 import Control.Monad (when)
 import Data.Either (isLeft)
 import Data.Text qualified as Text
+import HaskellReviewer.Core.Address (Port (..))
 import HaskellReviewer.Core.Git (GitVersion (..))
 import HaskellReviewer.Core.Root (Root (..))
 import HaskellReviewer.Effects.Clock (Microseconds (..))
@@ -25,12 +26,25 @@ import HaskellReviewer.Effects.Git
     renderGitError,
   )
 import HaskellReviewer.Effects.Log (LogLevel (..), Logger, newLogger)
+import HaskellReviewer.Effects.Spawn (spawnFdCap)
+import HaskellReviewer.Server.Listen (Listener (..), openListener)
+import Network.Socket qualified as Socket
 import System.Directory qualified as Dir
 import System.FilePath (takeDirectory, (</>))
+import System.IO (IOMode (WriteMode), hClose, openFile)
 import System.Posix.Signals (nullSignal, signalProcess)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
-import TestSupport (gitSetup, withCanonicalTemp, writeExecutable, writeScript)
+import TestSupport
+  ( assertFds,
+    baselineFds,
+    gitSetup,
+    listFdsTo,
+    withCanonicalTemp,
+    withFdLock,
+    writeExecutable,
+    writeScript,
+  )
 
 tests :: TestTree
 tests =
@@ -197,6 +211,35 @@ tests =
       testCase "real git: not a repo, from disk" $
         withDirs $
           \root _ -> probeReal root >>= assertDisk,
+      -- See Note [No inherited fds] in "HaskellReviewer.Effects.Spawn".
+      -- git must see what a clean child sees ('baselineFds').
+      testCase "git inherits no fds" $
+        withDirs $ \root bin -> do
+          let fdDir = takeDirectory bin </> "fds"
+          Dir.createDirectory fdDir
+          _ <- fakeGitLogging bin (listFdsTo ("'" <> fdDir <> "'/$$.fds"))
+          -- Plain openFile: not close-on-exec.
+          bracket (openFile (bin </> "open") WriteMode) hClose $ \_ ->
+            withListener $ \port ->
+              withClient port $ do
+                r <- withFdLock (probeIn [bin] root)
+                assertDisk r
+          files <- Dir.listDirectory fdDir
+          -- --version and rev-parse.
+          length files @?= 2
+          baseline <- baselineFds bin root.path
+          mapM_ (assertFds baseline . (fdDir </>)) files,
+      testCase "children get a capped fd limit" $
+        withDirs $ \root bin -> do
+          let out = bin </> "limit"
+          _ <- fakeGitLogging bin ("ulimit -n > '" <> out <> "'")
+          r <- withFdLock (probeIn [bin] root)
+          assertDisk r
+          limit <- filter (/= '\n') <$> readFile out
+          case reads limit of
+            [(n, "")] ->
+              assertBool ("limit " <> limit) (n <= spawnFdCap)
+            _ -> assertFailure ("limit " <> limit),
       testCase "git inside ROOT is not used" $
         withDirs $ \root _ -> do
           let planted = root.path </> "bin"
@@ -244,3 +287,36 @@ withDirs action =
 
 fakeGit :: FilePath -> [String] -> IO FilePath
 fakeGit bin = writeScript bin "git"
+
+-- | A git 2.50 that runs the given line first. ROOT is not a repo.
+fakeGitLogging :: FilePath -> String -> IO FilePath
+fakeGitLogging bin line =
+  fakeGit
+    bin
+    [ line,
+      "case \"$*\" in",
+      "  *--version*) echo 'git version 2.50.0' ;;",
+      "  *) echo 'fatal: not a git repository (or any of the parent \
+      \directories): .git' >&2; exit 128 ;;",
+      "esac"
+    ]
+
+-- | A listening socket, open while the action runs.
+withListener :: (Port -> IO a) -> IO a
+withListener action = do
+  opened <- openListener quiet Nothing
+  case opened of
+    Left e -> assertFailure (show e)
+    Right l -> action l.port `finally` l.close
+
+-- | A client connected to the port, open while the action runs.
+withClient :: Port -> IO a -> IO a
+withClient (Port p) action =
+  bracket open Socket.close (const action)
+  where
+    open = do
+      s <- Socket.socket Socket.AF_INET Socket.Stream Socket.defaultProtocol
+      Socket.connect
+        s
+        (Socket.SockAddrInet (fromIntegral p) (Socket.tupleToHostAddress (127, 0, 0, 1)))
+      pure s

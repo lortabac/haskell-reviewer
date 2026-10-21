@@ -7,6 +7,9 @@ module HaskellReviewer.Server.Listen
     -- * Operations
     openListener,
     renderListenError,
+
+    -- * Internal (for tests)
+    acceptWithMss,
   )
 where
 
@@ -16,12 +19,37 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import GHC.IO.Exception (IOException (..))
 import HaskellReviewer.Core.Address (Port (..))
-import HaskellReviewer.Effects.Log (Logger, exceptionMessage, logVerbose)
+import HaskellReviewer.Effects.Log
+  ( Logger,
+    exceptionMessage,
+    logDebug,
+    logVerbose,
+  )
 import HaskellReviewer.Server.Security (addSecurityHeaders)
 import Network.Socket qualified as Socket
 import Network.Wai (Application)
 import Network.Wai.Handler.Warp qualified as Warp
 import System.IO.Error (ioeGetErrorString)
+
+{- Note [Loopback MSS]
+
+On loopback the MSS is about 32 KB (MTU 65536). A client's receive
+window can shrink below that while it's busy. Then our kernel won't
+send a segment smaller than the MSS (silly window avoidance): it holds
+the rest of the data until the TCP persist timer fires, about 200 ms
+later. A 160 KB response waits three such steps, with no packet lost.
+
+So we set TCP_MAXSEG to 1460 (a normal Ethernet MSS) on the listening
+socket, and again on each accepted socket. Linux copies it from the
+listener; macOS may not, hence the second set (harmless on Linux). Small segments fit in a small window, so data keeps flowing.
+The extra segments cost nothing we can measure on loopback.
+
+Best effort: if the OS refuses, we log at debug level and go on.
+
+Side effect: a client sending far too much (huge cookies, over warp's
+50 KiB header limit) may now get a reset instead of warp's 400, since
+warp closes with its bytes still unread.
+-}
 
 -- | A socket bound to 127.0.0.1 and listening.
 data Listener = Listener
@@ -62,6 +90,7 @@ openListener logger wanted = do
   result <- try @IOException $
     bracketOnError newSocket Socket.close $ \s -> do
       Socket.withFdSocket s Socket.setCloseOnExecIfNeeded
+      setMss logger s
       Socket.bind s (Socket.SockAddrInet portNumber localhost)
       Socket.listen s (max 2048 Socket.maxListenQueue)
       real <- Socket.socketPort s
@@ -87,6 +116,7 @@ openListener logger wanted = do
         . Warp.setServerName ""
         -- Browsers never speak HTTP/2 without TLS. Less code exposed.
         . Warp.setHTTP2Disabled
+        . Warp.setAccept (acceptWithMss logger)
         . Warp.setOnExceptionResponse
           (addSecurityHeaders . Warp.defaultOnExceptionResponse)
         . Warp.setOnException (\_ e -> logException e)
@@ -98,6 +128,26 @@ openListener logger wanted = do
         logVerbose logger ("warp: " <> exceptionMessage e)
 
 -- * Internal
+
+-- | Accept, then set the MSS on the new socket (best effort). See
+-- Note [Loopback MSS].
+acceptWithMss :: Logger -> Socket.Socket -> IO (Socket.Socket, Socket.SockAddr)
+acceptWithMss logger s = do
+  (conn, addr) <- Socket.accept s
+  setMss logger conn
+  pure (conn, addr)
+
+-- | See Note [Loopback MSS].
+loopbackMss :: Int
+loopbackMss = 1460
+
+-- | Set TCP_MAXSEG, or log at debug level why not.
+setMss :: Logger -> Socket.Socket -> IO ()
+setMss logger s = do
+  r <- try @IOException (Socket.setSocketOption s Socket.MaxSegment loopbackMss)
+  case r of
+    Right () -> pure ()
+    Left e -> logDebug logger ("cannot set TCP_MAXSEG: " <> osReason e)
 
 -- | The OS message (e.g. @Address already in use@), not just the error
 -- kind ('ioeGetErrorString' would give @resource busy@).

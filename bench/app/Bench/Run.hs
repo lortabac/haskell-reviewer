@@ -148,7 +148,10 @@ runOnce cfg = bracket (openFile "/dev/null" ReadMode) hClose $ \devNull -> do
           { std_in = UseHandle devNull,
             std_out = CreatePipe,
             std_err = CreatePipe,
-            close_fds = True,
+            -- True would close every fd up to our (uncapped) fd limit in
+            -- the child: slow. Our fds aren't secret and we spawn from one
+            -- thread. See Note [No inherited fds] in HaskellReviewer.Effects.Spawn.
+            close_fds = False,
             env = Just childEnv
           }
   bracket (createProcess cp) killAndReap $ \(_, mout, merr, ph) ->

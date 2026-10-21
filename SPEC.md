@@ -1174,7 +1174,9 @@ revspec ─► git layer ─► snapshot (file list + blobs, per side)
     is not used;
   - a time limit, 30 s at start-up and 120 s for `ls-files` (a FIFO in
     the tree can block git): then it is killed;
-  - `--end-of-options` before any user-given revision.
+  - `--end-of-options` before any user-given revision;
+  - no inherited file descriptors, and a soft fd limit of at most 4096
+    (D-86).
 
   Git's `safe.directory` refusal is reported as is. The minimum git version
   is 2.44 (for `GIT_NO_LAZY_FETCH`), checked at start-up (exit code 2).
@@ -1361,6 +1363,9 @@ following:
   responses. Static assets also live under the token path, and their
   hashed names let the browser cache them as immutable;
 - gzips large responses, except the event stream (from M1).
+
+The listening socket sets `TCP_MAXSEG` to 1460, so a big response doesn't
+stall on loopback (D-86).
 
 The router is a plain pattern match on path segments. The API is small, so
 a framework would cost more than it saves.

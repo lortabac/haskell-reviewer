@@ -69,6 +69,8 @@ openBrowser logger root url = void $ forkIO $ do
                   { std_in = UseHandle devNull,
                     std_out = UseHandle devNull,
                     std_err = UseHandle devNull,
+                    -- See Note [No inherited fds] in
+                    -- "HaskellReviewer.Effects.Spawn".
                     close_fds = True,
                     new_session = True
                   }
