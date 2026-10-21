@@ -153,8 +153,9 @@ users. It tests the core idea: *types first*.
   default < `cabal.project`); components with source dirs, extensions and
   language; `.hs`, `.lhs` and `.hsig` files; implicit package for plain
   dirs (§8); `stack.yaml` ignored, with a banner (D-66, §8); Hpack banner
-  (D-41); generated modules shown as text (§2.3); "Other files"; module
-  identity (D-44).
+  (D-41); generated modules shown as text (§2.3); "Other files" (with
+  `.hs-boot`); "listed, no source" modules; `-pgmF` "preprocessed, not
+  indexed" banner; markdown-unlit `.lhs` (D-84); module identity (D-44).
 - Parsing with the bundled parser, using each component's language and
   extensions (§3). The GHC AST is converted at once into our compact
   module model and dropped (D-61). Parse failure → text with a banner
@@ -351,7 +352,8 @@ broke during M1–M4 feedback.
 
 **In**
 - Full CPP (§3.1): Cabal macros synthesised per side, `#include` inside
-  the snapshot with `include-dirs`, `--cpp-define`, `--flag` on top of
+  the snapshot with `include-dirs`, optional built-in `MachDeps.h`
+  (D-84), `--cpp-define`, `--flag` on top of
   `.cabal` defaults and `cabal.project` (D-67); the header tooltip shows
   the assumptions and where each flag value came from (§11.4.2). (Basic
   CPP is already in M1, D-83.)
