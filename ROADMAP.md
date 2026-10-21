@@ -159,12 +159,12 @@ users. It tests the core idea: *types first*.
   extensions (§3). The GHC AST is converted at once into our compact
   module model and dropped (D-61). Parse failure → text with a banner
   (§3.1).
-- Basic CPP (§3.1), if the M0 counts say CPP is common: own evaluator with
-  a position map (D-55); host platform, flags from `.cabal` defaults and
-  `cabal.project`, `MIN_VERSION_*` = true, GHC macros from the detected
-  version (`--ghc`, `with-compiler`, else the parser's version; §7.1).
-  Excluded regions greyed. Otherwise CPP modules show as text with a
-  "CPP not supported yet" banner. Full CPP is in M5.
+- Basic CPP (§3.1). In M1, since the M0 counts say CPP is common (D-83):
+  own evaluator with a position map (D-55); host platform, flags from
+  `.cabal` defaults and `cabal.project`, `MIN_VERSION_*` = true (also
+  for `defined`/`#ifdef`), GHC macros from the detected version (`--ghc`,
+  `with-compiler`, else the parser's version; §7.1). Excluded regions
+  greyed. Full CPP is in M5.
 - Docs view (§4.2): every declaration kind, synopsis, Haddock sections,
   instances under class and type (collapsed), orphan flag, fixity next to
   the operator, Pragmas block, shared signatures, exported marker, "exported
@@ -354,7 +354,7 @@ broke during M1–M4 feedback.
   the snapshot with `include-dirs`, `--cpp-define`, `--flag` on top of
   `.cabal` defaults and `cabal.project` (D-67); the header tooltip shows
   the assumptions and where each flag value came from (§11.4.2). (Basic
-  CPP first, if M1 did not have it.)
+  CPP is already in M1, D-83.)
 - Q-OLD-SYNTAX resolved: lexing shim if needed, or text fallback with the
   reason in the banner (§7.1, §8).
 - Dependency names (D-42): `plan.json`, then `build-depends` + local
@@ -556,7 +556,7 @@ Every section of SPEC.md and the milestone(s) that deliver it.
 | §2.2 | Sides | M3 |
 | §2.3 | Project model, module identity | M1; dependency links M5 (HIE source M8) |
 | §3 | Tiers | syntactic M1–M2; precise M8 |
-| §3.1 | CPP | basic M1 (if needed), full M5; HIE branches M8 |
+| §3.1 | CPP | basic M1 (D-83), full M5; HIE branches M8 |
 | §3.1 | TH, parse failures | M1 (TH declarations M8) |
 | §4.1 | Frame, URLs | M0–M1; diff URLs M3; `/changes` M4 |
 | §4.2 | Docs view | M1; side switch M3; badges M4 |
