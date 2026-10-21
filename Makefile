@@ -1,14 +1,40 @@
 CABAL ?= cabal
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
+BENCH_RUNS ?= 10
+BENCH_PROJECTS ?=
+BENCH_JSON ?=
+BENCH_LABEL ?=
 
-.PHONY: build test install freeze web
+.PHONY: build test install freeze web bench bench-smoke
 
 build:
 	$(CABAL) build all
 
 test:
 	$(CABAL) test all --test-show-details=direct
+
+# Runs the three reference projects (SPEC §10, §11.9; D-76, D-82, D-85).
+# By hand, before a release: shared CI runners are too noisy for timings.
+# Needs network the first time, to fetch the projects into bench/projects/
+# (git-ignored).
+bench: build
+	bench/fetch-projects.sh $(BENCH_PROJECTS)
+	"$$($(CABAL) list-bin bench:haskell-reviewer-bench)" \
+	    --exe "$$($(CABAL) list-bin exe:haskell-reviewer)" \
+	    --runs $(BENCH_RUNS) \
+	    $(if $(BENCH_JSON),--json $(BENCH_JSON)) \
+	    $(if $(BENCH_LABEL),--label "$(BENCH_LABEL)") \
+	    $(BENCH_PROJECTS)
+
+# CI smoke test (D-76): checks the harness itself works, on one small
+# project, with no timing checks. Needs network the first time.
+bench-smoke: build
+	bench/fetch-projects.sh optparse-applicative
+	"$$($(CABAL) list-bin bench:haskell-reviewer-bench)" \
+	    --exe "$$($(CABAL) list-bin exe:haskell-reviewer)" \
+	    --runs 1 --warmup 0 \
+	    optparse-applicative
 
 # Rebuild the frontend bundle. Needs Node (version in web/.nvmrc).
 # web/dist is committed: commit it after this.
