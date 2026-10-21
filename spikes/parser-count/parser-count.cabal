@@ -1,0 +1,25 @@
+cabal-version: 3.0
+name:          parser-count
+version:       0
+synopsis:      Throwaway M0 spike (T06): run ghc-lib-parser over reference projects.
+license:       BSD-3-Clause
+build-type:    Simple
+
+executable parser-count
+  main-is:          Main.hs
+  hs-source-dirs:   src
+  other-modules:    Project Components Parse Cpp Report Types
+  default-language: GHC2021
+  ghc-options:      -O1 -Wall -threaded -rtsopts "-with-rtsopts=-N -T"
+  build-depends:
+    , base
+    , aeson
+    , bytestring
+    , Cabal-syntax   ^>=3.16
+    , containers
+    , directory
+    , filepath
+    , ghc-lib-parser ==9.14.1.20251220
+    , process
+    , text
+    , time

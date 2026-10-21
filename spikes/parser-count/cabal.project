@@ -1,0 +1,3 @@
+-- Own project: the root cabal.project never sees this package.
+packages: .
+index-state: hackage.haskell.org 2026-10-20T12:40:44Z

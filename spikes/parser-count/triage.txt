@@ -1,0 +1,18 @@
+# Manual triage of rejected files: tag | project | rule (see Report.hs).
+# Tags: old-syntax, needs-cpp, spike-config, spike-limit, test-data.
+
+# Needs #include "MachDeps.h" (a GHC header) for WORD_SIZE_IN_BITS.
+needs-cpp     | clash-compiler | file:clash-prelude/src/Clash/Sized/Internal/Mod.hs
+# Object-like macro used in code (infixr CONS_PREC): needs expansion.
+needs-cpp     | clash-compiler | file:clash-prelude/src/Clash/Sized/Vector.hs
+# Test inputs of the clash testsuite. It compiles them with its own
+# flags (TemplateHaskell, DataKinds, …); here they get GHC2021 only.
+spike-config  | clash-compiler | file:tests/
+# Clash examples: no pragmas, the clash compiler adds its own
+# extensions (TemplateHaskell, DataKinds, …).
+spike-config  | clash-compiler | file:examples/
+# Template files, not Haskell.
+test-data     | cabal          | file:templates/
+# Packages used as test inputs, not in cabal.project; their flags
+# (CPP defines, extensions) are in .cabal files we don't read.
+spike-config  | cabal          | file:cabal-testsuite/

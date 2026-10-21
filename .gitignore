@@ -4,3 +4,4 @@
 dist-newstyle/
 cabal.project.local*
 web/node_modules/
+/bench/projects/

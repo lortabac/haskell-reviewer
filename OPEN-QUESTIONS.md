@@ -9,6 +9,13 @@ is updated if needed (§10.3).
   known cases (e.g. changes to `forall`/`!`/`~` lexing, `NoStarIsType`) need
   to be checked against the 3 supported GHCs, which may require a lexing-mode
   shim.
+  M0 (D-83): the 9.14 parser rejects 0 of 2,355 files in the reference
+  projects, and no old-syntax case in the extras. On a checklist of known
+  cases, 9.10, 9.12 and 9.14 accept and reject the same things; `forall`
+  as a term name is rejected from 9.10 on (9.6 accepts it; 9.8 not
+  tested). Re-run: `spikes/parser-count/old-syntax-probes/run.sh`. No
+  shim needed for now.
+  Left open until M1 parses more projects (check the text fallbacks).
 - **Q-CLAUDE-CLI-FLAGS**: Confirm the exact `claude` flags for D-34/D-47
   with a real headless run on the tested CLI version range. Flags were seen in
   `claude --help` 2.1.281: `--tools`, `--mcp-config`, `--strict-mcp-config`,

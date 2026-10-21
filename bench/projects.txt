@@ -1,0 +1,16 @@
+# Reference projects (D-82). Fetched by bench/fetch-projects.sh.
+# Format: name role url sha
+# Roles: small, typical, large (the three reference projects) and
+# extra (only for spikes, fetched only when asked by name or role).
+# Fetched only, never vendored: some are GPL or AGPL.
+
+optparse-applicative small   https://github.com/pcapriotti/optparse-applicative a6ca1a25bfad06f660cd67df75349cfcda567a8f
+# tag 3.12.1
+pandoc               typical https://github.com/jgm/pandoc                      e51c9c6054c8f4ec5c3209d5abe10939dfe2963e
+# tag v2026-10-05; 383k lines, short of the 500k target; AGPL
+wire-server          large   https://github.com/wireapp/wire-server             7568f595e42ece6f0791682336014853a9dfcac4
+
+# master on 2026-10-20
+clash-compiler       extra   https://github.com/clash-lang/clash-compiler       4b1edbc71e94d57c457905e40a7085b062bff047
+servant              extra   https://github.com/haskell-servant/servant         c12cc3702a62df609b5b4fb859bc3e75d4e09747
+cabal                extra   https://github.com/haskell/cabal                   9cd921b600189e4199b278d4637b5adcb762ef7b
