@@ -26,7 +26,7 @@ import System.Directory qualified as Dir
 import System.Environment (getEnvironment, lookupEnv)
 import System.Exit (ExitCode (..))
 import System.FilePath (takeDirectory, (</>))
-import System.IO (Handle, hGetContents', hGetLine, hIsEOF, readFile')
+import System.IO (Handle, hGetContents', hGetLine, hIsEOF)
 import System.IO.Temp (withSystemTempDirectory)
 import System.Posix.Resource
   ( Resource (ResourceOpenFiles),
@@ -56,7 +56,14 @@ import Test.Tasty.HUnit
     testCaseInfo,
     (@?=),
   )
-import TestSupport (git, withCanonicalTemp, writeScript)
+import TestSupport
+  ( assertFds,
+    baselineFds,
+    git,
+    listFdsTo,
+    withCanonicalTemp,
+    writeScript,
+  )
 
 tests :: TestTree
 tests =
@@ -468,8 +475,8 @@ gitTests =
       -- See Note [No inherited fds] in "HaskellReviewer.Effects.Spawn".
       -- We start the binary through bash, with close_fds off, a soft fd
       -- limit of 8192 and a plain fd 5000 open (above the cap). Its gits
-      -- must still see only 0-2 (plus ls's own /dev/fd, 3) and a soft
-      -- limit of at most 4096. Fails if main skips prepareSpawning.
+      -- must still see only what a clean child sees ('baselineFds': 0-2
+      -- plus ls's own) and a soft limit of at most 4096. Fails if main skips prepareSpawning.
       -- bash, not sh: dash (Ubuntu's sh) only takes one-digit fds in
       -- redirections.
       testCaseInfo "git inherits no fds and a capped limit" $ do
@@ -506,7 +513,7 @@ gitTests =
                 -- holds, for the failure message.
                 [ "log='" <> fdDir <> "'/$$",
                   "ulimit -n > \"$log.limit\"",
-                  "/bin/ls -l /dev/fd/ > \"$log.fds\"",
+                  listFdsTo "\"$log.fds\"",
                   "for l in /usr/sbin/lsof /usr/bin/lsof; do",
                   "  if [ -x \"$l\" ]; then \"$l\" -p $$ > \"$log.lsof\" 2>&1; break; fi",
                   "done",
@@ -528,7 +535,8 @@ gitTests =
             let logs = [fdDir </> takeWhile (/= '.') f | f <- files, ".fds" `isSuffixOf` f]
             -- --version, rev-parse, two ls-files.
             length logs @?= 4
-            mapM_ checkFdLog logs
+            baseline <- baselineFds dir root
+            mapM_ (checkFdLog baseline) logs
             pure "",
       testCase "hostile repo config: nothing runs, .git unchanged" $
         withCanonicalTemp $ \dir -> do
@@ -583,29 +591,12 @@ gitTests =
     ]
 
 -- | Check one call of the fake git in "git inherits no fds and a capped
--- limit": soft fd limit at most 4096, only fds 0-3 (3 is ls's own
--- /dev/fd). On failure, show the full ls -l and lsof output.
-checkFdLog :: FilePath -> Assertion
-checkFdLog logFile = do
+-- limit": soft fd limit at most 4096, and the fds of a clean child.
+checkFdLog :: [Int] -> FilePath -> Assertion
+checkFdLog baseline logFile = do
   limit <- filter (/= '\n') <$> readFile (logFile <> ".limit")
-  listing <- readFile (logFile <> ".fds")
-  lsof <- either (const "(no lsof)") id <$> try @IOException (readFile' (logFile <> ".lsof"))
   assertBool ("fd limit " <> limit) (read limit <= (4096 :: Int))
-  let fds = sort (map fdOf (filter (not . ("total" `isPrefixOf`)) (lines listing)))
-  unless (fds == [0, 1, 2, 3]) $
-    assertFailure $
-      "fds seen by git: "
-        <> show fds
-        <> "\nls -l /dev/fd/:\n"
-        <> listing
-        <> "lsof of the shell:\n"
-        <> lsof
-  where
-    -- The name is before "->" if it's a link (Linux), else last (macOS).
-    fdOf :: String -> Int
-    fdOf line = case break (== "->") (words line) of
-      (before, _ : _) | not (null before) -> read (last before)
-      (ws, _) -> read (last ws)
+  assertFds baseline (logFile <> ".fds")
 
 -- | A git script that writes the marker if run.
 plantGit :: FilePath -> FilePath -> IO ()

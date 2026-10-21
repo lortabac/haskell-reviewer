@@ -36,7 +36,10 @@ import System.Posix.Signals (nullSignal, signalProcess)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 import TestSupport
-  ( gitSetup,
+  ( assertFds,
+    baselineFds,
+    gitSetup,
+    listFdsTo,
     withCanonicalTemp,
     withFdLock,
     writeExecutable,
@@ -209,22 +212,23 @@ tests =
         withDirs $
           \root _ -> probeReal root >>= assertDisk,
       -- See Note [No inherited fds] in "HaskellReviewer.Effects.Spawn".
-      -- The shell keeps the script open on a high fd, close-on-exec, so
-      -- ls doesn't see it. ls itself has /dev/fd open (3) while it lists.
+      -- git must see what a clean child sees ('baselineFds').
       testCase "git inherits no fds" $
         withDirs $ \root bin -> do
-          let out = bin </> "fds"
-          _ <- fakeGitLogging bin ("{ echo ==; /bin/ls /dev/fd; } >> '" <> out <> "'")
+          let fdDir = takeDirectory bin </> "fds"
+          Dir.createDirectory fdDir
+          _ <- fakeGitLogging bin (listFdsTo ("'" <> fdDir <> "'/$$.fds"))
           -- Plain openFile: not close-on-exec.
           bracket (openFile (bin </> "open") WriteMode) hClose $ \_ ->
             withListener $ \port ->
               withClient port $ do
                 r <- withFdLock (probeIn [bin] root)
                 assertDisk r
-          calls <- splitCalls . lines <$> readFile out
+          files <- Dir.listDirectory fdDir
           -- --version and rev-parse.
-          length calls @?= 2
-          mapM_ (@?= ["0", "1", "2", "3"]) calls,
+          length files @?= 2
+          baseline <- baselineFds bin root.path
+          mapM_ (assertFds baseline . (fdDir </>)) files,
       testCase "children get a capped fd limit" $
         withDirs $ \root bin -> do
           let out = bin </> "limit"
@@ -296,12 +300,6 @@ fakeGitLogging bin line =
       \directories): .git' >&2; exit 128 ;;",
       "esac"
     ]
-
--- | Split the output of several calls, each starting with "==".
-splitCalls :: [String] -> [[String]]
-splitCalls = \case
-  "==" : rest -> let (call, more) = break (== "==") rest in call : splitCalls more
-  _ -> []
 
 -- | A listening socket, open while the action runs.
 withListener :: (Port -> IO a) -> IO a

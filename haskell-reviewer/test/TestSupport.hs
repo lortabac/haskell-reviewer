@@ -16,13 +16,17 @@ module TestSupport
 
     -- * Fds
     withFdLock,
+    listFdsTo,
+    baselineFds,
+    assertFds,
   )
 where
 
 import Control.Concurrent.MVar (MVar, newMVar, withMVar)
-import Control.Exception (bracket)
+import Control.Exception (IOException, bracket, try)
 import Control.Monad (unless, void)
 import Data.ByteString qualified as BS
+import Data.List (isPrefixOf, sort)
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
@@ -32,6 +36,7 @@ import System.Directory qualified as Dir
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..))
 import System.FilePath (splitSearchPath, (</>))
+import System.IO (IOMode (ReadMode), hGetContents', readFile', withBinaryFile)
 import System.IO.Temp (withSystemTempDirectory)
 import System.IO.Unsafe (unsafePerformIO)
 import System.Posix.IO
@@ -43,7 +48,14 @@ import System.Posix.IO
   )
 import System.Posix.IO.ByteString (fdWrite)
 import System.Posix.User (getEffectiveUserID)
-import System.Process (CreateProcess (..), proc, readCreateProcessWithExitCode)
+import System.Process
+  ( CreateProcess (..),
+    StdStream (CreatePipe, UseHandle),
+    createProcess,
+    proc,
+    readCreateProcessWithExitCode,
+    waitForProcess,
+  )
 import Test.Tasty.HUnit (assertFailure)
 
 -- * Temp dirs
@@ -149,3 +161,63 @@ withFdLock action = withMVar fdLock (const action)
 fdLock :: MVar ()
 fdLock = unsafePerformIO (newMVar ())
 {-# NOINLINE fdLock #-}
+
+-- | A shell line that writes @ls -l /dev/fd/@ to the file (a shell
+-- word, quoted by the caller). One command, its own redirect: the shell
+-- holds no extra fd while ls runs.
+listFdsTo :: String -> String
+listFdsTo word = "/bin/ls -l /dev/fd/ > " <> word
+
+-- | The fds a clean child sees with 'listFdsTo', run from a /bin/sh
+-- script in the given dir: what a fake git should see too. ls itself
+-- holds some (Linux: /dev/fd; macOS: also the cwd, to get back to it).
+-- The script and its output go in the first dir.
+baselineFds :: FilePath -> FilePath -> IO [Int]
+baselineFds tmp dir = do
+  let out = tmp </> "baseline.fds"
+  script <- writeScript tmp "baseline" [listFdsTo ("'" <> out <> "'")]
+  -- createProcess closes devNull for us.
+  withBinaryFile "/dev/null" ReadMode $ \devNull -> do
+    let cp =
+          (proc script [])
+            { cwd = Just dir,
+              std_in = UseHandle devNull,
+              std_out = CreatePipe,
+              std_err = CreatePipe,
+              close_fds = True
+            }
+    (_, hOut, hErr, ph) <- createProcess cp
+    mapM_ hGetContents' hOut
+    mapM_ hGetContents' hErr
+    void (waitForProcess ph)
+  fst <$> readFds out
+
+-- | The fds in a 'listFdsTo' file must be the baseline. On failure, show
+-- the listing, and @<file without .fds>.lsof@ if there.
+assertFds :: [Int] -> FilePath -> IO ()
+assertFds baseline file = do
+  (fds, listing) <- readFds file
+  let lsofFile = take (length file - length (".fds" :: String)) file <> ".lsof"
+  lsof <- either (const "(none)") id <$> try @IOException (readFile' lsofFile)
+  unless (fds == baseline) $
+    assertFailure $
+      "fds seen: "
+        <> show fds
+        <> ", clean child: "
+        <> show baseline
+        <> "\nls -l /dev/fd/:\n"
+        <> listing
+        <> "lsof of the shell:\n"
+        <> lsof
+
+-- | Sorted fd numbers, and the raw listing.
+readFds :: FilePath -> IO ([Int], String)
+readFds file = do
+  listing <- readFile' file
+  let entries = filter (not . ("total" `isPrefixOf`)) (lines listing)
+  pure (sort (map fdOf entries), listing)
+  where
+    -- The name is before "->" if it's a link (Linux), else last (macOS).
+    fdOf line = case break (== "->") (words line) of
+      (before@(_ : _), _ : _) -> read (last before)
+      (ws, _) -> read (last ws)
