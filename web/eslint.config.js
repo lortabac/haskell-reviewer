@@ -75,7 +75,7 @@ const banned = [
 ];
 
 export default tseslint.config(
-  { ignores: ["dist/"] },
+  { ignores: ["dist/", "test-results/", "playwright-report/", "blob-report/"] },
   js.configs.recommended,
   tseslint.configs.recommendedTypeChecked,
   {
@@ -88,6 +88,16 @@ export default tseslint.config(
           defaultProject: "tsconfig.json",
         },
         tsconfigRootDir: import.meta.dirname,
+      },
+    },
+  },
+  // Not under e2e/, but type checked with it (node types).
+  {
+    files: ["playwright.config.ts"],
+    languageOptions: {
+      parserOptions: {
+        projectService: false,
+        project: "./e2e/tsconfig.json",
       },
     },
   },

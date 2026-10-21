@@ -1504,7 +1504,8 @@ a framework would cost more than it saves.
   file.
 - **CI** (GitHub Actions): Linux and macOS × GHC 9.10/9.12/9.14 for the
   Haskell packages; one web job (type check, lint, Vitest, bundle
-  reproducibility, no-eval check); one end-to-end job.
+  reproducibility, no-eval check); one end-to-end job, on Linux only
+  (Chromium, Firefox, WebKit).
 - **Benchmarks** (`make bench`) run on three pinned reference projects: a
   small one, a typical one and a 2,000-module one. They measure the §10
   targets and memory. They are run by hand and before each release, not in

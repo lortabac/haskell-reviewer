@@ -34,9 +34,20 @@ is updated if needed (§10.3).
   (§11.6.3).
 - **Q-SSE**: Check SharedWorker + SSE keep-alive and reconnect on the
   three browsers, including background-tab throttling (§11.6.2).
-  Not checked yet: EventSource inside a SharedWorker on Safari. Known:
-  Chrome's Memory Saver discards idle tabs, which closes their stream, so
-  the tool may idle-exit while the tab still looks open (D-80).
+  Known: Chrome's Memory Saver discards idle tabs, which closes their
+  stream, so the tool may idle-exit while the tab still looks open (D-80).
+  M0 (D-89): `make e2e` now checks, on Chromium and Firefox (and WebKit in
+  CI): one stream for several tabs, the fallback (no SharedWorker), a
+  second browser, keep-alive over 40 s, a closed browser noticed within
+  about 30 s, reconnect after a cut, the end of a session (new run, and
+  30 s refused), and on Chromium a tab frozen for 40 s (CDP) keeps the
+  stream. All pass locally on Chromium and Firefox.
+  WebKit: can't run on the dev machine (Fedora; Playwright's WebKit wants
+  Ubuntu libs), so it runs only in CI. Not known yet whether its
+  SharedWorker has EventSource; if not, the fallback kicks in and the
+  "one stream" test fails there.
+  Still manual: real background-tab throttling, Memory Saver, real
+  Safari, sleep/wake.
 - **Q-HIE-SIZE**: Measure the index size and decode time on pandoc and
   wire-server built with `-fwrite-ide-info`, against the guess of 10–20 KB
   per module (D-87). Are types at uses and local types worth keeping?
