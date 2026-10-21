@@ -14,7 +14,7 @@ import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as Char8
 import Data.Char (isDigit, toLower)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
-import Data.List (isInfixOf, isPrefixOf, sort)
+import Data.List (isInfixOf, isPrefixOf, isSuffixOf, sort)
 import Data.Text qualified as Text
 import GHC.Clock (getMonotonicTime)
 import HaskellReviewer.App.Version (toolVersion)
@@ -26,7 +26,7 @@ import System.Directory qualified as Dir
 import System.Environment (getEnvironment, lookupEnv)
 import System.Exit (ExitCode (..))
 import System.FilePath (takeDirectory, (</>))
-import System.IO (Handle, hGetContents', hGetLine, hIsEOF)
+import System.IO (Handle, hGetContents', hGetLine, hIsEOF, readFile')
 import System.IO.Temp (withSystemTempDirectory)
 import System.Posix.Resource
   ( Resource (ResourceOpenFiles),
@@ -500,7 +500,16 @@ gitTests =
               writeScript
                 bin
                 "git"
-                [ "{ ulimit -n; /bin/ls /dev/fd; } > '" <> fdDir <> "'/$$",
+                -- One command per line, each with its own redirect: no
+                -- group redirect, so the shell itself holds no extra fd
+                -- while ls runs. lsof (if there) shows what the shell
+                -- holds, for the failure message.
+                [ "log='" <> fdDir <> "'/$$",
+                  "ulimit -n > \"$log.limit\"",
+                  "/bin/ls -l /dev/fd/ > \"$log.fds\"",
+                  "for l in /usr/sbin/lsof /usr/bin/lsof; do",
+                  "  if [ -x \"$l\" ]; then \"$l\" -p $$ > \"$log.lsof\" 2>&1; break; fi",
+                  "done",
                   "exec '" <> real <> "' \"$@\""
                 ]
             gitDir <- realGitDir
@@ -516,17 +525,10 @@ gitTests =
               r <- getPath server "api/files/tree"
               assertContains "\"path\":\"a.hs\"" (Char8.unpack r.body)
             files <- Dir.listDirectory fdDir
-            calls <- mapM (fmap lines . readFile . (fdDir </>)) files
+            let logs = [fdDir </> takeWhile (/= '.') f | f <- files, ".fds" `isSuffixOf` f]
             -- --version, rev-parse, two ls-files.
-            length calls @?= 4
-            mapM_
-              ( \case
-                  limit : fds -> do
-                    assertBool ("fd limit " <> limit) (read limit <= (4096 :: Int))
-                    fds @?= ["0", "1", "2", "3"]
-                  [] -> assertFailure "empty log"
-              )
-              calls
+            length logs @?= 4
+            mapM_ checkFdLog logs
             pure "",
       testCase "hostile repo config: nothing runs, .git unchanged" $
         withCanonicalTemp $ \dir -> do
@@ -579,6 +581,31 @@ gitTests =
           lock <- Dir.doesPathExist (root </> ".git" </> "index.lock")
           assertBool "index.lock left" (not lock)
     ]
+
+-- | Check one call of the fake git in "git inherits no fds and a capped
+-- limit": soft fd limit at most 4096, only fds 0-3 (3 is ls's own
+-- /dev/fd). On failure, show the full ls -l and lsof output.
+checkFdLog :: FilePath -> Assertion
+checkFdLog logFile = do
+  limit <- filter (/= '\n') <$> readFile (logFile <> ".limit")
+  listing <- readFile (logFile <> ".fds")
+  lsof <- either (const "(no lsof)") id <$> try @IOException (readFile' (logFile <> ".lsof"))
+  assertBool ("fd limit " <> limit) (read limit <= (4096 :: Int))
+  let fds = sort (map fdOf (filter (not . ("total" `isPrefixOf`)) (lines listing)))
+  unless (fds == [0, 1, 2, 3]) $
+    assertFailure $
+      "fds seen by git: "
+        <> show fds
+        <> "\nls -l /dev/fd/:\n"
+        <> listing
+        <> "lsof of the shell:\n"
+        <> lsof
+  where
+    -- The name is before "->" if it's a link (Linux), else last (macOS).
+    fdOf :: String -> Int
+    fdOf line = case break (== "->") (words line) of
+      (before, _ : _) | not (null before) -> read (last before)
+      (ws, _) -> read (last ws)
 
 -- | A git script that writes the marker if run.
 plantGit :: FilePath -> FilePath -> IO ()
