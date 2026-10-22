@@ -1,0 +1,13 @@
+source: cabal.project
+package pkg 1.0 (pkg/pkg.cabal)
+  lib
+    source dirs: pkg/src, shared, pkg
+    language: Haskell98
+    modules: P (exposed)
+    include-dirs: pkg/include
+  exe:e
+    source dirs: pkg/app
+    language: Haskell98
+    main-is: ../Main.hs
+warning: pkg/pkg.cabal: hs-source-dirs: ../../../escape skipped (outside ROOT)
+warning: pkg/pkg.cabal: include-dirs: /usr/include skipped (absolute path)

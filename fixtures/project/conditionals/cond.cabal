@@ -1,0 +1,67 @@
+cabal-version: 3.0
+name:          cond
+version:       1.0
+
+flag dev
+  description: Dev build.
+  default:     False
+  manual:      True
+
+flag fast
+  default: True
+  manual:  False
+
+library
+  hs-source-dirs:  src
+  exposed-modules: Cond
+  build-depends:   base
+
+  if os(linux)
+    other-modules: Cond.Linux
+  elif os(darwin)
+    other-modules: Cond.Darwin
+  else
+    other-modules: Cond.Other
+
+  if os(windows)
+    other-modules: Cond.Windows
+
+  if arch(x86_64)
+    cpp-options: -DX86
+  if arch(aarch64)
+    cpp-options: -DARM
+
+  if flag(dev)
+    ghc-options: -O0
+  else
+    ghc-options: -O1
+
+  if flag(fast)
+    cpp-options: -DFAST
+
+  if impl(ghc >= 9.14)
+    default-extensions: OrPatterns
+  if impl(ghc < 9.10)
+    build-depends: old-dep
+  if impl(ghcjs)
+    build-depends: ghcjs-base
+
+  if os(linux)
+    if arch(x86_64)
+      other-modules: Cond.LinuxX86
+    else
+      other-modules: Cond.LinuxOther
+
+library internal
+  hs-source-dirs:   internal
+  exposed-modules:  Internal
+  default-language: Haskell2010
+  if os(darwin)
+    buildable: False
+
+executable tool
+  hs-source-dirs: app
+  main-is:        Main.hs
+  build-depends:  base
+  if os(darwin)
+    main-is: MainMac.hs

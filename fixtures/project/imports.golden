@@ -1,0 +1,17 @@
+source: cabal.project, imports common.project, cfg/more.project
+package lib 1.0 (lib/lib.cabal)
+  lib
+    source dirs: lib
+    language: Haskell98
+    modules: M (exposed)
+package main 1.0 (main/main.cabal)
+  flag a = True (manual, from common.project)
+  flag b = True (manual, from cfg/more.project)
+  lib
+    source dirs: main
+    language: Haskell98
+    modules: M (exposed)
+warning: cfg/more.project:3: import cycle: ../cabal.project
+warning: cabal.project:3: remote import skipped: https://example.com/remote.project
+warning: cabal.project:4: import skipped: ../outside.project (outside ROOT)
+warning: cabal.project:5: import not found: missing.project

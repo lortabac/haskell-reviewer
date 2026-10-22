@@ -17,6 +17,19 @@ module HaskellReviewer.Core.RelPath
 
     -- * Symlinks
     resolveLinkTarget,
+
+    -- * Dirs
+    RelDir,
+    PathProblem (..),
+    rootDir,
+    relDirFromSegments,
+    relDirSegments,
+    relDirText,
+    relDirFile,
+    parentDir,
+    relPathDirs,
+    relPathName,
+    resolveUnder,
   )
 where
 
@@ -149,6 +162,77 @@ resolveLinkTarget link target
           [] -> Nothing
           _ : up -> go up rest
       | otherwise = go (s : dir) rest
+
+-- * Dirs
+
+-- | A dir under ROOT, or ROOT itself. Same segment rules as 'RelPath'.
+newtype RelDir = RelDir [Text]
+  deriving (Eq, Ord, Show)
+
+-- | ROOT.
+rootDir :: RelDir
+rootDir = RelDir []
+
+-- | Join segments (empty list is ROOT). 'Nothing' if any segment is
+-- bad.
+relDirFromSegments :: [Text] -> Maybe RelDir
+relDirFromSegments segs
+  | all goodSegment segs = Just (RelDir segs)
+  | otherwise = Nothing
+
+-- | The segments. Empty for ROOT.
+relDirSegments :: RelDir -> [Text]
+relDirSegments (RelDir segs) = segs
+
+-- | The dir as text: @a\/b@, or @.@ for ROOT.
+relDirText :: RelDir -> Text
+relDirText (RelDir []) = "."
+relDirText (RelDir segs) = Text.intercalate "/" segs
+
+-- | The same path, as a file path. 'Nothing' for ROOT.
+relDirFile :: RelDir -> Maybe RelPath
+relDirFile (RelDir segs) = relPathFromSegments segs
+
+-- | The dir a file is in.
+parentDir :: RelPath -> RelDir
+parentDir = RelDir . dirSegments
+
+-- | The dirs above a file, from ROOT down: @a\/b\/c@ gives ROOT, @a@
+-- and @a\/b@.
+relPathDirs :: RelPath -> [RelDir]
+relPathDirs = map RelDir . inits . dirSegments
+
+-- | The last segment, e.g. @Foo.hs@.
+relPathName :: RelPath -> Text
+relPathName (RelPath t) = Text.takeWhileEnd (/= '/') t
+
+-- | Why a path written in a project file can't be used.
+data PathProblem
+  = AbsolutePath
+  | -- | Goes above ROOT with @..@.
+    AboveRoot
+  | -- | A bad segment, like @.git@ or a NUL.
+    BadName
+  deriving (Eq, Show)
+
+-- | Read a path as written in a project file (@src@, @..\/shared@,
+-- @.\/@), relative to a dir. Lexical: @.@ and @..@ are applied to the
+-- text, no disk access. Empty text is the dir itself. See
+-- Note [File containment].
+resolveUnder :: RelDir -> Text -> Either PathProblem RelDir
+resolveUnder (RelDir base) t
+  | "/" `Text.isPrefixOf` t = Left AbsolutePath
+  | otherwise = go (reverse base) (Text.splitOn "/" t)
+  where
+    -- The dir so far is kept reversed.
+    go dir [] = Right (RelDir (reverse dir))
+    go dir (s : rest)
+      | s == "" || s == "." = go dir rest
+      | s == ".." = case dir of
+          [] -> Left AboveRoot
+          _ : up -> go up rest
+      | goodSegment s = go (s : dir) rest
+      | otherwise = Left BadName
 
 -- * Internal
 

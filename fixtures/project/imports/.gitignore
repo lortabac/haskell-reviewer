@@ -1,0 +1,2 @@
+# Keep our fixture: the top .gitignore ignores this name.
+!cabal.project.local

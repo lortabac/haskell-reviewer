@@ -5,6 +5,15 @@ implementation phase. Their outcomes are logged in DECISIONS.md, and SPEC.md
 is updated if needed (§10.3).
 
 ## To verify during implementation (not blocking the spec)
+- **Q-RTS-BLACKHOLE**: On GHC 9.12 and 9.14 (not 9.10) the threaded test
+  binary sometimes hung (about 5% of runs of the PackageGlob tests): several
+  capabilities spin on a `CAF_BLACKHOLE` whose blocking queue was already
+  woken, so GC sync never ends and SIGTERM is ignored. Not our code (pure,
+  no `unsafe*`); standalone repros didn't hang. Workaround: shared test
+  values are built once with `withResource` (Note [Shared values in tests]).
+  Open: root cause, GHC issue, and whether the server can hit it. Until
+  then, the server builds shared values fully before request threads use
+  them.
 - **Q-OLD-SYNTAX**: How real is "the newest parser rejects old code"? The
   known cases (e.g. changes to `forall`/`!`/`~` lexing, `NoStarIsType`) need
   to be checked against the 3 supported GHCs, which may require a lexing-mode

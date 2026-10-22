@@ -1,0 +1,15 @@
+source: cabal.project
+with-compiler: ghc-9.12.2 (9.12.2) from cabal.project
+package base-pkg 1.0 (base-pkg/base-pkg.cabal)
+  flag x = True (manual, from cabal.project)
+  lib
+    source dirs: base-pkg
+    language: Haskell98
+    modules: M (exposed)
+package linux-pkg 1.0 (linux-pkg/linux-pkg.cabal)
+  lib
+    source dirs: linux-pkg
+    language: Haskell98
+    modules: M (exposed)
+warning: cabal.project:13: flag() in a condition is taken as false
+warning: cabal.project:17: with-compiler inside a conditional is ignored

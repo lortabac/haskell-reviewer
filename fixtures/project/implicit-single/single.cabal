@@ -1,0 +1,33 @@
+cabal-version: 3.0
+name:          single
+version:       0.2.0
+
+common warnings
+  ghc-options:        -Wall
+  default-extensions: OverloadedStrings
+
+library
+  import:          warnings
+  hs-source-dirs:  src
+  exposed-modules: Single
+  other-modules:   Paths_single
+  autogen-modules: Paths_single
+  build-depends:   base, text
+
+executable single-exe
+  import:         warnings
+  hs-source-dirs: app
+  main-is:        Main.hs
+  build-depends:  base, single
+
+test-suite spec
+  type:             exitcode-stdio-1.0
+  main-is:          Spec.hs
+  default-language: Haskell2010
+  build-depends:    base, single
+
+benchmark bench
+  type:           exitcode-stdio-1.0
+  hs-source-dirs: bench
+  main-is:        Bench.hs
+  build-depends:  base

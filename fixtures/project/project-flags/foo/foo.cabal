@@ -1,0 +1,18 @@
+cabal-version: 3.0
+name:          foo
+version:       1.0
+
+flag dev
+  default: False
+  manual:  True
+
+flag fast
+  default: True
+  manual:  False
+
+flag shared
+  default: False
+  manual:  True
+
+library
+  exposed-modules: Foo

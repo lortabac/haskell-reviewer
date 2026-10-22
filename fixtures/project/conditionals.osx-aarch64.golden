@@ -1,0 +1,21 @@
+source: *.cabal in ROOT
+package cond 1.0 (cond.cabal)
+  flag dev = False (manual, default)
+  flag fast = True (automatic, default)
+  lib
+    source dirs: src
+    language: Haskell98
+    extensions: OrPatterns
+    build-depends: base
+    modules: Cond (exposed), Cond.Darwin (other)
+    ghc-options: -O1
+    cpp-options: -DARM, -DFAST
+  lib:internal (not buildable)
+    source dirs: internal
+    language: Haskell2010
+    modules: Internal (exposed)
+  exe:tool
+    source dirs: app
+    language: Haskell98
+    build-depends: base
+    main-is: MainMac.hs

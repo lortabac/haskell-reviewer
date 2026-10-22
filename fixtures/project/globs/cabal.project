@@ -1,0 +1,15 @@
+-- Globs, dirs, files, and entries we skip.
+packages: libs/*/
+          apps/*/*.cabal
+          {tools,extra}/*
+          ./core
+          ./core/
+          .
+          hpack/
+          empty-dir/
+          two/
+          nothing/*
+          deep/**/*.cabal
+packages: https://example.com/pkg.tar.gz, vendor/thing-1.0.tar.gz
+packages: ../outside /abs/pkg ~/pkg
+optional-packages: missing/*

@@ -1,0 +1,3 @@
+constraints: any.base ==4.20.0.0
+packages: freeze-only/
+flags: -a -b

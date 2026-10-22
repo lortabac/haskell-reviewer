@@ -1,0 +1,9 @@
+source: *.cabal in ROOT
+package good 1.0 (good.cabal)
+  lib
+    source dirs: .
+    language: Haskell98
+    modules: Good (exposed)
+broken: bad.cabal: can't parse: bad.cabal:7:25: unexpected end of input expecting white space or version digit (integral without leading zeroes)
+broken: undeclared.cabal: can't parse: undeclared.cabal:0:0: These flags are used without having been defined: nope
+warning: cabal.project: can't parse: (line 3, column 1): unexpected character in input '\n' expecting field or section name

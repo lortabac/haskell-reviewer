@@ -1,0 +1,19 @@
+cabal-version: 3.0
+name:          bar
+version:       1.0
+
+flag dev
+  default: False
+  manual:  True
+
+flag fast
+  default: True
+
+flag other
+  default: True
+  manual:  True
+
+library
+  exposed-modules: Bar
+  if flag(dev)
+    cpp-options: -DDEV

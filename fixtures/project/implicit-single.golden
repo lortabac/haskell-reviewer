@@ -1,0 +1,26 @@
+source: *.cabal in ROOT
+package single 0.2.0 (single.cabal)
+  lib
+    source dirs: src
+    language: Haskell98
+    extensions: OverloadedStrings
+    build-depends: base, text
+    modules: Single (exposed), Paths_single (other, autogen)
+    ghc-options: -Wall
+  exe:single-exe
+    source dirs: app
+    language: Haskell98
+    extensions: OverloadedStrings
+    build-depends: base, single
+    main-is: Main.hs
+    ghc-options: -Wall
+  test:spec
+    source dirs: .
+    language: Haskell2010
+    build-depends: base, single
+    main-is: Spec.hs
+  bench:bench
+    source dirs: bench
+    language: Haskell98
+    build-depends: base
+    main-is: Bench.hs
