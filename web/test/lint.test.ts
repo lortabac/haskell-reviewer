@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { ESLint } from "eslint";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 // Each snippet must fail one of our rules (SPEC §11.7). Linted with the
 // real config. The file name is listed in eslint.config.js.
@@ -68,8 +68,11 @@ const banned: [string, string][] = [
 
 const clean = "export const A = () => <div class='x'>{'text'}</div>;\n";
 
+// Cold start (config + type-aware parser) can take over 5s on CI. One
+// instance for all tests; pay the cold start once in beforeAll.
+const eslint = new ESLint();
+
 async function lint(code: string): Promise<ESLint.LintResult> {
-  const eslint = new ESLint();
   const [result] = await eslint.lintText(code, {
     filePath: "lint-snippet.tsx",
   });
@@ -78,6 +81,10 @@ async function lint(code: string): Promise<ESLint.LintResult> {
 }
 
 describe("lint rules", () => {
+  beforeAll(async () => {
+    await lint(clean);
+  }, 60_000);
+
   it.each(banned)("rejects %s", async (code, rule) => {
     const result = await lint(code);
     expect(result.messages.filter((m) => m.fatal)).toEqual([]);
