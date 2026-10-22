@@ -1,0 +1,4 @@
+notice: stack
+notice: implicit
+other: Foo.hs [Foo]
+other: src/Bar/Baz.hs [Bar.Baz]

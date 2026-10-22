@@ -23,6 +23,7 @@ import Control.Concurrent.STM
 import Data.ByteString.Lazy qualified as LBS
 import Data.Word (Word64)
 import HaskellReviewer.Core.FileList (FileList)
+import HaskellReviewer.Core.Modules (ModuleIndex)
 import HaskellReviewer.Core.Root (CanonicalRoot)
 import HaskellReviewer.Effects.FileSystem (ListError)
 
@@ -36,14 +37,17 @@ newtype Generation = Generation Word64
 firstGeneration :: Generation
 firstGeneration = Generation 1
 
--- | One snapshot. Never changes once made.
+-- | One snapshot. Never changes once made. Forced before requests see
+-- it: see Note [Forced snapshot] in "HaskellReviewer.Server.Api".
 data Snapshot = Snapshot
   { generation :: Generation,
     root :: CanonicalRoot,
     files :: FileList,
-    -- | The body of GET api/files/tree, made once. Lazy: made on the
-    -- first request.
-    fileListJson :: LBS.ByteString
+    modules :: ModuleIndex,
+    -- | The body of GET api/files/tree, made once.
+    fileListJson :: LBS.ByteString,
+    -- | The body of GET api/modules/tree, made once.
+    moduleTreeJson :: LBS.ByteString
   }
 
 -- | Where the snapshot goes once listed. Requests wait on it: the list

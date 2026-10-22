@@ -1215,8 +1215,9 @@ revspec ─► git layer ─► snapshot (file list + blobs, per side)
   relevant.
 - **Flag values**: `.cabal` default < `cabal.project` (`flags:`) <
   `--flag`. The header tooltip shows where each value came from. Flags set
-  only through `constraints:` are not read, and automatic flags
-  (`manual: False`) keep their default, since there is no solver.
+  only through `constraints:` are not read. Automatic flags (`manual:
+  False`) can be set like manual ones, but are never flipped by a solver,
+  since there is none (D-95).
 - Stack is not supported. `stack.yaml` is never read (§2, §8).
 
 #### 11.4.3 CPP

@@ -15,6 +15,7 @@ import Control.Concurrent.MVar
 import Control.Exception (AsyncException (..), throwIO, try)
 import Control.Monad (forever, void)
 import Data.ByteString qualified as BS
+import Data.ByteString.Lazy qualified as LBS
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef)
 import Data.Maybe (isNothing)
 import Data.Text (Text)
@@ -38,6 +39,7 @@ import HaskellReviewer.Effects.Shutdown (Shutdown (..))
 import HaskellReviewer.Effects.Spawn (SoftLimit (..), SpawnSetup (..))
 import HaskellReviewer.Effects.Trace (Span (..), TraceFileError (..), Tracer (..))
 import HaskellReviewer.Server.Listen (ListenError (..), Listener (..))
+import HaskellReviewer.Session.Project qualified as Session.Project
 import Network.Wai (Application, Request (..), defaultRequest, responseToStream)
 import Network.Wai.Internal (ResponseReceived (..))
 import System.Exit (ExitCode (..))
@@ -293,6 +295,20 @@ listingTests =
             putMVar release ()
             r <- timeout 5_000_000 (wait request)
             fmap (.status) r @?= Just 200,
+      testCase "project crashes: a line, files still work, warning in the tree" $ do
+        let crash d = d {readProject = \_ _ _ -> ioError (userError "boom")}
+            empty _ = fakeLister (pure (Right (mkFileList FromDisk 0 [])))
+        withRunningWith crash empty $ \fake app -> do
+          r <- getFiles app
+          r.status @?= 200
+          m <-
+            callApp app "GET" "127.0.0.1:4321" $
+              [tokenText fakeToken, "api", "modules", "tree"]
+          m.status @?= 200
+          let warning = "can't read the project: user error (boom)"
+          assertBool (show m.body) (warning `BS.isInfixOf` LBS.toStrict m.body)
+          out <- readIORef fake.console
+          drop 1 out @?= ["haskell-reviewer: cannot read the project: user error (boom)"],
       testCase "warnings for skipped names and the cap" $ do
         let big = (mkFileList FromDisk 3 []) {truncated = True}
         withRunning (\_ -> fakeLister (pure (Right big))) $ \fake app -> do
@@ -310,15 +326,21 @@ listingTests =
 -- | Run with this lister until the action is done, then stop with a
 -- signal. The action gets the app warp would serve.
 withRunning :: (Fake -> Lister) -> (Fake -> Application -> IO a) -> IO a
-withRunning mkLister action = do
+withRunning = withRunningWith id
+
+-- | Like 'withRunning', with changed deps.
+withRunningWith ::
+  (Deps -> Deps) -> (Fake -> Lister) -> (Fake -> Application -> IO a) -> IO a
+withRunningWith change mkLister action = do
   fake <- newFake
   stop <- newEmptyMVar
   appVar <- newEmptyMVar
   let serve ready app = ready >> putMVar appVar app >> blockForever
       deps =
-        (idleDeps fake stop serve)
-          { probeFiles = \_ _ -> pure (Right (mkLister fake))
-          }
+        change
+          (idleDeps fake stop serve)
+            { probeFiles = \_ _ -> pure (Right (mkLister fake))
+            }
   withAsync (run deps ["--idle-exit", "0"]) $ \running -> do
     app <- timeout 5_000_000 (takeMVar appVar)
     result <- maybe (assertFailure "not ready") (action fake) app
@@ -519,6 +541,7 @@ newFake = do
             listen = \_ _ -> pure (Right listener),
             -- Never done: no line or span from the listing.
             probeFiles = \_ _ -> pure (Right (fakeLister neverDone)),
+            readProject = Session.Project.readProject,
             openBrowser = \_ _ url -> modifyIORef' opened (<> [url]),
             installShutdown =
               pure

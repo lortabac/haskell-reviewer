@@ -1,0 +1,4 @@
+notice: stack
+package sc 1.0 (sc.cabal)
+  lib
+    Lib [Lib] exposed: src/Lib.hs

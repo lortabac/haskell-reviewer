@@ -1,29 +1,37 @@
--- | The file list and file text routes.
+-- | The routes that read the snapshot: file list, file text, module
+-- tree.
 module HaskellReviewer.Server.Api
   ( -- * Types
     FilesApi (..),
 
     -- * Snapshots
     newSnapshot,
+    forceSnapshot,
 
     -- * Routes
     filesApp,
     fileApp,
+    modulesApp,
   )
 where
 
+import Control.Exception (evaluate)
+import Control.Monad (void)
 import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Lazy qualified as LBS
 import Data.Map.Strict qualified as Map
+import Data.Set qualified as Set
 import Data.Text (Text)
 import HaskellReviewer.Core.FileContent (FileContent (..), LinkInfo (..))
 import HaskellReviewer.Core.FileList (EntryKind, FileList (..))
+import HaskellReviewer.Core.Modules (ModuleIndex (..), buildModuleIndex)
+import HaskellReviewer.Core.Project (Project)
 import HaskellReviewer.Core.RelPath (RelPath, relPathFromSegments, relPathText)
 import HaskellReviewer.Core.Root (CanonicalRoot)
 import HaskellReviewer.Effects.FileSystem (ListError, ReadError (..))
 import HaskellReviewer.Effects.Log (Logger, logInfo)
 import HaskellReviewer.Server.Security (methodNotAllowed, notFound)
-import HaskellReviewer.Server.Wire (encodeFileList, encodeFileView)
+import HaskellReviewer.Server.Wire (encodeFileList, encodeFileView, encodeModuleTree)
 import HaskellReviewer.Session.Snapshot (Snapshot (..), firstGeneration)
 import Network.HTTP.Types
   ( hContentLength,
@@ -34,7 +42,7 @@ import Network.HTTP.Types
   )
 import Network.Wai (Application, Request (..), Response, responseLBS)
 
--- | What the file routes need. Tests plug in fakes.
+-- | What the snapshot routes need. Tests plug in fakes.
 data FilesApi = FilesApi
   { -- | The snapshot. Waits until the list is made.
     snapshot :: IO (Either ListError Snapshot),
@@ -45,15 +53,41 @@ data FilesApi = FilesApi
     logger :: Logger
   }
 
--- | The snapshot of a file list, with its JSON body ready.
-newSnapshot :: CanonicalRoot -> FileList -> Snapshot
-newSnapshot root fl =
+{- Note [Forced snapshot]
+
+On GHC 9.12 and 9.14, threads that force the same thunk at once can
+livelock the RTS (Q-RTS-BLACKHOLE). Request threads all read the same
+snapshot. So the listing thread builds it fully ('forceSnapshot')
+before it fills the slot: request threads then find no thunk to force.
+-}
+
+-- | The snapshot of a file list and its project, with the JSON bodies.
+-- Lazy: call 'forceSnapshot' before requests see it.
+newSnapshot :: CanonicalRoot -> FileList -> Project -> Snapshot
+newSnapshot root fl project =
   Snapshot
     { generation = firstGeneration,
       root = root,
       files = fl,
-      fileListJson = encodeFileList firstGeneration fl
+      modules = modules,
+      fileListJson = encodeFileList firstGeneration fl,
+      moduleTreeJson = encodeModuleTree firstGeneration modules
     }
+  where
+    modules = buildModuleIndex project fl
+
+-- | Force both JSON bodies, the module index (strict fields), and every
+-- list of its name maps and the id set. The JSON walks the rest of the
+-- index. See Note [Forced snapshot].
+forceSnapshot :: Snapshot -> IO ()
+forceSnapshot snap = do
+  let idx = snap.modules
+  void (evaluate idx)
+  mapM_ (mapM_ evaluate) (Map.elems idx.ownedByName)
+  mapM_ (mapM_ evaluate) (Map.elems idx.looseByName)
+  void (evaluate (Set.size idx.ids))
+  void (evaluate (LBS.length snap.fileListJson))
+  void (evaluate (LBS.length snap.moduleTreeJson))
 
 -- | @GET api\/files\/\<side>@: the file list. The only side is @tree@.
 filesApp :: FilesApi -> Text -> Application
@@ -64,6 +98,17 @@ filesApp api side req respond
       api.snapshot >>= \case
         Left _ -> respond cannotList
         Right snap -> respond (json snap.fileListJson)
+
+-- | @GET api\/modules\/\<side>@: the module tree. The only side is
+-- @tree@.
+modulesApp :: FilesApi -> Text -> Application
+modulesApp api side req respond
+  | req.requestMethod /= methodGet = respond (methodNotAllowed "GET")
+  | side /= "tree" = respond notFound
+  | otherwise =
+      api.snapshot >>= \case
+        Left _ -> respond cannotList
+        Right snap -> respond (json snap.moduleTreeJson)
 
 -- | @GET api\/file\/\<side>\/\<path segments>@: one file of the list.
 -- Anything not in the list is a 404. See Note [File containment] in

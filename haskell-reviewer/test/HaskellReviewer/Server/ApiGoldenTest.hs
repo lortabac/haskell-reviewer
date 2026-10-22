@@ -4,10 +4,11 @@
 -- Tests run from the package dir, so fixtures/api is one level up.
 module HaskellReviewer.Server.ApiGoldenTest (tests) where
 
-import ApiSupport (ApiResult (..), fixtureApi, getApi)
+import ApiSupport (ApiResult (..), fixtureApi, getApi, implicitApi, projectApi)
 import Data.ByteString.Lazy qualified as LBS
 import Data.List (sort)
 import Data.Text (Text)
+import HaskellReviewer.Server.Api (FilesApi)
 import HaskellReviewer.Server.Wire (helloPayload)
 import System.Directory qualified as Dir
 import System.FilePath (dropExtension, takeExtension)
@@ -25,12 +26,14 @@ tests =
 cases :: [(String, IO LBS.ByteString)]
 cases =
   [ ("events-hello", pure (LBS.fromStrict helloPayload <> "\n")),
-    ("files", okBody ["api", "files", "tree"]),
-    ("file-text", okBody (file ["app", "Main.hs"])),
-    ("file-binary", okBody (file ["assets", "logo.png"])),
-    ("file-too-large", okBody (file ["data", "big.csv"])),
-    ("file-symlink", okBody (file ["docs", "guide.md"])),
-    ("file-submodule", okBody (file ["vendor", "dep"]))
+    ("files", okBody fixtureApi ["api", "files", "tree"]),
+    ("file-text", okBody fixtureApi (file ["app", "Main.hs"])),
+    ("file-binary", okBody fixtureApi (file ["assets", "logo.png"])),
+    ("file-too-large", okBody fixtureApi (file ["data", "big.csv"])),
+    ("file-symlink", okBody fixtureApi (file ["docs", "guide.md"])),
+    ("file-submodule", okBody fixtureApi (file ["vendor", "dep"])),
+    ("modules", okBody projectApi ["api", "modules", "tree"]),
+    ("modules-implicit", okBody implicitApi ["api", "modules", "tree"])
   ]
   where
     file p = ["api", "file", "tree"] <> p
@@ -47,9 +50,9 @@ noStale = do
   [f | f <- files, takeExtension f /= ".json"] @?= []
 
 -- | GET through the real app; must be a 200 with JSON.
-okBody :: [Text] -> IO LBS.ByteString
-okBody path = do
-  r <- getApi fixtureApi path
+okBody :: FilesApi -> [Text] -> IO LBS.ByteString
+okBody api path = do
+  r <- getApi api path
   r.status @?= 200
   lookup "Content-Type" r.headers @?= Just "application/json"
   pure (r.body <> "\n")

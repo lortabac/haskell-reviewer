@@ -10,6 +10,15 @@ import {
   entryKinds,
   fileViewKinds,
 } from "./files";
+import {
+  decodeModuleTree,
+  moduleRoles,
+  noSourceReasons,
+  noticeKinds,
+  otherKinds,
+  sourceKinds,
+  type ModuleEntry,
+} from "./modules";
 import { fixture, fixtures } from "../../test/fixtures";
 
 // Every fixture, with the decoder for it. One per file view kind.
@@ -21,6 +30,8 @@ const decoders: Record<string, (value: unknown) => unknown> = {
   "file-too-large": decodeFileView,
   "file-symlink": decodeFileView,
   "file-submodule": decodeFileView,
+  modules: decodeModuleTree,
+  "modules-implicit": decodeModuleTree,
 };
 
 describe("API fixtures", () => {
@@ -48,6 +59,40 @@ describe("API fixtures", () => {
     expect(
       list.entries.some((e) => e.kind === "submodule" && e.commit === null),
     ).toBe(true);
+  });
+
+  it("the module tree fixtures cover every kind, role and reason", () => {
+    const trees = [fixture("modules"), fixture("modules-implicit")].map(
+      decodeModuleTree,
+    );
+    const entries = trees.flatMap((t) =>
+      t.packages.flatMap((p) => p.components.flatMap((c) => c.modules)),
+    );
+    const sorted = (xs: Iterable<string>) => [...new Set(xs)].sort();
+    expect(sorted(trees.flatMap((t) => t.notices.map((n) => n.kind)))).toEqual(
+      sorted(noticeKinds),
+    );
+    expect(sorted(entries.map((e) => e.role))).toEqual(sorted(moduleRoles));
+    expect(sorted(entries.map((e) => e.source.kind))).toEqual(
+      sorted(sourceKinds),
+    );
+    expect(
+      sorted(
+        entries.flatMap((e) =>
+          e.source.kind === "no-source" ? [e.source.reason] : [],
+        ),
+      ),
+    ).toEqual(sorted(noSourceReasons));
+    const others = trees.flatMap((t) => t.other);
+    expect(sorted(others.map((o) => o.kind))).toEqual(sorted(otherKinds));
+    // A loose file with no module name, a short ref and a long one.
+    expect(others.some((o) => o.kind === "module" && o.name === null)).toBe(
+      true,
+    );
+    expect(entries.some((e) => e.ref === e.name)).toBe(true);
+    expect(entries.some((e) => e.ref === e.id)).toBe(true);
+    expect(trees.some((t) => t.broken.length > 0)).toBe(true);
+    expect(trees.some((t) => t.warnings.length > 0)).toBe(true);
   });
 
   it("text comes through as is", () => {
@@ -109,6 +154,55 @@ describe("decoders reject bad shapes", () => {
       { ...list, skippedNames: undefined },
     ]) {
       expect(() => decodeFileList(bad), JSON.stringify(bad)).toThrow(
+        DecodeError,
+      );
+    }
+  });
+
+  it("module tree", () => {
+    const entry: ModuleEntry = {
+      name: "A",
+      id: "p:lib:A",
+      ref: "A",
+      role: "exposed",
+      source: { kind: "module", path: "A.hs" },
+    };
+    const withModule = (m: object) => ({
+      generation: 1,
+      notices: [{ kind: "stack" }],
+      packages: [
+        {
+          name: "p",
+          version: "1",
+          cabalFile: "p.cabal",
+          components: [{ name: "lib", buildable: true, modules: [m] }],
+        },
+      ],
+      broken: [],
+      other: [{ kind: "boot", path: "A.hs-boot" }],
+      warnings: [],
+    });
+    const tree = withModule(entry);
+    expect(decodeModuleTree(tree)).toEqual(tree);
+    for (const bad of [
+      { ...tree, generation: -1 },
+      { ...tree, notices: [{ kind: "cabal" }] },
+      { ...tree, notices: [{ kind: "hpack" }] },
+      { ...tree, notices: [{ kind: "hpack", dirs: [1] }] },
+      { ...tree, packages: [{ name: "p" }] },
+      { ...tree, broken: [{ cabalFile: "x" }] },
+      { ...tree, other: [{ kind: "module", path: "x.hs" }] },
+      { ...tree, other: [{ kind: "elf", path: "x" }] },
+      { ...tree, warnings: [1] },
+      { ...tree, warnings: undefined },
+      withModule({ ...entry, role: "hidden" }),
+      withModule({ ...entry, ref: undefined }),
+      withModule({ ...entry, source: { kind: "module" } }),
+      withModule({ ...entry, source: { kind: "generated", path: "x.y" } }),
+      withModule({ ...entry, source: { kind: "no-source", reason: "lost" } }),
+      withModule({ ...entry, source: { kind: "binary", path: "x" } }),
+    ]) {
+      expect(() => decodeModuleTree(bad), JSON.stringify(bad)).toThrow(
         DecodeError,
       );
     }

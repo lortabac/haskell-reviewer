@@ -1,0 +1,3 @@
+notice: implicit
+notice: hpack: .
+other: src/Lib.hs [Lib]

@@ -193,6 +193,8 @@ tests =
             ["api", "files"],
             ["api", "file"],
             ["api", "files", "tree", "x"],
+            ["api", "modules"],
+            ["api", "modules", "tree", "x"],
             ["index.html"]
           ]
     ]
