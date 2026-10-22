@@ -1,0 +1,3 @@
+-- Relative to this file's dir.
+flags: -a +b
+import: ../cabal.project

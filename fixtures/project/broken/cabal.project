@@ -1,0 +1,3 @@
+-- Does not lex: an open quote at column 1.
+packages: good/
+"oops

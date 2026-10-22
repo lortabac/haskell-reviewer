@@ -1,0 +1,6 @@
+cabal-version: 3.0
+name: good
+version: 1.0
+
+library
+  exposed-modules: Good

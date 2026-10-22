@@ -1,0 +1,3 @@
+packages: lib/
+import: cfg/more.project
+flags: +a

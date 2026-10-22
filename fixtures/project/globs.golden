@@ -1,0 +1,61 @@
+source: cabal.project
+package x 1.0 (apps/x/x.cabal)
+  lib
+    source dirs: apps/x
+    language: Haskell98
+    modules: M (exposed)
+package core 1.0 (core/core.cabal)
+  lib
+    source dirs: core
+    language: Haskell98
+    modules: M (exposed)
+package dot 1.0 (deep/.dot/dot.cabal)
+  lib
+    source dirs: deep/.dot
+    language: Haskell98
+    modules: M (exposed)
+package deep 1.0 (deep/x/y/deep.cabal)
+  lib
+    source dirs: deep/x/y
+    language: Haskell98
+    modules: M (exposed)
+package t 1.0 (extra/e/e.cabal)
+  lib
+    source dirs: extra/e
+    language: Haskell98
+    modules: M (exposed)
+package a 1.0 (libs/a/a.cabal)
+  lib
+    source dirs: libs/a
+    language: Haskell98
+    modules: M (exposed)
+package b 1.0 (libs/b/b.cabal)
+  lib
+    source dirs: libs/b
+    language: Haskell98
+    modules: M (exposed)
+package root 1.0 (root.cabal)
+  lib
+    source dirs: .
+    language: Haskell98
+    modules: M (exposed)
+package one 1.0 (two/one.cabal)
+  lib
+    source dirs: two
+    language: Haskell98
+    modules: M (exposed)
+package two 1.0 (two/two.cabal)
+  lib
+    source dirs: two
+    language: Haskell98
+    modules: M (exposed)
+warning: hpack: package.yaml but no .cabal file (Hpack is not supported: run hpack and commit the .cabal file)
+warning: empty-dir: no .cabal file
+warning: two: several .cabal files: two/one.cabal, two/two.cabal
+warning: cabal.project:11: no package matches nothing/*
+warning: cabal.project:13: package skipped: https://example.com/pkg.tar.gz (remote)
+warning: cabal.project:13: package skipped: vendor/thing-1.0.tar.gz (tarball)
+warning: cabal.project:14: package skipped: ../outside (outside ROOT)
+warning: cabal.project:14: package skipped: /abs/pkg (absolute path)
+warning: cabal.project:14: package skipped: ~/pkg (home dir)
+warning: package t is defined more than once (extra/e/e.cabal, tools/t/t.cabal): the first one is used

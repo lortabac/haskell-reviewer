@@ -1,0 +1,19 @@
+-- Conditionals are applied after the plain fields.
+if os(linux)
+  packages: linux-pkg/
+  flags: +x
+elif os(darwin)
+  packages: mac-pkg/
+else
+  packages: other-pkg/
+
+packages: base-pkg/
+flags: -x
+
+if flag(foo)
+  packages: never/
+
+if impl(ghc >= 9.14)
+  with-compiler: ghc-9.99
+
+with-compiler: ghc-9.12.2

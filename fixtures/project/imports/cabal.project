@@ -1,0 +1,5 @@
+import: common.project
+packages: main/
+import: https://example.com/remote.project
+import: ../outside.project
+import: missing.project

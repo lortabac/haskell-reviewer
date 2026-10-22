@@ -1,0 +1,11 @@
+source: *.cabal in ROOT
+package a 1.0 (a.cabal)
+  lib
+    source dirs: .
+    language: GHC2021
+    modules: A (exposed)
+package b 1.0 (b.cabal)
+  lib
+    source dirs: .
+    language: GHC2021
+    modules: B (exposed)

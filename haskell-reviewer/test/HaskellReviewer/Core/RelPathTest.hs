@@ -2,7 +2,11 @@ module HaskellReviewer.Core.RelPathTest (tests) where
 
 import HaskellReviewer.Core.RelPath
   ( BadPath (..),
+    PathProblem (..),
+    parentDir,
     parseRelPath,
+    relDirSegments,
+    relDirText,
     relPathBytes,
     relPathFromBytes,
     relPathFromSegments,
@@ -10,6 +14,8 @@ import HaskellReviewer.Core.RelPath
     relPathSegments,
     relPathText,
     resolveLinkTarget,
+    resolveUnder,
+    rootDir,
   )
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
@@ -73,5 +79,21 @@ tests =
         resolve "\xff" @?= Nothing
         -- A link at the top: its dir is ROOT.
         fmap relPathText (relPathFromBytes "lib" >>= (`resolveLinkTarget` "src/lib"))
-          @?= Just "src/lib"
+          @?= Just "src/lib",
+      testCase "resolveUnder" $ do
+        let pkg = maybe rootDir parentDir (relPathFromBytes "pkg/p.cabal")
+            resolve t = fmap relDirText (resolveUnder pkg t)
+        relDirSegments pkg @?= ["pkg"]
+        resolve "src" @?= Right "pkg/src"
+        resolve "." @?= Right "pkg"
+        resolve "" @?= Right "pkg"
+        resolve "./src/" @?= Right "pkg/src"
+        resolve ".." @?= Right "."
+        resolve "../shared" @?= Right "shared"
+        resolve "a/../../b" @?= Right "b"
+        resolve "../.." @?= Left AboveRoot
+        resolve "/usr/include" @?= Left AbsolutePath
+        resolve "a/.git/b" @?= Left BadName
+        resolve "a/.GIT" @?= Left BadName
+        fmap relDirText (resolveUnder rootDir "..") @?= Left AboveRoot
     ]

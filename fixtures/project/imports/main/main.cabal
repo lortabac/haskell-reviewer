@@ -1,0 +1,14 @@
+cabal-version: 3.0
+name: main
+version: 1.0
+
+flag a
+  default: False
+  manual: True
+
+flag b
+  default: False
+  manual: True
+
+library
+  exposed-modules: M

@@ -1,0 +1,19 @@
+source: cabal.project
+package bar 1.0 (bar/bar.cabal)
+  flag dev = True (manual, from cabal.project)
+  flag fast = False (automatic, from cabal.project)
+  flag other = True (manual, default)
+  lib
+    source dirs: bar
+    language: Haskell98
+    modules: Bar (exposed)
+    cpp-options: -DDEV
+package foo 1.0 (foo/foo.cabal)
+  flag dev = False (manual, from cabal.project)
+  flag fast = False (automatic, from cabal.project)
+  flag shared = False (manual, default)
+  lib
+    source dirs: foo
+    language: Haskell98
+    modules: Foo (exposed)
+warning: cabal.project:10: package foo has no flag nosuch

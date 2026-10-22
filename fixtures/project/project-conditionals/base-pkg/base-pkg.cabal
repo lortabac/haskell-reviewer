@@ -1,0 +1,10 @@
+cabal-version: 3.0
+name: base-pkg
+version: 1.0
+
+flag x
+  default: False
+  manual: True
+
+library
+  exposed-modules: M

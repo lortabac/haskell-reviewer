@@ -1,0 +1,10 @@
+packages: foo/ bar/
+
+flags: +dev -fast
+
+-- Ignored, like cabal: shared stays at its default, fast stays off.
+package *
+  flags: +shared +fast
+
+package foo
+  flags: -dev +nosuch

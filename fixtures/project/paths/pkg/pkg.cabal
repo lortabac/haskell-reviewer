@@ -1,0 +1,12 @@
+cabal-version: 3.0
+name:          pkg
+version:       1.0
+
+library
+  hs-source-dirs:  src ../shared ../../../escape . src
+  include-dirs:    include /usr/include
+  exposed-modules: P
+
+executable e
+  hs-source-dirs: app
+  main-is:        ../Main.hs
