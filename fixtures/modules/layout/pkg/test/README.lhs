@@ -1,0 +1,5 @@
+# Docs
+
+```haskell
+main = pure ()
+```

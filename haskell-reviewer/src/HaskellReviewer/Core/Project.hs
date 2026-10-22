@@ -410,6 +410,9 @@ data ProjectWarning
   | -- | Over 'HaskellReviewer.Core.FileList.fileListCap' files: some
     -- packages may be missing.
     FileListTruncated
+  | -- | Reading the project failed (a bug). The text is the error. No
+    -- packages are shown.
+    ProjectCrashed Text
   deriving (Eq, Show)
 
 -- | Why a @packages:@ entry is skipped.
@@ -477,6 +480,7 @@ renderProjectWarning = \case
       <> renderComponentName c
       <> " is defined twice, the first is used"
   FileListTruncated -> "too many files: some packages may be missing"
+  ProjectCrashed e -> "can't read the project: " <> e
   where
     loc l = relPathText l.file <> ":" <> Text.pack (show l.line)
     commas = Text.intercalate ", "

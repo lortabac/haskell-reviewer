@@ -1,4 +1,4 @@
--- | The file routes, in process: status codes and containment.
+-- | The snapshot routes, in process: status codes and containment.
 module HaskellReviewer.Server.ApiTest (tests) where
 
 import ApiSupport (ApiResult (..), fixtureApi, getApi, requestApi)
@@ -50,7 +50,9 @@ tests =
         r1 <- getApi fixtureApi ["api", "files", "head"]
         r1.status @?= 404
         r2 <- getApi fixtureApi ["api", "file", "base", "app", "Main.hs"]
-        r2.status @?= 404,
+        r2.status @?= 404
+        r3 <- getApi fixtureApi ["api", "modules", "head"]
+        r3.status @?= 404,
       testCase "not GET: 405, Allow: GET" $
         mapM_
           ( \(method, path) -> do
@@ -60,7 +62,11 @@ tests =
           )
           [ (m, p)
           | m <- ["HEAD", "POST", "PUT"],
-            p <- [["api", "files", "tree"], ["api", "file", "tree", "app", "Main.hs"]]
+            p <-
+              [ ["api", "files", "tree"],
+                ["api", "file", "tree", "app", "Main.hs"],
+                ["api", "modules", "tree"]
+              ]
           ],
       testCase "JSON with a length, no-store" $ do
         r <- getApi fixtureApi ["api", "file", "tree", "app", "Main.hs"]
@@ -93,7 +99,14 @@ tests =
         failed.body @?= "cannot read file"
         readIORef logged
           >>= (@?= ["haskell-reviewer: cannot read app/Main.hs: Permission denied"]),
-      testCase "listing failed: 500 on both routes" $ do
+      testCase "module tree: JSON with a length, no-store" $ do
+        r <- getApi fixtureApi ["api", "modules", "tree"]
+        r.status @?= 200
+        lookup "Content-Type" r.headers @?= Just "application/json"
+        lookup "Content-Length" r.headers
+          @?= Just (Char8.pack (show (LBS.length r.body)))
+        assertNoStore r,
+      testCase "listing failed: 500 on every route" $ do
         let api = fixtureApi {snapshot = pure (Left (ListCrashed "boom"))}
         mapM_
           ( \path -> do
@@ -102,7 +115,10 @@ tests =
               r.body @?= "cannot list files"
               assertNoStore r
           )
-          [["api", "files", "tree"], ["api", "file", "tree", "app", "Main.hs"]]
+          [ ["api", "files", "tree"],
+            ["api", "file", "tree", "app", "Main.hs"],
+            ["api", "modules", "tree"]
+          ]
     ]
 
 assertNoStore :: ApiResult -> Assertion

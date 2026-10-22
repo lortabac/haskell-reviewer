@@ -42,6 +42,7 @@ library
     HaskellReviewer.Core.FileContent
     HaskellReviewer.Core.FileList
     HaskellReviewer.Core.Git
+    HaskellReviewer.Core.Modules
     HaskellReviewer.Core.PackageGlob
     HaskellReviewer.Core.Project
     HaskellReviewer.Core.ProjectFile
@@ -143,6 +144,8 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.CabalFileTest
     HaskellReviewer.Core.FileListTest
     HaskellReviewer.Core.GitTest
+    HaskellReviewer.Core.ModulesGoldenTest
+    HaskellReviewer.Core.ModulesTest
     HaskellReviewer.Core.PackageGlobTest
     HaskellReviewer.Core.ProjectFileTest
     HaskellReviewer.Core.ProjectGoldenTest
@@ -163,6 +166,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Server.RouterTest
     HaskellReviewer.Session.ClientsTest
     HaskellReviewer.Session.SnapshotTest
+    ModulesDump
     ProjectDump
     TestSupport
 

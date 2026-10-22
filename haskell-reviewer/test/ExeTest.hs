@@ -342,7 +342,21 @@ filesTests =
               @?= "{\"generation\":1,\"source\":\"git\",\"entries\":[\
                   \{\"path\":\".gitignore\",\"kind\":\"file\"},\
                   \{\"path\":\"a.hs\",\"kind\":\"file\"}],\
-                  \\"skippedNames\":0,\"truncated\":false}"
+                  \\"skippedNames\":0,\"truncated\":false}",
+      testCase "module tree: stack.yaml only gives the stack notice" $
+        withCanonicalTemp $ \dir -> do
+          writeFile (dir </> "stack.yaml") "resolver: lts-22.0\n"
+          writeFile (dir </> "Foo.hs") "module Foo where\n"
+          withServer id [dir] $ \server -> do
+            r <- getPath server "api/modules/tree"
+            r.status @?= 200
+            r.body
+              @?= "{\"generation\":1,\
+                  \\"notices\":[{\"kind\":\"stack\"},{\"kind\":\"implicit\"}],\
+                  \\"packages\":[],\"broken\":[],\
+                  \\"other\":[{\"kind\":\"module\",\"path\":\"Foo.hs\",\
+                  \\"name\":\"Foo\",\"id\":\"Foo.hs\",\"ref\":\"Foo\"}],\
+                  \\"warnings\":[]}"
     ]
 
 -- * git
@@ -684,7 +698,7 @@ signalTests =
           getPid server.process >>= mapM_ (signalProcess sigTERM)
           (code, _) <- stopServer server sigTERM
           code @?= ExitSuccess,
-      testCase "--trace-file: startup and files spans" $
+      testCase "--trace-file: startup, files and project spans" $
         withTemp $ \dir -> do
           let file = dir </> "t.jsonl"
               root = dir </> "root"
@@ -692,16 +706,17 @@ signalTests =
           withServer id ["--trace-file", file, root] $ \server -> do
             r <- getPath server "api/files/tree"
             r.status @?= 200
-            -- The span is written just after the list is ready.
-            _ <- waitForFile' file ((== 2) . length . lines)
+            -- The spans are written just after the snapshot is ready.
+            _ <- waitForFile' file ((== 3) . length . lines)
             (code, _) <- stopServer server sigTERM
             code @?= ExitSuccess
           contents <- readFile file
           case lines contents of
-            [startup, files] -> do
+            [startup, files, project] -> do
               assertContains "\"name\":\"startup\"" startup
               assertContains "\"name\":\"files\"" files
-            ls -> assertFailure ("expected two lines, got " <> show ls),
+              assertContains "\"name\":\"project\"" project
+            ls -> assertFailure ("expected three lines, got " <> show ls),
       testCase "--trace-file /dev/full: exit 0 with a warning" $ do
         -- Linux only: elsewhere, nothing to do.
         hasDevFull <- Dir.doesPathExist "/dev/full"

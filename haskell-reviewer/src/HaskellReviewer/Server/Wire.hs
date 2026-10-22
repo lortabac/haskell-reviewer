@@ -6,6 +6,7 @@ module HaskellReviewer.Server.Wire
   ( -- * Bodies
     encodeFileList,
     encodeFileView,
+    encodeModuleTree,
     helloPayload,
   )
 where
@@ -29,7 +30,34 @@ import HaskellReviewer.Core.FileList
     FileList (..),
     ListSource (..),
   )
-import HaskellReviewer.Core.RelPath (relPathText)
+import HaskellReviewer.Core.Modules
+  ( ComponentModules (..),
+    GeneratedFile (..),
+    HaskellFile (..),
+    LooseFile (..),
+    ModuleEntry (..),
+    ModuleId (..),
+    ModuleIndex (..),
+    ModuleRole (..),
+    ModuleSource (..),
+    NoSourceReason (..),
+    Notice (..),
+    OtherFile (..),
+    PackageModules (..),
+    PreprocessedFile (..),
+    moduleRef,
+    renderModuleId,
+    renderPreprocessor,
+  )
+import HaskellReviewer.Core.Project
+  ( BrokenPackage (..),
+    ModuleName (..),
+    PackageName (..),
+    renderCabalProblem,
+    renderComponentName,
+    renderProjectWarning,
+  )
+import HaskellReviewer.Core.RelPath (relDirText, relPathText)
 import HaskellReviewer.Session.Snapshot (Generation (..))
 
 {- Note [API fixtures]
@@ -99,6 +127,100 @@ encodeFileView (Generation g) content =
       Submodule c -> kindIs "submodule" <> ("commit" .= commitText c)
       NestedRepo -> kindIs "submodule" <> ("commit" .= Aeson.Null)
     bytes (FileSize n) = n
+
+-- | GET api\/modules\/\<side>: the module tree.
+--
+-- > {"generation":1,
+-- >  "notices":[{"kind":"stack"},{"kind":"implicit"},{"kind":"hpack","dirs":["."]}],
+-- >  "packages":[{"name":"pkg","version":"0.1","cabalFile":"pkg/pkg.cabal",
+-- >    "components":[{"name":"lib","buildable":true,"modules":[
+-- >      {"name":"Foo","id":"pkg:lib:Foo","ref":"Foo","role":"exposed",
+-- >       "source":{"kind":"module","path":"pkg/src/Foo.hs"}}]}]}],
+-- >  "broken":[{"cabalFile":"bad/bad.cabal","problem":"can't parse: ..."}],
+-- >  "other":[{"kind":"module","path":"x/Tool.hs","name":"Tool",
+-- >            "id":"x/Tool.hs","ref":"Tool"},
+-- >           {"kind":"boot","path":"pkg/src/A.hs-boot"}],
+-- >  "warnings":["cabal.project:3: no package matches foo/"]}
+--
+-- Roles: exposed, other, signature, test-module, main. Sources: module
+-- (path), generated and preprocessed (path, tool), no-source (reason:
+-- autogen, missing, outside, symlink). An other module's name may be
+-- null. See Note [Module discovery] in "HaskellReviewer.Core.Modules".
+encodeModuleTree :: Generation -> ModuleIndex -> LBS.ByteString
+encodeModuleTree (Generation g) idx =
+  Encoding.encodingToLazyByteString . Aeson.pairs $
+    ("generation" .= g)
+      <> Encoding.pair "notices" (Encoding.list notice idx.notices)
+      <> Encoding.pair "packages" (Encoding.list package idx.packages)
+      <> Encoding.pair "broken" (Encoding.list broken idx.broken)
+      <> Encoding.pair "other" (Encoding.list other idx.other)
+      <> ("warnings" .= map renderProjectWarning idx.warnings)
+  where
+    notice = \case
+      StackNotice -> Aeson.pairs (kindIs "stack")
+      ImplicitNotice -> Aeson.pairs (kindIs "implicit")
+      HpackNotice ds -> Aeson.pairs (kindIs "hpack" <> ("dirs" .= fmap relDirText ds))
+    package p =
+      let PackageName n = p.name
+       in Aeson.pairs $
+            ("name" .= n)
+              <> ("version" .= p.version)
+              <> ("cabalFile" .= relPathText p.cabalFile)
+              <> Encoding.pair
+                "components"
+                (Encoding.list (component p.name) p.components)
+    component pkg c =
+      Aeson.pairs $
+        ("name" .= renderComponentName c.name)
+          <> ("buildable" .= c.buildable)
+          <> Encoding.pair "modules" (Encoding.list (entry pkg c.name) c.modules)
+    entry pkg comp m =
+      let ModuleName n = m.name
+          i = ComponentModule pkg comp m.name
+       in Aeson.pairs $
+            ("name" .= n)
+              <> ("id" .= renderModuleId i)
+              <> ("ref" .= moduleRef idx i)
+              <> ("role" .= role m.role)
+              <> Encoding.pair "source" (source m.source)
+    role :: ModuleRole -> Text
+    role = \case
+      RoleExposed -> "exposed"
+      RoleOther -> "other"
+      RoleSignature -> "signature"
+      RoleTestModule -> "test-module"
+      RoleMain -> "main"
+    source = \case
+      HaskellSource f -> Aeson.pairs (kindIs "module" <> ("path" .= relPathText f.path))
+      GeneratedSource f ->
+        Aeson.pairs $
+          kindIs "generated"
+            <> ("path" .= relPathText f.path)
+            <> ("tool" .= renderPreprocessor f.tool)
+      PreprocessedSource f ->
+        Aeson.pairs $
+          kindIs "preprocessed" <> ("path" .= relPathText f.path) <> ("tool" .= f.tool)
+      NoSource r -> Aeson.pairs (kindIs "no-source" <> ("reason" .= reason r))
+    reason :: NoSourceReason -> Text
+    reason = \case
+      Autogen -> "autogen"
+      Missing -> "missing"
+      Outside _ -> "outside"
+      SymlinkSource _ -> "symlink"
+    broken b =
+      Aeson.pairs $
+        ("cabalFile" .= relPathText b.cabalFile)
+          <> ("problem" .= renderCabalProblem b.problem)
+    other = \case
+      OtherModule f ->
+        let i = LooseModule f.path
+         in Aeson.pairs $
+              kindIs "module"
+                <> ("path" .= relPathText f.path)
+                <> ("name" .= fmap (\(ModuleName n) -> n) f.name)
+                <> ("id" .= renderModuleId i)
+                <> ("ref" .= moduleRef idx i)
+      BootFile p -> Aeson.pairs (kindIs "boot" <> ("path" .= relPathText p))
 
 -- | The data of the @hello@ event: @{}@.
 helloPayload :: ByteString

@@ -1,0 +1,7 @@
+cabal-version: 3.0
+name: sc
+version: 1.0
+
+library
+  hs-source-dirs: src
+  exposed-modules: Lib

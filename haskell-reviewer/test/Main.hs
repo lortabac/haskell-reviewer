@@ -1,5 +1,6 @@
 module Main (main) where
 
+import ApiSupport (forceFixtures)
 import Bench.ProjectsTest qualified
 import Bench.RtsStatsTest qualified
 import Bench.StatsTest qualified
@@ -11,6 +12,8 @@ import HaskellReviewer.Core.AddressTest qualified
 import HaskellReviewer.Core.CabalFileTest qualified
 import HaskellReviewer.Core.FileListTest qualified
 import HaskellReviewer.Core.GitTest qualified
+import HaskellReviewer.Core.ModulesGoldenTest qualified
+import HaskellReviewer.Core.ModulesTest qualified
 import HaskellReviewer.Core.PackageGlobTest qualified
 import HaskellReviewer.Core.ProjectFileTest qualified
 import HaskellReviewer.Core.ProjectGoldenTest qualified
@@ -32,7 +35,7 @@ import HaskellReviewer.Server.ListenTest qualified
 import HaskellReviewer.Server.RouterTest qualified
 import HaskellReviewer.Session.ClientsTest qualified
 import HaskellReviewer.Session.SnapshotTest qualified
-import Test.Tasty (defaultMain, testGroup)
+import Test.Tasty (defaultMain, testGroup, withResource)
 
 main :: IO ()
 main = do
@@ -57,6 +60,8 @@ main = do
         HaskellReviewer.Core.CabalFileTest.tests,
         HaskellReviewer.Core.FileListTest.tests,
         HaskellReviewer.Core.GitTest.tests,
+        HaskellReviewer.Core.ModulesGoldenTest.tests,
+        HaskellReviewer.Core.ModulesTest.tests,
         HaskellReviewer.Core.PackageGlobTest.tests,
         HaskellReviewer.Core.ProjectFileTest.tests,
         HaskellReviewer.Core.ProjectGoldenTest.tests,
@@ -69,8 +74,13 @@ main = do
         HaskellReviewer.Effects.LogTest.tests,
         HaskellReviewer.Effects.SpawnTest.tests,
         HaskellReviewer.Effects.TraceTest.tests,
-        HaskellReviewer.Server.ApiGoldenTest.tests,
-        HaskellReviewer.Server.ApiTest.tests,
+        -- Both share the API fixtures: built once, here.
+        withResource forceFixtures (const (pure ())) $ \_ ->
+          testGroup
+            "API"
+            [ HaskellReviewer.Server.ApiGoldenTest.tests,
+              HaskellReviewer.Server.ApiTest.tests
+            ],
         HaskellReviewer.Server.AssetsTest.tests,
         HaskellReviewer.Server.EventsTest.tests,
         HaskellReviewer.Server.ListenTest.tests,

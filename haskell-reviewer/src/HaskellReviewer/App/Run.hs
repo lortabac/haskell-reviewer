@@ -53,7 +53,20 @@ import HaskellReviewer.Core.Address
     tokenFromBytes,
   )
 import HaskellReviewer.Core.FileList (FileList (..), ListSource (..), fileListCap)
-import HaskellReviewer.Core.Root (Root (..))
+import HaskellReviewer.Core.Modules
+  ( ComponentModules (..),
+    ModuleIndex (..),
+    PackageModules (..),
+  )
+import HaskellReviewer.Core.Project
+  ( Project (..),
+    ProjectSettings (..),
+    ProjectSource (..),
+    ProjectWarning (..),
+    defaultGhcVersion,
+    hostPlatform,
+  )
+import HaskellReviewer.Core.Root (CanonicalRoot, Root (..))
 import HaskellReviewer.Effects.Browser qualified as Browser
 import HaskellReviewer.Effects.Clock
   ( Clock (..),
@@ -94,7 +107,7 @@ import HaskellReviewer.Effects.Trace
     openFileTracer,
     renderTraceFileError,
   )
-import HaskellReviewer.Server.Api (FilesApi (..), newSnapshot)
+import HaskellReviewer.Server.Api (FilesApi (..), forceSnapshot, newSnapshot)
 import HaskellReviewer.Server.Events (EventStream (..), keepAliveInterval)
 import HaskellReviewer.Server.Listen
   ( ListenError,
@@ -104,6 +117,7 @@ import HaskellReviewer.Server.Listen
   )
 import HaskellReviewer.Server.Router (Routes (..), application)
 import HaskellReviewer.Session.Clients (newClients, waitIdle)
+import HaskellReviewer.Session.Project qualified as Session.Project
 import HaskellReviewer.Session.Snapshot
   ( Snapshot (..),
     SnapshotSlot,
@@ -185,8 +199,15 @@ HaskellReviewer.Effects.Browser).
 The URL must come fast (SPEC §10.1), and listing a big tree takes a
 while. So at start-up we only check git (version, is ROOT in a work
 tree): a bad git is exit 2, before the URL. The listing itself runs in
-a thread that starts once the URL is printed. The file routes wait for
-it (Session.Snapshot), so an early request is just slower.
+a thread that starts once the URL is printed. Then the same thread
+reads the project and finds the modules. The snapshot routes wait for
+both (Session.Snapshot), so an early request is just slower. The
+snapshot is fully built before the routes see it (Note [Forced
+snapshot] in "HaskellReviewer.Server.Api").
+
+If reading the project crashes (a bug), the snapshot gets no packages
+and a warning, logged and shown in the module tree. The file routes
+still work.
 
 The thread lives as long as the server (withAsync): on exit it is
 cancelled, and a git it runs is killed (Note [Git hardening] in
@@ -208,6 +229,8 @@ data Deps = Deps
     -- | Check git and get ready to list the files of ROOT. See
     -- Note [Listing after the URL].
     probeFiles :: Logger -> Root -> IO (Either GitError Lister),
+    -- | Read the project of a snapshot. See Note [Listing after the URL].
+    readProject :: CanonicalRoot -> FileList -> ProjectSettings -> IO Project,
     -- | Open the URL in the browser. Must not block or throw.
     openBrowser :: Logger -> Root -> Text -> IO (),
     -- | Catch the stop signals.
@@ -232,6 +255,7 @@ newRealDeps spawnSetup = do
         newToken = tokenFromBytes <$> getRandomBytes tokenByteCount,
         listen = openListener,
         probeFiles = FileSystem.probeFiles,
+        readProject = Session.Project.readProject,
         openBrowser = Browser.openBrowser,
         installShutdown = installShutdownHandlers,
         idleMinute = Microseconds 60_000_000,
@@ -388,7 +412,7 @@ serve deps logger opts root lister tracer shutdown t0 w0 = do
               pure ExitSuccess
             Right () -> throwIO (userError "the HTTP server stopped")
 
--- | Make the file list, fill the slot, report. See
+-- | Make the file list, read the project, fill the slot, report. See
 -- Note [Listing after the URL].
 --
 -- The slot is always filled, or requests would wait for ever: with the
@@ -400,10 +424,18 @@ runListing deps logger tracer lister slot = do
     w0 <- deps.clock.now
     listed <- lister.list
     t1 <- deps.clock.monotonic
-    _ <- fill listed
+    w1 <- deps.clock.now
+    made <- traverse (snapshotOf deps logger lister.root) listed
+    t2 <- deps.clock.monotonic
+    _ <- fill made
     -- After the fill: a slow trace file can't hold up requests.
     tracer.record Span {name = "files", start = w0, duration = elapsed t0 t1}
-    report listed (elapsed t0 t1)
+    case made of
+      Right snap -> do
+        tracer.record Span {name = "project", start = w1, duration = elapsed t1 t2}
+        reportFiles snap.files (elapsed t0 t1)
+        reportProject snap.modules (elapsed t1 t2)
+      Left e -> reportError e
   case result of
     Right () -> pure ()
     Left e
@@ -413,35 +445,74 @@ runListing deps logger tracer lister slot = do
       | otherwise -> do
           let err = ListCrashed (exceptionMessage e)
           filled <- fill (Left err)
-          when filled (report (Left err) (Nanoseconds 0))
+          when filled (reportError err)
   where
-    fill listed = fillSnapshot slot (newSnapshot lister.root <$> listed)
-    report listed (Nanoseconds ns) = case listed of
-      Left e ->
-        logInfo logger ("haskell-reviewer: cannot list files: " <> renderListError e)
-      Right fl -> do
-        when (fl.skippedNames > 0) $
-          logInfo logger $
-            "haskell-reviewer: skipped "
-              <> showText fl.skippedNames
-              <> " file name(s) that are not UTF-8"
-        when fl.truncated $
-          logInfo logger $
-            "haskell-reviewer: more than "
-              <> showText fileListCap
-              <> " files under ROOT; listing the first "
-              <> showText fileListCap
-        let from = case fl.source of
-              FromGit -> "git"
-              FromDisk -> "disk"
-        logVerbose logger $
-          "files: "
-            <> showText (length fl.entries)
-            <> " from "
-            <> from
-            <> " in "
-            <> showText (ns `div` 1_000_000)
-            <> " ms"
+    fill = fillSnapshot slot
+    reportError e =
+      logInfo logger ("haskell-reviewer: cannot list files: " <> renderListError e)
+    reportFiles fl (Nanoseconds ns) = do
+      when (fl.skippedNames > 0) $
+        logInfo logger $
+          "haskell-reviewer: skipped "
+            <> showText fl.skippedNames
+            <> " file name(s) that are not UTF-8"
+      when fl.truncated $
+        logInfo logger $
+          "haskell-reviewer: more than "
+            <> showText fileListCap
+            <> " files under ROOT; listing the first "
+            <> showText fileListCap
+      let from = case fl.source of
+            FromGit -> "git"
+            FromDisk -> "disk"
+      logVerbose logger $
+        "files: "
+          <> showText (length fl.entries)
+          <> " from "
+          <> from
+          <> " in "
+          <> showText (ns `div` 1_000_000)
+          <> " ms"
+    reportProject idx (Nanoseconds ns) =
+      logVerbose logger $
+        "project: "
+          <> showText (length idx.packages)
+          <> " packages, "
+          <> showText (sum [length c.modules | p <- idx.packages, c <- p.components])
+          <> " modules, "
+          <> showText (length idx.other)
+          <> " other files in "
+          <> showText (ns `div` 1_000_000)
+          <> " ms"
+
+-- | Read the project and build the snapshot, all of it. If that
+-- crashes, the snapshot has no project, only a warning. See
+-- Note [Listing after the URL].
+snapshotOf :: Deps -> Logger -> CanonicalRoot -> FileList -> IO Snapshot
+snapshotOf deps logger root fl = do
+  result <- try @SomeException $ do
+    project <- deps.readProject root fl settings
+    built (newSnapshot root fl project)
+  case result of
+    Right snap -> pure snap
+    Left e
+      | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
+      | otherwise -> do
+          let msg = exceptionMessage e
+          logInfo logger ("haskell-reviewer: cannot read the project: " <> msg)
+          built (newSnapshot root fl (crashed msg))
+  where
+    settings = ProjectSettings {platform = hostPlatform, ghcVersion = defaultGhcVersion}
+    built snap = forceSnapshot snap >> pure snap
+    -- Not the implicit source: there may be a project we failed to read.
+    crashed msg =
+      Project
+        { source = ProjectFile [],
+          withCompiler = Nothing,
+          packages = [],
+          brokenPackages = [],
+          warnings = [ProjectCrashed msg]
+        }
 
 showText :: (Show a) => a -> Text
 showText = Text.pack . show

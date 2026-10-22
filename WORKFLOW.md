@@ -235,6 +235,13 @@ human says so.
 - Wrap anything that runs the server, a browser, a benchmark or a test that
   could hang in `timeout`. Never background a command without a time limit.
   After, check that nothing you started is left (`pgrep -af ...`).
+- Test hangs on GHC 9.12 and 9.14 (Q-RTS-BLACKHOLE): the threaded test
+  binary can livelock in the RTS when parallel tests force the same shared
+  value. It then ignores SIGTERM, so use `timeout -s KILL`. Build shared
+  test values once with tasty's `withResource` (Note [Shared values in
+  tests]). In the server, force shared values before request threads see
+  them. A hang that shows up only sometimes: loop the test group (e.g. 300
+  runs) to measure it before and after a fix.
 - If a subagent stops with background work still running, the coordinator
   checks what it is (process list, elapsed time) instead of just waiting.
   Kill runaway processes and report them.
