@@ -3,9 +3,9 @@ import { ConnectionNotice } from "./events/ConnectionNotice";
 
 // The page frame (SPEC §4.1): header, sidebar, main view.
 // No router hooks here, so tests can render it alone. The sidebar
-// comes in as a prop.
+// and the project notices come in as props.
 export function Frame(
-  props: ParentProps<{ sidebar?: JSX.Element }>,
+  props: ParentProps<{ sidebar?: JSX.Element; notices?: JSX.Element }>,
 ): JSX.Element {
   // Move focus by hand: following "#main" only scrolls, and the router
   // would also put the hash in the URL. A native listener runs before
@@ -23,10 +23,11 @@ export function Frame(
         <span class="app-name">haskell-reviewer</span>
         <ConnectionNotice />
       </header>
-      <nav class="frame-sidebar" aria-label="Files">
+      <nav class="frame-sidebar" aria-label="Project">
         <div class="frame-sidebar-content">{props.sidebar}</div>
       </nav>
       <main id="main" class="frame-main" tabindex="-1">
+        {props.notices}
         {props.children}
       </main>
     </div>

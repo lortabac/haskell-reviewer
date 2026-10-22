@@ -1,7 +1,14 @@
 // The page frame: security headers, themes, accessibility.
 import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
-import { expect, notFound404, tabKey, test } from "./support/fixtures";
+import {
+  expect,
+  notFound404,
+  showFiles,
+  sidebar,
+  tabKey,
+  test,
+} from "./support/fixtures";
 
 const csp =
   "default-src 'self'; img-src 'self' data:; connect-src 'self'; " +
@@ -60,16 +67,17 @@ for (const t of themes) {
     await page.goto(server.base);
     await expect(page.locator("body")).toHaveCSS("background-color", t.bg);
     await expect(page.locator("header")).toContainText("haskell-reviewer");
-    await expect(page.getByRole("navigation", { name: "Files" })).toBeVisible();
+    await expect(sidebar(page)).toBeVisible();
   });
 
   test(`axe, ${t.scheme} theme`, async ({ page, server, guard }, testInfo) => {
     testInfo.setTimeout(60_000);
     guard.allow(notFound404);
     await page.emulateMedia({ colorScheme: t.scheme });
-    const tree = page.getByRole("navigation", { name: "Files" });
+    const tree = sidebar(page);
 
     await page.goto(server.base);
+    await showFiles(page);
     await tree.getByRole("button", { name: "src" }).click();
     await expect(tree.getByRole("link", { name: "Main.hs" })).toBeVisible();
     await axe(page, "home, src open");

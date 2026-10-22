@@ -3,10 +3,11 @@
 import {
   type BrowserContext,
   expect,
+  type Locator,
   type Page,
   test as base,
 } from "@playwright/test";
-import { makeProject, type Project } from "./project";
+import { makeCabalProject, makeProject, type Project } from "./project";
 import { type Proxy, startProxy } from "./proxy";
 import { type Server, startServer } from "./server";
 
@@ -64,13 +65,15 @@ function initScript(): void {
 
 interface TestFixtures {
   server: Server;
-  startServer: () => Promise<Server>;
+  // Default root: the main fixture project.
+  startServer: (opts?: { root?: string }) => Promise<Server>;
   startProxy: (backend: number) => Promise<Proxy>;
   guard: Guard;
 }
 
 interface WorkerFixtures {
   project: Project;
+  cabalProject: Project;
 }
 
 export const test = base.extend<TestFixtures, WorkerFixtures>({
@@ -84,10 +87,20 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     { scope: "worker" },
   ],
 
+  cabalProject: [
+    // eslint-disable-next-line no-empty-pattern
+    async ({}, use) => {
+      const p = await makeCabalProject();
+      await use(p);
+      await p.remove();
+    },
+    { scope: "worker" },
+  ],
+
   startServer: async ({ project }, use) => {
     const servers: Server[] = [];
-    await use(async () => {
-      const s = await startServer({ root: project.root });
+    await use(async (opts) => {
+      const s = await startServer({ root: opts?.root ?? project.root });
       servers.push(s);
       return s;
     });
@@ -170,6 +183,18 @@ export { expect };
 // 404 on an asset must fail.
 export const notFound404 =
   /Failed to load resource: the server responded with a status of 404.* \[\S*\/api\/file\/tree\//;
+
+// The sidebar: the Project nav.
+export function sidebar(page: Page): Locator {
+  return page.getByRole("navigation", { name: "Project" });
+}
+
+// Switch the sidebar to the file tree.
+export async function showFiles(page: Page): Promise<void> {
+  const b = sidebar(page).getByRole("button", { name: "Files", exact: true });
+  await b.click();
+  await expect(b).toHaveAttribute("aria-pressed", "true");
+}
 
 // On macOS, Tab skips links in WebKit and Chromium; Alt+Tab reaches them.
 export function tabKey(browserName: string): string {

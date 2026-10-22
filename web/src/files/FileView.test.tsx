@@ -4,20 +4,22 @@ import { mountAppAt, unmountApp } from "../../test/mount";
 import { lineCount } from "./FileView";
 
 // Mounts the app at /tok/src/tree/<path>, with the API answering
-// status and body for that file.
+// status and body for that file. No module tree unless given.
 async function open(
   path: string,
   status: number,
   body: unknown,
+  modules: [number, unknown] = [404, "not found"],
 ): Promise<HTMLElement> {
   const fetch = stubFetch({
     "/tok/api/files/tree": [200, fixture("files")],
+    "/tok/api/modules/tree": modules,
     [`/tok/api/file/tree/${path}`]: [status, body],
   });
   const main = mountAppAt(`/tok/src/tree/${path}`).querySelector("main");
   if (main === null) throw new Error("no main");
   await vi.waitFor(() => {
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(3);
     expect(main.querySelector("h1, p")).not.toBeNull();
   });
   // Let the resource settle.
@@ -115,6 +117,44 @@ describe("FileView", () => {
     expect(document.title).toBe("Not found — haskell-reviewer");
   });
 
+  it.each([
+    [
+      "pkg/src/Lexer.x",
+      "Generated from this file by alex: shown as text, not indexed.",
+    ],
+    [
+      "pkg/test/Spec.hs",
+      "Preprocessed by hspec-discover: shown as text, not indexed.",
+    ],
+  ])("banner for %s", async (path, text) => {
+    const main = await open(path, 200, fixture("file-text"), [
+      200,
+      fixture("modules"),
+    ]);
+    await vi.waitFor(() => {
+      expect(main.querySelector(".file-banner")?.textContent).toBe(text);
+    });
+    // Right under the heading.
+    expect(main.querySelector("h1 + .file-banner")).not.toBeNull();
+  });
+
+  it.each([
+    ["a plain module", [200, fixture("modules")]],
+    ["no module tree", [404, "not found"]],
+  ] as [string, [number, unknown]][])("no banner: %s", async (_, modules) => {
+    const main = await open(
+      "pkg/src/Foo.hs",
+      200,
+      fixture("file-text"),
+      modules,
+    );
+    await vi.waitFor(() => {
+      expect(main.querySelector(".file-code")).not.toBeNull();
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(main.querySelector(".file-banner")).toBeNull();
+  });
+
   it("other errors", async () => {
     const main = await open("x.hs", 500, "cannot read file");
     expect(main.textContent).toContain("Couldn't load this file.");
@@ -158,10 +198,10 @@ describe("FileView navigation", () => {
     const main = root.querySelector("main");
     if (nav === null || main === null) throw new Error("no frame");
     await vi.waitFor(() => {
-      expect(nav.querySelector("button")?.textContent).toBe("app");
+      expect(nav.querySelector(".file-tree button")?.textContent).toBe("app");
     });
-    nav.querySelector("button")?.click();
-    const link = nav.querySelector("a");
+    nav.querySelector<HTMLElement>(".file-tree button")?.click();
+    const link = nav.querySelector<HTMLElement>(".file-tree a");
     if (link === null) throw new Error("no link");
     link.focus();
     link.click();
@@ -218,10 +258,12 @@ describe("FileView navigation", () => {
     if (main === null) throw new Error("no main");
     await vi.waitFor(() => {
       expect(late).toBeDefined();
-      expect(root.querySelectorAll("nav button").length).toBeGreaterThan(0);
+      expect(
+        root.querySelectorAll("nav .file-tree button").length,
+      ).toBeGreaterThan(0);
     });
     // Go to another file, through the router.
-    [...root.querySelectorAll<HTMLElement>("nav button")]
+    [...root.querySelectorAll<HTMLElement>("nav .file-tree button")]
       .find((b) => b.textContent === "shared")
       ?.click();
     root

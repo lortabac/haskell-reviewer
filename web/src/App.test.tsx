@@ -38,11 +38,11 @@ describe("App routing under the token", () => {
     },
   );
 
-  it("the sidebar is in the Files nav", async () => {
+  it("the sidebar is in the Project nav", async () => {
     const nav = mountAppAt("/tok").querySelector("nav");
-    expect(nav?.getAttribute("aria-label")).toBe("Files");
+    expect(nav?.getAttribute("aria-label")).toBe("Project");
     await vi.waitFor(() => {
-      expect(nav?.querySelector("button")?.textContent).toBe("app");
+      expect(nav?.querySelector(".file-tree button")?.textContent).toBe("app");
     });
   });
 });

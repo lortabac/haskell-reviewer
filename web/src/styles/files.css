@@ -1,12 +1,15 @@
-/* Sidebar file tree. */
+/* Sidebar trees: files and modules. */
 .file-tree,
-.file-tree ul {
+.file-tree ul,
+.module-tree,
+.module-tree ul {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-.file-tree ul {
+.file-tree ul,
+.module-tree ul {
   padding-left: var(--space-3);
 }
 

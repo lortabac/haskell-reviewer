@@ -2,10 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fixture, stubFetch } from "../../test/fixtures";
 import { mountAppAt, unmountApp } from "../../test/mount";
 
+// The Files view of the sidebar. No module tree, so it is the one shown.
 function nav(list: [number, unknown], at = "/tok"): HTMLElement {
   stubFetch({ "/tok/api/files/tree": list });
-  const n = mountAppAt(at).querySelector("nav");
-  if (n === null) throw new Error("no nav");
+  const n = mountAppAt(at).querySelector<HTMLElement>("nav .files-panel");
+  if (n === null) throw new Error("no files panel");
   return n;
 }
 
@@ -16,7 +17,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("Sidebar", () => {
+describe("FilesPanel", () => {
   it("shows the tree", async () => {
     const n = nav([200, list]);
     expect(n.textContent).toBe("Loading files…");

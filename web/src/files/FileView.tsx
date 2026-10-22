@@ -13,6 +13,8 @@ import {
 } from "solid-js";
 import { getJson } from "../api/client";
 import { decodeFileView, type FileView as View } from "../api/files";
+import { bannerText } from "../modules/notices";
+import { useModules } from "../modules/store";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
 import { apiFileUrl, hrefFor, pathFromPathname, withBase } from "./paths";
@@ -36,6 +38,13 @@ function FilePage(props: { path: string }): JSX.Element {
     (p) => getJson(apiFileUrl(p), decodeFileView),
   );
   const slow = createDelay(() => file.loading, 300);
+  // Generated or preprocessed: say why there's only text. Needs the
+  // module tree, but never waits for it.
+  const modules = useModules();
+  const banner = () => {
+    const info = modules.bySource().get(props.path);
+    return info === undefined ? undefined : bannerText(info.source);
+  };
   // Only the result for this path, never a stale one.
   const result = () => (file.state === "ready" ? file() : undefined);
   const notFound = () => result()?.kind === "not-found";
@@ -61,6 +70,7 @@ function FilePage(props: { path: string }): JSX.Element {
       <h1 class="file-path" tabindex="-1">
         {props.path}
       </h1>
+      <Show when={banner()}>{(b) => <p class="file-banner">{b()}</p>}</Show>
       <Switch
         fallback={
           <Show when={slow()}>
