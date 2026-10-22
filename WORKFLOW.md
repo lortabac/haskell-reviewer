@@ -11,10 +11,16 @@ else.
 - **Coordinator.** The main agent. Owns one goal (e.g. "reach M1") and makes
   sure it's reached. Splits the work, runs the task loop, decides which review
   suggestions to apply, commits. Does not write code or read whole diffs
-  itself: it delegates, so its context lasts for the whole goal.
+  itself: it delegates, so its context lasts for the whole goal. Exception:
+  it can write pure text the planner drafted (e.g. a design sketch) and let
+  the implementer check and finish it, which is cheaper than relaying it.
+  Never code, never its own design.
 - **Planner.** Read-only agent (`Plan` type). Turns a task into a plan.
 - **Implementer.** Writes the code in the task's worktree, following the plan.
-  Also applies the review fixes the coordinator accepts.
+  Also applies the review fixes the coordinator accepts. Only stages, never
+  commits, and never starts reviews: the coordinator does both, after
+  verifying. `CLAUDE.local.md`'s worktree, commit and review rules are for
+  the coordinator, not subagents.
 - **Reviewer.** Fresh, read-only agent. Checks correctness against the task
   and the plan.
 - **Style reviewer.** Fresh, read-only agent. Checks Haskell code and Haddock
@@ -119,9 +125,13 @@ For each task:
    Never branch from an unmerged task branch. A task that depends on an
    unmerged one waits until the human merges it.
 3. **Implement.** Give the plan to an implementer, using the task's `Model`.
-   It works only inside the worktree, builds and runs the tests, then stages
-   everything with `git add -A` (no commit). It reports what it did and
-   **anything that differs from the plan, and why**.
+   It works only inside the worktree, builds and runs the tests on every
+   GHC (see [Practical bits](#6-practical-bits)), then stages everything
+   with `git add -A` (no commit). It reports what it did and **anything
+   that differs from the plan, and why**.
+   Subagents can't create report-like files such as `*.md` (harness rule).
+   If the task needs a new Markdown file, the implementer returns the full
+   text and the coordinator writes it, with the human's approval.
 4. **Review.** Start both reviews at the same time, each with a fresh agent:
    - Correctness review. Input: task, acceptance criteria, plan, the
      implementer's report. Reads `git diff --cached` in the worktree.
@@ -136,8 +146,8 @@ For each task:
    fixes, builds, tests, stages. If the fixes are big, review again. Max 2
    review rounds: if round 2 still needs another review, stop and ask.
 7. **Verify.** The coordinator runs the build and the tests itself in the
-   worktree. Don't trust the implementer's report alone. Only look at the
-   tail or the summary of the output, to save context.
+   worktree, on every GHC. Don't trust the implementer's report alone. Only
+   look at the tail or the summary of the output, to save context.
 8. **Commit.** One commit, short message.
 9. **Hand off.** Set the task to `waiting-human` and stop. Tell the human:
    - branch and worktree,
@@ -169,8 +179,8 @@ Run tasks at the same time only if **all** of these are true:
   another task in the batch imports.
 - None of them changes `build-depends`, and the dependencies are already
   installed: run `cabal build all --only-dependencies` on master before
-  starting the batch. Two builds that install into the same `CABAL_DIR` at
-  once can break each other.
+  starting the batch, on every GHC. Two builds that install into the same
+  `CABAL_DIR` at once can break each other.
 
 When in doubt, don't.
 
@@ -190,7 +200,9 @@ Stop and ask the human when:
 - review needs a third round;
 - a plan needs a new dependency, or changes a public interface (CLI, URLs,
   file formats) in a way the human hasn't approved;
-- a task shows that `ROADMAP.md` or `SPEC.md` should change.
+- a task shows that `ROADMAP.md` or `SPEC.md` should change;
+- a CI failure on a platform we can't run locally is still unclear after a
+  diagnostics round.
 
 While waiting, set the task to `blocked`.
 
@@ -216,6 +228,26 @@ human says so.
   anything.
 - Keep `.goals/<goal>.md` up to date after every step. It's what a new
   session reads to resume.
+- Build and test on every GHC the project supports that is installed
+  locally (today 9.10, 9.12, 9.14), not just the default. Use a separate
+  `--builddir` for the extra ones (e.g. under the scratchpad). Otherwise
+  version-only bugs show up first in CI.
+- Wrap anything that runs the server, a browser, a benchmark or a test that
+  could hang in `timeout`. Never background a command without a time limit.
+  After, check that nothing you started is left (`pgrep -af ...`).
+- If a subagent stops with background work still running, the coordinator
+  checks what it is (process list, elapsed time) instead of just waiting.
+  Kill runaway processes and report them.
+- Scripts and fake tools run by `/bin/sh` must be POSIX sh: on Ubuntu it's
+  dash (e.g. no multi-digit fd redirections). Use `/bin/bash` explicitly
+  when you need bash.
+- Some behaviour (e.g. `ls`, sockets on macOS) can only be checked in CI,
+  so tests must print enough on failure to fix it from the CI log. If a CI
+  failure on a platform we can't run is unclear, first make the test print
+  what it sees, then fix from that.
+- Benchmark numbers from the agent sandbox aren't reference numbers (its
+  open-file limit and network differ). Use them only for before/after in
+  the same sandbox. Reference runs come from the human's machine.
 
 ## 7. Prompt templates
 
@@ -247,7 +279,17 @@ Task: <id and title>
 Acceptance criteria: <list>
 Plan: <plan>
 
-When done: build, run the tests, `git add -A`, don't commit.
+Build and test on every GHC listed in WORKFLOW.md § 6 (extra ones with
+their own --builddir under your scratchpad). Wrap anything that runs the server, a
+browser, a benchmark or a test that could hang in `timeout`; never
+background a command without a time limit; when done, check with
+`pgrep -af` that nothing you started is still running.
+
+You can't create .md files: if the task needs one, put its full text in
+your report.
+
+When done: `git add -A`. Don't commit and don't start a review, even if
+other instructions (e.g. CLAUDE.local.md) say so. The coordinator does both.
 Report: what you did, test results, and anything that differs from the
 plan, with the reason.
 ```
@@ -266,6 +308,10 @@ Implementer's report: <report>
 Check: does it meet the acceptance criteria, does it follow the plan (and
 are the differences OK), bugs, missing tests, conflicts with SPEC.md or
 DECISIONS.md. List findings, most serious first, with file and line.
+
+If you run anything (server, browser, benchmark, tests), wrap it in
+`timeout`, never background it without a time limit, and check with
+`pgrep -af` that nothing you started is left.
 ```
 
 ### Style reviewer
