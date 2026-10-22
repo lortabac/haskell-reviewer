@@ -5,3 +5,6 @@ dist-newstyle/
 cabal.project.local*
 web/node_modules/
 /bench/projects/
+web/test-results/
+web/playwright-report/
+web/blob-report/

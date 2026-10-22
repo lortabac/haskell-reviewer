@@ -142,3 +142,71 @@ jobs:
 
       - name: Check bundle (CSP, no eval)
         run: npm run check:bundle
+
+  # Browser end-to-end tests against the real binary (D-89). Linux only:
+  # Playwright's WebKit is close enough to Safari, and macOS runners are
+  # slow and scarce.
+  e2e:
+    name: ubuntu-latest / e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: haskell-actions/setup@v2
+        id: setup
+        with:
+          ghc-version: '9.14'
+          cabal-version: latest
+
+      # Same build as the haskell job, so the store cache is shared.
+      # Restore only: the haskell job saves it.
+      - name: Turn warnings into errors
+        run: |
+          printf 'package haskell-reviewer\n  ghc-options: -Werror\n' > cabal.project.local
+
+      - name: Plan
+        run: cabal build all --dry-run
+
+      - name: Restore cabal store
+        uses: actions/cache/restore@v6
+        id: cache
+        with:
+          path: ${{ steps.setup.outputs.cabal-store }}
+          key: ubuntu-latest-ghc-${{ steps.setup.outputs.ghc-version }}-${{ hashFiles('dist-newstyle/cache/plan.json') }}
+          restore-keys: ubuntu-latest-ghc-${{ steps.setup.outputs.ghc-version }}-
+
+      - name: Build dependencies
+        run: cabal build all --only-dependencies
+
+      - name: Build
+        run: make build
+
+      - name: Git version
+        run: git --version
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        working-directory: web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium firefox webkit
+
+      - name: End-to-end tests
+        run: make e2e
+
+      - name: Upload report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            web/playwright-report
+            web/test-results
+          retention-days: 7

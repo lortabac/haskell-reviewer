@@ -6,7 +6,7 @@ BENCH_PROJECTS ?=
 BENCH_JSON ?=
 BENCH_LABEL ?=
 
-.PHONY: build test install freeze web bench bench-smoke
+.PHONY: build test install freeze web e2e bench bench-smoke
 
 build:
 	$(CABAL) build all
@@ -40,6 +40,15 @@ bench-smoke: build
 # web/dist is committed: commit it after this.
 web:
 	cd web && npm ci && npm run build && npm run check:bundle
+
+# Browser end-to-end tests (Playwright) against the built binary.
+# First time: `cd web && npm ci && npx playwright install chromium firefox
+# webkit`. They test web/dist as committed: run `make web` first if
+# web/src changed. Pass Playwright flags in E2E_ARGS, e.g.
+# make e2e E2E_ARGS='--project=chromium --grep-invert @slow'
+e2e: build
+	cd web && HASKELL_REVIEWER_EXE="$$($(CABAL) list-bin exe:haskell-reviewer)" \
+	    npx playwright test $(E2E_ARGS)
 
 # Not `cabal install`: it builds from an sdist, which would miss files
 # outside the package (like ../web/dist). Copy the built binary.

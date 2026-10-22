@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 import solid from "vite-plugin-solid";
 
 // The server serves the bundle under /<token>/. Asset refs stay relative
@@ -24,6 +24,8 @@ export default defineConfig({
   worker: { format: "iife" },
   test: {
     environment: "happy-dom",
+    // e2e/ is Playwright's, run with `make e2e`.
+    exclude: [...configDefaults.exclude, "e2e/**"],
     // The persistent module cache keeps the import.meta.glob list of
     // test/fixtures.ts, so an added or removed fixture would go
     // unseen. The whole run takes a few seconds anyway.
