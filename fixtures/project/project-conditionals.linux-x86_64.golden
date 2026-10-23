@@ -1,5 +1,6 @@
 source: cabal.project
 with-compiler: ghc-9.12.2 (9.12.2) from cabal.project
+ghc: 9.12.2 (with-compiler)
 package base-pkg 1.0 (base-pkg/base-pkg.cabal)
   flag x = True (manual, from cabal.project)
   lib

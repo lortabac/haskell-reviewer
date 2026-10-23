@@ -1,4 +1,5 @@
 source: cabal.project
+ghc: 9.14.1 (parser)
 package bar 1.0 (bar/bar.cabal)
   flag dev = True (manual, from cabal.project)
   flag fast = False (automatic, from cabal.project)

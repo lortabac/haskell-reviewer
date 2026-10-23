@@ -1,4 +1,5 @@
 source: *.cabal in ROOT
+ghc: 9.14.1 (parser)
 package good 1.0 (good.cabal)
   lib
     source dirs: .

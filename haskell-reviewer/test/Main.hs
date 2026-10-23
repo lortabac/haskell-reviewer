@@ -18,6 +18,7 @@ import HaskellReviewer.Core.PackageGlobTest qualified
 import HaskellReviewer.Core.ProjectFileTest qualified
 import HaskellReviewer.Core.ProjectGoldenTest qualified
 import HaskellReviewer.Core.ProjectLoadTest qualified
+import HaskellReviewer.Core.ProjectTest qualified
 import HaskellReviewer.Core.RelPathTest qualified
 import HaskellReviewer.Core.RootTest qualified
 import HaskellReviewer.Effects.FileSystemTest qualified
@@ -66,6 +67,7 @@ main = do
         HaskellReviewer.Core.ProjectFileTest.tests,
         HaskellReviewer.Core.ProjectGoldenTest.tests,
         HaskellReviewer.Core.ProjectLoadTest.tests,
+        HaskellReviewer.Core.ProjectTest.tests,
         HaskellReviewer.Core.RelPathTest.tests,
         HaskellReviewer.Core.RootTest.tests,
         HaskellReviewer.Effects.FileSystemTest.tests,

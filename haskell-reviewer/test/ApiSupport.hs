@@ -45,6 +45,8 @@ import HaskellReviewer.Core.Project
     CabalProblem (..),
     Component (..),
     ComponentName (..),
+    DetectedGhc (..),
+    GhcSource (..),
     Language (..),
     ListedModule (..),
     Loc (..),
@@ -55,6 +57,7 @@ import HaskellReviewer.Core.Project
     Project (..),
     ProjectSource (..),
     ProjectWarning (..),
+    parserGhcVersion,
   )
 import HaskellReviewer.Core.RelPath
   ( RelDir,
@@ -152,6 +155,7 @@ projectSnapshot =
     Project
       { source = ProjectFile [],
         withCompiler = Nothing,
+        ghc = fixtureGhc,
         packages = [fixturePackage],
         brokenPackages =
           [ BrokenPackage
@@ -243,10 +247,16 @@ noProject =
   Project
     { source = ImplicitRootCabalFiles,
       withCompiler = Nothing,
+      ghc = fixtureGhc,
       packages = [],
       brokenPackages = [],
       warnings = []
     }
+
+-- | No --ghc, no with-compiler: both fixtures just take the parser's
+-- own version.
+fixtureGhc :: DetectedGhc
+fixtureGhc = DetectedGhc {version = parserGhcVersion, source = GhcFromParser}
 
 fixtureRoot :: CanonicalRoot
 fixtureRoot = CanonicalRoot {path = "/fixture", bytes = "/fixture"}

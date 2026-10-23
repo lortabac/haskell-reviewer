@@ -9,6 +9,7 @@ where
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Version (showVersion)
+import HaskellReviewer.Core.Project (parserGhcVersion, renderGhcVersion)
 import PackageInfo_haskell_reviewer qualified as PackageInfo
 
 -- | The package version, e.g. @0.1.0.0@.
@@ -16,13 +17,12 @@ toolVersion :: Text
 toolVersion = Text.pack (showVersion PackageInfo.version)
 
 -- | The full @--version@ output (SPEC §2.1), without a final newline.
--- There is no parser and no companion lookup yet, so those lines are
--- fixed.
+-- There is no companion lookup yet, so that line is fixed.
 versionText :: Text
 versionText =
   Text.intercalate
     "\n"
     [ "haskell-reviewer " <> toolVersion,
-      "Haskell parser: none yet",
+      "Haskell parser: GHC " <> renderGhcVersion parserGhcVersion,
       "HIE companions: none found"
     ]

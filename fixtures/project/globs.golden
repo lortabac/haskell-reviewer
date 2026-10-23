@@ -1,4 +1,5 @@
 source: cabal.project
+ghc: 9.14.1 (parser)
 package x 1.0 (apps/x/x.cabal)
   lib
     source dirs: apps/x

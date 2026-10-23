@@ -9,17 +9,26 @@ where
 import Data.Text (Text)
 import HaskellReviewer.Core.FileContent (FileContent (..))
 import HaskellReviewer.Core.FileList (EntryKind (..), FileList)
-import HaskellReviewer.Core.Project (FileProblem (..), Project, ProjectSettings)
+import HaskellReviewer.Core.Project
+  ( FileProblem (..),
+    GhcVersion,
+    Platform,
+    Project,
+    ProjectConfig (..),
+    detectGhc,
+  )
 import HaskellReviewer.Core.ProjectLoad (loadProjectConfig, resolveProject)
 import HaskellReviewer.Core.RelPath (RelPath)
 import HaskellReviewer.Core.Root (CanonicalRoot)
 import HaskellReviewer.Effects.FileSystem (ReadError (..), readEntry)
 
--- | Both phases in one go, for a snapshot on disk.
-readProject :: CanonicalRoot -> FileList -> ProjectSettings -> IO Project
-readProject canon fl settings = do
+-- | Both phases in one go, for a snapshot on disk. @cliGhc@ is
+-- @--ghc@, if given: it wins over @with-compiler@ (§7.1).
+readProject :: CanonicalRoot -> FileList -> Platform -> Maybe GhcVersion -> IO Project
+readProject canon fl platform cliGhc = do
   config <- loadProjectConfig (readProjectFile canon) fl
-  resolveProject (readProjectFile canon) settings fl config
+  let detected = detectGhc cliGhc config.withCompiler
+  resolveProject (readProjectFile canon) platform detected fl config
 
 -- | Read a project file safely (Note [File containment] in
 -- "HaskellReviewer.Core.RelPath").

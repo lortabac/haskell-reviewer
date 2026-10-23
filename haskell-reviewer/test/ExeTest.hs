@@ -91,7 +91,8 @@ quickExitTests =
         (code, err) <- runExe ["--version"]
         code @?= ExitSuccess
         -- Catches a stale binary on PATH.
-        assertContains ("haskell-reviewer " <> Text.unpack toolVersion) err,
+        assertContains ("haskell-reviewer " <> Text.unpack toolVersion) err
+        assertContains "Haskell parser: GHC 9.14.1" err,
       testCase "--bogus: exit 2" $ do
         (code, _) <- runExe ["--bogus"]
         code @?= ExitFailure 2,

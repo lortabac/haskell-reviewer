@@ -17,7 +17,7 @@ module HaskellReviewer.Core.ProjectFile
 where
 
 import Data.ByteString qualified as BS
-import Data.Char (isDigit, isSpace)
+import Data.Char (isSpace)
 import Data.Foldable (toList)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -45,9 +45,9 @@ import HaskellReviewer.Core.Project
     PackageName (..),
     ProjectWarning (..),
     Required (..),
+    parseGhcVersionNumbers,
   )
 import HaskellReviewer.Core.RelPath (RelPath)
-import Text.Read (readMaybe)
 
 -- | One field of a project file, before imports are followed.
 data RawItem
@@ -98,14 +98,7 @@ parseWithCompilerVersion :: Text -> Maybe GhcVersion
 parseWithCompilerVersion t = do
   let base = Text.takeWhileEnd (/= '/') (Text.strip t)
   v <- Text.stripPrefix "ghc-" base
-  ns <- traverse number (Text.splitOn "." v)
-  pure (GhcVersion ns)
-  where
-    number s
-      -- At most 9 digits, so it fits in an Int.
-      | not (Text.null s) && Text.length s <= 9 && Text.all isDigit s =
-          readMaybe (Text.unpack s)
-      | otherwise = Nothing
+  GhcVersion <$> parseGhcVersionNumbers v
 
 -- * Internal
 

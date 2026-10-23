@@ -1,4 +1,5 @@
 source: cabal.project, imports common.project, cfg/more.project
+ghc: 9.14.1 (parser)
 package lib 1.0 (lib/lib.cabal)
   lib
     source dirs: lib
