@@ -1,4 +1,4 @@
-// The fixture project: a small git repo in a temp dir, built fresh by
+// The fixture projects: small git repos in a temp dir, built fresh by
 // each worker. Fixed author and dates, no user git config.
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
@@ -98,6 +98,70 @@ export async function makeProject(): Promise<Project> {
   await put(root, "untracked.txt", "not in git yet\n");
   await mkdir(join(root, "vendor/nested"), { recursive: true });
   git(join(root, "vendor/nested"), "init", "-q");
+  return {
+    root,
+    remove: () => rm(root, { recursive: true, force: true }),
+  };
+}
+
+// A cabal project: one package with every kind of module, a broken
+// package, an Hpack-only dir and a loose file.
+export const cabalFiles: Record<string, string> = {
+  "cabal.project": "packages: pkg/ bad/ hp/ nope/\n",
+  "pkg/pkg.cabal": [
+    "cabal-version: 2.0",
+    "name: pkg",
+    "version: 0.1.0",
+    "build-type: Simple",
+    "",
+    "library",
+    "  hs-source-dirs: src",
+    "  exposed-modules: Foo Lexer",
+    "  signatures: Sig",
+    "  other-modules: Paths_pkg",
+    "  autogen-modules: Paths_pkg",
+    "  build-depends: base",
+    "",
+    "executable app",
+    "  main-is: Main.hs",
+    "  hs-source-dirs: app",
+    "  build-depends: base",
+    "",
+    "test-suite spec",
+    "  type: exitcode-stdio-1.0",
+    "  main-is: Spec.hs",
+    "  hs-source-dirs: test",
+    "  ghc-options: -F -pgmF hspec-discover",
+    "  build-depends: base",
+    "",
+    "benchmark slow",
+    "  type: exitcode-stdio-1.0",
+    "  main-is: Bench.hs",
+    "  hs-source-dirs: bench",
+    "  buildable: False",
+    "  build-depends: base",
+    "",
+  ].join("\n"),
+  "pkg/src/Foo.hs": "module Foo where\n",
+  "pkg/src/Lexer.x": "{\nmodule Lexer where\n}\n",
+  "pkg/src/Sig.hsig": "signature Sig where\n",
+  "pkg/app/Main.hs": "main = pure ()\n",
+  "pkg/test/Spec.hs": "{-# OPTIONS_GHC -F -pgmF hspec-discover #-}\n",
+  "pkg/bench/Bench.hs": "main = pure ()\n",
+  // Unparsable.
+  "bad/bad.cabal": "name: bad\nlibrary\n  exposed-modules: {\n",
+  "hp/package.yaml": "name: hp\n",
+  "scripts/Tool.hs": "module Tool where\n",
+};
+
+export async function makeCabalProject(): Promise<Project> {
+  const root = await mkdtemp(join(tmpdir(), "hr-e2e-"));
+  git(root, "init", "-q");
+  for (const [path, text] of Object.entries(cabalFiles)) {
+    await put(root, path, text);
+  }
+  git(root, "add", "-A");
+  git(root, "commit", "-q", "-m", "fixture");
   return {
     root,
     remove: () => rm(root, { recursive: true, force: true }),

@@ -13,8 +13,8 @@ import { FileTree } from "./FileTree";
 import { hrefFor, pathFromPathname, withBase } from "./paths";
 import { buildTree } from "./tree";
 
-// The file list, as a tree. Loaded once.
-export function Sidebar(): JSX.Element {
+// The Files view of the sidebar: the file list, as a tree. Loaded once.
+export function FilesPanel(): JSX.Element {
   const [list] = createResource(() =>
     getJson("/api/files/tree", decodeFileList),
   );

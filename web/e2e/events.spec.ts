@@ -3,7 +3,7 @@
 // Tests tagged @slow wait for real keep-alives (15 s) or the 30 s
 // give-up timer.
 import type { BrowserContext, Page } from "@playwright/test";
-import { expect, type Guard, test } from "./support/fixtures";
+import { expect, type Guard, showFiles, test } from "./support/fixtures";
 
 const texts = {
   reconnecting: "Connection lost. Reconnecting…",
@@ -251,6 +251,7 @@ test("a frozen tab keeps the stream @slow", async ({
   await cdp.send("Page.setWebLifecycleState", { state: "active" });
 
   await frozen.bringToFront();
+  await showFiles(frozen);
   await frozen.getByRole("link", { name: "README.md", exact: true }).click();
   await expect(frozen.locator("main h1")).toHaveText("README.md");
   expect(await notices(frozen)).toEqual([]);

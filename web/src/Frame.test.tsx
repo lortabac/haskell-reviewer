@@ -7,7 +7,10 @@ let dispose: (() => void) | undefined;
 function mount(): HTMLElement {
   const root = document.createElement("div");
   document.body.append(root);
-  dispose = render(() => <Frame>hello</Frame>, root);
+  dispose = render(
+    () => <Frame notices={<p class="note">note</p>}>hello</Frame>,
+    root,
+  );
   return root;
 }
 
@@ -23,10 +26,12 @@ describe("Frame", () => {
       "haskell-reviewer",
     );
     const nav = root.querySelector("nav");
-    expect(nav?.getAttribute("aria-label")).toBe("Files");
+    expect(nav?.getAttribute("aria-label")).toBe("Project");
     const main = root.querySelector("main");
     expect(main?.id).toBe("main");
-    expect(main?.textContent).toBe("hello");
+    // Notices first, then the page.
+    expect(main?.textContent).toBe("notehello");
+    expect(main?.firstElementChild?.className).toBe("note");
   });
 
   it("skip link comes first and focuses main", () => {

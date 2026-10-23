@@ -2,10 +2,12 @@ import { Route, Router, type RouteSectionProps } from "@solidjs/router";
 import type { JSX } from "solid-js";
 import { basePath } from "./base";
 import { FileView } from "./files/FileView";
-import { Sidebar } from "./files/Sidebar";
 import { Frame } from "./Frame";
 import { Home } from "./Home";
+import { ProjectNotices } from "./modules/ProjectNotices";
+import { ModulesProvider } from "./modules/store";
 import { NotFound } from "./NotFound";
+import { Sidebar } from "./Sidebar";
 
 export function App(): JSX.Element {
   return (
@@ -18,5 +20,11 @@ export function App(): JSX.Element {
 }
 
 function Root(props: RouteSectionProps): JSX.Element {
-  return <Frame sidebar={<Sidebar />}>{props.children}</Frame>;
+  return (
+    <ModulesProvider>
+      <Frame sidebar={<Sidebar />} notices={<ProjectNotices />}>
+        {props.children}
+      </Frame>
+    </ModulesProvider>
+  );
 }

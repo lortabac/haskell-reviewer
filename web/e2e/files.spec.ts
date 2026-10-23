@@ -1,6 +1,15 @@
-// The file tree and the file view, against the fixture project.
+// The file tree and the file view, against the fixture project. The
+// project has no .cabal file, so the sidebar starts on Modules: the
+// tree tests switch to Files first.
 import type { Locator, Page } from "@playwright/test";
-import { expect, notFound404, tabKey, test } from "./support/fixtures";
+import {
+  expect,
+  notFound404,
+  showFiles,
+  sidebar,
+  tabKey,
+  test,
+} from "./support/fixtures";
 import {
   deepHs,
   evilHs,
@@ -13,7 +22,7 @@ import {
 } from "./support/project";
 
 function tree(page: Page): Locator {
-  return page.getByRole("navigation", { name: "Files" });
+  return sidebar(page);
 }
 
 function folder(page: Page, name: string): Locator {
@@ -35,6 +44,7 @@ function code(page: Page): Promise<string | null> {
 
 test("tree: top level", async ({ page, server }) => {
   await page.goto(server.base);
+  await showFiles(page);
   const top = tree(page).locator(".file-tree > li > .tree-folder");
   await expect(top).toHaveText(topFolders);
   for (const b of await top.all()) {
@@ -57,6 +67,7 @@ test("tree: top level", async ({ page, server }) => {
 
 test("tree: keyboard", async ({ page, server, browserName }) => {
   await page.goto(server.base);
+  await showFiles(page);
   const src = folder(page, "src");
   await src.focus();
   await page.keyboard.press("Enter");
@@ -74,6 +85,7 @@ test("tree: keyboard", async ({ page, server, browserName }) => {
 
 test("open a text file", async ({ page, server }) => {
   await page.goto(server.base);
+  await showFiles(page);
   await folder(page, "src").click();
   await fileLink(page, "Main.hs").click();
   await expect(page).toHaveURL(server.base + "src/tree/src/Main.hs");
@@ -104,7 +116,7 @@ test("notices: binary, too large, nested repo", async ({ page, server }) => {
   ];
   for (const [path, text] of cases) {
     await page.goto(fileUrl(server.base, path));
-    await expect(page.locator("main p")).toHaveText(text);
+    await expect(page.locator("main p:not(.project-notice)")).toHaveText(text);
   }
 });
 
@@ -127,6 +139,7 @@ test("symlinks", async ({ page, server }) => {
 for (const [path, text] of Object.entries(oddFiles)) {
   test(`odd name: ${path}`, async ({ page, server }) => {
     await page.goto(server.base);
+    await showFiles(page);
     await folder(page, "odd").click();
     const name = path.slice("odd/".length);
     await fileLink(page, name).click();
@@ -148,8 +161,9 @@ test("not found", async ({ page, server, guard }) => {
 });
 
 test("back and forward", async ({ page, server }) => {
-  const current = tree(page).locator("[aria-current=page]");
+  const current = tree(page).locator(".file-tree [aria-current=page]");
   await page.goto(server.base);
+  await showFiles(page);
   await folder(page, "src").click();
   await fileLink(page, "Main.hs").click();
   await expect(page.locator("main h1")).toHaveText("src/Main.hs");
@@ -170,13 +184,16 @@ test("back and forward", async ({ page, server }) => {
   await page.goBack();
   await page.goBack();
   await expect(page).toHaveURL(server.base);
-  await expect(page.locator("main")).toHaveText("Pick a file in the sidebar.");
+  await expect(page.locator("main")).toContainText(
+    "Pick a file in the sidebar.",
+  );
   await expect(current).toHaveCount(0);
 });
 
 test("deep link in a new page", async ({ context, server }) => {
   const page = await context.newPage();
   await page.goto(fileUrl(server.base, "src/Data/Deep/Nested/Mod.hs"));
+  await showFiles(page);
   for (const name of ["src", "Data", "Deep", "Nested"]) {
     await expect(folder(page, name)).toHaveAttribute("aria-expanded", "true");
   }
