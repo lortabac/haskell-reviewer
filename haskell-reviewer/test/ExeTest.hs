@@ -357,7 +357,20 @@ filesTests =
                   \\"packages\":[],\"broken\":[],\
                   \\"other\":[{\"kind\":\"module\",\"path\":\"Foo.hs\",\
                   \\"name\":\"Foo\",\"id\":\"Foo.hs\",\"ref\":\"Foo\"}],\
-                  \\"warnings\":[]}"
+                  \\"warnings\":[]}",
+      testCase "module: parsed on demand; a symlink is never read" $
+        withCanonicalTemp $ \dir -> do
+          writeFile (dir </> "Foo.hs") "module Foo (x) where\nx = 1\n"
+          writeFile (dir </> "secret.txt") "module Secret where\n"
+          Dir.createFileLink "secret.txt" (dir </> "Bar.hs")
+          withServer id [dir] $ \server -> do
+            r <- getPath server "api/module/tree/Foo"
+            r.status @?= 200
+            assertContains "\"kind\":\"parsed\"" (Char8.unpack r.body)
+            assertContains "\"occ\":\"x\"" (Char8.unpack r.body)
+            -- Symlinks are only in the file tree: not a module.
+            gone <- getPath server "api/module/tree/Bar"
+            gone.status @?= 404
     ]
 
 -- * git
@@ -699,7 +712,7 @@ signalTests =
           getPid server.process >>= mapM_ (signalProcess sigTERM)
           (code, _) <- stopServer server sigTERM
           code @?= ExitSuccess,
-      testCase "--trace-file: startup, files and project spans" $
+      testCase "--trace-file: startup, files, project and warm-up spans" $
         withTemp $ \dir -> do
           let file = dir </> "t.jsonl"
               root = dir </> "root"
@@ -708,16 +721,17 @@ signalTests =
             r <- getPath server "api/files/tree"
             r.status @?= 200
             -- The spans are written just after the snapshot is ready.
-            _ <- waitForFile' file ((== 3) . length . lines)
+            _ <- waitForFile' file ((== 4) . length . lines)
             (code, _) <- stopServer server sigTERM
             code @?= ExitSuccess
           contents <- readFile file
           case lines contents of
-            [startup, files, project] -> do
+            [startup, files, project, warmUp] -> do
               assertContains "\"name\":\"startup\"" startup
               assertContains "\"name\":\"files\"" files
               assertContains "\"name\":\"project\"" project
-            ls -> assertFailure ("expected three lines, got " <> show ls),
+              assertContains "\"name\":\"parser-warm-up\"" warmUp
+            ls -> assertFailure ("expected four lines, got " <> show ls),
       testCase "--trace-file /dev/full: exit 0 with a warning" $ do
         -- Linux only: elsewhere, nothing to do.
         hasDevFull <- Dir.doesPathExist "/dev/full"

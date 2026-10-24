@@ -10,6 +10,7 @@ module HaskellReviewer.Core.Parser
     ParseSettings (..),
     FileKind (..),
     defaultParseSettings,
+    moduleParseSettings,
 
     -- * Parsing
     parseSource,
@@ -20,7 +21,7 @@ module HaskellReviewer.Core.Parser
 where
 
 import Data.Foldable (toList)
-import Data.List (sort)
+import Data.List (nub, sort)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Set (Set)
@@ -109,15 +110,23 @@ import HaskellReviewer.Core.ModuleModel
     TextOnlyReason (..),
     forceModuleParse,
   )
-import HaskellReviewer.Core.Modules (Literate (..), Tools (..), toolsFrom)
+import HaskellReviewer.Core.Modules
+  ( ComponentSettings (..),
+    HaskellFile (..),
+    Literate (..),
+    Tools (..),
+    toolsFrom,
+  )
 import HaskellReviewer.Core.Parser.Convert (convertModule, toSpan)
 import HaskellReviewer.Core.Project
   ( Extension (..),
+    GhcVersion,
     Language,
     hostPlatform,
     parserGhcVersion,
   )
 import HaskellReviewer.Core.Project qualified as Project (Language (..))
+import HaskellReviewer.Core.RelPath (relPathName)
 import HaskellReviewer.Core.SourceText
   ( ColumnMap,
     columnMap,
@@ -203,6 +212,27 @@ defaultParseSettings =
             buildDepends = []
           }
     }
+
+-- | The settings for a file of the module index, with the project's
+-- GHC. A .hsig or .lhsig file is a signature, as for GHC.
+moduleParseSettings :: GhcVersion -> ComponentSettings -> HaskellFile -> ParseSettings
+moduleParseSettings ghc c file =
+  ParseSettings
+    { language = c.language,
+      extensions = c.extensions,
+      ghcOptions = c.ghcOptions,
+      literate = file.literate,
+      kind = if signature then SignatureFile else ModuleFile,
+      cpp =
+        CppEnv
+          { ghc = ghc,
+            platform = hostPlatform,
+            cppOptions = c.cppOptions,
+            buildDepends = c.buildDepends
+          }
+    }
+  where
+    signature = any (`Text.isSuffixOf` relPathName file.path) [".hsig", ".lhsig"]
 
 -- * Parsing
 
@@ -320,7 +350,8 @@ applyPragmas = go [] []
         let (df', safeWarnings) = safeCheck df
          in PragmaFlags
               { dflags = df',
-                names = reverse names,
+                -- A name given twice is listed once, first place.
+                names = nub (reverse names),
                 warnings = reverse ws <> safeWarnings
               }
       a : rest

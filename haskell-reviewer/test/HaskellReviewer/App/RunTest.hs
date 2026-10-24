@@ -43,6 +43,7 @@ import HaskellReviewer.Effects.Clock
   )
 import HaskellReviewer.Effects.FileSystem (ListError (..), Lister (..), RootError (..))
 import HaskellReviewer.Effects.Git (GitError (..), TooOld (..))
+import HaskellReviewer.Effects.Parser (parseGuarded)
 import HaskellReviewer.Effects.Shutdown (Shutdown (..))
 import HaskellReviewer.Effects.Spawn (SoftLimit (..), SpawnSetup (..))
 import HaskellReviewer.Effects.Trace (Span (..), TraceFileError (..), Tracer (..))
@@ -303,6 +304,43 @@ listingTests =
             putMVar release ()
             r <- timeout 5_000_000 (wait request)
             fmap (.status) r @?= Just 200,
+      testCase "the parser warms up before requests get the snapshot" $ do
+        release <- newEmptyMVar
+        let slowWarmUp d = d {warmUpParser = readMVar release}
+            empty _ = fakeLister (pure (Right (mkFileList FromDisk 0 [])))
+        withRunningWith slowWarmUp empty $ \_ app ->
+          withAsync (getFiles app) $ \request -> do
+            threadDelay 200_000
+            early <- poll request
+            assertBool "answered before the warm-up" (isNothing early)
+            putMVar release ()
+            r <- timeout 5_000_000 (wait request)
+            fmap (.status) r @?= Just 200,
+      testCase "warm-up: runs when the project crashes, not when listing fails" $ do
+        let counting ref d = d {warmUpParser = modifyIORef' ref (+ 1)}
+            crash ref d =
+              (counting ref d) {readProject = \_ _ _ _ -> ioError (userError "boom")}
+            empty _ = fakeLister (pure (Right (mkFileList FromDisk 0 [])))
+            failing _ = fakeLister (pure (Left (ListCrashed "boom")))
+        crashed <- newIORef (0 :: Int)
+        withRunningWith (crash crashed) empty $ \_ app -> do
+          r <- getFiles app
+          r.status @?= 200
+        readIORef crashed >>= (@?= 1)
+        failed <- newIORef (0 :: Int)
+        withRunningWith (counting failed) failing $ \_ app -> do
+          r <- getFiles app
+          r.status @?= 500
+        readIORef failed >>= (@?= 0),
+      testCase "warm-up throws: a line, the snapshot is still filled" $ do
+        let throwing d = d {warmUpParser = ioError (userError "boom")}
+            empty _ = fakeLister (pure (Right (mkFileList FromDisk 0 [])))
+        withRunningWith throwing empty $ \fake app -> do
+          r <- getFiles app
+          r.status @?= 200
+          _ <- waitFor 5 ((>= 2) . length <$> readIORef fake.console)
+          out <- readIORef fake.console
+          drop 1 out @?= ["haskell-reviewer: parser warm-up failed: user error (boom)"],
       testCase "project crashes: a line, files still work, warning in the tree" $ do
         let crash d = d {readProject = \_ _ _ _ -> ioError (userError "boom")}
             empty _ = fakeLister (pure (Right (mkFileList FromDisk 0 [])))
@@ -572,6 +610,9 @@ newFake = do
             -- Never done: no line or span from the listing.
             probeFiles = \_ _ -> pure (Right (fakeLister neverDone)),
             readProject = Session.Project.readProject,
+            -- The tests that parse warm up on their own.
+            warmUpParser = pure (),
+            parse = parseGuarded,
             openBrowser = \_ _ url -> modifyIORef' opened (<> [url]),
             installShutdown =
               pure

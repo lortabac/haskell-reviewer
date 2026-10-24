@@ -31,6 +31,7 @@ import Control.Exception
   )
 import Control.Monad (unless, void, when)
 import Crypto.Random (getRandomBytes)
+import Data.Either (isRight)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as Text.IO
@@ -53,11 +54,13 @@ import HaskellReviewer.Core.Address
     tokenFromBytes,
   )
 import HaskellReviewer.Core.FileList (FileList (..), ListSource (..), fileListCap)
+import HaskellReviewer.Core.ModuleModel (ModuleParse)
 import HaskellReviewer.Core.Modules
   ( ComponentModules (..),
     ModuleIndex (..),
     PackageModules (..),
   )
+import HaskellReviewer.Core.Parser (ParseSettings)
 import HaskellReviewer.Core.Project
   ( DetectedGhc (..),
     GhcVersion,
@@ -97,6 +100,7 @@ import HaskellReviewer.Effects.Log
     logVerbose,
     newLogger,
   )
+import HaskellReviewer.Effects.Parser qualified as Parser
 import HaskellReviewer.Effects.Shutdown (Shutdown (..), installShutdownHandlers)
 import HaskellReviewer.Effects.Spawn
   ( SpawnSetup,
@@ -240,6 +244,11 @@ data Deps = Deps
       Platform ->
       Maybe GhcVersion ->
       IO Project,
+    -- | Build the parser's shared values. See Note [Forced snapshot] in
+    -- "HaskellReviewer.Server.Api".
+    warmUpParser :: IO (),
+    -- | Parse one module, fully forced.
+    parse :: ParseSettings -> Text -> IO ModuleParse,
     -- | Open the URL in the browser. Must not block or throw.
     openBrowser :: Logger -> Root -> Text -> IO (),
     -- | Catch the stop signals.
@@ -255,6 +264,8 @@ newRealDeps :: SpawnSetup -> IO Deps
 newRealDeps spawnSetup = do
   -- Lines from warp's threads and the browser opener must not mix.
   lock <- newMVar ()
+  -- See Note [One parse at a time] in "HaskellReviewer.Effects.Parser".
+  parse <- Parser.oneAtATime Parser.parseGuarded
   pure
     Deps
       { console = \line -> withMVar lock (\_ -> Text.IO.hPutStrLn stderr line),
@@ -265,6 +276,8 @@ newRealDeps spawnSetup = do
         listen = openListener,
         probeFiles = FileSystem.probeFiles,
         readProject = Session.Project.readProject,
+        warmUpParser = Parser.warmUpParser,
+        parse = parse,
         openBrowser = Browser.openBrowser,
         installShutdown = installShutdownHandlers,
         idleMinute = Microseconds 60_000_000,
@@ -398,6 +411,7 @@ serve deps logger opts root lister tracer shutdown t0 w0 = do
                 FilesApi
                   { snapshot = awaitSnapshot slot,
                     readEntry = \snap -> FileSystem.readEntry snap.root,
+                    parse = deps.parse,
                     logger = logger
                   }
               routes = Routes {events = events, files = files}
@@ -438,14 +452,22 @@ runListing deps logger tracer lister slot cliGhc = do
     w1 <- deps.clock.now
     made <- traverse (\fl -> snapshotOf deps logger lister.root fl cliGhc) listed
     t2 <- deps.clock.monotonic
+    w2 <- deps.clock.now
+    -- Warm up before the fill: requests parse. See Note [Forced
+    -- snapshot] in "HaskellReviewer.Server.Api".
+    when (isRight made) (warmUp deps logger)
+    t3 <- deps.clock.monotonic
     _ <- fill made
     -- After the fill: a slow trace file can't hold up requests.
     tracer.record Span {name = "files", start = w0, duration = elapsed t0 t1}
     case made of
       Right snap -> do
         tracer.record Span {name = "project", start = w1, duration = elapsed t1 t2}
+        tracer.record
+          Span {name = "parser-warm-up", start = w2, duration = elapsed t2 t3}
         reportFiles snap.files (elapsed t0 t1)
         reportProject snap.modules (elapsed t1 t2)
+        reportWarmUp (elapsed t2 t3)
       Left e -> reportError e
   case result of
     Right () -> pure ()
@@ -495,6 +517,20 @@ runListing deps logger tracer lister slot cliGhc = do
           <> " other files in "
           <> showText (ns `div` 1_000_000)
           <> " ms"
+    reportWarmUp (Nanoseconds ns) =
+      logVerbose logger ("parser warm-up: " <> showText (ns `div` 1_000) <> " us")
+
+-- | 'warmUpParser', but a crash only logs a line: the snapshot is fine
+-- without it.
+warmUp :: Deps -> Logger -> IO ()
+warmUp deps logger =
+  try @SomeException deps.warmUpParser >>= \case
+    Right () -> pure ()
+    Left e
+      | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
+      | otherwise ->
+          logInfo logger $
+            "haskell-reviewer: parser warm-up failed: " <> exceptionMessage e
 
 -- | Read the project and build the snapshot, all of it. If that
 -- crashes, the snapshot has no project, only a warning. See

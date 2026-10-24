@@ -69,17 +69,6 @@ main = do
         HaskellReviewer.Core.ModulesGoldenTest.tests,
         HaskellReviewer.Core.ModulesTest.tests,
         HaskellReviewer.Core.PackageGlobTest.tests,
-        -- Build the parser's shared values before the tests parse in
-        -- parallel (Q-RTS-BLACKHOLE). A smaller warm-up still hung once
-        -- in 300 runs on 9.12.
-        withResource warmUpParser (const (pure ())) $ \_ ->
-          testGroup
-            "Parsing"
-            [ HaskellReviewer.Core.CppTest.tests,
-              HaskellReviewer.Core.ParseGoldenTest.tests,
-              HaskellReviewer.Core.ParserTest.tests,
-              HaskellReviewer.Core.SourceTextTest.tests
-            ],
         HaskellReviewer.Core.ProjectFileTest.tests,
         HaskellReviewer.Core.ProjectGoldenTest.tests,
         HaskellReviewer.Core.ProjectLoadTest.tests,
@@ -92,12 +81,23 @@ main = do
         HaskellReviewer.Effects.LogTest.tests,
         HaskellReviewer.Effects.SpawnTest.tests,
         HaskellReviewer.Effects.TraceTest.tests,
-        -- Both share the API fixtures: built once, here.
-        withResource forceFixtures (const (pure ())) $ \_ ->
+        -- Build the parser's shared values before the tests parse in
+        -- parallel (Q-RTS-BLACKHOLE). A smaller warm-up still hung once
+        -- in 300 runs on 9.12. The API tests parse too.
+        withResource warmUpParser (const (pure ())) $ \_ ->
           testGroup
-            "API"
-            [ HaskellReviewer.Server.ApiGoldenTest.tests,
-              HaskellReviewer.Server.ApiTest.tests
+            "Parsing"
+            [ HaskellReviewer.Core.CppTest.tests,
+              HaskellReviewer.Core.ParseGoldenTest.tests,
+              HaskellReviewer.Core.ParserTest.tests,
+              HaskellReviewer.Core.SourceTextTest.tests,
+              -- Both share the API fixtures: built once, here.
+              withResource forceFixtures (const (pure ())) $ \_ ->
+                testGroup
+                  "API"
+                  [ HaskellReviewer.Server.ApiGoldenTest.tests,
+                    HaskellReviewer.Server.ApiTest.tests
+                  ]
             ],
         HaskellReviewer.Server.AssetsTest.tests,
         HaskellReviewer.Server.EventsTest.tests,

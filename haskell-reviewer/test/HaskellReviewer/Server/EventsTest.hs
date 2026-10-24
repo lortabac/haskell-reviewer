@@ -314,6 +314,7 @@ routesFor events =
         FilesApi
           { snapshot = pure (Left (ListCrashed "no files here")),
             readEntry = \_ _ _ -> pure (Left ReadGone),
+            parse = \_ _ -> ioError (userError "no parsing here"),
             logger = newLogger LevelInfo (\_ -> pure ())
           }
     }
