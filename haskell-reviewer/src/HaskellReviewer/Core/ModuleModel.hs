@@ -13,6 +13,7 @@ module HaskellReviewer.Core.ModuleModel
     TextOnlyReason (..),
     ParseError (..),
     ParseWarning (..),
+    renderParseWarning,
 
     -- * Parsed module
     ParsedModule (..),
@@ -106,6 +107,16 @@ data ParseWarning
     -- the first, like GHC does before failing.
     SafeModesClash Text Text
   deriving (Eq, Show)
+
+-- | For the user, like @unknown extension: Foo@.
+renderParseWarning :: ParseWarning -> Text
+renderParseWarning = \case
+  UnknownExtension t -> "unknown extension: " <> t
+  UnknownLanguage t -> "unknown language: " <> t
+  IgnoredPragmaFlag t -> "ignored OPTIONS_GHC flag: " <> t
+  NoMarkdownCode -> "no Haskell code block"
+  SafeTurnsOff t -> "turned off by Safe: " <> t
+  SafeModesClash a b -> "Safe Haskell modes clash: " <> a <> ", " <> b <> " ignored"
 
 -- * Parsed module
 
@@ -276,7 +287,8 @@ data Extensions = Extensions
     language :: Text,
     -- | Every extension that is on, by GHC's main name, sorted.
     enabled :: [Text],
-    -- | Applied from the module's own pragmas, as written, in order.
+    -- | Applied from the module's own pragmas, as written, in order,
+    -- each once.
     -- @-cpp@ is @CPP@. Unknown names are warnings, not here.
     fromPragmas :: [Text]
   }

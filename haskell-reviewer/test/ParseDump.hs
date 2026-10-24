@@ -20,7 +20,6 @@ import HaskellReviewer.Core.ModuleModel
     ModuleParse (..),
     NameKeyword (..),
     ParseError (..),
-    ParseWarning (..),
     ParsedModule (..),
     Qualified (..),
     RawDoc (..),
@@ -31,6 +30,7 @@ import HaskellReviewer.Core.ModuleModel
     TextOnlyReason (..),
     WarningKind (..),
     WarningText (..),
+    renderParseWarning,
   )
 import HaskellReviewer.Core.Project (ModuleName (..))
 import HaskellReviewer.Core.Span (Span, renderSpan)
@@ -39,7 +39,8 @@ dumpParse :: ModuleParse -> Text
 dumpParse =
   Text.unlines . \case
     Parsed m -> "parsed" : parsed m
-    TextOnly t -> ("text only: " <> reason t.reason) : map (indent . warning) t.warnings
+    TextOnly t ->
+      ("text only: " <> reason t.reason) : map (indent . renderParseWarning) t.warnings
 
 parsed :: ParsedModule -> [Text]
 parsed m =
@@ -49,7 +50,7 @@ parsed m =
       Just es -> "exports:" : concatMap (map indent . export) es
     <> ("imports:" : concatMap (map indent . importDecl) m.imports)
     <> extensions m.extensions
-    <> ("warnings:" : map (indent . warning) m.warnings)
+    <> ("warnings:" : map (indent . renderParseWarning) m.warnings)
 
 header :: ModuleHeader -> [Text]
 header h =
@@ -138,15 +139,6 @@ extensions e =
     "from pragmas: " <> Text.intercalate ", " e.fromPragmas,
     "enabled: " <> Text.intercalate ", " e.enabled
   ]
-
-warning :: ParseWarning -> Text
-warning = \case
-  UnknownExtension t -> "unknown extension: " <> t
-  UnknownLanguage t -> "unknown language: " <> t
-  IgnoredPragmaFlag t -> "ignored OPTIONS_GHC flag: " <> t
-  NoMarkdownCode -> "no Haskell code block"
-  SafeTurnsOff t -> "turned off by Safe: " <> t
-  SafeModesClash a b -> "Safe Haskell modes clash: " <> a <> ", " <> b <> " ignored"
 
 reason :: TextOnlyReason -> Text
 reason = \case

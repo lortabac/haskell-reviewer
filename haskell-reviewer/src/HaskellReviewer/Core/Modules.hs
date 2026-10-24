@@ -14,6 +14,7 @@ module HaskellReviewer.Core.Modules
     ModuleIndex (..),
     PackageModules (..),
     ComponentModules (..),
+    ComponentSettings (..),
     ModuleEntry (..),
     ModuleRole (..),
     ModuleSource (..),
@@ -29,6 +30,12 @@ module HaskellReviewer.Core.Modules
 
     -- * Building
     buildModuleIndex,
+    looseSettings,
+    forceSettings,
+
+    -- * Lookup
+    FoundModule (..),
+    findModule,
 
     -- * Identity
     ModuleId (..),
@@ -45,6 +52,7 @@ module HaskellReviewer.Core.Modules
 where
 
 import Control.Applicative ((<|>))
+import Control.Monad (guard)
 import Data.Char (isAlphaNum, isUpper)
 import Data.List (nub, sortOn, unsnoc)
 import Data.List.NonEmpty (NonEmpty, nonEmpty)
@@ -60,6 +68,10 @@ import HaskellReviewer.Core.Project
   ( BrokenPackage,
     Component (..),
     ComponentName (..),
+    DetectedGhc (..),
+    Extension (..),
+    GhcVersion (..),
+    Language (..),
     ListedModule (..),
     ModuleKind (..),
     ModuleName (..),
@@ -158,7 +170,9 @@ data ModuleIndex = ModuleIndex
     -- | Other files by module name, for short forms.
     looseByName :: Map ModuleName [RelPath],
     -- | Every module id.
-    ids :: Set ModuleId
+    ids :: Set ModuleId,
+    -- | The project's GHC (SPEC §7.1), for CPP.
+    ghc :: GhcVersion
   }
 
 -- | The modules of one package.
@@ -174,9 +188,21 @@ data PackageModules = PackageModules
 data ComponentModules = ComponentModules
   { name :: ComponentName,
     buildable :: Bool,
+    settings :: ComponentSettings,
     -- | Sorted by name.
     modules :: [ModuleEntry]
   }
+
+-- | What the component sets for parsing its modules. Lists as in the
+-- .cabal file.
+data ComponentSettings = ComponentSettings
+  { language :: Language,
+    extensions :: [Extension],
+    ghcOptions :: [Text],
+    cppOptions :: [Text],
+    buildDepends :: [PackageName]
+  }
+  deriving (Eq, Show)
 
 -- | One module of a component. Its id is a 'ComponentModule'.
 data ModuleEntry = ModuleEntry
@@ -304,7 +330,8 @@ buildModuleIndex project fl =
       warnings = [w | w <- project.warnings, not (isHpackOnly w)],
       ownedByName = groupByName owned,
       looseByName = groupByName [(n, f.path) | f <- loose, Just n <- [f.name]],
-      ids = Set.fromList (map snd owned <> [LooseModule f.path | f <- loose])
+      ids = Set.fromList (map snd owned <> [LooseModule f.path | f <- loose]),
+      ghc = project.ghc.version
     }
   where
     packages = map (packageModules fl) project.packages
@@ -348,6 +375,61 @@ buildModuleIndex project fl =
     isHpackOnly = \case
       HpackOnly _ -> True
       _ -> False
+
+-- | Other files: GHC2021 and nothing else, GHC's default (D-84).
+looseSettings :: ComponentSettings
+looseSettings =
+  ComponentSettings
+    { language = GHC2021,
+      extensions = [],
+      ghcOptions = [],
+      cppOptions = [],
+      buildDepends = []
+    }
+
+-- | Force the settings fully. They come from the project, which is
+-- lazy, and request threads read them. See Note [Forced snapshot] in
+-- "HaskellReviewer.Server.Api".
+forceSettings :: ComponentSettings -> ()
+forceSettings s =
+  language s.language `seq`
+    each (\e -> e.name `seq` e.enabled `seq` ()) s.extensions `seq`
+      each (`seq` ()) s.ghcOptions `seq`
+        each (`seq` ()) s.cppOptions `seq`
+          each (\(PackageName n) -> n `seq` ()) s.buildDepends
+  where
+    language = \case
+      UnknownLanguage t -> t `seq` ()
+      l -> l `seq` ()
+    each f = foldr (\x r -> f x `seq` r) ()
+
+-- * Lookup
+
+-- | A module of the index, with what we need to parse it.
+data FoundModule = FoundModule
+  { source :: ModuleSource,
+    settings :: ComponentSettings
+  }
+  deriving (Eq, Show)
+
+-- | Find a module by id. Other files get 'looseSettings'.
+findModule :: ModuleIndex -> ModuleId -> Maybe FoundModule
+findModule idx = \case
+  ComponentModule pkg comp name -> listToMaybe $ do
+    p <- idx.packages
+    guard (p.name == pkg)
+    c <- p.components
+    guard (c.name == comp)
+    m <- c.modules
+    guard (m.name == name)
+    pure FoundModule {source = m.source, settings = c.settings}
+  LooseModule path -> listToMaybe $ do
+    OtherModule f <- idx.other
+    guard (f.path == path)
+    -- No tools for other files: always plain Haskell, maybe literate.
+    pure FoundModule {source = fileSource noTools path, settings = looseSettings}
+  where
+    noTools = toolsFrom []
 
 -- * Identity
 
@@ -472,6 +554,14 @@ componentModules fl pkg c =
   ComponentModules
     { name = c.name,
       buildable = c.buildable,
+      settings =
+        ComponentSettings
+          { language = c.language,
+            extensions = c.extensions,
+            ghcOptions = c.ghcOptions,
+            cppOptions = c.cppOptions,
+            buildDepends = c.buildDepends
+          },
       modules = sortOn (.name) (mains <> filter notMain listed)
     }
   where

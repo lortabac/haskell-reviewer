@@ -46,6 +46,7 @@ import HaskellReviewer.Core.Project
     Component (..),
     ComponentName (..),
     DetectedGhc (..),
+    Extension (..),
     GhcSource (..),
     Language (..),
     ListedModule (..),
@@ -71,6 +72,7 @@ import HaskellReviewer.Core.Root (CanonicalRoot (..))
 import HaskellReviewer.Effects.Clock (Microseconds (..))
 import HaskellReviewer.Effects.FileSystem (ReadError (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), newLogger)
+import HaskellReviewer.Effects.Parser (parseGuarded)
 import HaskellReviewer.Server.Api (FilesApi (..), forceSnapshot, newSnapshot)
 import HaskellReviewer.Server.Events (EventStream (..))
 import HaskellReviewer.Server.Router (Routes (..), application)
@@ -108,6 +110,7 @@ apiFor snap =
     { snapshot = pure (Right snap),
       readEntry = \_ p _ ->
         pure (maybe (Left ReadGone) Right (lookup (relPathText p) contents)),
+      parse = parseGuarded,
       logger = newLogger LevelInfo (\_ -> pure ())
     }
 
@@ -179,7 +182,13 @@ fixturePackage =
       flags = [],
       components =
         [ (component Lib "pkg/src")
-            { modules =
+            { -- Only for parsing: the tree doesn't show them.
+              extensions =
+                [ Extension "ExplicitLevelImports" True,
+                  Extension "PackageImports" True,
+                  Extension "NoSuchThing" True
+                ],
+              modules =
                 [ listed "Foo" Exposed,
                   listed "Lexer" Exposed,
                   listed "Sig" Signature,
@@ -301,7 +310,27 @@ contents =
     -- Points under ROOT, but not to a listed file: resolved is null.
     ("docs/old.md", link "docs/old.md" "gone.md"),
     ("vendor/dep", Submodule commit),
-    ("vendor/nested", NestedRepo)
+    ("vendor/nested", NestedRepo),
+    -- Modules of the project fixture.
+    ("pkg/src/Foo.hs", TextContent fooModule),
+    ("pkg/src/Lit.lhs", TextContent "> module Lit (x) where\n> x = 1\n"),
+    ("pkg/src/Sig.hsig", TextContent "signature Sig (T) where\ndata T\n"),
+    -- A parse error after a tab.
+    ("pkg/app/Main.hs", TextContent "module Main where\nmain =\t= 1\n"),
+    ( "pkg/test/Tests.hs",
+      TextContent "{-# LANGUAGE NoSuchThing #-}\nmodule Tests where\n"
+    ),
+    ( "pkg/bench/Bench.hs",
+      TextContent
+        "{-# LANGUAGE CPP #-}\nmodule Main where\n#if 1\nmain = pure ()\n#endif\n"
+    ),
+    ("scripts/Tool.hs", TextContent "{-# OPTIONS_GHC -F -pgmF hspec-discover #-}\n"),
+    ("scripts/build-docs.hs", TextContent "main = pure ()\n"),
+    -- Modules of the implicit fixture.
+    ("Main.hs", Binary (FileSize 10)),
+    ( "src/Data/Deep/Mod.hs",
+      TooLarge TooLargeInfo {size = FileSize 2_000_000, limit = textLimit}
+    )
   ]
   where
     link p t =
@@ -311,6 +340,52 @@ contents =
             resolved =
               relPathFromBytes p >>= (`resolveLinkTarget` Text.Encoding.encodeUtf8 t)
           }
+
+-- | A header with every kind of export, import and doc.
+fooModule :: Text
+fooModule =
+  Text.unlines
+    [ "{-# LANGUAGE PatternSynonyms, ExplicitNamespaces, NamedDefaults #-}",
+      "{-# LANGUAGE Trustworthy #-}",
+      "{-# LANGUAGE ImportQualifiedPost #-}",
+      "{-# OPTIONS_GHC -Wall #-}",
+      "",
+      "-- | Foo things.",
+      "module Foo",
+      "  {-# DEPRECATED \"Use Bar\" #-}",
+      "  ( -- * Values",
+      "    f, -- ^ The f.",
+      "    {-# WARNING in \"x-old\" \"Going\" #-} old,",
+      "    (+++),",
+      "    Q.qualified,",
+      "",
+      "    -- ** Types",
+      "    T,",
+      "    U (..),",
+      "    V (A, b),",
+      "    W (.., C),",
+      "    type (:+:),",
+      "    pattern P,",
+      "    data D,",
+      "    default Num,",
+      "",
+      "    -- $chunk",
+      "",
+      "    -- | Re-exports.",
+      "    module Data.Map,",
+      "  )",
+      "where",
+      "",
+      "import Data.Map",
+      "import qualified Data.Map as Q",
+      "import Data.Set qualified as S (Set, empty)",
+      "import Data.Char hiding (ord)",
+      "import {-# SOURCE #-} Loop (Loop)",
+      "import safe Data.Bits",
+      "import \"base\" Data.Word ()",
+      "import splice Language.Haskell.TH (Q)",
+      "import Control.Monad quote (when)"
+    ]
 
 -- * Calling the app
 

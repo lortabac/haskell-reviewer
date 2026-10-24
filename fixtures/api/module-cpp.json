@@ -1,0 +1,1 @@
+{"generation":1,"id":"pkg:bench:slow:Main","ref":"pkg:bench:slow:Main","path":"pkg/bench/Bench.hs","tier":{"kind":"syntactic","reason":"no-hie"},"parse":{"kind":"text-only","reason":{"kind":"cpp-not-supported"},"warnings":[]}}

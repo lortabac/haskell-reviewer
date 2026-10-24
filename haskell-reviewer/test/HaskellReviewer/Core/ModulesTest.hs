@@ -8,6 +8,7 @@ import Data.Maybe (fromMaybe)
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
+import HaskellReviewer.Core.Cpp (CppEnv (..))
 import HaskellReviewer.Core.FileList
   ( EntryKind (..),
     FileList,
@@ -16,6 +17,8 @@ import HaskellReviewer.Core.FileList
   )
 import HaskellReviewer.Core.Modules
   ( ComponentModules (..),
+    ComponentSettings (..),
+    FoundModule (..),
     GeneratedFile (..),
     HaskellFile (..),
     Literate (..),
@@ -32,17 +35,26 @@ import HaskellReviewer.Core.Modules
     PreprocessedFile (..),
     Preprocessor (..),
     buildModuleIndex,
+    findModule,
+    looseSettings,
     moduleNameFromPath,
     moduleRef,
     renderModuleId,
     resolveModuleRef,
   )
+import HaskellReviewer.Core.Parser
+  ( FileKind (..),
+    ParseSettings (..),
+    moduleParseSettings,
+  )
 import HaskellReviewer.Core.Project
   ( Component (..),
     ComponentName (..),
     DetectedGhc (..),
+    Extension (..),
     FileProblem (..),
     GhcSource (..),
+    GhcVersion (..),
     Language (..),
     ListedModule (..),
     Loc (..),
@@ -53,6 +65,7 @@ import HaskellReviewer.Core.Project
     Project (..),
     ProjectSource (..),
     ProjectWarning (..),
+    hostPlatform,
     parserGhcVersion,
   )
 -- Qualified too, for record updates: Core.Modules has fields of the
@@ -67,7 +80,7 @@ import HaskellReviewer.Core.RelPath
     rootDir,
   )
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (testCase, (@?=))
+import Test.Tasty.HUnit (Assertion, testCase, (@?=))
 
 tests :: TestTree
 tests =
@@ -78,7 +91,8 @@ tests =
       toolTests,
       otherTests,
       identityTests,
-      noticeTests
+      noticeTests,
+      settingsTests
     ]
 
 -- * Lookup
@@ -443,6 +457,93 @@ noticeTests =
   where
     noMatch = EntryNoMatch Loc {file = path "cabal.project", line = 1} "x/"
 
+-- * Parse settings
+
+settingsTests :: TestTree
+settingsTests =
+  testGroup
+    "Parse settings"
+    [ testCase "findModule: the component's settings; GHC2021 for other files" findTest,
+      testCase
+        "moduleParseSettings: component, file and the project's GHC"
+        parseSettingsTest
+    ]
+
+findTest :: Assertion
+findTest = do
+  let c =
+        (lib ["p/src"])
+          { P.modules = [exposed "A"],
+            P.language = GHC2024,
+            P.extensions = [Extension "CPP" True],
+            P.ghcOptions = ["-Wall"],
+            P.cppOptions = ["-DX"],
+            P.buildDepends = [PackageName "base"]
+          }
+      idx = onePackage ["p/src/A.hs", "p/tools/B.lhs"] [c]
+      settings =
+        ComponentSettings
+          { language = GHC2024,
+            extensions = [Extension "CPP" True],
+            ghcOptions = ["-Wall"],
+            cppOptions = ["-DX"],
+            buildDepends = [PackageName "base"]
+          }
+  findModule idx (ComponentModule (PackageName "p") Lib (ModuleName "A"))
+    @?= Just
+      FoundModule {source = haskell "p/src/A.hs" NotLiterate, settings = settings}
+  findModule idx (LooseModule (path "p/tools/B.lhs"))
+    @?= Just
+      FoundModule
+        { source = haskell "p/tools/B.lhs" BirdOrLatex,
+          settings = looseSettings
+        }
+  looseSettings.language @?= GHC2021
+  findModule idx (ComponentModule (PackageName "p") Lib (ModuleName "B")) @?= Nothing
+  findModule idx (LooseModule (path "p/src/A.hs")) @?= Nothing
+
+parseSettingsTest :: Assertion
+parseSettingsTest = do
+  let c =
+        (lib ["p/src"])
+          { P.modules = [exposed "A", signature "S"],
+            P.language = Haskell98,
+            P.extensions = [Extension "CPP" True],
+            P.ghcOptions = ["-Wall", "-XLambdaCase"],
+            P.cppOptions = ["-DX=1"],
+            P.buildDepends = [PackageName "base", PackageName "text"]
+          }
+      -- --ghc 9.10, say: not the parser's own version.
+      ghc = GhcVersion [9, 10]
+      p =
+        (project [package "p" [c]])
+          { P.ghc = DetectedGhc {version = ghc, source = GhcFromCli}
+          }
+      idx = index (files ["p/p.cabal", "p/src/A.lhs", "p/src/S.hsig"]) p
+      settingsOf m = do
+        found <- findModule idx (ComponentModule (PackageName "p") Lib (ModuleName m))
+        case found.source of
+          HaskellSource f -> Just (moduleParseSettings idx.ghc found.settings f)
+          _ -> Nothing
+  idx.ghc @?= ghc
+  settingsOf "A"
+    @?= Just
+      ParseSettings
+        { language = Haskell98,
+          extensions = [Extension "CPP" True],
+          ghcOptions = ["-Wall", "-XLambdaCase"],
+          literate = BirdOrLatex,
+          kind = ModuleFile,
+          cpp =
+            CppEnv
+              { ghc = ghc,
+                platform = hostPlatform,
+                cppOptions = ["-DX=1"],
+                buildDepends = [PackageName "base", PackageName "text"]
+              }
+        }
+  fmap (.kind) (settingsOf "S") @?= Just SignatureFile
+
 -- * Helpers
 
 -- | One package @p@ in dir @p@, with these files.
@@ -508,8 +609,8 @@ comp name dirs =
 
 exposed, other, signature :: Text -> ListedModule
 exposed n = ListedModule {name = ModuleName n, kind = Exposed, autogen = False}
-other n = (exposed n) {kind = Other}
-signature n = (exposed n) {kind = Signature}
+other n = ListedModule {name = ModuleName n, kind = Other, autogen = False}
+signature n = ListedModule {name = ModuleName n, kind = Signature, autogen = False}
 
 -- | Long id and source of every component module.
 sources :: ModuleIndex -> [(Text, ModuleSource)]

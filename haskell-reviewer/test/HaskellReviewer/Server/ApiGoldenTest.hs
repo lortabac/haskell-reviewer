@@ -8,7 +8,12 @@ import ApiSupport (ApiResult (..), fixtureApi, getApi, implicitApi, projectApi)
 import Data.ByteString.Lazy qualified as LBS
 import Data.List (sort)
 import Data.Text (Text)
-import HaskellReviewer.Server.Api (FilesApi)
+import HaskellReviewer.Core.ModuleModel
+  ( ModuleParse (..),
+    TextOnlyModule (..),
+    TextOnlyReason (..),
+  )
+import HaskellReviewer.Server.Api (FilesApi (..))
 import HaskellReviewer.Server.Wire (helloPayload)
 import System.Directory qualified as Dir
 import System.FilePath (dropExtension, takeExtension)
@@ -33,10 +38,27 @@ cases =
     ("file-symlink", okBody fixtureApi (file ["docs", "guide.md"])),
     ("file-submodule", okBody fixtureApi (file ["vendor", "dep"])),
     ("modules", okBody projectApi ["api", "modules", "tree"]),
-    ("modules-implicit", okBody implicitApi ["api", "modules", "tree"])
+    ("modules-implicit", okBody implicitApi ["api", "modules", "tree"]),
+    -- One per reason a module is text only, and a parsed one.
+    ("module-parsed", okBody projectApi (modulePath "Foo")),
+    ("module-parse-error", okBody projectApi (modulePath "pkg:exe:app:Main")),
+    ("module-pragma-error", okBody projectApi (modulePath "Tests")),
+    ("module-preprocessed", okBody projectApi (modulePath "pkg:test:spec:Main")),
+    ("module-cpp", okBody projectApi (modulePath "pkg:bench:slow:Main")),
+    ("module-crashed", okBody crashingApi (modulePath "Foo")),
+    ("module-generated", okBody projectApi (modulePath "Lexer")),
+    ("module-no-source", okBody projectApi (modulePath "Gone")),
+    ("module-not-text", okBody implicitApi (modulePath "Main")),
+    ("module-too-large", okBody implicitApi (modulePath "Data.Deep.Mod"))
   ]
   where
     file p = ["api", "file", "tree"] <> p
+    modulePath ref = ["api", "module", "tree", ref]
+    crashingApi =
+      projectApi
+        { parse = \_ _ ->
+            pure (TextOnly TextOnlyModule {reason = ParserCrashed "boom", warnings = []})
+        }
 
 fixtureDir :: FilePath
 fixtureDir = "../fixtures/api/"

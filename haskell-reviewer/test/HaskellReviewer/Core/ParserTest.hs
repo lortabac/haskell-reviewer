@@ -39,6 +39,12 @@ tests =
           defaultParseSettings {extensions = [on "GeneralisedNewtypeDeriving"]}
           "module M where"
         $ \m -> has "GeneralizedNewtypeDeriving" m @?= True,
+      testCase "fromPragmas: a name given twice is listed once, first place"
+        $ parsed
+          defaultParseSettings
+          "{-# LANGUAGE LambdaCase, CPP #-}\n{-# OPTIONS_GHC -XLambdaCase -cpp #-}\n\
+          \{-# LANGUAGE MultiWayIf, LambdaCase #-}\nmodule M where"
+        $ \m -> m.extensions.fromPragmas @?= ["LambdaCase", "CPP", "MultiWayIf"],
       testCase "implied extensions are on" $
         parsed defaultParseSettings "{-# LANGUAGE TypeFamilyDependencies #-}" $ \m ->
           has "TypeFamilies" m @?= True,

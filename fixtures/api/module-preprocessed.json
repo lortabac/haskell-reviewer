@@ -1,0 +1,1 @@
+{"generation":1,"id":"pkg:test:spec:Main","ref":"pkg:test:spec:Main","path":"pkg/test/Spec.hs","tier":{"kind":"syntactic","reason":"no-hie"},"parse":{"kind":"text-only","reason":{"kind":"preprocessed","tool":"hspec-discover"},"warnings":[]}}
