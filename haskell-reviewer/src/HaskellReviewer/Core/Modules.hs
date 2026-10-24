@@ -39,6 +39,8 @@ module HaskellReviewer.Core.Modules
     -- * Helpers
     moduleNameFromPath,
     renderPreprocessor,
+    Tools (..),
+    toolsFrom,
   )
 where
 
@@ -427,8 +429,6 @@ renderPreprocessor = \case
   Happy -> "happy"
   Cpphs -> "cpphs"
 
--- * Internal
-
 -- | The -pgmF / -pgmL tools that apply to a component.
 data Tools = Tools
   { -- | Only with -F.
@@ -436,7 +436,8 @@ data Tools = Tools
     pgmL :: Maybe Text
   }
 
--- | Read the tools from ghc-options. See Note [Module discovery].
+-- | Read the tools from ghc-options (or ghc-options plus OPTIONS_GHC).
+-- See Note [Module discovery].
 toolsFrom :: [Text] -> Tools
 toolsFrom opts =
   Tools
@@ -454,6 +455,8 @@ toolsFrom opts =
     fileName t = case Text.takeWhileEnd (/= '/') t of
       "" -> t
       n -> n
+
+-- * Internal
 
 packageModules :: FileList -> Package -> PackageModules
 packageModules fl pkg =

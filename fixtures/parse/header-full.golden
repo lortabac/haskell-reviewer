@@ -1,0 +1,49 @@
+parsed
+module: Data.Full @6:8-6:17
+haddock @3:1-5:21
+  |  The module's doc.
+  | 
+  |  Second paragraph.
+warning deprecated @7:3-7:38
+  "Use Data.Other"
+exports:
+  section 1 @8:5-8:16
+    |  Values
+  f@9:5-9:6 @9:5-9:6
+  doc @10:5-10:23
+    |  Doc before g.
+  g@11:5-11:6 @11:5-11:6
+  h@12:5-12:6 @12:5-12:6
+    doc @12:8-12:25
+      |  Doc after h.
+  old@13:32-13:35 @13:5-13:35
+    warning deprecated @13:5-13:31
+      "Use f"
+  +++@14:5-14:10 @14:5-14:10
+  Q.qualified@15:5-15:16 @15:5-15:16
+  section 2 @17:5-17:16
+    |  Types
+  T@18:5-18:6 @18:5-18:6
+  U@19:5-19:6 (..) @19:5-19:11
+  V@20:5-20:6 (A@20:8-20:9, b@20:11-20:12) @20:5-20:13
+  W@21:5-21:6 (.., C@21:12-21:13) @21:5-21:14
+  X@22:5-22:6 () @22:5-22:9
+  type :+:@23:10-23:15 @23:5-23:15
+  data D@24:10-24:11 @24:5-24:11
+  pattern P@25:13-25:14 @25:5-25:14
+  default Num@26:13-26:16 @26:5-26:16
+  named doc "chunk" @28:5-28:14
+  section 1 @30:5-30:20
+    |  Re-exports
+  module Data.Map @31:12-31:20
+  module Data.Set @32:53-32:61
+    warning warning in "x-gone" @32:5-32:45
+      "Going away"
+imports:
+  import Data.Map@36:8-36:16 @36:1-36:16
+  import Data.Map@37:8-37:16 qualified as Q@37:30-37:31 @37:1-37:31
+  import Data.Set@38:8-38:16 @38:1-38:16
+language: GHC2024
+from pragmas: PatternSynonyms, NamedDefaults
+enabled: BangPatterns, BinaryLiterals, ConstrainedClassMethods, ConstraintKinds, DataKinds, DeriveDataTypeable, DeriveFoldable, DeriveFunctor, DeriveGeneric, DeriveLift, DeriveTraversable, DerivingStrategies, DisambiguateRecordFields, DoAndIfThenElse, EmptyCase, EmptyDataDecls, EmptyDataDeriving, ExistentialQuantification, ExplicitForAll, ExplicitNamespaces, FieldSelectors, FlexibleContexts, FlexibleInstances, ForeignFunctionInterface, GADTSyntax, GADTs, GeneralizedNewtypeDeriving, HexFloatLiterals, ImplicitPrelude, ImplicitStagePersistence, ImportQualifiedPost, InstanceSigs, KindSignatures, LambdaCase, ListTuplePuns, MonoLocalBinds, MonomorphismRestriction, MultiParamTypeClasses, NamedDefaults, NamedFieldPuns, NamedWildCards, NumericUnderscores, PatternGuards, PatternSynonyms, PolyKinds, PostfixOperators, RankNTypes, RelaxedPolyRec, RoleAnnotations, ScopedTypeVariables, StandaloneDeriving, StandaloneKindSignatures, StarIsType, TraditionalRecordSyntax, TupleSections, TypeApplications, TypeOperators, TypeSynonymInstances
+warnings:

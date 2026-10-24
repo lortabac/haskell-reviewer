@@ -1,0 +1,14 @@
+parsed
+module: Extensions @5:8-5:18
+exports: everything
+imports:
+language: Haskell2010
+from pragmas: NoImplicitPrelude, LambdaCase, NoTypeApplications, MultiWayIf
+enabled: CUSKs, DatatypeContexts, DeepSubsumption, DisambiguateRecordFields, DoAndIfThenElse, EmptyDataDecls, FieldSelectors, ForeignFunctionInterface, ImplicitStagePersistence, LambdaCase, ListTuplePuns, MonomorphismRestriction, MultiWayIf, OverloadedStrings, PatternGuards, RecordWildCards, RelaxedPolyRec, StarIsType, TraditionalRecordSyntax
+warnings:
+  unknown extension: NoSuchThing
+  unknown extension: AlsoUnknown
+  ignored OPTIONS_GHC flag: -Wall
+  unknown extension: NotAnExtension
+  ignored OPTIONS_GHC flag: -pgmL foo
+  ignored OPTIONS_GHC flag: -Wno-orphans
