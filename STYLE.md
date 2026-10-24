@@ -134,8 +134,11 @@ Avoid type families.
 `ormolu` is the formatter, with default settings. Run it before committing:
 
 ```
-ormolu -i $(git ls-files --cached --others --exclude-standard '*.hs')
+ormolu -i $(git ls-files --cached --others --exclude-standard '*.hs' ':!fixtures/')
 ```
+
+`fixtures/` is left out: its `.hs` files are test input and must stay as
+they are.
 
 Keep lines to about 90 characters or less. `ormolu` doesn't enforce a limit,
 so this is on the author: break long expressions, signatures and comments

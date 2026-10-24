@@ -1,0 +1,8 @@
+parsed
+module: NeedsExtension @1:8-1:22
+exports: everything
+imports:
+language: Haskell2010
+from pragmas: 
+enabled: CUSKs, DatatypeContexts, DeepSubsumption, DoAndIfThenElse, EmptyDataDecls, FieldSelectors, ForeignFunctionInterface, ImplicitPrelude, ImplicitStagePersistence, LambdaCase, ListTuplePuns, MonomorphismRestriction, PatternGuards, RelaxedPolyRec, StarIsType, TraditionalRecordSyntax
+warnings:
