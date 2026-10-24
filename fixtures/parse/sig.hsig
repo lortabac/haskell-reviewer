@@ -1,0 +1,5 @@
+signature Sig (T, f) where
+
+data T
+
+f :: T -> Int

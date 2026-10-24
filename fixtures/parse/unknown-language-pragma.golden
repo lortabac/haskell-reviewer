@@ -1,0 +1,1 @@
+text only: pragma error GHC-46537 @1:27-1:41: "Unsupported extension: NotAnExtension"

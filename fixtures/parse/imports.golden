@@ -1,0 +1,42 @@
+parsed
+module: Imports @5:8-5:15
+warning warning in "x-unstable" @5:16-5:72
+  "Not stable"
+  "Really"
+exports: everything
+imports:
+  import Data.List@7:8-7:17 @7:1-7:17
+  import qualified Data.Map@8:18-8:26 as M@8:30-8:31 @8:1-8:31
+  import Data.Set@9:8-9:16 qualified as S@9:30-9:31 @9:1-9:31
+  import Data.Maybe@10:8-10:18 @10:1-10:49
+    only:
+      fromMaybe@10:20-10:29 @10:20-10:29
+      Maybe@10:31-10:36 (..) @10:31-10:41
+      <|>@10:43-10:48 @10:43-10:48
+  import Data.Char@11:8-11:17 @11:1-11:39
+    hiding:
+      isSpace@11:26-11:33 @11:26-11:33
+      ord@11:35-11:38 @11:35-11:38
+  import {-# SOURCE #-} Loop@12:23-12:27 @12:1-12:34
+    only:
+      Loop@12:29-12:33 @12:29-12:33
+  import safe Data.Bits@13:13-13:22 @13:1-13:22
+  import "base" Data.Word@14:15-14:24 @14:1-14:32
+    only:
+      Word8@14:26-14:31 @14:26-14:31
+  import splice Language.Haskell.TH@15:15-15:34 @15:1-15:38
+    only:
+      Q@15:36-15:37 @15:36-15:37
+  import quote Control.Monad@16:8-16:21 @16:1-16:34
+    only:
+      when@16:29-16:33 @16:29-16:33
+  import qualified "text" Data.Text@17:25-17:34 as T@17:38-17:39 @17:1-17:52
+    only:
+      Text@17:41-17:45 @17:41-17:45
+      pack@17:47-17:51 @17:47-17:51
+  import Data.Function@18:8-18:21 @18:1-18:24
+    only:
+language: GHC2021
+from pragmas: PackageImports, Trustworthy, ExplicitLevelImports
+enabled: BangPatterns, BinaryLiterals, ConstrainedClassMethods, ConstraintKinds, DeriveDataTypeable, DeriveFoldable, DeriveFunctor, DeriveGeneric, DeriveLift, DeriveTraversable, DoAndIfThenElse, EmptyCase, EmptyDataDecls, EmptyDataDeriving, ExistentialQuantification, ExplicitForAll, ExplicitLevelImports, FieldSelectors, FlexibleContexts, FlexibleInstances, ForeignFunctionInterface, GADTSyntax, GeneralizedNewtypeDeriving, HexFloatLiterals, ImplicitPrelude, ImportQualifiedPost, InstanceSigs, KindSignatures, ListTuplePuns, MonomorphismRestriction, MultiParamTypeClasses, NamedFieldPuns, NamedWildCards, NumericUnderscores, PackageImports, PatternGuards, PolyKinds, PostfixOperators, RankNTypes, RelaxedPolyRec, ScopedTypeVariables, StandaloneDeriving, StandaloneKindSignatures, StarIsType, TraditionalRecordSyntax, TupleSections, TypeApplications, TypeOperators, TypeSynonymInstances
+warnings:

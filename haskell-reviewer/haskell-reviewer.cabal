@@ -39,16 +39,23 @@ library
     HaskellReviewer.Core.Address
     HaskellReviewer.Core.CabalCompat
     HaskellReviewer.Core.CabalFile
+    HaskellReviewer.Core.Cpp
     HaskellReviewer.Core.FileContent
     HaskellReviewer.Core.FileList
     HaskellReviewer.Core.Git
+    HaskellReviewer.Core.ModuleModel
     HaskellReviewer.Core.Modules
+    HaskellReviewer.Core.Names
     HaskellReviewer.Core.PackageGlob
+    HaskellReviewer.Core.Parser
+    HaskellReviewer.Core.Parser.Convert
     HaskellReviewer.Core.Project
     HaskellReviewer.Core.ProjectFile
     HaskellReviewer.Core.ProjectLoad
     HaskellReviewer.Core.RelPath
     HaskellReviewer.Core.Root
+    HaskellReviewer.Core.SourceText
+    HaskellReviewer.Core.Span
 
     -- Effects
     HaskellReviewer.Effects.Browser
@@ -57,6 +64,7 @@ library
     HaskellReviewer.Effects.Git
     HaskellReviewer.Effects.Helper
     HaskellReviewer.Effects.Log
+    HaskellReviewer.Effects.Parser
     HaskellReviewer.Effects.PosixAt
     HaskellReviewer.Effects.Shutdown
     HaskellReviewer.Effects.Spawn
@@ -143,17 +151,21 @@ test-suite haskell-reviewer-test
     HaskellReviewer.App.RunTest
     HaskellReviewer.Core.AddressTest
     HaskellReviewer.Core.CabalFileTest
+    HaskellReviewer.Core.CppTest
     HaskellReviewer.Core.FileListTest
     HaskellReviewer.Core.GitTest
     HaskellReviewer.Core.ModulesGoldenTest
     HaskellReviewer.Core.ModulesTest
     HaskellReviewer.Core.PackageGlobTest
+    HaskellReviewer.Core.ParseGoldenTest
+    HaskellReviewer.Core.ParserTest
     HaskellReviewer.Core.ProjectFileTest
     HaskellReviewer.Core.ProjectGoldenTest
     HaskellReviewer.Core.ProjectLoadTest
     HaskellReviewer.Core.ProjectTest
     HaskellReviewer.Core.RelPathTest
     HaskellReviewer.Core.RootTest
+    HaskellReviewer.Core.SourceTextTest
     HaskellReviewer.Effects.FileSystemTest
     HaskellReviewer.Effects.GitTest
     HaskellReviewer.Effects.HelperTest
@@ -169,6 +181,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Session.ClientsTest
     HaskellReviewer.Session.SnapshotTest
     ModulesDump
+    ParseDump
     ProjectDump
     TestSupport
 
