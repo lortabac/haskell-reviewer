@@ -40,7 +40,9 @@ import HaskellReviewer.Core.Modules
 import HaskellReviewer.Core.Project
   ( Component (..),
     ComponentName (..),
+    DetectedGhc (..),
     FileProblem (..),
+    GhcSource (..),
     Language (..),
     ListedModule (..),
     Loc (..),
@@ -51,6 +53,7 @@ import HaskellReviewer.Core.Project
     Project (..),
     ProjectSource (..),
     ProjectWarning (..),
+    parserGhcVersion,
   )
 -- Qualified too, for record updates: Core.Modules has fields of the
 -- same names.
@@ -460,6 +463,7 @@ project ps =
   Project
     { P.source = ProjectFile [],
       withCompiler = Nothing,
+      ghc = DetectedGhc {version = parserGhcVersion, source = GhcFromParser},
       packages = ps,
       brokenPackages = [],
       P.warnings = []

@@ -1,4 +1,5 @@
 source: *.cabal in ROOT
+ghc: 9.12.2 (cli)
 package cond 1.0 (cond.cabal)
   flag dev = False (manual, default)
   flag fast = True (automatic, default)

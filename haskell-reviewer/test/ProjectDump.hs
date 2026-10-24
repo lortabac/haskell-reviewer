@@ -7,6 +7,7 @@ import Data.Text qualified as Text
 import HaskellReviewer.Core.Project
   ( BrokenPackage (..),
     Component (..),
+    DetectedGhc (..),
     Extension (..),
     FlagKind (..),
     FlagName (..),
@@ -22,6 +23,7 @@ import HaskellReviewer.Core.Project
     WithCompiler (..),
     renderCabalProblem,
     renderComponentName,
+    renderGhcSource,
     renderGhcVersion,
     renderProjectWarning,
   )
@@ -38,6 +40,12 @@ dumpProject p =
              <> " from "
              <> relPathText w.file
          | Just w <- [p.withCompiler]
+         ]
+      <> [ "ghc: "
+             <> renderGhcVersion p.ghc.version
+             <> " ("
+             <> renderGhcSource p.ghc.source
+             <> ")"
          ]
       <> concatMap package p.packages
       <> [ "broken: " <> relPathText b.cabalFile <> ": " <> renderCabalProblem b.problem

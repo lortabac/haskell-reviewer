@@ -9,11 +9,7 @@ import Data.List (sort)
 import Data.Text.Encoding qualified as Text.Encoding
 import HaskellReviewer.Core.FileList (ListSource (..), fileListCap, mkFileList)
 import HaskellReviewer.Core.Modules (buildModuleIndex)
-import HaskellReviewer.Core.Project
-  ( GhcVersion (..),
-    Platform (..),
-    ProjectSettings (..),
-  )
+import HaskellReviewer.Core.Project (Platform (..))
 import HaskellReviewer.Core.Root (Root (..))
 import HaskellReviewer.Effects.FileSystem (WalkResult (..), canonicalRoot, walkFiles)
 import HaskellReviewer.Session.Project (readProject)
@@ -51,15 +47,11 @@ dump dir = do
   canon <- canonicalRoot (Root (fixtureDir <> dir))
   w <- walkFiles canon (fileListCap + 1)
   let fl = mkFileList FromDisk w.skippedNames w.entries
-  project <- readProject canon fl settings
+  project <- readProject canon fl platform Nothing
   let text = dumpModules (buildModuleIndex project fl)
   pure (LBS.fromStrict (Text.Encoding.encodeUtf8 text))
   where
-    settings =
-      ProjectSettings
-        { platform = Platform {os = "linux", arch = "x86_64"},
-          ghcVersion = GhcVersion [9, 14, 1]
-        }
+    platform = Platform {os = "linux", arch = "x86_64"}
 
 -- | Fail if a fixture or golden file has no test.
 noStale :: IO ()

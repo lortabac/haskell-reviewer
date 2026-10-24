@@ -16,7 +16,14 @@ import Control.Exception (AsyncException (..), throwIO, try)
 import Control.Monad (forever, void)
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as LBS
-import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef)
+import Data.IORef
+  ( IORef,
+    atomicModifyIORef',
+    modifyIORef',
+    newIORef,
+    readIORef,
+    writeIORef,
+  )
 import Data.Maybe (isNothing)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -26,6 +33,7 @@ import HaskellReviewer.App.Run (Deps (..), run)
 import HaskellReviewer.Core.Address (Port (..), Token, tokenFromBytes, tokenText)
 import HaskellReviewer.Core.FileList (FileList (..), ListSource (..), mkFileList)
 import HaskellReviewer.Core.Git (GitVersion (..))
+import HaskellReviewer.Core.Project (GhcVersion (..))
 import HaskellReviewer.Core.Root (CanonicalRoot (..), Root (..))
 import HaskellReviewer.Effects.Clock
   ( Clock (..),
@@ -296,7 +304,7 @@ listingTests =
             r <- timeout 5_000_000 (wait request)
             fmap (.status) r @?= Just 200,
       testCase "project crashes: a line, files still work, warning in the tree" $ do
-        let crash d = d {readProject = \_ _ _ -> ioError (userError "boom")}
+        let crash d = d {readProject = \_ _ _ _ -> ioError (userError "boom")}
             empty _ = fakeLister (pure (Right (mkFileList FromDisk 0 [])))
         withRunningWith crash empty $ \fake app -> do
           r <- getFiles app
@@ -309,6 +317,18 @@ listingTests =
           assertBool (show m.body) (warning `BS.isInfixOf` LBS.toStrict m.body)
           out <- readIORef fake.console
           drop 1 out @?= ["haskell-reviewer: cannot read the project: user error (boom)"],
+      testCase "--ghc reaches readProject" $ do
+        captured <- newIORef Nothing
+        let capture root fl platform cliGhc = do
+              writeIORef captured (Just cliGhc)
+              Session.Project.readProject root fl platform cliGhc
+            change d = d {readProject = capture}
+            empty _ = fakeLister (pure (Right (mkFileList FromDisk 0 [])))
+        withRunningArgs ["--idle-exit", "0", "--ghc", "9.10"] change empty $ \_ app -> do
+          r <- getFiles app
+          r.status @?= 200
+        got <- readIORef captured
+        got @?= Just (Just (GhcVersion [9, 10])),
       testCase "warnings for skipped names and the cap" $ do
         let big = (mkFileList FromDisk 3 []) {truncated = True}
         withRunning (\_ -> fakeLister (pure (Right big))) $ \fake app -> do
@@ -331,7 +351,17 @@ withRunning = withRunningWith id
 -- | Like 'withRunning', with changed deps.
 withRunningWith ::
   (Deps -> Deps) -> (Fake -> Lister) -> (Fake -> Application -> IO a) -> IO a
-withRunningWith change mkLister action = do
+withRunningWith = withRunningArgs ["--idle-exit", "0"]
+
+-- | Like 'withRunningWith', with the given CLI args instead of just
+-- @--idle-exit 0@.
+withRunningArgs ::
+  [String] ->
+  (Deps -> Deps) ->
+  (Fake -> Lister) ->
+  (Fake -> Application -> IO a) ->
+  IO a
+withRunningArgs args change mkLister action = do
   fake <- newFake
   stop <- newEmptyMVar
   appVar <- newEmptyMVar
@@ -341,7 +371,7 @@ withRunningWith change mkLister action = do
           (idleDeps fake stop serve)
             { probeFiles = \_ _ -> pure (Right (mkLister fake))
             }
-  withAsync (run deps ["--idle-exit", "0"]) $ \running -> do
+  withAsync (run deps args) $ \running -> do
     app <- timeout 5_000_000 (takeMVar appVar)
     result <- maybe (assertFailure "not ready") (action fake) app
     putMVar stop ()

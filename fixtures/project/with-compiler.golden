@@ -1,0 +1,9 @@
+source: cabal.project
+with-compiler: ghc-9.12.2 (9.12.2) from cabal.project
+ghc: 9.12.2 (with-compiler)
+package wc 1.0 (wc.cabal)
+  lib
+    source dirs: .
+    language: Haskell98
+    build-depends: base
+    modules: M (exposed), New (exposed)

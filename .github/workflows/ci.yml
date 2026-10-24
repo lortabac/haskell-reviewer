@@ -149,7 +149,12 @@ jobs:
   e2e:
     name: ubuntu-latest / e2e
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # No `needs: haskell`, so this job can't rely on that job's store
+    # cache being ready yet. When cabal.project.freeze changes (e.g.
+    # M1/T03a added ghc-lib-parser, alex, happy), this job may have to
+    # build those few packages cold too (~5-10 min). 30 min was already
+    # tight, so give it more room.
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v7

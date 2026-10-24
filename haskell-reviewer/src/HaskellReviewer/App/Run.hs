@@ -59,12 +59,16 @@ import HaskellReviewer.Core.Modules
     PackageModules (..),
   )
 import HaskellReviewer.Core.Project
-  ( Project (..),
-    ProjectSettings (..),
+  ( DetectedGhc (..),
+    GhcVersion,
+    Platform,
+    Project (..),
     ProjectSource (..),
     ProjectWarning (..),
-    defaultGhcVersion,
+    detectGhc,
     hostPlatform,
+    renderGhcSource,
+    renderGhcVersion,
   )
 import HaskellReviewer.Core.Root (CanonicalRoot, Root (..))
 import HaskellReviewer.Effects.Browser qualified as Browser
@@ -230,7 +234,12 @@ data Deps = Deps
     -- Note [Listing after the URL].
     probeFiles :: Logger -> Root -> IO (Either GitError Lister),
     -- | Read the project of a snapshot. See Note [Listing after the URL].
-    readProject :: CanonicalRoot -> FileList -> ProjectSettings -> IO Project,
+    readProject ::
+      CanonicalRoot ->
+      FileList ->
+      Platform ->
+      Maybe GhcVersion ->
+      IO Project,
     -- | Open the URL in the browser. Must not block or throw.
     openBrowser :: Logger -> Root -> Text -> IO (),
     -- | Catch the stop signals.
@@ -401,7 +410,8 @@ serve deps logger opts root lister tracer shutdown t0 w0 = do
                       shutdown.wait
                       (waitIdle clients (idleTimeout deps.idleMinute m))
               -- Scoped: on the way out it's cancelled, and git with it.
-              listing = takeMVar start >> runListing deps logger tracer lister slot
+              listing =
+                takeMVar start >> runListing deps logger tracer lister slot opts.ghc
           result <-
             withAsync listing (\_ -> race waitStop (listener.serve ready app))
               `finally` listener.close
@@ -417,15 +427,16 @@ serve deps logger opts root lister tracer shutdown t0 w0 = do
 --
 -- The slot is always filled, or requests would wait for ever: with the
 -- list, or with an error if anything goes wrong (even a cancel).
-runListing :: Deps -> Logger -> Tracer -> Lister -> SnapshotSlot -> IO ()
-runListing deps logger tracer lister slot = do
+runListing ::
+  Deps -> Logger -> Tracer -> Lister -> SnapshotSlot -> Maybe GhcVersion -> IO ()
+runListing deps logger tracer lister slot cliGhc = do
   result <- try @SomeException $ do
     t0 <- deps.clock.monotonic
     w0 <- deps.clock.now
     listed <- lister.list
     t1 <- deps.clock.monotonic
     w1 <- deps.clock.now
-    made <- traverse (snapshotOf deps logger lister.root) listed
+    made <- traverse (\fl -> snapshotOf deps logger lister.root fl cliGhc) listed
     t2 <- deps.clock.monotonic
     _ <- fill made
     -- After the fill: a slow trace file can't hold up requests.
@@ -488,10 +499,17 @@ runListing deps logger tracer lister slot = do
 -- | Read the project and build the snapshot, all of it. If that
 -- crashes, the snapshot has no project, only a warning. See
 -- Note [Listing after the URL].
-snapshotOf :: Deps -> Logger -> CanonicalRoot -> FileList -> IO Snapshot
-snapshotOf deps logger root fl = do
+snapshotOf ::
+  Deps -> Logger -> CanonicalRoot -> FileList -> Maybe GhcVersion -> IO Snapshot
+snapshotOf deps logger root fl cliGhc = do
   result <- try @SomeException $ do
-    project <- deps.readProject root fl settings
+    project <- deps.readProject root fl hostPlatform cliGhc
+    logVerbose logger $
+      "ghc: "
+        <> renderGhcVersion project.ghc.version
+        <> " ("
+        <> renderGhcSource project.ghc.source
+        <> ")"
     built (newSnapshot root fl project)
   case result of
     Right snap -> pure snap
@@ -502,13 +520,14 @@ snapshotOf deps logger root fl = do
           logInfo logger ("haskell-reviewer: cannot read the project: " <> msg)
           built (newSnapshot root fl (crashed msg))
   where
-    settings = ProjectSettings {platform = hostPlatform, ghcVersion = defaultGhcVersion}
     built snap = forceSnapshot snap >> pure snap
     -- Not the implicit source: there may be a project we failed to read.
+    -- Never got to with-compiler: --ghc, else the parser's version.
     crashed msg =
       Project
         { source = ProjectFile [],
           withCompiler = Nothing,
+          ghc = detectGhc cliGhc Nothing,
           packages = [],
           brokenPackages = [],
           warnings = [ProjectCrashed msg]

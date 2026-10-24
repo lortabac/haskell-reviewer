@@ -1,4 +1,5 @@
 source: cabal.project
+ghc: 9.14.1 (parser)
 package pkg 1.0 (pkg/pkg.cabal)
   lib
     source dirs: pkg/src, shared, pkg

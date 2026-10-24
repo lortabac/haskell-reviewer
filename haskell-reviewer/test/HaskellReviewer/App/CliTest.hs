@@ -3,6 +3,7 @@ module HaskellReviewer.App.CliTest (tests) where
 import Data.Text qualified as Text
 import HaskellReviewer.App.Cli
 import HaskellReviewer.Core.Address (Port (..))
+import HaskellReviewer.Core.Project (GhcVersion (..))
 import HaskellReviewer.Effects.Log (LogLevel (..))
 import System.Exit (ExitCode (..))
 import Test.Tasty (TestTree, testGroup)
@@ -44,6 +45,13 @@ tests =
         parseOk ["--debug", "--verbose"] (\o -> o.logLevel @?= LevelDebug),
       testCase "--trace-file" $
         parseOk ["--trace-file", "t.jsonl"] (\o -> o.traceFile @?= Just "t.jsonl"),
+      testCase "--ghc" $ do
+        parseOk ["--ghc", "9.12"] (\o -> o.ghc @?= Just (GhcVersion [9, 12]))
+        parseOk ["--ghc", "9.12.2"] (\o -> o.ghc @?= Just (GhcVersion [9, 12, 2])),
+      testCase "bad --ghc" $
+        mapM_
+          (\v -> usageError ["--ghc", v])
+          ["9", "9.x", "9.12.", "9.99999999999.1", ""],
       testCase "--version" $
         parseArgs ["--version"] @?= CliCommand ShowVersion,
       testCase "--help lists every flag" $
@@ -59,7 +67,8 @@ tests =
                 "--version",
                 "--verbose",
                 "--debug",
-                "--trace-file"
+                "--trace-file",
+                "--ghc"
               ]
           other -> assertFailure ("expected help, got " <> show other),
       testCase "unknown flag" $ usageError ["--bogus"],
@@ -74,7 +83,8 @@ defaults =
       browser = OpenBrowser,
       idleExit = IdleExitAfter (Minutes 5),
       logLevel = LevelInfo,
-      traceFile = Nothing
+      traceFile = Nothing,
+      ghc = Nothing
     }
 
 maxMinutes :: Int

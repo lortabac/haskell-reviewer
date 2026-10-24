@@ -22,15 +22,17 @@ import HaskellReviewer.Core.PackageGlob (expandEntry, mkDirIndex, rootCabalFiles
 import HaskellReviewer.Core.Project
   ( BrokenPackage (..),
     CabalProblem (..),
+    DetectedGhc (..),
     FileProblem (..),
     FlagsField,
     Loc (..),
     Package (..),
     PackageEntry,
+    Platform,
     Project (..),
     ProjectConfig (..),
     ProjectItem (..),
-    ProjectSettings,
+    ProjectSettings (..),
     ProjectSource (..),
     ProjectWarning (..),
     WithCompiler (..),
@@ -108,14 +110,16 @@ loadProjectConfig readIn fl = case projectPath of
         }
 
 -- | Phase 2: decide the conditionals, find and read the .cabal files.
+-- The GHC version used for conditionals is the one stored in the result.
 resolveProject ::
   (Monad m) =>
   FileReader m ->
-  ProjectSettings ->
+  Platform ->
+  DetectedGhc ->
   FileList ->
   ProjectConfig ->
   m Project
-resolveProject readIn settings fl config = do
+resolveProject readIn platform detected fl config = do
   results <- traverse readOne cabalPaths
   let packages = [p | Right (p, _) <- results]
       (kept, dupWarnings) = dropDuplicates packages
@@ -123,6 +127,7 @@ resolveProject readIn settings fl config = do
     Project
       { source = config.source,
         withCompiler = config.withCompiler,
+        ghc = detected,
         packages = kept,
         brokenPackages = [b | Left b <- results],
         warnings =
@@ -133,6 +138,7 @@ resolveProject readIn settings fl config = do
             <> [FileListTruncated | fl.truncated]
       }
   where
+    settings = ProjectSettings {platform = platform, ghcVersion = detected.version}
     idx = mkDirIndex fl
     (entries, flags) = flatten settings config.items
     (found, entryWarnings) = case config.source of

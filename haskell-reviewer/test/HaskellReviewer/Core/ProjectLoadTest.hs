@@ -16,20 +16,25 @@ import HaskellReviewer.Core.FileList
 import HaskellReviewer.Core.Project
   ( BrokenPackage (..),
     CabalProblem (..),
+    Component (..),
+    DetectedGhc (..),
     FileProblem (..),
     FlagName (..),
     FlagSource (..),
     FlagValue (..),
+    GhcSource (..),
     GhcVersion (..),
+    ListedModule (..),
     Loc (..),
+    ModuleName (..),
     Package (..),
     PackageName (..),
     Platform (..),
     Project (..),
-    ProjectSettings (..),
     ProjectSource (..),
     ProjectWarning (..),
     WithCompiler (..),
+    parserGhcVersion,
   )
 import HaskellReviewer.Core.ProjectLoad (loadProjectConfig, resolveProject)
 import HaskellReviewer.Core.RelPath
@@ -107,6 +112,22 @@ tests =
                 file = path "b.project"
               }
         p.warnings @?= [WithCompilerInConditional (at "b.project" 3)],
+      testCase "impl(ghc >= 9.12.1): a two-part --ghc 9.12 compares as less (D-98)" $ do
+        let cabalFile =
+              file
+                "p.cabal"
+                [ "cabal-version: 3.0",
+                  "name: p",
+                  "version: 1",
+                  "library",
+                  "  if impl(ghc >= 9.12.1)",
+                  "    exposed-modules: New",
+                  "  else",
+                  "    exposed-modules: Old"
+                ]
+            detected = DetectedGhc {version = GhcVersion [9, 12], source = GhcFromCli}
+            p = runGhc detected [cabalFile] (fileList [cabalFile])
+        modulesOf p @?= ["Old"],
       testCase "conditionals come after the plain fields" $ do
         let p =
               load
@@ -193,21 +214,26 @@ load :: [File] -> Project
 load fs = run fs (fileList fs)
 
 run :: [File] -> FileList -> Project
-run fs fl = runIdentity $ do
+run = runGhc (DetectedGhc {version = parserGhcVersion, source = GhcFromParser})
+
+-- | Like 'run', with the given detected GHC version instead of the
+-- parser's own.
+runGhc :: DetectedGhc -> [File] -> FileList -> Project
+runGhc detected fs fl = runIdentity $ do
   config <- loadProjectConfig reader fl
-  resolveProject reader settings fl config
+  resolveProject reader platform detected fl config
   where
     contents :: Map RelPath (Either FileProblem Text)
     contents = Map.fromList [(f.path, f.content) | f <- fs]
     reader p = Identity (Map.findWithDefault (Left (CantRead "no such file")) p contents)
-    settings =
-      ProjectSettings
-        { platform = Platform {os = "linux", arch = "x86_64"},
-          ghcVersion = GhcVersion [9, 14, 1]
-        }
+    platform = Platform {os = "linux", arch = "x86_64"}
 
 flagsOf :: Project -> [(FlagName, Bool, FlagSource)]
 flagsOf p = [(f.name, f.value, f.source) | pk <- p.packages, f <- pk.flags]
+
+modulesOf :: Project -> [Text]
+modulesOf p =
+  [n | pk <- p.packages, c <- pk.components, m <- c.modules, let ModuleName n = m.name]
 
 path :: Text -> RelPath
 path t =

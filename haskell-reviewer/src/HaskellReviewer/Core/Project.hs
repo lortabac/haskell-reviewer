@@ -6,9 +6,17 @@ module HaskellReviewer.Core.Project
     ProjectSettings (..),
     Platform (..),
     hostPlatform,
+
+    -- * GHC version
     GhcVersion (..),
-    defaultGhcVersion,
     renderGhcVersion,
+    parserGhcVersion,
+    parserVersionText,
+    parseGhcVersionNumbers,
+    GhcSource (..),
+    renderGhcSource,
+    DetectedGhc (..),
+    detectGhc,
 
     -- * Phase 1: cabal.project
     ProjectConfig (..),
@@ -52,10 +60,12 @@ module HaskellReviewer.Core.Project
   )
 where
 
+import Data.Char (isDigit)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Distribution.Types.Condition (Condition)
 import Distribution.Types.ConfVar (ConfVar)
+import GHC.Version qualified as GhcLibParser
 import HaskellReviewer.Core.RelPath
   ( PathProblem (..),
     RelDir,
@@ -64,6 +74,7 @@ import HaskellReviewer.Core.RelPath
     relPathText,
   )
 import System.Info qualified
+import Text.Read (readMaybe)
 
 {- Note [Project model]
 
@@ -83,8 +94,9 @@ Loading has two phases, so the GHC version can be picked in between
 
 1. 'ProjectConfig': cabal.project and its imports. Needs no GHC version,
    and gives with-compiler.
-2. 'Project': conditionals in cabal.project, then the .cabal files.
-   Needs 'ProjectSettings'.
+2. 'Project': 'detectGhc' picks the GHC version (--ghc, then
+   with-compiler, then the parser's, §7.1). With it we decide the
+   conditionals and read the .cabal files.
 
 We only read files of the snapshot, through its file list: never the
 real disk, never above ROOT, never a symlink (Note [File containment]
@@ -116,17 +128,65 @@ hostPlatform =
       arch = Text.pack System.Info.arch
     }
 
+-- * GHC version
+
 -- | A GHC version, e.g. @[9, 14, 1]@.
 newtype GhcVersion = GhcVersion [Int]
   deriving (Eq, Ord, Show)
 
--- | The parser's GHC version (ghc-lib-parser 9.14.1, D-83).
-defaultGhcVersion :: GhcVersion
-defaultGhcVersion = GhcVersion [9, 14, 1]
-
 -- | E.g. @9.14.1@.
 renderGhcVersion :: GhcVersion -> Text
 renderGhcVersion (GhcVersion ns) = Text.intercalate "." (map (Text.pack . show) ns)
+
+-- | The parser's GHC version (ghc-lib-parser 9.14.1, D-83).
+parserGhcVersion :: GhcVersion
+parserGhcVersion = GhcVersion [9, 14, 1]
+
+-- | ghc-lib-parser's own version, e.g. @\"9.14.1\"@. A test checks it
+-- against 'parserGhcVersion', so the hardcoded number above can't
+-- drift from the dependency.
+parserVersionText :: Text
+parserVersionText = Text.pack GhcLibParser.cProjectVersion
+
+-- | Parse @9@, @9.14@ or @9.14.1@ into @[9]@, @[9, 14]@ or @[9, 14, 1]@.
+-- Each part is at most 9 digits, so it fits an 'Int'. Used for
+-- @with-compiler@ (after stripping @ghc-@) and for @--ghc@.
+parseGhcVersionNumbers :: Text -> Maybe [Int]
+parseGhcVersionNumbers = traverse number . Text.splitOn "."
+  where
+    number s
+      | not (Text.null s) && Text.length s <= 9 && Text.all isDigit s =
+          readMaybe (Text.unpack s)
+      | otherwise = Nothing
+
+-- | Where the detected GHC version came from (SPEC §7.1).
+data GhcSource
+  = GhcFromCli
+  | GhcFromWithCompiler
+  | GhcFromParser
+  deriving (Eq, Show)
+
+-- | @cli@, @with-compiler@ or @parser@: for logs and dumps.
+renderGhcSource :: GhcSource -> Text
+renderGhcSource = \case
+  GhcFromCli -> "cli"
+  GhcFromWithCompiler -> "with-compiler"
+  GhcFromParser -> "parser"
+
+-- | The GHC version we target, and why (§7.1).
+data DetectedGhc = DetectedGhc
+  { version :: GhcVersion,
+    source :: GhcSource
+  }
+  deriving (Eq, Show)
+
+-- | @--ghc@ wins; then @with-compiler@, if it names a version (plain
+-- @ghc@ doesn't); otherwise the parser's own version.
+detectGhc :: Maybe GhcVersion -> Maybe WithCompiler -> DetectedGhc
+detectGhc (Just v) _ = DetectedGhc {version = v, source = GhcFromCli}
+detectGhc Nothing withCompiler = case withCompiler >>= (.version) of
+  Just v -> DetectedGhc {version = v, source = GhcFromWithCompiler}
+  Nothing -> DetectedGhc {version = parserGhcVersion, source = GhcFromParser}
 
 -- * Phase 1
 
@@ -216,6 +276,8 @@ data WithCompiler = WithCompiler
 data Project = Project
   { source :: ProjectSource,
     withCompiler :: Maybe WithCompiler,
+    -- | The GHC version we target, and why (§7.1).
+    ghc :: DetectedGhc,
     -- | Sorted by .cabal path.
     packages :: [Package],
     -- | .cabal files we can't use.

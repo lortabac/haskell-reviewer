@@ -20,6 +20,12 @@ import Data.Char (isDigit)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import HaskellReviewer.Core.Address (Port (..))
+import HaskellReviewer.Core.Project
+  ( GhcVersion (..),
+    parseGhcVersionNumbers,
+    parserGhcVersion,
+    renderGhcVersion,
+  )
 import HaskellReviewer.Effects.Log (LogLevel (..))
 import Options.Applicative qualified as Opt
 import System.Exit (ExitCode (..))
@@ -43,7 +49,10 @@ data Options = Options
     idleExit :: IdleExit,
     logLevel :: LogLevel,
     -- | Where to write timing spans, if anywhere.
-    traceFile :: Maybe FilePath
+    traceFile :: Maybe FilePath,
+    -- | GHC version the project targets. 'Nothing': with-compiler, else
+    -- the parser's own version (§7.1).
+    ghc :: Maybe GhcVersion
   }
   deriving (Eq, Show)
 
@@ -125,6 +134,7 @@ optionsParser =
     <*> idleExitOption
     <*> logLevelFlags
     <*> Opt.optional traceFileOption
+    <*> Opt.optional ghcOption
 
 rootArg :: Opt.Parser FilePath
 rootArg =
@@ -185,10 +195,29 @@ traceFileOption =
         <> Opt.help "Write timing spans to PATH, as JSON lines"
     )
 
+ghcOption :: Opt.Parser GhcVersion
+ghcOption =
+  Opt.option
+    (Opt.eitherReader readGhcVersion)
+    ( Opt.long "ghc"
+        <> Opt.metavar "X.Y[.Z]"
+        <> Opt.help
+          ( "GHC version the project targets (default: with-compiler, else "
+              <> Text.unpack (renderGhcVersion parserGhcVersion)
+              <> ")"
+          )
+    )
+
 readPort :: String -> Either String Port
 readPort s = case readNatural s of
   Just n | n >= 1 && n <= 65535 -> Right (Port (fromInteger n))
   _ -> Left ("invalid port: " <> s <> " (expected 1 to 65535)")
+
+-- | @X.Y@ or @X.Y.Z@, each part at most 9 digits (D-98).
+readGhcVersion :: String -> Either String GhcVersion
+readGhcVersion s = case parseGhcVersionNumbers (Text.pack s) of
+  Just ns | length ns == 2 || length ns == 3 -> Right (GhcVersion ns)
+  _ -> Left ("invalid GHC version: " <> s <> " (expected X.Y or X.Y.Z)")
 
 readIdleExit :: String -> Either String IdleExit
 readIdleExit s = case readNatural s of

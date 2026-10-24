@@ -1,0 +1,12 @@
+cabal-version: 3.0
+name:          wc
+version:       1.0
+
+library
+  exposed-modules: M
+  build-depends:   base
+
+  if impl(ghc >= 9.12)
+    exposed-modules: New
+  else
+    exposed-modules: Old
