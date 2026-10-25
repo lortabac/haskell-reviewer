@@ -6,7 +6,7 @@ BENCH_PROJECTS ?=
 BENCH_JSON ?=
 BENCH_LABEL ?=
 
-.PHONY: build test install freeze web e2e bench bench-smoke
+.PHONY: build test install freeze web e2e bench bench-smoke cpp-check
 
 build:
 	$(CABAL) build all
@@ -35,6 +35,14 @@ bench-smoke: build
 	    --exe "$$($(CABAL) list-bin exe:haskell-reviewer)" \
 	    --runs 1 --warmup 0 \
 	    optparse-applicative
+
+# Dev only, not in CI: compare our CPP with gcc -traditional, run as GHC
+# runs it, line by line, on fixtures/cpp and the bench projects (and any
+# dirs in CPP_CHECK_DIRS). Prints the files that differ. Linux gcc only:
+# macOS cpp is clang, which reads indented directives.
+cpp-check:
+	$(CABAL) build lib:haskell-reviewer
+	$(CABAL) exec -v0 -- runghc dev/CppCheck.hs fixtures/cpp bench/projects $(CPP_CHECK_DIRS)
 
 # Rebuild the frontend bundle. Needs Node (version in web/.nvmrc).
 # web/dist is committed: commit it after this.

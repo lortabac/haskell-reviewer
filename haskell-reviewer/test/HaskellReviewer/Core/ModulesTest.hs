@@ -8,7 +8,7 @@ import Data.Maybe (fromMaybe)
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
-import HaskellReviewer.Core.Cpp (CppEnv (..))
+import HaskellReviewer.Core.Cpp (CppEnv (..), MacroFlag (..))
 import HaskellReviewer.Core.FileList
   ( EntryKind (..),
     FileList,
@@ -538,7 +538,7 @@ parseSettingsTest = do
             CppEnv
               { ghc = ghc,
                 platform = hostPlatform,
-                cppOptions = ["-DX=1"],
+                flags = [Define "X" "1"],
                 buildDepends = [PackageName "base", PackageName "text"]
               }
         }

@@ -1,0 +1,43 @@
+== text
+
+
+
+
+
+
+
+
+
+one = [1] [2] F
+two = (a   |   b) z
+
+
+three = [3]
+
+four = [4] 5
+five = [[[6]]]
+six = G(a,b) [a,b]
+rec = X+1 A B R(7)
+wrong = F(1,2) G(1)
+line = 21
+open = F(oops
+
+
+
+== regions
+directive 1-9
+directive 23-24
+== warnings
+line 18: wrong number of arguments for G, left as is
+line 19: recursive macro X, left as is
+line 20: wrong number of arguments for F, left as is
+line 22: unterminated call of F, left as is
+== positions
+10: 1 copied 10:1 7 expanded 10:7-10:11 10 copied 10:11 11 expanded 10:12-10:17 14 copied 10:17
+11: 1 copied 11:1 7 expanded 11:7-13:5 18 copied 13:5
+14: 1 copied 14:1 9 expanded 14:9-15:6
+16: 1 copied 16:1 8 expanded 16:8-16:12 11 copied 16:12 12 expanded 16:13-16:20
+17: 1 copied 17:1 8 expanded 17:8-17:18
+18: 1 copied 18:1 9 expanded 18:9-18:11 12 copied 18:11 14 expanded 18:13-18:18
+19: 1 copied 19:1 7 expanded 19:7-19:8 10 copied 19:8 11 expanded 19:9-19:10 12 copied 19:10 13 expanded 19:11-19:12 14 copied 19:12 15 expanded 19:13-19:17
+21: 1 copied 21:1 8 expanded 21:8-21:16
