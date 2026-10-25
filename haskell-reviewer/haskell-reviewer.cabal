@@ -40,6 +40,12 @@ library
     HaskellReviewer.Core.CabalCompat
     HaskellReviewer.Core.CabalFile
     HaskellReviewer.Core.Cpp
+    HaskellReviewer.Core.Cpp.Expand
+    HaskellReviewer.Core.Cpp.Expr
+    HaskellReviewer.Core.Cpp.Lines
+    HaskellReviewer.Core.Cpp.Macros
+    HaskellReviewer.Core.Cpp.Positions
+    HaskellReviewer.Core.Cpp.Warning
     HaskellReviewer.Core.FileContent
     HaskellReviewer.Core.FileList
     HaskellReviewer.Core.Git
@@ -151,6 +157,8 @@ test-suite haskell-reviewer-test
     HaskellReviewer.App.RunTest
     HaskellReviewer.Core.AddressTest
     HaskellReviewer.Core.CabalFileTest
+    HaskellReviewer.Core.CppGoldenTest
+    HaskellReviewer.Core.CppPropertyTest
     HaskellReviewer.Core.CppTest
     HaskellReviewer.Core.FileListTest
     HaskellReviewer.Core.GitTest
@@ -199,7 +207,9 @@ test-suite haskell-reviewer-test
     , http-types
     , network
     , process
+    , hedgehog          >=1.7  && <1.8
     , tasty             >=1.5  && <1.6
+    , tasty-hedgehog    >=1.4  && <1.5
     , tasty-golden      >=2.3  && <2.4
     , tasty-hunit       >=0.10 && <0.11
     , temporary         >=1.3  && <1.4

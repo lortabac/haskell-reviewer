@@ -99,8 +99,7 @@ import GHC.Types.SrcLoc
 import GHC.Unit.Types (stringToUnitId)
 import GHC.Utils.Fingerprint (fingerprint0)
 import GHC.Utils.Outputable (defaultSDocContext, renderWithContext)
-import HaskellReviewer.Core.Cpp (CppEnv (..), CppOutput (..), runCpp)
-import HaskellReviewer.Core.Cpp qualified as Cpp (CppProblem (..))
+import HaskellReviewer.Core.Cpp (CppEnv (..), FlagSource (..), isDirective, macroFlags)
 import HaskellReviewer.Core.ModuleModel
   ( Extensions (..),
     ModuleParse (..),
@@ -208,7 +207,7 @@ defaultParseSettings =
         CppEnv
           { ghc = parserGhcVersion,
             platform = hostPlatform,
-            cppOptions = [],
+            flags = [],
             buildDepends = []
           }
     }
@@ -227,7 +226,9 @@ moduleParseSettings ghc c file =
         CppEnv
           { ghc = ghc,
             platform = hostPlatform,
-            cppOptions = c.cppOptions,
+            flags =
+              fst (macroFlags CppOptions c.cppOptions)
+                <> fst (macroFlags GhcOptions c.ghcOptions),
             buildDepends = c.buildDepends
           }
     }
@@ -253,11 +254,10 @@ run settings input = case readPragmas (initParserOpts comp.dflags) (toBuffer tex
     | Just tool <- (toolsFrom (settings.ghcOptions <> args)).pgmF ->
         textOnly (Preprocessed tool) []
     | not (xopt LangExt.Cpp pragmas.dflags) -> parseWith pragmas text
-    | otherwise -> case runCpp settings.cpp text of
-        -- GHC reads the pragmas again from cpp's output. runCpp gives
-        -- back the input, so there's nothing new to read.
-        Left Cpp.CppNotSupported -> textOnly CppNotSupported pragmas.warnings
-        Right out -> parseWith pragmas out.text
+    -- Directives: text only. No directive: parsed as is.
+    | any isDirective (Text.splitOn "\n" text) ->
+        textOnly CppNotSupported pragmas.warnings
+    | otherwise -> parseWith pragmas text
     where
       pragmas = applyPragmas comp.dflags args
   where

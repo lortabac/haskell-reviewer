@@ -10,6 +10,7 @@ import HaskellReviewer.App.CliTest qualified
 import HaskellReviewer.App.RunTest qualified
 import HaskellReviewer.Core.AddressTest qualified
 import HaskellReviewer.Core.CabalFileTest qualified
+import HaskellReviewer.Core.CppGoldenTest qualified
 import HaskellReviewer.Core.CppTest qualified
 import HaskellReviewer.Core.FileListTest qualified
 import HaskellReviewer.Core.GitTest qualified
@@ -81,13 +82,14 @@ main = do
         HaskellReviewer.Effects.LogTest.tests,
         HaskellReviewer.Effects.SpawnTest.tests,
         HaskellReviewer.Effects.TraceTest.tests,
-        -- Build the parser's shared values before the tests parse in
-        -- parallel (Q-RTS-BLACKHOLE). A smaller warm-up still hung once
-        -- in 300 runs on 9.12. The API tests parse too.
+        -- Build the parser's and CPP's shared values before the tests
+        -- use them in parallel (Q-RTS-BLACKHOLE). A smaller warm-up
+        -- still hung once in 300 runs on 9.12. The API tests parse too.
         withResource warmUpParser (const (pure ())) $ \_ ->
           testGroup
             "Parsing"
-            [ HaskellReviewer.Core.CppTest.tests,
+            [ HaskellReviewer.Core.CppGoldenTest.tests,
+              HaskellReviewer.Core.CppTest.tests,
               HaskellReviewer.Core.ParseGoldenTest.tests,
               HaskellReviewer.Core.ParserTest.tests,
               HaskellReviewer.Core.SourceTextTest.tests,

@@ -93,7 +93,8 @@ import HaskellReviewer.Effects.FileSystem
 import HaskellReviewer.Effects.FileSystem qualified as FileSystem
 import HaskellReviewer.Effects.Git (GitError, renderGitError)
 import HaskellReviewer.Effects.Log
-  ( Logger,
+  ( LogLevel,
+    Logger,
     exceptionMessage,
     logDebug,
     logInfo,
@@ -200,6 +201,10 @@ forever anyway.
 
 The browser opener is never waited for or killed (see
 HaskellReviewer.Effects.Browser).
+
+With --verbose, each step of the way out logs a "stop: ..." line, so a
+hang shows where it is. The signal handler writes its own line straight
+to fd 2, past the logger.
 -}
 
 {- Note [Listing after the URL]
@@ -251,8 +256,8 @@ data Deps = Deps
     parse :: ParseSettings -> Text -> IO ModuleParse,
     -- | Open the URL in the browser. Must not block or throw.
     openBrowser :: Logger -> Root -> Text -> IO (),
-    -- | Catch the stop signals.
-    installShutdown :: IO Shutdown,
+    -- | Catch the stop signals. The level says if the handler logs.
+    installShutdown :: LogLevel -> IO Shutdown,
     -- | How long a minute is, for --idle-exit. Tests make it short.
     idleMinute :: Microseconds,
     -- | What 'prepareSpawning' did, for the debug log.
@@ -342,7 +347,7 @@ startUp deps args = do
       deps.console versionText
       pure ExitSuccess
     CliCommand (Run opts) -> do
-      shutdown <- deps.installShutdown
+      shutdown <- deps.installShutdown opts.logLevel
       let logger = newLogger opts.logLevel deps.console
       rootResult <- deps.checkRoot opts.root
       case rootResult of
@@ -416,19 +421,28 @@ serve deps logger opts root lister tracer shutdown t0 w0 = do
                   }
               routes = Routes {events = events, files = files}
               app = application listener.port token routes
-              waitStop = case opts.idleExit of
-                IdleExitOff -> StopSignal <$ shutdown.wait
-                IdleExitAfter m ->
-                  either (const StopSignal) (const (StopIdle m))
-                    <$> race
-                      shutdown.wait
-                      (waitIdle clients (idleTimeout deps.idleMinute m))
+              waitStop = do
+                why <- case opts.idleExit of
+                  IdleExitOff -> StopSignal <$ shutdown.wait
+                  IdleExitAfter m ->
+                    either (const StopSignal) (const (StopIdle m))
+                      <$> race
+                        shutdown.wait
+                        (waitIdle clients (idleTimeout deps.idleMinute m))
+                step "stopping warp"
+                pure why
+              -- Shutdown steps, for --verbose: a hang shows where it is.
+              step msg = logVerbose logger ("stop: " <> msg)
               -- Scoped: on the way out it's cancelled, and git with it.
               listing =
                 takeMVar start >> runListing deps logger tracer lister slot opts.ghc
-          result <-
-            withAsync listing (\_ -> race waitStop (listener.serve ready app))
-              `finally` listener.close
+              serving _ = do
+                r <- race waitStop (listener.serve ready app)
+                step "warp stopped, stopping the listing"
+                pure r
+              closing = step "closing the socket" >> listener.close
+          result <- withAsync listing serving `finally` closing
+          step "socket closed, exiting"
           case result of
             Left StopSignal -> pure ExitSuccess
             Left (StopIdle m) -> do

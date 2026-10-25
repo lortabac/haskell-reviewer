@@ -12,7 +12,7 @@ import Control.Concurrent.MVar
     takeMVar,
     tryPutMVar,
   )
-import Control.Exception (AsyncException (..), throwIO, try)
+import Control.Exception (AsyncException (..), evaluate, throwIO, try)
 import Control.Monad (forever, void)
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as LBS
@@ -180,7 +180,7 @@ tests =
         fake <- newFake
         let deps =
               (fake.deps)
-                { installShutdown = pure alreadyStopped,
+                { installShutdown = \_ -> pure alreadyStopped,
                   listen = \_ _ -> assertFailure "listen called"
                 }
         code <- run deps ["--trace-file", "t.jsonl"]
@@ -194,7 +194,7 @@ tests =
         stoppedRef <- newIORef False
         let deps =
               (fake.deps)
-                { installShutdown =
+                { installShutdown = \_ ->
                     pure
                       Shutdown
                         { wait = pure (),
@@ -214,7 +214,7 @@ tests =
         fake <- newFake
         let deps =
               (fake.deps)
-                { installShutdown = pure alreadyStopped,
+                { installShutdown = \_ -> pure alreadyStopped,
                   checkRoot = \p -> pure (Left (RootMissing p))
                 }
         code <- run deps ["nope"]
@@ -224,9 +224,9 @@ tests =
         installed <- newIORef False
         let deps =
               (fake.deps)
-                { installShutdown = do
+                { installShutdown = \level -> do
                     modifyIORef' installed (const True)
-                    fake.deps.installShutdown,
+                    fake.deps.installShutdown level,
                   checkRoot = \p -> do
                     ok <- readIORef installed
                     assertBool "handlers not installed yet" ok
@@ -316,6 +316,25 @@ listingTests =
             putMVar release ()
             r <- timeout 5_000_000 (wait request)
             fmap (.status) r @?= Just 200,
+      testCase "stop during a slow warm-up: exit 0 within 5 s" $ do
+        fake <- newFake
+        stop <- newEmptyMVar
+        warming <- newEmptyMVar
+        let serve ready _ = ready >> blockForever
+            -- Pure work that never ends, like a big warm-up.
+            busy = mapM_ (\n -> evaluate (length (show (n * n :: Integer)))) [1 ..]
+            empty = fakeLister (pure (Right (mkFileList FromDisk 0 [])))
+            deps =
+              (idleDeps fake stop serve)
+                { probeFiles = \_ _ -> pure (Right empty),
+                  warmUpParser = putMVar warming () >> busy
+                }
+        withAsync (run deps ["--idle-exit", "0"]) $ \running -> do
+          started <- timeout 5_000_000 (takeMVar warming)
+          started @?= Just ()
+          putMVar stop ()
+          code <- timeout 5_000_000 (wait running)
+          code @?= Just ExitSuccess,
       testCase "warm-up: runs when the project crashes, not when listing fails" $ do
         let counting ref d = d {warmUpParser = modifyIORef' ref (+ 1)}
             crash ref d =
@@ -497,7 +516,7 @@ idleDeps fake stop serve =
   (fake.deps)
     { idleMinute = Microseconds 100_000,
       listen = \_ _ -> pure (Right fake.listener {serve = serve}),
-      installShutdown =
+      installShutdown = \_ ->
         pure
           Shutdown
             { wait = readMVar stop,
@@ -614,7 +633,7 @@ newFake = do
             warmUpParser = pure (),
             parse = parseGuarded,
             openBrowser = \_ _ url -> modifyIORef' opened (<> [url]),
-            installShutdown =
+            installShutdown = \_ ->
               pure
                 Shutdown
                   { wait = readMVar stop,

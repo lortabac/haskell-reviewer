@@ -1,0 +1,61 @@
+== text
+{-# LANGUAGE CPP #-}
+-- A typical module: version checks, platform, a fallback definition.
+module Basic
+  ( foo,
+
+    bar,
+
+  )
+where
+
+
+
+
+
+
+import Data.List (foldl')
+
+
+
+
+
+
+
+sep = '/'
+
+
+
+
+
+wordSize = 64
+
+
+
+
+
+
+foo = 1
+bar = 2
+
+== regions
+directive 5-5
+directive 7-7
+directive 11-13
+directive 15-15
+directive 17-17
+excluded 18-18
+directive 19-19
+directive 21-21
+excluded 22-22
+directive 23-23
+directive 25-25
+excluded 26-26
+directive 27-27
+directive 29-29
+directive 31-31
+directive 33-33
+excluded 34-34
+directive 35-35
+== warnings
+== positions

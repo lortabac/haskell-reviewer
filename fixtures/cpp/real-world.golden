@@ -1,0 +1,70 @@
+== text
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+-- Shapes seen in real packages (optparse-applicative, pandoc, text).
+module RealWorld
+  ( Parser,
+
+
+
+    run,
+  )
+where
+
+
+import qualified Data.Semigroup as Semigroup
+
+
+
+
+
+
+
+
+
+
+newtype Parser a = Parser a deriving stock (Show)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+{-# INLINE [1] run #-}
+run :: Parser a -> a
+run (Parser a) = a
+
+-- | Haddock with a #-sign: not a directive.
+--   #notADirective
+x # y = x
+
+== regions
+directive 6-6
+excluded 7-7
+directive 8-8
+directive 13-13
+directive 15-16
+excluded 17-17
+directive 18-18
+directive 20-22
+directive 24-24
+directive 26-26
+excluded 27-27
+directive 28-28
+directive 30-30
+excluded 31-31
+directive 32-32
+directive 34-36
+excluded 37-37
+directive 38-38
+== warnings
+== positions
+40: 1 copied 40:1 12 expanded 40:12-40:25 15 copied 40:25

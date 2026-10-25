@@ -7,7 +7,15 @@
 module ExeTest (tests) where
 
 import Control.Concurrent (threadDelay)
-import Control.Exception (IOException, bracket, finally, try)
+import Control.Exception
+  ( IOException,
+    SomeAsyncException,
+    bracket,
+    finally,
+    fromException,
+    throwIO,
+    try,
+  )
 import Control.Monad (unless, void, when)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
@@ -15,6 +23,7 @@ import Data.ByteString.Char8 qualified as Char8
 import Data.Char (isDigit, toLower)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.List (isInfixOf, isPrefixOf, isSuffixOf, sort)
+import Data.Maybe (isNothing)
 import Data.Text qualified as Text
 import GHC.Clock (getMonotonicTime)
 import HaskellReviewer.App.Version (toolVersion)
@@ -26,8 +35,10 @@ import System.Directory qualified as Dir
 import System.Environment (getEnvironment, lookupEnv)
 import System.Exit (ExitCode (..))
 import System.FilePath (takeDirectory, (</>))
-import System.IO (Handle, hGetContents', hGetLine, hIsEOF)
+import System.IO (Handle, hGetContents', hGetLine, hIsEOF, hReady, readFile')
 import System.IO.Temp (withSystemTempDirectory)
+import System.Info qualified
+import System.Posix.Process (getProcessID)
 import System.Posix.Resource
   ( Resource (ResourceOpenFiles),
     ResourceLimit (..),
@@ -35,6 +46,7 @@ import System.Posix.Resource
     getResourceLimit,
   )
 import System.Posix.Signals (Signal, sigINT, sigKILL, sigTERM, signalProcess)
+import System.Posix.Types (ProcessID)
 import System.Process
   ( CmdSpec (..),
     CreateProcess (..),
@@ -42,8 +54,10 @@ import System.Process
     StdStream (CreatePipe),
     createProcess,
     getPid,
+    getProcessExitCode,
     proc,
     readCreateProcessWithExitCode,
+    readProcessWithExitCode,
     waitForProcess,
   )
 import System.Timeout (timeout)
@@ -702,10 +716,17 @@ signalTests =
         withTemp $ \dir -> withServer id [dir] $ \server -> do
           (code, _) <- stopServer server sigTERM
           code @?= ExitSuccess,
+      -- --verbose: on failure, stderr shows how far start-up got.
       testCase "SIGINT: exit 0" $
-        withTemp $ \dir -> withServer id [dir] $ \server -> do
+        withTemp $ \dir -> withServer id ["--verbose", dir] $ \server -> do
           (code, _) <- stopServer server sigINT
           code @?= ExitSuccess,
+      -- See Note [Blocked signals] in "HaskellReviewer.Effects.Shutdown".
+      testCase "started with SIGINT and SIGTERM blocked: SIGINT still stops it" $
+        withTemp $ \dir ->
+          withServer withSignalsBlocked ["--verbose", dir] $ \server -> do
+            (code, _) <- stopServer server sigINT
+            code @?= ExitSuccess,
       testCase "two quick SIGTERMs: exit 0" $
         withTemp $ \dir -> withServer id [dir] $ \server -> do
           -- The second one may hit the forced exit path. Both exit 0.
@@ -826,7 +847,9 @@ data Server = Server
     stdout :: Handle,
     stderr :: Handle,
     -- | stderr lines read so far, oldest first.
-    seen :: IORef [String]
+    seen :: IORef [String],
+    -- | 'getMonotonicTime' just before the spawn.
+    startedAt :: Double
   }
 
 -- | Start the binary with --no-open, wait for the URL line, run the
@@ -845,6 +868,7 @@ withServerRaw tweak args action = do
               std_err = CreatePipe,
               close_fds = True
             }
+  startedAt <- getMonotonicTime
   bracket (createProcess cp) kill $ \case
     (_, Just out, Just err, ph) -> do
       seen <- newIORef []
@@ -866,7 +890,8 @@ withServerRaw tweak args action = do
             url = url,
             stdout = out,
             stderr = err,
-            seen = seen
+            seen = seen,
+            startedAt = startedAt
           }
     _ -> assertFailure "no pipes"
   where
@@ -920,18 +945,160 @@ nextLine h seen = do
 stopServer :: Server -> Signal -> IO (ExitCode, String)
 stopServer server sig = do
   pid <- getPid server.process
-  case pid of
-    Just p -> signalProcess sig p
-    Nothing -> assertFailure "process already gone"
+  p <- maybe (assertFailure "process already gone") pure pid
+  sentAt <- getMonotonicTime
+  signalProcess sig p
   code <- timeout 10000000 (waitForProcess server.process)
   case code of
-    Nothing -> assertFailure "no exit within 10 s of the signal"
+    Nothing -> hungReport server p sentAt >>= assertFailure
     Just c -> do
       rest <- hGetContents' server.stderr
       out <- hGetContents' server.stdout
       out @?= ""
       before <- readIORef server.seen
       pure (c, unlines before <> rest)
+
+-- | What we know about a server that didn't exit: enough to fix it from
+-- a CI log. All clues, best effort: each step has a time limit, and if
+-- one fails we say so and go on.
+--
+-- Last, a second SIGINT: our handler then calls exitImmediately, so an
+-- exit tells us Haskell signal handlers still run.
+hungReport :: Server -> ProcessID -> Double -> IO String
+hungReport server p sentAt = do
+  now <- getMonotonicTime
+  alive <- isNothing <$> getProcessExitCode server.process
+  more <- readReady server.stderr
+  before <- readIORef server.seen
+  self <- getProcessID
+  child <- psOutput (masks p)
+  parent <- psOutput (masks self)
+  -- Threads, on macOS (Linux ps reads -M as something else).
+  threads <- onMacOS (psOutput ["-M", "-p", show p])
+  stacks <- onMacOS (bestEffort (sampleStacks p))
+  second <- bestEffort (secondSignal server p)
+  pure . unlines $
+    [ "no exit within 10 s of the signal",
+      "still running: " <> show alive,
+      "seconds since spawn: " <> showSecs (now - server.startedAt),
+      "seconds since signal: " <> showSecs (now - sentAt),
+      "stderr: " <> show (before <> more),
+      "ps (server):",
+      child,
+      "ps (test process):",
+      parent,
+      "ps -M (server threads, macOS):",
+      threads,
+      "sample (native stacks, macOS):",
+      stacks,
+      "second SIGINT:",
+      second
+    ]
+  where
+    showSecs d = Numeric.showFFloat (Just 2) d ""
+    masks q = ["-o", psColumns, "-p", show q]
+    -- macOS ps has no caught or ignored.
+    psColumns
+      | macOS = "pid,stat,blocked,pending"
+      | otherwise = "pid,stat,blocked,pending,caught,ignored"
+    onMacOS act = if macOS then act else pure "  (macOS only)"
+
+macOS :: Bool
+macOS = System.Info.os == "darwin"
+
+-- | Run it; if it throws (not async), say so instead.
+bestEffort :: IO String -> IO String
+bestEffort act =
+  try act >>= \case
+    Right s -> pure s
+    Left e
+      | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
+      | otherwise -> pure ("  failed: " <> show e)
+
+-- | Send SIGINT again, wait up to 3 s for the exit.
+secondSignal :: Server -> ProcessID -> IO String
+secondSignal server p = do
+  signalProcess sigINT p
+  code <- timeout 3000000 (waitForProcess server.process)
+  later <- readReady server.stderr
+  let verdict = case code of
+        Just c -> "  exited (" <> show c <> "): Haskell handlers run"
+        Nothing -> "  still running after 3 s: Haskell handlers don't run"
+  pure (verdict <> "\n  stderr since: " <> show later)
+
+-- | Native stacks of all threads, from macOS's @sample@ (1 s). For each
+-- thread, its name and deepest frames (where it sleeps), then the
+-- "top of stack" summary.
+sampleStacks :: ProcessID -> IO String
+sampleStacks p = withSystemTempDirectory "hung" $ \dir -> do
+  let file = dir </> "sample.txt"
+      args = [show p, "1", "-mayDie", "-file", file]
+  r <- timeout 20000000 (readProcessWithExitCode "sample" args "")
+  case r of
+    Nothing -> pure "  sample timed out"
+    Just (code, out, err) -> do
+      report <- try @IOException (readFile' file)
+      pure $ case report of
+        Right txt -> trimSample txt
+        Left _ -> "  no report, " <> show code <> ": " <> take 1000 (out <> err)
+
+-- | Keep the useful part of a @sample@ report, about 150 lines at most.
+trimSample :: String -> String
+trimSample txt =
+  unlines . map (("  " <>) . take 160) . take 150 $
+    concatMap thread (threadBlocks callGraph)
+      <> ["top of stack:"]
+      <> take 30 (drop 1 topOfStack)
+  where
+    ls = lines txt
+    callGraph =
+      takeWhile (not . null) (drop 1 (dropWhile (not . isPrefixOf "Call graph:") ls))
+    topOfStack =
+      takeWhile (not . null) (dropWhile (not . isPrefixOf "Sort by top of stack") ls)
+    -- The thread's line, then its last frames: the deepest ones.
+    thread (header, frames) =
+      header : map (("  .. " <>) . dropWhile (`elem` treeChars)) (lastN 8 frames)
+    treeChars = " +!:|" :: String
+    lastN n xs = drop (length xs - n) xs
+
+-- | Split the call graph at each thread's line.
+threadBlocks :: [String] -> [(String, [String])]
+threadBlocks = \case
+  [] -> []
+  (l : rest) ->
+    let (frames, others) = break isThread rest
+     in (dropWhile (== ' ') l, map (dropWhile (== ' ')) frames) : threadBlocks others
+  where
+    isThread l = "Thread_" `isPrefixOf` dropWhile (\c -> c == ' ' || isDigit c) l
+
+-- | Run ps with these args for up to 5 s. Short output, or why not.
+psOutput :: [String] -> IO String
+psOutput args = do
+  r <- try @IOException (timeout 5000000 (readProcessWithExitCode "ps" args ""))
+  pure $ case r of
+    Left e -> "  ps failed: " <> show e
+    Right Nothing -> "  ps timed out"
+    Right (Just (_, out, err)) -> unlines (map ("  " <>) (take 20 (lines (out <> err))))
+
+-- | The lines that can be read now, without waiting.
+readReady :: Handle -> IO [String]
+readReady h = do
+  ready <- try @IOException (hReady h)
+  case ready of
+    Right True -> (:) <$> hGetLine h <*> readReady h
+    _ -> pure []
+
+-- | Start the binary through perl, with SIGINT and SIGTERM blocked: the
+-- mask goes through exec. Like a parent that left them blocked.
+withSignalsBlocked :: CreateProcess -> CreateProcess
+withSignalsBlocked p = case p.cmdspec of
+  RawCommand exe given ->
+    p {cmdspec = RawCommand "perl" (["-MPOSIX", "-e", script, exe] <> given)}
+  ShellCommand _ -> error "withSignalsBlocked: RawCommand only"
+  where
+    script =
+      "sigprocmask(SIG_BLOCK, POSIX::SigSet->new(SIGINT, SIGTERM)) or die;"
+        <> " exec @ARGV or die"
 
 -- | Split the session URL (@http:\/\/127.0.0.1:PORT\/TOKEN\/@) into port
 -- and token.
