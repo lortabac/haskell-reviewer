@@ -7,7 +7,15 @@
 module ExeTest (tests) where
 
 import Control.Concurrent (threadDelay)
-import Control.Exception (IOException, bracket, finally, try)
+import Control.Exception
+  ( IOException,
+    SomeAsyncException,
+    bracket,
+    finally,
+    fromException,
+    throwIO,
+    try,
+  )
 import Control.Monad (unless, void, when)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
@@ -27,8 +35,9 @@ import System.Directory qualified as Dir
 import System.Environment (getEnvironment, lookupEnv)
 import System.Exit (ExitCode (..))
 import System.FilePath (takeDirectory, (</>))
-import System.IO (Handle, hGetContents', hGetLine, hIsEOF, hReady)
+import System.IO (Handle, hGetContents', hGetLine, hIsEOF, hReady, readFile')
 import System.IO.Temp (withSystemTempDirectory)
+import System.Info qualified
 import System.Posix.Process (getProcessID)
 import System.Posix.Resource
   ( Resource (ResourceOpenFiles),
@@ -950,7 +959,11 @@ stopServer server sig = do
       pure (c, unlines before <> rest)
 
 -- | What we know about a server that didn't exit: enough to fix it from
--- a CI log. The ps calls are clues only: if one fails, we say so.
+-- a CI log. All clues, best effort: each step has a time limit, and if
+-- one fails we say so and go on.
+--
+-- Last, a second SIGINT: our handler then calls exitImmediately, so an
+-- exit tells us Haskell signal handlers still run.
 hungReport :: Server -> ProcessID -> Double -> IO String
 hungReport server p sentAt = do
   now <- getMonotonicTime
@@ -958,11 +971,12 @@ hungReport server p sentAt = do
   more <- readReady server.stderr
   before <- readIORef server.seen
   self <- getProcessID
-  let masks q = ["-o", "pid,stat,blocked,pending,caught,ignored", "-p", show q]
   child <- psOutput (masks p)
   parent <- psOutput (masks self)
   -- Threads, on macOS (Linux ps reads -M as something else).
-  threads <- psOutput ["-M", "-p", show p]
+  threads <- onMacOS (psOutput ["-M", "-p", show p])
+  stacks <- onMacOS (bestEffort (sampleStacks p))
+  second <- bestEffort (secondSignal server p)
   pure . unlines $
     [ "no exit within 10 s of the signal",
       "still running: " <> show alive,
@@ -974,10 +988,88 @@ hungReport server p sentAt = do
       "ps (test process):",
       parent,
       "ps -M (server threads, macOS):",
-      threads
+      threads,
+      "sample (native stacks, macOS):",
+      stacks,
+      "second SIGINT:",
+      second
     ]
   where
     showSecs d = Numeric.showFFloat (Just 2) d ""
+    masks q = ["-o", psColumns, "-p", show q]
+    -- macOS ps has no caught or ignored.
+    psColumns
+      | macOS = "pid,stat,blocked,pending"
+      | otherwise = "pid,stat,blocked,pending,caught,ignored"
+    onMacOS act = if macOS then act else pure "  (macOS only)"
+
+macOS :: Bool
+macOS = System.Info.os == "darwin"
+
+-- | Run it; if it throws (not async), say so instead.
+bestEffort :: IO String -> IO String
+bestEffort act =
+  try act >>= \case
+    Right s -> pure s
+    Left e
+      | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
+      | otherwise -> pure ("  failed: " <> show e)
+
+-- | Send SIGINT again, wait up to 3 s for the exit.
+secondSignal :: Server -> ProcessID -> IO String
+secondSignal server p = do
+  signalProcess sigINT p
+  code <- timeout 3000000 (waitForProcess server.process)
+  later <- readReady server.stderr
+  let verdict = case code of
+        Just c -> "  exited (" <> show c <> "): Haskell handlers run"
+        Nothing -> "  still running after 3 s: Haskell handlers don't run"
+  pure (verdict <> "\n  stderr since: " <> show later)
+
+-- | Native stacks of all threads, from macOS's @sample@ (1 s). For each
+-- thread, its name and deepest frames (where it sleeps), then the
+-- "top of stack" summary.
+sampleStacks :: ProcessID -> IO String
+sampleStacks p = withSystemTempDirectory "hung" $ \dir -> do
+  let file = dir </> "sample.txt"
+      args = [show p, "1", "-mayDie", "-file", file]
+  r <- timeout 20000000 (readProcessWithExitCode "sample" args "")
+  case r of
+    Nothing -> pure "  sample timed out"
+    Just (code, out, err) -> do
+      report <- try @IOException (readFile' file)
+      pure $ case report of
+        Right txt -> trimSample txt
+        Left _ -> "  no report, " <> show code <> ": " <> take 1000 (out <> err)
+
+-- | Keep the useful part of a @sample@ report, about 150 lines at most.
+trimSample :: String -> String
+trimSample txt =
+  unlines . map (("  " <>) . take 160) . take 150 $
+    concatMap thread (threadBlocks callGraph)
+      <> ["top of stack:"]
+      <> take 30 (drop 1 topOfStack)
+  where
+    ls = lines txt
+    callGraph =
+      takeWhile (not . null) (drop 1 (dropWhile (not . isPrefixOf "Call graph:") ls))
+    topOfStack =
+      takeWhile (not . null) (dropWhile (not . isPrefixOf "Sort by top of stack") ls)
+    -- The thread's line, then its last frames: the deepest ones.
+    thread (header, frames) =
+      header : map (("  .. " <>) . dropWhile (`elem` treeChars)) (lastN 8 frames)
+    treeChars = " +!:|" :: String
+    lastN n xs = drop (length xs - n) xs
+
+-- | Split the call graph at each thread's line.
+threadBlocks :: [String] -> [(String, [String])]
+threadBlocks = \case
+  [] -> []
+  (l : rest) ->
+    let (frames, others) = break isThread rest
+     in (dropWhile (== ' ') l, map (dropWhile (== ' ')) frames) : threadBlocks others
+  where
+    isThread l = "Thread_" `isPrefixOf` dropWhile (\c -> c == ' ' || isDigit c) l
 
 -- | Run ps with these args for up to 5 s. Short output, or why not.
 psOutput :: [String] -> IO String

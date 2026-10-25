@@ -180,7 +180,7 @@ tests =
         fake <- newFake
         let deps =
               (fake.deps)
-                { installShutdown = pure alreadyStopped,
+                { installShutdown = \_ -> pure alreadyStopped,
                   listen = \_ _ -> assertFailure "listen called"
                 }
         code <- run deps ["--trace-file", "t.jsonl"]
@@ -194,7 +194,7 @@ tests =
         stoppedRef <- newIORef False
         let deps =
               (fake.deps)
-                { installShutdown =
+                { installShutdown = \_ ->
                     pure
                       Shutdown
                         { wait = pure (),
@@ -214,7 +214,7 @@ tests =
         fake <- newFake
         let deps =
               (fake.deps)
-                { installShutdown = pure alreadyStopped,
+                { installShutdown = \_ -> pure alreadyStopped,
                   checkRoot = \p -> pure (Left (RootMissing p))
                 }
         code <- run deps ["nope"]
@@ -224,9 +224,9 @@ tests =
         installed <- newIORef False
         let deps =
               (fake.deps)
-                { installShutdown = do
+                { installShutdown = \level -> do
                     modifyIORef' installed (const True)
-                    fake.deps.installShutdown,
+                    fake.deps.installShutdown level,
                   checkRoot = \p -> do
                     ok <- readIORef installed
                     assertBool "handlers not installed yet" ok
@@ -516,7 +516,7 @@ idleDeps fake stop serve =
   (fake.deps)
     { idleMinute = Microseconds 100_000,
       listen = \_ _ -> pure (Right fake.listener {serve = serve}),
-      installShutdown =
+      installShutdown = \_ ->
         pure
           Shutdown
             { wait = readMVar stop,
@@ -633,7 +633,7 @@ newFake = do
             warmUpParser = pure (),
             parse = parseGuarded,
             openBrowser = \_ _ url -> modifyIORef' opened (<> [url]),
-            installShutdown =
+            installShutdown = \_ ->
               pure
                 Shutdown
                   { wait = readMVar stop,
