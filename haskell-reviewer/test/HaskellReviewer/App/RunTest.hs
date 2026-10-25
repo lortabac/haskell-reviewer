@@ -12,7 +12,7 @@ import Control.Concurrent.MVar
     takeMVar,
     tryPutMVar,
   )
-import Control.Exception (AsyncException (..), throwIO, try)
+import Control.Exception (AsyncException (..), evaluate, throwIO, try)
 import Control.Monad (forever, void)
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as LBS
@@ -316,6 +316,25 @@ listingTests =
             putMVar release ()
             r <- timeout 5_000_000 (wait request)
             fmap (.status) r @?= Just 200,
+      testCase "stop during a slow warm-up: exit 0 within 5 s" $ do
+        fake <- newFake
+        stop <- newEmptyMVar
+        warming <- newEmptyMVar
+        let serve ready _ = ready >> blockForever
+            -- Pure work that never ends, like a big warm-up.
+            busy = mapM_ (\n -> evaluate (length (show (n * n :: Integer)))) [1 ..]
+            empty = fakeLister (pure (Right (mkFileList FromDisk 0 [])))
+            deps =
+              (idleDeps fake stop serve)
+                { probeFiles = \_ _ -> pure (Right empty),
+                  warmUpParser = putMVar warming () >> busy
+                }
+        withAsync (run deps ["--idle-exit", "0"]) $ \running -> do
+          started <- timeout 5_000_000 (takeMVar warming)
+          started @?= Just ()
+          putMVar stop ()
+          code <- timeout 5_000_000 (wait running)
+          code @?= Just ExitSuccess,
       testCase "warm-up: runs when the project crashes, not when listing fails" $ do
         let counting ref d = d {warmUpParser = modifyIORef' ref (+ 1)}
             crash ref d =
