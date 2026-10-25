@@ -16,7 +16,7 @@ import Control.Exception
     throwIO,
     try,
   )
-import Control.Monad (unless, void, when)
+import Control.Monad (forM_, unless, void, when)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as Char8
@@ -712,11 +712,12 @@ signalTests :: TestTree
 signalTests =
   testGroup
     "signals"
+    -- --verbose in the stop tests: on failure, stderr shows how far
+    -- start-up and the shutdown got (the "stop:" lines).
     [ testCase "SIGTERM: exit 0" $
-        withTemp $ \dir -> withServer id [dir] $ \server -> do
+        withTemp $ \dir -> withServer id ["--verbose", dir] $ \server -> do
           (code, _) <- stopServer server sigTERM
           code @?= ExitSuccess,
-      -- --verbose: on failure, stderr shows how far start-up got.
       testCase "SIGINT: exit 0" $
         withTemp $ \dir -> withServer id ["--verbose", dir] $ \server -> do
           (code, _) <- stopServer server sigINT
@@ -727,8 +728,16 @@ signalTests =
           withServer withSignalsBlocked ["--verbose", dir] $ \server -> do
             (code, _) <- stopServer server sigINT
             code @?= ExitSuccess,
+      -- Q-MACOS-SIGINT: a stop right after the URL line, while the
+      -- listing runs, once hung on macOS. Repeat it to make it likely.
+      testCase "a stop right after the URL, 20 times: exit 0" $
+        withTemp $ \dir ->
+          forM_ (take 20 (cycle [sigTERM, sigINT])) $ \sig ->
+            withServer id ["--verbose", dir] $ \server -> do
+              (code, _) <- stopServer server sig
+              code @?= ExitSuccess,
       testCase "two quick SIGTERMs: exit 0" $
-        withTemp $ \dir -> withServer id [dir] $ \server -> do
+        withTemp $ \dir -> withServer id ["--verbose", dir] $ \server -> do
           -- The second one may hit the forced exit path. Both exit 0.
           getPid server.process >>= mapM_ (signalProcess sigTERM)
           (code, _) <- stopServer server sigTERM
@@ -1021,8 +1030,16 @@ secondSignal server p = do
   signalProcess sigINT p
   code <- timeout 3000000 (waitForProcess server.process)
   later <- readReady server.stderr
-  let verdict = case code of
-        Just c -> "  exited (" <> show c <> "): Haskell handlers run"
+  -- With --verbose, the handler's lines tell if the first signal got
+  -- to it: then this one takes the second-signal path.
+  let first
+        | any ("stop: second signal" `isInfixOf`) later =
+            "the first signal reached our handler, the shutdown is stuck"
+        | any ("stop: got" `isInfixOf`) later =
+            "the first signal never reached our handler"
+        | otherwise = "no stop: lines (no --verbose?)"
+      verdict = case code of
+        Just c -> "  exited (" <> show c <> "): Haskell handlers run; " <> first
         Nothing -> "  still running after 3 s: Haskell handlers don't run"
   pure (verdict <> "\n  stderr since: " <> show later)
 
