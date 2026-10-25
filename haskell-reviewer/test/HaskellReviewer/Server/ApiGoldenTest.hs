@@ -39,13 +39,15 @@ cases =
     ("file-submodule", okBody fixtureApi (file ["vendor", "dep"])),
     ("modules", okBody projectApi ["api", "modules", "tree"]),
     ("modules-implicit", okBody implicitApi ["api", "modules", "tree"]),
-    -- One per reason a module is text only, and a parsed one.
+    -- One per reason a module is text only, a parsed one and one after
+    -- CPP.
     ("module-parsed", okBody projectApi (modulePath "Foo")),
     ("module-parse-error", okBody projectApi (modulePath "pkg:exe:app:Main")),
     ("module-pragma-error", okBody projectApi (modulePath "Tests")),
     ("module-preprocessed", okBody projectApi (modulePath "pkg:test:spec:Main")),
     ("module-cpp", okBody projectApi (modulePath "pkg:bench:slow:Main")),
     ("module-crashed", okBody crashingApi (modulePath "Foo")),
+    ("module-too-slow", okBody slowApi (modulePath "Foo")),
     ("module-generated", okBody projectApi (modulePath "Lexer")),
     ("module-no-source", okBody projectApi (modulePath "Gone")),
     ("module-not-text", okBody implicitApi (modulePath "Main")),
@@ -54,10 +56,11 @@ cases =
   where
     file p = ["api", "file", "tree"] <> p
     modulePath ref = ["api", "module", "tree", ref]
-    crashingApi =
+    crashingApi = answering (ParserCrashed "boom")
+    slowApi = answering TooSlow
+    answering r =
       projectApi
-        { parse = \_ _ ->
-            pure (TextOnly TextOnlyModule {reason = ParserCrashed "boom", warnings = []})
+        { parse = \_ _ -> pure (TextOnly TextOnlyModule {reason = r, warnings = []})
         }
 
 fixtureDir :: FilePath

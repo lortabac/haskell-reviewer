@@ -1,0 +1,15 @@
+parsed
+module: CppMacroExport @4:8-4:22
+exports:
+  before@5:5-5:11 @5:5-5:11
+  foo@6:2-6:16 @6:2-6:16
+  bar@6:2-6:16 @6:2-6:16
+  multi@7:5-8:18 @7:5-8:18
+  line@7:5-8:18 @7:5-8:18
+  one@9:5-9:8 @9:5-9:8
+  after@9:10-9:15 @9:10-9:15
+imports:
+language: GHC2021
+from pragmas: CPP
+enabled: BangPatterns, BinaryLiterals, CPP, ConstrainedClassMethods, ConstraintKinds, DeriveDataTypeable, DeriveFoldable, DeriveFunctor, DeriveGeneric, DeriveLift, DeriveTraversable, DoAndIfThenElse, EmptyCase, EmptyDataDecls, EmptyDataDeriving, ExistentialQuantification, ExplicitForAll, FieldSelectors, FlexibleContexts, FlexibleInstances, ForeignFunctionInterface, GADTSyntax, GeneralizedNewtypeDeriving, HexFloatLiterals, ImplicitPrelude, ImplicitStagePersistence, ImportQualifiedPost, InstanceSigs, KindSignatures, ListTuplePuns, MonomorphismRestriction, MultiParamTypeClasses, NamedFieldPuns, NamedWildCards, NumericUnderscores, PatternGuards, PolyKinds, PostfixOperators, RankNTypes, RelaxedPolyRec, ScopedTypeVariables, StandaloneDeriving, StandaloneKindSignatures, StarIsType, TraditionalRecordSyntax, TupleSections, TypeApplications, TypeOperators, TypeSynonymInstances
+warnings:

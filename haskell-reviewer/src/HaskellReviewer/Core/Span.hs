@@ -33,10 +33,12 @@ The syntactic module model uses the same convention, so joining the two
 tiers is an equality lookup. The browser needs UTF-16 offsets: the
 server or the client converts per line, at the edge.
 
-CPP: GHC's spans come from the cpp output with #line pragmas, so lines
-are those of the original file. Columns can differ only on lines where a
-macro was expanded; such occurrences fail to join and keep their
-syntactic link.
+CPP: our cpp keeps every line in place, and spans on its output are
+mapped back to the file (Note [Position map] in
+HaskellReviewer.Core.Cpp.Positions). A name made by a macro gets the
+whole call's span. HIE spans can differ only on lines where a macro was
+expanded or lines were joined; such occurrences fail to join and keep
+their syntactic link.
 -}
 
 -- * Types

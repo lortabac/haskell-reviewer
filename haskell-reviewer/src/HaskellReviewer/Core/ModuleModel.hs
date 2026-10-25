@@ -48,6 +48,7 @@ module HaskellReviewer.Core.ModuleModel
 where
 
 import Data.Text (Text)
+import HaskellReviewer.Core.Cpp.Warning (CppWarning, renderCppWarning)
 import HaskellReviewer.Core.Project (ModuleName)
 import HaskellReviewer.Core.Span (Span)
 
@@ -76,10 +77,11 @@ data TextOnlyReason
     PragmaFailed ParseError
   | -- | @-F -pgmF <tool>@, from ghc-options and @OPTIONS_GHC@ together.
     Preprocessed Text
-  | -- | CPP with directives.
-    CppNotSupported
   | -- | The parser threw. A bug, in GHC or ours.
     ParserCrashed Text
+  | -- | CPP and GHC together took longer than the limit (Note [Parse
+    -- time limit] in "HaskellReviewer.Effects.Parser").
+    TooSlow
   deriving (Eq, Show)
 
 -- | GHC's first error.
@@ -99,6 +101,10 @@ data ParseWarning
     UnknownLanguage Text
   | -- | An @OPTIONS_GHC@ flag we don't apply.
     IgnoredPragmaFlag Text
+  | -- | A cpp-options word that isn't @-D@, @-U@ or @-I@.
+    IgnoredCppOption Text
+  | -- | A CPP warning (@#error@, a bad @#if@, ...).
+    FromCpp CppWarning
   | -- | markdown-unlit found no Haskell block (D-84).
     NoMarkdownCode
   | -- | Off under Safe Haskell, like GHC does (with a warning too).
@@ -114,6 +120,8 @@ renderParseWarning = \case
   UnknownExtension t -> "unknown extension: " <> t
   UnknownLanguage t -> "unknown language: " <> t
   IgnoredPragmaFlag t -> "ignored OPTIONS_GHC flag: " <> t
+  IgnoredCppOption t -> "ignored cpp-options flag: " <> t
+  FromCpp w -> renderCppWarning w
   NoMarkdownCode -> "no Haskell code block"
   SafeTurnsOff t -> "turned off by Safe: " <> t
   SafeModesClash a b -> "Safe Haskell modes clash: " <> a <> ", " <> b <> " ignored"

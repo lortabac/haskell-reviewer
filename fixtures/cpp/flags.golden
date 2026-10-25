@@ -4,20 +4,21 @@
 debug = [3]
 
 
-old = True
 
 
 
+linux = True
 
-other = True
+
 
 
 == regions
 directive 2-2
 directive 4-5
+excluded 6-6
 directive 7-8
-excluded 9-9
 directive 10-10
+excluded 11-11
 directive 12-12
 == warnings
 == positions

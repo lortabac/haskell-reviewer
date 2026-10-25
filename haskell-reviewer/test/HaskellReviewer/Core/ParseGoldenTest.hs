@@ -13,15 +13,30 @@ module HaskellReviewer.Core.ParseGoldenTest (tests) where
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as LBS
 import Data.List (nub, sort)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text.Encoding qualified as Text.Encoding
+import HaskellReviewer.Core.Cpp (CppEnv (..))
 import HaskellReviewer.Core.Modules (Literate (..))
+import HaskellReviewer.Core.Modules qualified as Modules
+  ( ComponentSettings (..),
+    HaskellFile (..),
+  )
 import HaskellReviewer.Core.Parser
   ( FileKind (..),
     ParseSettings (..),
     defaultParseSettings,
+    moduleParseSettings,
   )
-import HaskellReviewer.Core.Project (Extension (..), Language (..))
+import HaskellReviewer.Core.Project
+  ( Extension (..),
+    GhcVersion (..),
+    Language (..),
+    PackageName (..),
+    Platform (..),
+    parserGhcVersion,
+  )
+import HaskellReviewer.Core.RelPath (relPathFromSegments)
 import HaskellReviewer.Effects.Parser (parseGuarded)
 import ParseDump (dumpParse)
 import System.Directory qualified as Dir
@@ -101,15 +116,69 @@ cases =
     plain "cpp-directives.hs",
     -- CPP on, no directive: parsed as-is.
     plain "cpp-plain.hs",
-    -- -cpp in ghc-options, with directives.
+    -- -cpp in ghc-options, with indented directives: text to cpp.
     (plain "cpp-option.hs") {settings = with {ghcOptions = ["-cpp"]}},
     (plain "cpp-option.hs") {golden = "cpp-option-off"},
+    -- MIN_VERSION_pkg is 1 for any package, defined only for
+    -- build-depends.
+    (plain "cpp-min-version.hs")
+      { settings = withCpp (cppWith {buildDepends = [PackageName "text-short"]})
+      },
+    (plain "cpp-min-version.hs") {golden = "cpp-min-version-no-dep"},
+    (plain "cpp-os-arch.hs")
+      { golden = "cpp-os-arch-linux",
+        settings = withCpp (cppWith {platform = Platform "linux" "x86_64"})
+      },
+    (plain "cpp-os-arch.hs")
+      { golden = "cpp-os-arch-darwin",
+        settings = withCpp (cppWith {platform = Platform "darwin" "aarch64"})
+      },
+    -- The pragmas are read again after CPP.
+    plain "cpp-language-if0.hs",
+    -- -D and -U from cpp-options, ghc-options and OPTIONS_GHC, in order.
+    (plain "cpp-define-flags.hs")
+      { settings =
+          withFlags
+            ["-DFROM_CPP=fromCpp", "-D", "SPACED", "-Iinclude", "-I", "inc", "-bogus"]
+            ["-Wall", "-DFROM_GHC_OPTIONS", "-optP-DOPT_P=2", "-DUNDONE"]
+      },
+    plain "cpp-include.hs",
+    -- -F -pgmF inside #if 1: preprocessed, as GHC.
+    plain "cpp-pgmf.hs",
+    -- A BOM, then CPP: columns on line 1 don't count it.
+    plain "cpp-bom.hs",
+    plain "cpp-error.hs",
+    -- Names from a macro span the whole call; a tab before one.
+    plain "cpp-macro-export.hs",
+    -- The error's place is on the file, after a macro and joined lines.
+    plain "cpp-parse-error.hs",
+    -- A built-in macro and no directive: CPP still runs.
+    plain "cpp-ghc-version.hs",
+    (plain "cpp-ghc-version.hs")
+      { golden = "cpp-ghc-version-910",
+        settings = withCpp (cppWith {ghc = GhcVersion [9, 10]})
+      },
     plain "unknown-language-pragma.hs",
     -- GHC with -haddock rejects "{- #" too; without, it parses.
     plain "haddock-quirk.hs"
   ]
   where
     with = defaultParseSettings
+    cppWith = defaultParseSettings.cpp
+    withCpp env = with {cpp = env}
+    -- Through moduleParseSettings, as the server does.
+    withFlags cppOpts ghcOpts =
+      moduleParseSettings
+        parserGhcVersion
+        Modules.ComponentSettings
+          { Modules.language = GHC2021,
+            Modules.extensions = [],
+            Modules.ghcOptions = ghcOpts,
+            Modules.cppOptions = cppOpts,
+            Modules.buildDepends = []
+          }
+        Modules.HaskellFile {Modules.path = file, Modules.literate = NotLiterate}
+    file = fromMaybe (error "bad path") (relPathFromSegments ["M.hs"])
     ext n = Extension {name = n, enabled = True}
     off n = Extension {name = n, enabled = False}
 

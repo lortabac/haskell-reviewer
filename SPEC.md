@@ -949,6 +949,7 @@ Therefore:
 | `claude-cli` missing, not signed in, or failing tool-set verification (§6.8) | That backend is refused for this run, with the specific reason; no fallback to another backend without the user's choice. |
 | HIE files found but no matching companion extractor (§7.1) | Syntactic tier for those modules; the header hint names the companion to install. |
 | Newest parser rejects a module written for an older GHC | Text-only fallback with the reason in the banner (§3.1, §7.1). |
+| A module takes over 2 s to parse (pathological input) | Text-only, "parse took too long" (D-136). |
 
 ---
 

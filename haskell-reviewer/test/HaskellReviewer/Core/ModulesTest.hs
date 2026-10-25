@@ -510,7 +510,7 @@ parseSettingsTest = do
             P.language = Haskell98,
             P.extensions = [Extension "CPP" True],
             P.ghcOptions = ["-Wall", "-XLambdaCase"],
-            P.cppOptions = ["-DX=1"],
+            P.cppOptions = ["-DX=1", "-Idir", "-I", "inc", "-bogus", "-U", "Y"],
             P.buildDepends = [PackageName "base", PackageName "text"]
           }
       -- --ghc 9.10, say: not the parser's own version.
@@ -532,13 +532,15 @@ parseSettingsTest = do
         { language = Haskell98,
           extensions = [Extension "CPP" True],
           ghcOptions = ["-Wall", "-XLambdaCase"],
+          -- -I is silent.
+          ignoredCppOptions = ["-bogus"],
           literate = BirdOrLatex,
           kind = ModuleFile,
           cpp =
             CppEnv
               { ghc = ghc,
                 platform = hostPlatform,
-                flags = [Define "X" "1"],
+                flags = [Define "X" "1", Undefine "Y"],
                 buildDepends = [PackageName "base", PackageName "text"]
               }
         }

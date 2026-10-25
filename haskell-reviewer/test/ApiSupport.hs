@@ -320,9 +320,11 @@ contents =
     ( "pkg/test/Tests.hs",
       TextContent "{-# LANGUAGE NoSuchThing #-}\nmodule Tests where\n"
     ),
+    -- CPP: a macro in the export list, and a warning.
     ( "pkg/bench/Bench.hs",
       TextContent
-        "{-# LANGUAGE CPP #-}\nmodule Main where\n#if 1\nmain = pure ()\n#endif\n"
+        "{-# LANGUAGE CPP #-}\n#define M main\nmodule Main (M) where\n\
+        \#if 1\nmain = pure ()\n#endif\n#warning slow\n"
     ),
     ("scripts/Tool.hs", TextContent "{-# OPTIONS_GHC -F -pgmF hspec-discover #-}\n"),
     ("scripts/build-docs.hs", TextContent "main = pure ()\n"),

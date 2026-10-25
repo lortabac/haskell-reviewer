@@ -125,8 +125,8 @@ export const reasonKinds = [
   "parse-error",
   "pragma-error",
   "preprocessed",
-  "cpp-not-supported",
   "parser-crashed",
+  "too-slow",
   "generated",
   "no-source",
   "not-text",
@@ -143,8 +143,9 @@ export type TextOnlyReason =
     }
   // -F -pgmF or -pgmL; generated: a preprocessor input (alex, ...).
   | { kind: "preprocessed" | "generated"; tool: string }
-  | { kind: "cpp-not-supported" }
   | { kind: "parser-crashed"; message: string }
+  // The parse (CPP and GHC) took too long.
+  | { kind: "too-slow" }
   | { kind: "no-source"; reason: NoSourceReason }
   | { kind: "not-text"; size: number }
   | { kind: "too-large"; size: number; limit: number };
@@ -325,10 +326,10 @@ function decodeReason(value: unknown, path: string): TextOnlyReason {
     case "preprocessed":
     case "generated":
       return { kind, tool: field(o, "tool", path, str) };
-    case "cpp-not-supported":
-      return { kind };
     case "parser-crashed":
       return { kind, message: field(o, "message", path, str) };
+    case "too-slow":
+      return { kind };
     case "no-source":
       return { kind, reason: field(o, "reason", path, oneOf(noSourceReasons)) };
     case "not-text":

@@ -248,7 +248,7 @@ moduleTests =
             atomicModifyIORef' entered (\e -> (e + 1, ()))
             readMVar gate
             atomicModifyIORef' active (\a -> (a - 1, ()))
-            pure (TextOnly TextOnlyModule {reason = CppNotSupported, warnings = []})
+            pure (TextOnly TextOnlyModule {reason = TooSlow, warnings = []})
       limited <- oneAtATime slow
       withAsync (limited defaultParseSettings "") $ \a1 ->
         withAsync (limited defaultParseSettings "") $ \a2 -> do

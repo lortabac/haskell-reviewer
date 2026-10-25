@@ -1,1 +1,3 @@
-text only: CPP not supported
+text only: parse error GHC-58481 @2:3-2:4: "parse error on input `#'"
+  line 2: directive not in column 1, read as text
+  line 5: directive not in column 1, read as text

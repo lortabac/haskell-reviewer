@@ -5,6 +5,22 @@ implementation phase. Their outcomes are logged in DECISIONS.md, and SPEC.md
 is updated if needed (§10.3).
 
 ## To verify during implementation (not blocking the spec)
+- **Q-MACOS-SIGINT**: On the macos-15 (arm64) CI runner the ExeTest
+  "SIGINT: exit 0" sometimes hangs: no exit within 10 s of SIGINT. Seen
+  on GHC 9.12 and 9.14, never on 9.10 or Linux; three CI rounds failed,
+  failed, then passed. Known: SIGINT was delivered (not blocked, not
+  pending), start-up had finished, the process slept with idle threads.
+  Ruled out: the CPP warm-up (fast everywhere), a blocked signal mask
+  from `process` (spawns are serialized; haskell/process#384 is a
+  handler install racing a spawn, which doesn't happen here), and our
+  shutdown waits (none can block forever without connections). Left:
+  the RTS never runs our handler after delivery, or the RTS hangs in
+  `hs_exit`. Not reproducible on Linux (2,000+ runs). A guard unblocks
+  the stop signals at start (Note [Blocked signals]). The test now prints
+  `stop:` lines from the server, `sample` stacks and a second-SIGINT
+  probe when it hangs: the next failure tells the two cases apart.
+  Candidate fixes: our own signal pipe read by a `forkOS` thread, or a
+  logged watchdog that exits 5 s after a stop (hides the bug).
 - **Q-RTS-BLACKHOLE**: On GHC 9.12 and 9.14 (not 9.10) the threaded test
   binary sometimes hung (about 5% of runs of the PackageGlob tests): several
   capabilities spin on a `CAF_BLACKHOLE` whose blocking queue was already
