@@ -17,6 +17,7 @@ import HaskellReviewer.Core.Cpp
     FlagSource (..),
     Limit (..),
     MacroFlag (..),
+    MacroFlags (..),
     Piece (..),
     Pos (..),
     PositionMap (..),
@@ -361,6 +362,10 @@ macros =
         let ls = ["#define F(x) [x]", "#define FOO 1", "F(FOO", "#if 1", ")", "#endif"]
         cpp ls @?= ["", "", "F(1", "", ")", ""]
         warns ls @?= [(3, UnterminatedCall "F")],
+      testCase "a failed call over lines warns on the call's line" $ do
+        warns ["#define F(x) [x]", "F(a,", "b", "#if 1", "#endif"]
+          @?= [(2, UnterminatedCall "F")]
+        warns ["#define F(x) [x]", "x = F(a,", "b)"] @?= [(2, WrongArgCount "F")],
       testCase "bad #define" $ do
         warns
           [ "#define",
@@ -390,26 +395,47 @@ macros =
             e = env {flags = fs}
         (runCpp e [] "a = FOO BAR\n").text @?= "a = 3 2\n"
         (runCpp e [Undefine "BAR"] "a = FOO BAR\n").text @?= "a = 3 BAR\n"
-        (runCpp e [Undefine "__GLASGOW_HASKELL__"] "__GLASGOW_HASKELL__").text
-          @?= "__GLASGOW_HASKELL__"
         (runCpp env [Define "F(x)" "[x]"] "F(1)").text @?= "[1]",
+      testCase "-D and -U don't change GHC's macros: GHC passes its own last" $ do
+        let deps = env {buildDepends = [PackageName "base"]}
+            run1 fs t = (runCpp deps fs t).text
+        run1 [Undefine "__GLASGOW_HASKELL__"] "__GLASGOW_HASKELL__" @?= "914"
+        run1 [Define "__GLASGOW_HASKELL__" "1"] "__GLASGOW_HASKELL__" @?= "914"
+        run1 [Define "linux_HOST_OS" "0"] "#if linux_HOST_OS\nyes\n#endif" @?= "\nyes\n"
+        run1 [Undefine "__IO_MANAGER_MIO__"] "__IO_MANAGER_MIO__" @?= "1"
+        run1
+          [Undefine "MIN_VERSION_GLASGOW_HASKELL"]
+          "#if MIN_VERSION_GLASGOW_HASKELL(9,0,0,0)\nyes\n#endif"
+          @?= "\nyes\n"
+        run1 [Define "MIN_VERSION_base(a,b,c)" "0"] "MIN_VERSION_base(1,2,3)" @?= "1"
+        -- In the file, #undef still works.
+        run1 [] "#undef __GLASGOW_HASKELL__\n__GLASGOW_HASKELL__"
+          @?= "\n__GLASGOW_HASKELL__"
+        -- A package not in build-depends: the flag stands.
+        run1 [Define "MIN_VERSION_other(a,b,c)" "0"] "MIN_VERSION_other(1,2,3)" @?= "0",
       testCase "macroFlags: cpp-options take -D X" $ do
         macroFlags CppOptions ["-DX", "-DY=2", "-D", "Z=", "-UW", "-U", "V", "-optP-DA"]
-          @?= ( [ Define "X" "1",
+          @?= MacroFlags
+            { found =
+                [ Define "X" "1",
                   Define "Y" "2",
                   Define "Z" "",
                   Undefine "W",
                   Undefine "V"
                 ],
-                ["-optP-DA"]
-              )
+              rest = ["-optP-DA"]
+            }
         macroFlags CppOptions ["-Wall", "-D1X", "-U", "-DF(x)=x", "-I.", "-U-x"]
-          @?= ([Define "F(x)" "x"], ["-Wall", "-D1X", "-U", "-I.", "-U-x"]),
+          @?= MacroFlags
+            { found = [Define "F(x)" "x"],
+              rest = ["-Wall", "-D1X", "-U", "-I.", "-U-x"]
+            },
       testCase "macroFlags: ghc-options take -DX and -optP-DX only, as GHC" $
         macroFlags GhcOptions ["-DX", "-D", "Y", "-optP-DA", "-optP-UB", "-UC", "-U"]
-          @?= ( [Define "X" "1", Define "A" "1", Undefine "B", Undefine "C"],
-                ["-D", "Y", "-U"]
-              )
+          @?= MacroFlags
+            { found = [Define "X" "1", Define "A" "1", Undefine "B", Undefine "C"],
+              rest = ["-D", "Y", "-U"]
+            }
     ]
 
 directives :: TestTree

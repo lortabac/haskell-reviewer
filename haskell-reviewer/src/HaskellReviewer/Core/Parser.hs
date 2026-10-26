@@ -14,6 +14,7 @@ module HaskellReviewer.Core.Parser
 
     -- * Parsing
     parseSource,
+    earlyWarnings,
 
     -- * Helpers
     canonicalExtensionNames,
@@ -99,7 +100,17 @@ import GHC.Types.SrcLoc
 import GHC.Unit.Types (stringToUnitId)
 import GHC.Utils.Fingerprint (fingerprint0)
 import GHC.Utils.Outputable (defaultSDocContext, renderWithContext)
-import HaskellReviewer.Core.Cpp (CppEnv (..), FlagSource (..), isDirective, macroFlags)
+import HaskellReviewer.Core.Cpp
+  ( CppEnv (..),
+    CppOutput (..),
+    FlagSource (..),
+    MacroFlag,
+    MacroFlags (..),
+    macroFlag,
+    macroFlags,
+    runCpp,
+    sameLines,
+  )
 import HaskellReviewer.Core.ModuleModel
   ( Extensions (..),
     ModuleParse (..),
@@ -116,7 +127,7 @@ import HaskellReviewer.Core.Modules
     Tools (..),
     toolsFrom,
   )
-import HaskellReviewer.Core.Parser.Convert (convertModule, toSpan)
+import HaskellReviewer.Core.Parser.Convert (SpanMap (..), convertModule, toSpan)
 import HaskellReviewer.Core.Project
   ( Extension (..),
     GhcVersion,
@@ -127,8 +138,7 @@ import HaskellReviewer.Core.Project
 import HaskellReviewer.Core.Project qualified as Project (Language (..))
 import HaskellReviewer.Core.RelPath (relPathName)
 import HaskellReviewer.Core.SourceText
-  ( ColumnMap,
-    columnMap,
+  ( columnMap,
     stripBom,
     unlitBirdLatex,
     unlitMarkdown,
@@ -141,12 +151,15 @@ GHC's flags come from three places, in this order (Cabal's):
 1. The component: default-language, then default-extensions, then the
    -X... and -cpp words of ghc-options. A name GHC doesn't know: a
    warning, skipped. An unknown language: a warning, Haskell98 (D-84).
+   A cpp-options word that isn't -D, -U or -I: a warning.
 2. The module's LANGUAGE and OPTIONS_GHC pragmas, read by our copy of
-   GHC's getOptions (readPragmas). Only -X..., -cpp and the LANGUAGE
-   names are applied. -F and -pgmF count with ghc-options for "is this
-   preprocessed?" (D-103). Any other OPTIONS_GHC word never reaches
-   GHC's flag code: it's an IgnoredPragmaFlag warning. -pgmL in a pragma
-   does nothing, like in GHC (unlit runs before GHC reads the pragmas).
+   GHC's getOptions (readPragmas), before and after CPP (Note [Pragmas
+   after CPP]). Only -X..., -cpp and the LANGUAGE names are applied.
+   -D and -U go to CPP. -F and -pgmF count with ghc-options for "is
+   this preprocessed?" (D-103). Any other OPTIONS_GHC word never
+   reaches GHC's flag code: it's an IgnoredPragmaFlag warning. -pgmL in
+   a pragma does nothing, like in GHC (unlit runs before GHC reads the
+   pragmas).
 3. Haddock is always on, so we get the doc comments.
 4. Safe Haskell, once all flags are in, like GHC's safeFlagCheck: under
    Safe, TemplateHaskell, GeneralizedNewtypeDeriving and DerivingVia are
@@ -172,6 +185,25 @@ parser reads are set; the others are left out (-Wno-missing-fields) and
 would throw if read. The parser never reads them.
 -}
 
+{- Note [Pragmas after CPP]
+
+GHC reads the pragmas twice. First on the file (after unlit): that read
+says if CPP runs, and with which -D and -U. Then on the text CPP made.
+-F and -pgmF count from both reads (checked with ghc 9.14: an
+OPTIONS_GHC -F inside #if 1 runs the preprocessor). The extensions
+come from the second read alone, starting again from the component's
+flags. So a LANGUAGE pragma inside #if 0 does nothing, and one inside
+an #if 1 counts (the first read never sees it: it stops at the first
+line that isn't a pragma or a comment). We do the same, and the pragma
+warnings come from the second read too.
+
+runCpp decides by itself when the text needs no work (D-129), so CPP
+on means we always call it.
+
+GHC's spans are on the CPP text. Tabs are converted on that text, then
+mapSpan takes the span back to the file (SpanMap).
+-}
+
 -- * Settings
 
 -- | All the parse depends on, apart from the text. Part of the parse
@@ -181,6 +213,9 @@ data ParseSettings = ParseSettings
     extensions :: [Extension],
     -- | The component's, as written.
     ghcOptions :: [Text],
+    -- | The cpp-options words that are not @-D@, @-U@ or @-I@, for
+    -- warnings. The flags are in 'cpp'.
+    ignoredCppOptions :: [Text],
     literate :: Literate,
     kind :: FileKind,
     cpp :: CppEnv
@@ -201,6 +236,7 @@ defaultParseSettings =
     { language = Project.GHC2021,
       extensions = [],
       ghcOptions = [],
+      ignoredCppOptions = [],
       literate = NotLiterate,
       kind = ModuleFile,
       cpp =
@@ -220,20 +256,29 @@ moduleParseSettings ghc c file =
     { language = c.language,
       extensions = c.extensions,
       ghcOptions = c.ghcOptions,
+      ignoredCppOptions = withoutIncludes cppFlags.rest,
       literate = file.literate,
       kind = if signature then SignatureFile else ModuleFile,
       cpp =
         CppEnv
           { ghc = ghc,
             platform = hostPlatform,
-            flags =
-              fst (macroFlags CppOptions c.cppOptions)
-                <> fst (macroFlags GhcOptions c.ghcOptions),
+            flags = cppFlags.found <> (macroFlags GhcOptions c.ghcOptions).found,
             buildDepends = c.buildDepends
           }
     }
   where
     signature = any (`Text.isSuffixOf` relPathName file.path) [".hsig", ".lhsig"]
+    cppFlags = macroFlags CppOptions c.cppOptions
+
+-- | Without @-I dir@ and @-Idir@: silent until we read includes.
+withoutIncludes :: [Text] -> [Text]
+withoutIncludes = \case
+  "-I" : _ : ws -> withoutIncludes ws
+  w : ws
+    | "-I" `Text.isPrefixOf` w -> withoutIncludes ws
+    | otherwise -> w : withoutIncludes ws
+  [] -> []
 
 -- * Parsing
 
@@ -249,47 +294,71 @@ parseSource settings input = forceModuleParse r `seq` r
 
 run :: ParseSettings -> Text -> ModuleParse
 run settings input = case readPragmas (initParserOpts comp.dflags) (toBuffer text) of
-  Left e -> textOnly (PragmaFailed (headerError text e)) []
+  Left e -> textOnly (PragmaFailed (headerError (plainSpans text) e)) []
   Right args
     | Just tool <- (toolsFrom (settings.ghcOptions <> args)).pgmF ->
         textOnly (Preprocessed tool) []
-    | not (xopt LangExt.Cpp pragmas.dflags) -> parseWith pragmas text
-    -- Directives: text only. No directive: parsed as is.
-    | any isDirective (Text.splitOn "\n" text) ->
-        textOnly CppNotSupported pragmas.warnings
-    | otherwise -> parseWith pragmas text
+    | not (xopt LangExt.Cpp first.dflags) -> parseWith first text (plainSpans text) []
+    | otherwise -> afterCpp args (runCpp settings.cpp first.macros text)
     where
-      pragmas = applyPragmas comp.dflags args
+      first = applyPragmas comp.dflags args
   where
-    (text, unlitWarnings) = case settings.literate of
-      NotLiterate -> (stripBom input, [])
-      BirdOrLatex -> (unlitBirdLatex (stripBom input), [])
-      MarkdownUnlit -> case unlitMarkdown (stripBom input) of
-        Just t -> (t, [])
-        Nothing -> ("", [NoMarkdownCode])
+    (text, unlitWarnings) = unlit settings input
     comp = componentFlags settings
     early = unlitWarnings <> comp.warnings
     textOnly reason later =
       TextOnly TextOnlyModule {reason = reason, warnings = early <> later}
-    parseWith pragmas t =
+    -- The pragmas again, on the text after CPP, from the component's
+    -- flags (Note [Pragmas after CPP]).
+    afterCpp firstArgs out =
+      let spans = SpanMap {columns = columnMap out.text, cpp = out.positions}
+          notes = map FromCpp out.warnings
+          -- -F and -pgmF from both reads.
+          tools args = toolsFrom (settings.ghcOptions <> firstArgs <> args)
+       in case readPragmas (initParserOpts comp.dflags) (toBuffer out.text) of
+            Left e -> textOnly (PragmaFailed (headerError spans e)) notes
+            Right args
+              | Just tool <- (tools args).pgmF -> textOnly (Preprocessed tool) notes
+              | otherwise ->
+                  parseWith (applyPragmas comp.dflags args) out.text spans notes
+    parseWith pragmas t spans notes =
       case unP parser (initParserState opts (toBuffer t) startLoc) of
         PFailed st -> failed (errorsOf st)
         POk st m -> case errorsOf st of
-          [] -> cols `seq` Parsed (convertModule cols exts (early <> pragmas.warnings) m)
+          [] -> spans `seq` Parsed (convertModule spans exts (early <> later) m)
           errs -> failed errs
       where
+        later = pragmas.warnings <> notes
         parser = case settings.kind of
           ModuleFile -> Ghc.parseModule
           SignatureFile -> Ghc.parseSignature
         opts = initParserOpts pragmas.dflags
-        cols = columnMap t
         exts = extensionsOf pragmas.dflags pragmas.names
         errorsOf st = toList (getMessages (getPsErrorMessages st))
-        failed errs = textOnly (ParseFailed (firstError errs)) pragmas.warnings
+        failed errs = textOnly (ParseFailed (firstError errs)) later
         firstError = \case
-          e : _ -> diagnosticError cols (errMsgSpan e) (errMsgDiagnostic e)
+          e : _ -> diagnosticError spans (errMsgSpan e) (errMsgDiagnostic e)
           -- PFailed always has an error. Just in case.
           [] -> ParseError {message = "parse failed", code = Nothing, span = Nothing}
+
+-- | The warnings known before parsing: unlit's and the component's.
+-- For a parse that gave up (too slow, crashed).
+earlyWarnings :: ParseSettings -> Text -> [ParseWarning]
+earlyWarnings settings input =
+  snd (unlit settings input) <> (componentFlags settings).warnings
+
+-- | The text GHC reads, and unlit's warning.
+unlit :: ParseSettings -> Text -> (Text, [ParseWarning])
+unlit settings input = case settings.literate of
+  NotLiterate -> (stripBom input, [])
+  BirdOrLatex -> (unlitBirdLatex (stripBom input), [])
+  MarkdownUnlit -> case unlitMarkdown (stripBom input) of
+    Just t -> (t, [])
+    Nothing -> ("", [NoMarkdownCode])
+
+-- | Spans on text that didn't go through CPP.
+plainSpans :: Text -> SpanMap
+plainSpans t = SpanMap {columns = columnMap t, cpp = sameLines}
 
 -- | The text as GHC's buffer.
 toBuffer :: Text -> StringBuffer
@@ -310,7 +379,10 @@ data Flags = Flags
 -- | The component's flags. See Note [Parser settings].
 componentFlags :: ParseSettings -> Flags
 componentFlags settings =
-  Flags {dflags = withExtensions, warnings = langWarnings <> reverse extWarnings}
+  Flags
+    { dflags = withExtensions,
+      warnings = langWarnings <> reverse extWarnings <> cppWarnings
+    }
   where
     base = gopt_set (defaultDynFlags fakeSettings) Opt_Haddock
     (lang, langWarnings) = case settings.language of
@@ -330,45 +402,51 @@ componentFlags settings =
       Applied df' -> (df', ws)
       AppliedWith w df' -> (df', w : ws)
       Unknown -> (df, UnknownExtension n : ws)
+    cppWarnings = map IgnoredCppOption settings.ignoredCppOptions
 
 -- | All the module's flags: the component's, then its pragmas'.
 data PragmaFlags = PragmaFlags
   { dflags :: DynFlags,
     -- | The names applied from the pragmas, as written.
     names :: [Text],
+    -- | @-D@ and @-U@, in order, for CPP.
+    macros :: [MacroFlag],
     warnings :: [ParseWarning]
   }
 
 -- | Apply what readPragmas found, then the Safe Haskell check. See
 -- Note [Parser settings].
 applyPragmas :: DynFlags -> [Text] -> PragmaFlags
-applyPragmas = go [] []
+applyPragmas = go [] [] []
   where
-    -- Names and warnings in reverse.
-    go names ws df = \case
+    -- Names, macro flags and warnings in reverse.
+    go names ms ws df = \case
       [] ->
         let (df', safeWarnings) = safeCheck df
          in PragmaFlags
               { dflags = df',
                 -- A name given twice is listed once, first place.
                 names = nub (reverse names),
+                macros = reverse ms,
                 warnings = reverse ws <> safeWarnings
               }
       a : rest
         | Just n <- Text.stripPrefix "-X" a -> named n rest
         | a == "-cpp" -> named "CPP" rest
-        | a == "-F" -> go names ws df rest
-        | a `elem` ["-pgmF", "-haddock-opts", "-#include"] -> go names ws df (drop 1 rest)
-        | "-pgmF" `Text.isPrefixOf` a -> go names ws df rest
+        | Just m <- macroFlag GhcOptions a -> go names (m : ms) ws df rest
+        | a == "-F" -> go names ms ws df rest
+        | a `elem` ["-pgmF", "-haddock-opts", "-#include"] ->
+            go names ms ws df (drop 1 rest)
+        | "-pgmF" `Text.isPrefixOf` a -> go names ms ws df rest
         | otherwise ->
             -- With its arguments, if any: -pgmL tool.
             let (args, rest') = break ("-" `Text.isPrefixOf`) rest
-             in go names (IgnoredPragmaFlag (Text.unwords (a : args)) : ws) df rest'
+             in go names ms (IgnoredPragmaFlag (Text.unwords (a : args)) : ws) df rest'
       where
         named n rest = case applyName n df of
-          Applied df' -> go (n : names) ws df' rest
-          AppliedWith w df' -> go (n : names) (w : ws) df' rest
-          Unknown -> go names (UnknownExtension n : ws) df rest
+          Applied df' -> go (n : names) ms ws df' rest
+          AppliedWith w df' -> go (n : names) ms (w : ws) df' rest
+          Unknown -> go names ms (UnknownExtension n : ws) df rest
 
 -- | Like GHC's safeFlagCheck: under -XSafe, the extensions Safe Haskell
 -- forbids are turned off, with a warning each.
@@ -531,17 +609,17 @@ supportedNames =
 -- * Errors
 
 -- | A header error as a 'ParseError', worded like GHC.
-headerError :: Text -> HeaderError -> ParseError
-headerError text (HeaderError loc msg) =
-  diagnosticError (columnMap text) loc (PsHeaderMessage msg)
+headerError :: SpanMap -> HeaderError -> ParseError
+headerError spans (HeaderError loc msg) =
+  diagnosticError spans loc (PsHeaderMessage msg)
 
 -- | GHC's message, code and span.
-diagnosticError :: ColumnMap -> SrcSpan -> PsMessage -> ParseError
-diagnosticError cols loc msg =
+diagnosticError :: SpanMap -> SrcSpan -> PsMessage -> ParseError
+diagnosticError spans loc msg =
   ParseError
     { message = Text.intercalate "\n" (map render blocks),
       code = Text.pack . show <$> diagnosticCode msg,
-      span = toSpan cols loc
+      span = toSpan spans loc
     }
   where
     blocks = unDecorated (diagnosticMessage (defaultDiagnosticOpts @PsMessage) msg)

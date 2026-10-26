@@ -51,6 +51,7 @@ const decoders: Record<string, (value: unknown) => unknown> = {
   "module-preprocessed": decodeModuleView,
   "module-cpp": decodeModuleView,
   "module-crashed": decodeModuleView,
+  "module-too-slow": decodeModuleView,
   "module-generated": decodeModuleView,
   "module-no-source": decodeModuleView,
   "module-not-text": decodeModuleView,
@@ -284,7 +285,7 @@ describe("decoders reject bad shapes", () => {
       tier: { kind: "syntactic", reason: "no-hie" },
       parse: {
         kind: "text-only",
-        reason: { kind: "cpp-not-supported" },
+        reason: { kind: "too-slow" },
         warnings: [],
       },
     };

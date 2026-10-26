@@ -16,8 +16,6 @@ module HaskellReviewer.Core.Cpp.Expand
   )
 where
 
-import Data.Map.Strict (Map)
-import Data.Map.Strict qualified as Map
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text)
@@ -151,11 +149,10 @@ expandIf sh ts = case scan emitIf (start (FromToks ts) sh) [] of
 data Ex = Ex
   { -- | Macro bodies being read, innermost first.
     ctxs :: [Ctx],
-    -- | The names of the open bodies in 'ctxs', innermost first, how
-    -- many of each, and as a set. Kept here so nothing walks the stack,
-    -- and stamping a token (Note [Put back]) shares the set.
+    -- | The names of the open bodies in 'ctxs', innermost first, and
+    -- as a set. Kept here so nothing walks 'ctxs'; stamping a token
+    -- (Note [Put back]) shares the set.
     names :: [Text],
-    counts :: Map Text Int,
     openSet :: Set Text,
     src :: Source,
     shared :: Shared
@@ -166,7 +163,6 @@ start s sh =
   Ex
     { ctxs = [],
       names = [],
-      counts = Map.empty,
       openSet = Set.empty,
       src = s,
       shared = sh
@@ -312,13 +308,12 @@ next ex = case ex.ctxs of
     origin = Pos ex.shared.current 1
     closeTop c cs = case c.name of
       Just n ->
-        let k = Map.findWithDefault 1 n ex.counts - 1
+        -- At most 'maxNesting' names: a walk is cheap.
+        let rest = drop 1 ex.names
          in ex
               { ctxs = cs,
-                names = drop 1 ex.names,
-                counts =
-                  if k <= 0 then Map.delete n ex.counts else Map.insert n k ex.counts,
-                openSet = if k <= 0 then Set.delete n ex.openSet else ex.openSet
+                names = rest,
+                openSet = if n `elem` rest then ex.openSet else Set.delete n ex.openSet
               }
       Nothing -> ex {ctxs = cs}
 
@@ -424,7 +419,7 @@ ident e n lx ex out
       Just (ObjectMacro body)
         -- Only object-like macros are hidden: gcc lets function-like
         -- ones recurse (deepRecursion), and the budget ends a loop.
-        | Set.member n lx.hide || Map.member n ex.counts ->
+        | Set.member n lx.hide || Set.member n ex.openSet ->
             asIsWith (warn (RecursiveMacro n))
         | length ex.names >= maxNesting -> asIsWith (limitHit ExpansionDepth)
         | otherwise -> case push n [Lexeme b (gen lx.at) lx.hide | b <- body] ex of
@@ -451,7 +446,9 @@ call e n lx m ex0 out = case blanks ex0 (Look [] Nothing) of
     Right (i, from, ex2) -> fallBack id ex2 (see i from ex2 look1)
     Left ex2 -> fallBack id ex2 look1
   where
-    fallBack f ex look = scan e (rewind ex0 ex {shared = f ex.shared} look) (e lx out)
+    -- Warn after the rewind, so the warning is on the call's line.
+    fallBack f ex look =
+      let ex' = rewind ex0 ex look in scan e ex' {shared = f ex'.shared} (e lx out)
     expand as ex look
       | deepRecursion n ex = fallBack (warn (RecursiveMacro n)) ex look
       | length ex.names >= maxNesting = fallBack (limitHit ExpansionDepth) ex look
@@ -588,7 +585,6 @@ push n ls ex
             ex
               { ctxs = Ctx (Just n) (map Item ls) : ex.ctxs,
                 names = n : ex.names,
-                counts = Map.insertWith (+) n 1 ex.counts,
                 openSet = Set.insert n ex.openSet
               }
         )

@@ -7,13 +7,14 @@ module HaskellReviewer.Core.Cpp.Macros
     BodyPart (..),
     MacroTable,
     MacroFlag (..),
+    MacroFlags (..),
     FlagSource (..),
 
     -- * Building
-    builtinMacros,
+    macroTable,
     parseDefine,
     macroFlags,
-    applyFlag,
+    macroFlag,
     defineMacro,
     undefineMacro,
 
@@ -61,7 +62,9 @@ three define the same names; only the values change:
   __IO_MANAGER_MIO__                1
 
 The first six come from ghcversion.h (GHC passes -include), the rest
-from -D flags. On Windows GHC adds __IO_MANAGER_WINIO__. The os and
+from -D flags. GHC puts these after the user's -optP flags (ghc -v3),
+so -D or -U of a built-in name does nothing: macroTable applies the
+built-ins last. On Windows GHC adds __IO_MANAGER_WINIO__. The os and
 arch names are GHC's, and System.Info uses the same ones (linux,
 darwin, mingw32, x86_64, aarch64, i386). With --ghc 9.12 the missing
 numbers are 0.
@@ -78,7 +81,9 @@ __GLASGOW_HASKELL_LLVM__, __GLASGOW_HASKELL_ASSERTS_IGNORED__. Also
 left out: what gcc adds itself, __ASSEMBLER__ (from -x
 assembler-with-cpp) and the stdc-predef.h macros (__STDC_ISO_10646__
 and friends). __FILE__, __DATE__ and __TIME__ are left as is: we have
-no path and want the same result every time.
+no path and want the same result every time. So are gcc's other own
+names: __TIMESTAMP__, __BASE_FILE__, __COUNTER__, __INCLUDE_LEVEL__ and
+__STDC_HOSTED__ (1 in gcc). __STDC__ isn't defined in traditional mode.
 -}
 
 -- * Types
@@ -120,33 +125,40 @@ data MacroFlag
 
 -- * Building
 
--- | What GHC defines before the file (Note [GHC's macros]), plus
--- @MIN_VERSION_pkg@ for each build-depends.
-builtinMacros :: GhcVersion -> Platform -> [PackageName] -> MacroTable
-builtinMacros (GhcVersion ns) p deps =
-  fromList $
-    [ ("__GLASGOW_HASKELL__", obj (num (part 0 * 100 + part 1))),
-      ("__GLASGOW_HASKELL_FULL_VERSION__", obj ("\"" <> fullVersion <> "\"")),
-      ("__GLASGOW_HASKELL_PATCHLEVEL1__", obj (num (part 2))),
-      ("__GLASGOW_HASKELL_PATCHLEVEL2__", obj (num (part 3))),
-      ("__GHCVERSION_H__", obj ""),
-      ("__GLASGOW_HASKELL_TH__", obj "1"),
-      (p.os <> "_HOST_OS", obj "1"),
-      (p.os <> "_BUILD_OS", obj "1"),
-      (p.arch <> "_HOST_ARCH", obj "1"),
-      (p.arch <> "_BUILD_ARCH", obj "1"),
-      ("__IO_MANAGER_MIO__", obj "1"),
-      ("__LINE__", LineMacro)
-    ]
-      <> [("__SSE__", obj "1") | x86]
-      <> [("__SSE2__", obj "1") | x86]
-      <> [("__IO_MANAGER_WINIO__", obj "1") | p.os == "mingw32"]
-      <> [m | Right m <- [parseDefine [minVersionGhc]]]
-      <> [ ("MIN_VERSION_" <> Text.replace "-" "_" d, MinVersionMacro)
-         | PackageName d <- deps
-         ]
+-- | The macros before the file: the flags, in order, then what GHC
+-- defines (Note [GHC's macros]), plus @MIN_VERSION_pkg@ for each
+-- build-depends. GHC passes its own -D after the user's, so the
+-- built-ins win: @-U__GLASGOW_HASKELL__@ does nothing.
+macroTable :: GhcVersion -> Platform -> [PackageName] -> [MacroFlag] -> MacroTable
+macroTable ghc p deps flags =
+  foldl' (\m (n, x) -> defineMacro n x m) fromFlags (builtins ghc p deps)
   where
-    fromList ms = MacroTable {defs = Map.fromList ms, undefs = Set.empty}
+    fromFlags = foldl' applyFlag (MacroTable Map.empty Set.empty) flags
+
+-- | What GHC defines, plus @MIN_VERSION_pkg@ for each build-depends.
+builtins :: GhcVersion -> Platform -> [PackageName] -> [(Text, Macro)]
+builtins (GhcVersion ns) p deps =
+  [ ("__GLASGOW_HASKELL__", obj (num (part 0 * 100 + part 1))),
+    ("__GLASGOW_HASKELL_FULL_VERSION__", obj ("\"" <> fullVersion <> "\"")),
+    ("__GLASGOW_HASKELL_PATCHLEVEL1__", obj (num (part 2))),
+    ("__GLASGOW_HASKELL_PATCHLEVEL2__", obj (num (part 3))),
+    ("__GHCVERSION_H__", obj ""),
+    ("__GLASGOW_HASKELL_TH__", obj "1"),
+    (p.os <> "_HOST_OS", obj "1"),
+    (p.os <> "_BUILD_OS", obj "1"),
+    (p.arch <> "_HOST_ARCH", obj "1"),
+    (p.arch <> "_BUILD_ARCH", obj "1"),
+    ("__IO_MANAGER_MIO__", obj "1"),
+    ("__LINE__", LineMacro)
+  ]
+    <> [("__SSE__", obj "1") | x86]
+    <> [("__SSE2__", obj "1") | x86]
+    <> [("__IO_MANAGER_WINIO__", obj "1") | p.os == "mingw32"]
+    <> [m | Right m <- [parseDefine [minVersionGhc]]]
+    <> [ ("MIN_VERSION_" <> Text.replace "-" "_" d, MinVersionMacro)
+       | PackageName d <- deps
+       ]
+  where
     part i = case drop i ns of
       n : _ -> n
       [] -> 0
@@ -246,42 +258,63 @@ data FlagSource
     GhcOptions
   deriving (Eq, Show)
 
+-- | The flags of a list of words, and the other words.
+data MacroFlags = MacroFlags
+  { -- | The @-D@ and @-U@ flags, in order.
+    found :: [MacroFlag],
+    rest :: [Text]
+  }
+  deriving (Eq, Show)
+
 -- | Take the @-D@ and @-U@ flags out of a list of words: @-DX@,
 -- @-DX=v@, @-UX@, plus @-D X@ and @-U X@ in cpp-options, or
--- @-optP-DX@ and @-optP-UX@ in ghc-options. @-DX@ is @X@ = 1. Gives
--- the flags in order, and the other words. A flag that isn't a good
--- @#define@ is one of the other words.
-macroFlags :: FlagSource -> [Text] -> ([MacroFlag], [Text])
+-- @-optP-DX@ and @-optP-UX@ in ghc-options. @-DX@ is @X@ = 1. A flag
+-- that isn't a good @#define@ is one of the other words.
+macroFlags :: FlagSource -> [Text] -> MacroFlags
 macroFlags source = go [] []
   where
     go fs os = \case
-      [] -> (reverse fs, reverse os)
+      [] -> MacroFlags {found = reverse fs, rest = reverse os}
       w : v : ws
-        | source == CppOptions, w == "-D", Just f <- define v -> go (f : fs) os ws
-        | source == CppOptions, w == "-U", Just f <- undefine v -> go (f : fs) os ws
+        | source == CppOptions, w == "-D", Just f <- defineFlag v -> go (f : fs) os ws
+        | source == CppOptions, w == "-U", Just f <- undefineFlag v -> go (f : fs) os ws
       w : ws
-        | Just d <- prefixed "D" w, Just f <- define d -> go (f : fs) os ws
-        | Just u <- prefixed "U" w, Just f <- undefine u -> go (f : fs) os ws
+        | Just f <- macroFlag source w -> go (f : fs) os ws
         | otherwise -> go fs (w : os) ws
-    prefixed c w = case [r | p <- prefixes c, Just r <- [Text.stripPrefix p w]] of
+
+-- | One word as a flag: @-DX@, @-DX=v@, @-UX@, or (ghc-options)
+-- @-optP-DX@ and @-optP-UX@.
+macroFlag :: FlagSource -> Text -> Maybe MacroFlag
+macroFlag source w
+  | Just d <- prefixed "D" = defineFlag d
+  | Just u <- prefixed "U" = undefineFlag u
+  | otherwise = Nothing
+  where
+    prefixed c = case [r | p <- prefixes c, Just r <- [Text.stripPrefix p w]] of
       r : _ | not (Text.null r) -> Just r
       _ -> Nothing
     prefixes c = case source of
       CppOptions -> ["-" <> c]
       GhcOptions -> ["-" <> c, "-optP-" <> c]
-    -- As gcc: the first = becomes a space, then it's a #define.
-    define d =
-      let (n, v) = Text.breakOn "=" d
-          body = if Text.null v then "1" else Text.drop 1 v
-       in case parseDefine [n <> " " <> body] of
-            Right _ -> Just (Define n body)
-            Left _ -> Nothing
-    undefine u
-      | Text.all isIdentChar u,
-        Just (c, _) <- Text.uncons u,
-        isIdentStart c =
-          Just (Undefine u)
-      | otherwise = Nothing
+
+-- | What follows @-D@. As gcc: the first = becomes a space, then it's a
+-- #define.
+defineFlag :: Text -> Maybe MacroFlag
+defineFlag d =
+  let (n, v) = Text.breakOn "=" d
+      body = if Text.null v then "1" else Text.drop 1 v
+   in case parseDefine [n <> " " <> body] of
+        Right _ -> Just (Define n body)
+        Left _ -> Nothing
+
+-- | What follows @-U@: a name.
+undefineFlag :: Text -> Maybe MacroFlag
+undefineFlag u
+  | Text.all isIdentChar u,
+    Just (c, _) <- Text.uncons u,
+    isIdentStart c =
+      Just (Undefine u)
+  | otherwise = Nothing
 
 -- | Run a flag on the table.
 applyFlag :: MacroTable -> MacroFlag -> MacroTable

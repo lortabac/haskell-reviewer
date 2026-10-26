@@ -57,6 +57,18 @@ install racing a spawn can leave signals blocked for good
 
 We don't unblock after each spawn: that runs outside the spawn lock and
 could undo the blocking another thread's spawn needs.
+
+An early signal is not lost either. The RTS C handler sends each signal
+down the timer manager's pipe, and drops it if that pipe isn't set yet.
+But the RTS sets it up during hs_init, before main runs (same in 9.10,
+9.12 and 9.14), and the pipe holds the signal until the timer manager
+reads it. Only a signal before 'installShutdownHandlers' runs gets GHC's
+default (SIGTERM kills us, SIGINT exits 252 or kills us).
+
+On macOS, though, a signal that comes while the process is busy (e.g.
+during start-up) can sit in that pipe until the timer manager wakes up
+for something else: a GHC bug, not fixed here. Ctrl-C may need a second
+try. The tests that signal a busy server skip macOS. See Q-MACOS-SIGINT.
 -}
 
 -- | Catch SIGINT and SIGTERM. A second signal exits at once with code 0,

@@ -3,7 +3,8 @@
 -- | From GHC's AST to our module model (D-61). Only what the model needs
 -- is copied out; the AST is dropped after this.
 module HaskellReviewer.Core.Parser.Convert
-  ( convertModule,
+  ( SpanMap (..),
+    convertModule,
     toSpan,
   )
 where
@@ -52,6 +53,7 @@ import GHC.Unit.Module.Warnings
     WarningCategory (..),
     WarningTxt (..),
   )
+import HaskellReviewer.Core.Cpp (PositionMap, mapSpan)
 import HaskellReviewer.Core.ModuleModel
   ( Export (..),
     Extensions,
@@ -82,11 +84,20 @@ import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
 import Language.Haskell.Syntax.ImpExp.IsBoot (IsBootInterface (..))
 import Language.Haskell.Syntax.Module.Name qualified as Ghc (ModuleName, moduleNameString)
 
+-- | From a GHC span to ours: tabs first, on the text GHC saw (the CPP
+-- output), then back through CPP to the file.
+data SpanMap = SpanMap
+  { -- | Tabs, on the CPP output.
+    columns :: ColumnMap,
+    -- | CPP output to file.
+    cpp :: PositionMap
+  }
+
 -- | The model of a parsed module. The extensions and warnings come from
 -- the flags.
 convertModule ::
-  ColumnMap -> Extensions -> [ParseWarning] -> Located (HsModule GhcPs) -> ParsedModule
-convertModule cols exts warnings (L _ m) =
+  SpanMap -> Extensions -> [ParseWarning] -> Located (HsModule GhcPs) -> ParsedModule
+convertModule spans exts warnings (L _ m) =
   ParsedModule
     { header =
         ModuleHeader
@@ -103,7 +114,7 @@ convertModule cols exts warnings (L _ m) =
     ext = hsmodExt m
 
     -- The parser gives real spans to everything it parsed.
-    spanOf l = fromMaybe (Span (Line 0) (Col 0) (Line 0) (Col 0)) (toSpan cols l)
+    spanOf l = fromMaybe (Span (Line 0) (Col 0) (Line 0) (Col 0)) (toSpan spans l)
 
     located f lx@(L _ x) = Model.Located {span = spanOf (getLocA lx), value = f x}
 
@@ -240,12 +251,13 @@ convertModule cols exts warnings (L _ m) =
       ImportDeclSplice -> SpliceLevel
       ImportDeclQuote -> QuoteLevel
 
--- | GHC's span in our columns. 'Nothing' for GHC's spans with no place.
-toSpan :: ColumnMap -> SrcSpan -> Maybe Span
-toSpan cols = \case
+-- | GHC's span, in our columns, on the file. 'Nothing' for GHC's spans
+-- with no place.
+toSpan :: SpanMap -> SrcSpan -> Maybe Span
+toSpan spans = \case
   RealSrcSpan r _ ->
-    Just $
-      ghcToSpan cols $
+    Just . mapSpan spans.cpp $
+      ghcToSpan spans.columns $
         GhcRange
           { startLine = srcSpanStartLine r,
             startCol = srcSpanStartCol r,

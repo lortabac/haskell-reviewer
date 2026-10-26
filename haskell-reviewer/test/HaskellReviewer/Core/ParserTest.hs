@@ -1,14 +1,21 @@
 module HaskellReviewer.Core.ParserTest (tests) where
 
+import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar)
 import Data.List (nub)
 import Data.Text qualified as Text
+import GHC.Clock (getMonotonicTime)
+import HaskellReviewer.Core.Cpp (CppProblem (..), CppWarning (..))
 import HaskellReviewer.Core.ModuleModel
   ( ModuleParse (..),
     ParseWarning (..),
     TextOnlyReason (..),
+    renderParseWarning,
   )
 import HaskellReviewer.Core.ModuleModel qualified as Model
-  ( Extensions (..),
+  ( Export (..),
+    Extensions (..),
+    Item (..),
+    ItemName (..),
     ParseError (..),
     ParsedModule (..),
     TextOnlyModule (..),
@@ -20,9 +27,16 @@ import HaskellReviewer.Core.Parser
     parseSource,
   )
 import HaskellReviewer.Core.Project (Extension (..))
+import HaskellReviewer.Core.Span (renderSpan)
+import HaskellReviewer.Effects.Parser
+  ( cppParseWarmUp,
+    cppSettings,
+    parseGuarded,
+    parseWithin,
+  )
 import System.Timeout (timeout)
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 
 tests :: TestTree
 tests =
@@ -101,11 +115,101 @@ tests =
         r <- timeout 5_000_000 $ case parseSource defaultParseSettings src of
           Parsed m -> pure (fmap length m.exports)
           other -> assertFailure (show other) >> pure Nothing
-        r @?= Just (Just 20000)
+        r @?= Just (Just 20000),
+      testCase "OPTIONS_GHC -D and -U go to CPP, not to the warnings"
+        $ parsed
+          defaultParseSettings
+          "{-# LANGUAGE CPP #-}\n{-# OPTIONS_GHC -DX=x -optP-DY=y -UZ #-}\n\
+          \module M (X, Y) where"
+        $ \m -> do
+          fmap (map exportName) m.exports @?= Just ["x", "y"]
+          m.warnings @?= [],
+      testCase "cpp-options: ignored words warn"
+        $ parsed
+          defaultParseSettings {ignoredCppOptions = ["-traditional"]}
+          "module M where"
+        $ \m -> m.warnings @?= [IgnoredCppOption "-traditional"],
+      testCase "a pragma error after CPP: on the file's lines" $
+        case parseSource defaultParseSettings pragmaAfterCpp of
+          TextOnly t | PragmaFailed e <- t.reason -> do
+            fmap renderSpan e.span @?= Just "4:14-4:25"
+            t.warnings @?= [FromCpp (CppWarning 2 (WarningDirective "w"))]
+          other -> assertFailure (show other),
+      testCase "CPP warnings on the text-only path" $
+        case parseSource defaultParseSettings "{-# LANGUAGE CPP #-}\n#error e\nx = = 1" of
+          TextOnly t | ParseFailed e <- t.reason -> do
+            fmap renderSpan e.span @?= Just "3:5-3:6"
+            t.warnings @?= [FromCpp (CppWarning 2 (ErrorDirective "e"))]
+          other -> assertFailure (show other),
+      testCase "the CPP warm-up takes every path (Q-RTS-BLACKHOLE)" $
+        case map (parseSource cppSettings) cppParseWarmUp of
+          [Parsed m, TextOnly bad, TextOnly badPragma] -> do
+            m.extensions.fromPragmas @?= ["CPP", "LambdaCase"]
+            fmap (map exportName) m.exports @?= Just ["f", "y", "o", "p", "c"]
+            [renderParseWarning w | w <- m.warnings]
+              @?= [ "ignored cpp-options flag: -bogus",
+                    "ignored OPTIONS_GHC flag: -Wall",
+                    "line 11: #include \"x.h\" read as empty",
+                    "line 12: #error e"
+                  ]
+            case bad.reason of
+              ParseFailed e -> fmap renderSpan e.span @?= Just "15:5-15:6"
+              other -> assertFailure (show other)
+            case badPragma.reason of
+              PragmaFailed _ -> pure ()
+              other -> assertFailure (show other)
+          other -> assertFailure (show other),
+      testCase "a parse over the time limit stops soon" $
+        mapM_ stopsWithin [20_000, 200_000],
+      testCase "after a stopped parse, another thread parses" $ do
+        _ <- parseWithin 1_000 defaultParseSettings (slowModule 20000)
+        done <- newEmptyMVar
+        _ <- forkIO (parseGuarded defaultParseSettings (slowModule 2) >>= putMVar done)
+        r <- timeout 10_000_000 (takeMVar done)
+        case r of
+          Just (Parsed m) -> fmap length m.exports @?= Just 1024
+          other -> assertFailure (take 200 (show other))
     ]
   where
     on n = Extension {name = n, enabled = True}
     has n m = n `elem` m.extensions.enabled
+
+-- | A pragma, after a #warning, in #if 1.
+pragmaAfterCpp :: Text.Text
+pragmaAfterCpp =
+  "{-# LANGUAGE CPP #-}\n#warning w\n#if 1\n{-# LANGUAGE NoSuchThing #-}\n#endif\n"
+
+-- | 20000 macro calls make about 1 MB of exports out of 40 KB: GHC
+-- takes seconds. With a limit of a few ms, it must stop soon after the
+-- limit, and keep the warnings known before.
+stopsWithin :: Int -> Assertion
+stopsWithin limit = do
+  t0 <- getMonotonicTime
+  r <- parseWithin limit settings (slowModule 20000)
+  t1 <- getMonotonicTime
+  case r of
+    TextOnly t | TooSlow <- t.reason -> t.warnings @?= [UnknownExtension "NoSuchThing"]
+    other -> assertFailure (take 200 (show other))
+  assertBool (show (limit, t1 - t0)) (t1 - t0 < fromIntegral limit / 1e6 + 1.5)
+  where
+    settings = defaultParseSettings {extensions = [on "NoSuchThing"]}
+    on n = Extension {name = n, enabled = True}
+
+-- | Each call of C gives 512 exports.
+slowModule :: Int -> Text.Text
+slowModule calls =
+  Text.unlines
+    [ "{-# LANGUAGE CPP #-}",
+      "#define A a,a,a,a,a,a,a,a",
+      "#define B A,A,A,A,A,A,A,A",
+      "#define C B,B,B,B,B,B,B,B",
+      "module M (" <> Text.intercalate "," (replicate calls "C") <> ") where"
+    ]
+
+exportName :: Model.Export -> Text.Text
+exportName = \case
+  Model.ExportItem i -> i.name.occ
+  other -> Text.pack (show other)
 
 -- | Check a parsed module.
 parsed :: ParseSettings -> Text.Text -> (Model.ParsedModule -> Assertion) -> Assertion

@@ -145,8 +145,8 @@ reason = \case
   ParseFailed e -> "parse error " <> parseError e
   PragmaFailed e -> "pragma error " <> parseError e
   Preprocessed tool -> "preprocessed by " <> tool
-  CppNotSupported -> "CPP not supported"
   ParserCrashed t -> "parser crashed: " <> t
+  TooSlow -> "parse took too long"
   where
     parseError e =
       Text.unwords (maybe [] pure e.code <> maybe [] (pure . at) e.span)

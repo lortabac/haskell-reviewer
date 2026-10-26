@@ -5,6 +5,16 @@ implementation phase. Their outcomes are logged in DECISIONS.md, and SPEC.md
 is updated if needed (§10.3).
 
 ## To verify during implementation (not blocking the spec)
+- **Q-MACOS-SIGINT**: resolved as a known macOS limitation (D-139). On
+  macOS (arm64; GHC 9.10, 9.12 and 9.14) a signal that arrives while the
+  process is busy can be handled late: its message waits in the timer
+  manager's control pipe until the next wakeup (another signal or a
+  timer). Shown by a tiny program with only `installHandler`: 10 of 40
+  signals delayed while a thread allocated for 50 ms, 0 of 40 when idle;
+  0 of 20 late signals lost on an idle server; all zero on Linux. A GHC
+  bug, not ours; a draft report exists (not filed yet). Not fixed (human,
+  2026-10-26: no extra complexity). Stop tests that signal during
+  start-up are skipped on macOS.
 - **Q-RTS-BLACKHOLE**: On GHC 9.12 and 9.14 (not 9.10) the threaded test
   binary sometimes hung (about 5% of runs of the PackageGlob tests): several
   capabilities spin on a `CAF_BLACKHOLE` whose blocking queue was already

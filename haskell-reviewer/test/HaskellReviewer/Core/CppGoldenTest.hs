@@ -17,6 +17,7 @@ import HaskellReviewer.Core.Cpp
   ( CppEnv (..),
     CppOutput (..),
     FlagSource (..),
+    MacroFlags (..),
     Piece (..),
     Pos (..),
     PositionMap (..),
@@ -82,7 +83,7 @@ dumpCpp t =
     o = runCpp goldenEnv pragmaFlags t
     PositionMap m = o.positions
     pragmaFlags = case Text.stripPrefix "-- cpp-flags:" (Text.takeWhile (/= '\n') t) of
-      Just ws -> fst (macroFlags GhcOptions (Text.words ws))
+      Just ws -> (macroFlags GhcOptions (Text.words ws)).found
       Nothing -> []
     kind = \case
       DirectiveLines -> "directive"

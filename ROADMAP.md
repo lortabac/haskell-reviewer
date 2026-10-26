@@ -515,8 +515,8 @@ clear?
   `make install-hie` checked on Linux and macOS; committed bundle matches
   `make web`. No prebuilt binaries, no Hackage.
 - User docs: install from source, flags, config file, how to produce HIE
-  files (§9.3), known limits (Hpack, Stack, Windows, `claude-cli` residual
-  context).
+  files (§9.3), known limits (Hpack, Stack, Windows, late Ctrl-C on
+  macOS, `claude-cli` residual context).
 - SPEC.md brought in line with every change logged during the work.
 
 **Done when**: all §10 targets met or officially revised; the audit has no

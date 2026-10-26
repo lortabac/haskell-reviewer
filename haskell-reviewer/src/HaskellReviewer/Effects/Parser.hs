@@ -1,9 +1,18 @@
--- | Running the parser from IO: GHC's own crashes become text only, a
--- limit of one parse at a time, and a warm-up for its shared values.
+-- | Running the parser from IO: a time limit, crash catching, one
+-- parse at a time, and a warm-up.
 module HaskellReviewer.Effects.Parser
-  ( parseGuarded,
+  ( -- * Parsing
+    parseGuarded,
+    parseTimeLimit,
     oneAtATime,
+
+    -- * Warm-up
     warmUpParser,
+
+    -- * For tests
+    parseWithin,
+    cppParseWarmUp,
+    cppSettings,
     cppWarmUp,
     cppLimitsWarmUp,
   )
@@ -36,11 +45,13 @@ import HaskellReviewer.Core.ModuleModel
   ( ModuleParse (..),
     TextOnlyModule (..),
     TextOnlyReason (..),
+    forceModuleParse,
   )
 import HaskellReviewer.Core.Parser
   ( FileKind (..),
     ParseSettings (..),
     defaultParseSettings,
+    earlyWarnings,
     parseSource,
   )
 import HaskellReviewer.Core.Project
@@ -49,24 +60,69 @@ import HaskellReviewer.Core.Project
     hostPlatform,
     parserGhcVersion,
   )
+import System.Timeout (timeout)
 
--- | 'parseSource', fully forced. If GHC throws (a bug, in GHC or ours),
--- the module is text only. Async exceptions go through, and so do
--- StackOverflow and HeapOverflow: they are async exceptions too.
+-- | 'parseSource', fully forced, within 'parseTimeLimit'. If GHC
+-- throws (a bug, in GHC or ours), the module is text only. Async
+-- exceptions go through, and so do StackOverflow and HeapOverflow:
+-- they are async exceptions too.
 parseGuarded :: ParseSettings -> Text -> IO ModuleParse
-parseGuarded settings text = do
-  r <- try (evaluate (parseSource settings text))
+parseGuarded = parseWithin parseTimeLimit
+
+{- Note [Parse time limit]
+
+A parse (CPP and GHC) that takes over 2 s gives up: the module is text
+only, "too slow". A normal module takes a few ms, so this is only a
+safety net for hostile input (SPEC §9.1).
+
+System.Timeout throws an async exception to the thread that parses.
+Pure code only gets it at a heap check, so code that never allocates
+can't be stopped. CPP and GHC's parser allocate all the time; a test
+checks that a slow parse stops soon after the limit.
+
+The result keeps the warnings known before the parse (unlit's and the
+component's), as for a crash.
+
+A stopped parse leaves half-done thunks. That's fine: nothing else
+holds them. The inputs were forced before (D-125), and the shared
+values are built by 'warmUpParser', which has no limit
+(Q-RTS-BLACKHOLE).
+-}
+
+-- | 2 s, in microseconds. See Note [Parse time limit].
+parseTimeLimit :: Int
+parseTimeLimit = 2_000_000
+
+-- | 'parseGuarded' with this time limit, in microseconds.
+parseWithin :: Int -> ParseSettings -> Text -> IO ModuleParse
+parseWithin limit settings text = do
+  r <- timeout limit (tryParse (parseSource settings text))
   case r of
-    Right p -> pure p
+    Just (Right p) -> pure p
+    Just (Left message) -> gaveUp (ParserCrashed message)
+    Nothing -> gaveUp TooSlow
+  where
+    textOnly reason ws = TextOnly TextOnlyModule {reason = reason, warnings = ws}
+    -- Cheap, but they could crash too.
+    gaveUp reason =
+      either (const (textOnly reason [])) id
+        <$> tryParse (textOnly reason (earlyWarnings settings text))
+
+-- | Force a result, or GHC's crash message. Async exceptions, like the
+-- timeout's, go through.
+tryParse :: ModuleParse -> IO (Either Text ModuleParse)
+tryParse parse = do
+  r <- try (evaluate (forceModuleParse parse `seq` parse))
+  case r of
+    Right p -> pure (Right p)
     Left e -> do
       rethrowAsync e
       -- Showing the exception can throw too, and a lazy text would keep
       -- it alive: build the text here, in its own try.
       shown <- try (evaluate (Text.pack (displayException e)))
-      message <- case shown of
-        Right t -> pure t
-        Left e2 -> "parser crashed" <$ rethrowAsync e2
-      pure (TextOnly TextOnlyModule {reason = ParserCrashed message, warnings = []})
+      case shown of
+        Right t -> pure (Left t)
+        Left e2 -> Left "parser crashed" <$ rethrowAsync e2
 
 {- Note [One parse at a time]
 
@@ -97,25 +153,63 @@ rethrowAsync e = case fromException e of
 -- and ghc-lib-parser's) are built before parallel threads use them
 -- (Q-RTS-BLACKHOLE). Each one takes a different path: pragmas and
 -- extension names, Haddock, tabs, a parse error, a pragma error, a
--- signature.
+-- signature, and CPP modules end to end.
 warmUpParser :: IO ()
 warmUpParser = do
   mapM_
-    (parseGuarded defaultParseSettings {extensions = [Extension "LambdaCase" True]})
+    (parse defaultParseSettings {extensions = [Extension "LambdaCase" True]})
     [ "{-# LANGUAGE CPP, Safe #-}\n{-# OPTIONS_GHC -Wall -XMultiWayIf #-}\n"
         <> "-- | Doc.\nmodule M (x, T (..)) where\nimport A (b)\nx =\t1\n",
       "module M where\nx = = 1\n",
       "{-# LANGUAGE NoSuchThing #-}\nmodule M where\n"
     ]
-  _ <-
-    parseGuarded
-      defaultParseSettings {kind = SignatureFile}
-      "signature S (T) where\ndata T\n"
+  _ <- parse defaultParseSettings {kind = SignatureFile} "signature S (T) where\ndata T\n"
+  mapM_ (parse cppSettings) cppParseWarmUp
   -- The CPP evaluator, on every kind of line (Q-RTS-BLACKHOLE).
   _ <- evaluate (forceCpp cppWarmUp)
   _ <- evaluate (forceCpp cppLimitsWarmUp)
   _ <- evaluate (sum (map (Text.length . renderCppWarning . CppWarning 1) allProblems))
   pure ()
+  where
+    -- No time limit (Note [Parse time limit]).
+    parse s t = tryParse (parseSource s t)
+
+-- | CPP modules for the parser's warm-up, with 'cppSettings': CPP, then
+-- the pragmas again, spans mapped back, CPP notes; then a parse error
+-- and a pragma error after CPP. A test checks they do all that.
+cppParseWarmUp :: [Text]
+cppParseWarmUp =
+  [ cppModule,
+    cppModule <> "x = = 1\n",
+    "{-# LANGUAGE CPP #-}\n#if 1\n{-# LANGUAGE NoSuchThing #-}\n#endif\n"
+  ]
+
+-- | Settings with a cpp-options flag and an ignored word.
+cppSettings :: ParseSettings
+cppSettings =
+  defaultParseSettings
+    { ignoredCppOptions = ["-bogus"],
+      cpp = defaultParseSettings.cpp {flags = [Define "C" "c"]}
+    }
+
+cppModule :: Text
+cppModule =
+  Text.unlines
+    [ "{-# LANGUAGE CPP #-}",
+      "{-# OPTIONS_GHC -DO=o -UU -optP-DP=p -Wall #-}",
+      "#if 0",
+      "{-# LANGUAGE NoSuchThing #-}",
+      "#else",
+      "{-# LANGUAGE LambdaCase #-}",
+      "#endif",
+      "#define F(x) x, y",
+      "-- | Doc.",
+      "module M (F(f),\tO, P, C) where",
+      "#include \"x.h\"",
+      "#error e",
+      "import A (b)",
+      "f = __LINE__"
+    ]
 
 -- | CPP on a module where every line does something: every operator
 -- and kind of number in #if, macros of each kind used in code, a

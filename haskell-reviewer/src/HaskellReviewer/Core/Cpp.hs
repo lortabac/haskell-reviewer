@@ -7,6 +7,7 @@ module HaskellReviewer.Core.Cpp
   ( -- * Types
     CppEnv (..),
     MacroFlag (..),
+    MacroFlags (..),
     FlagSource (..),
     CppOutput (..),
     Region (..),
@@ -18,6 +19,7 @@ module HaskellReviewer.Core.Cpp
     -- * Running
     runCpp,
     macroFlags,
+    macroFlag,
 
     -- * Positions
     PositionMap (..),
@@ -66,13 +68,14 @@ import HaskellReviewer.Core.Cpp.Lines
 import HaskellReviewer.Core.Cpp.Macros
   ( FlagSource (..),
     MacroFlag (..),
+    MacroFlags (..),
     MacroTable,
-    applyFlag,
-    builtinMacros,
     defineMacro,
     isDefined,
     isMacroName,
+    macroFlag,
     macroFlags,
+    macroTable,
     parseDefine,
     undefineMacro,
   )
@@ -122,7 +125,8 @@ with gcc 15, and what we copy:
 
 - Backslash-newline joins lines everywhere, in code too (Haskell string
   gaps and a lambda's \ at the end of a line included). Blanks after the
-  backslash still join. A \r before a newline is dropped.
+  backslash still join. A \r before a newline is dropped. A lone \r
+  doesn't end a line (gcc splits there, GHC doesn't).
 - Joined lines (backslashes, a /* */ comment over lines, a macro call
   over lines) give their text on the first line, then blank lines, so
   lines stay where they are. See Note [Position map] in
@@ -169,8 +173,10 @@ defined(X) works in #if, also when a macro makes it. Values are 64
 bits, signed or unsigned, with C's conversions; division by zero and
 shifts by 64 or more give 0 (or -1 for a negative >>) with a warning.
 
-Not done: #include files, __FILE__, __DATE__, __TIME__ (left as is),
-Cabal's VERSION_pkg macros.
+Not done: #include files, Cabal's VERSION_pkg macros. Left as is (gcc
+expands them): __FILE__, __DATE__, __TIME__, __TIMESTAMP__,
+__BASE_FILE__, __COUNTER__, __INCLUDE_LEVEL__ and __STDC_HOSTED__ (1).
+__STDC__ stays in gcc too (traditional mode).
 -}
 
 {- Note [CPP limits]
@@ -270,7 +276,7 @@ runCpp env more input
         || "/*" `Text.isInfixOf` l
         || "\\" `Text.isSuffixOf` Text.dropWhileEnd (\c -> isBlank c || c == '\r') l
     total = Text.count "\n" input + 1
-    table = foldl' applyFlag (builtinMacros env.ghc env.platform env.buildDepends) flags
+    table = macroTable env.ghc env.platform env.buildDepends flags
 
 -- * Helpers
 

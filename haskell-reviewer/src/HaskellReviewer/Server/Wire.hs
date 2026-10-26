@@ -289,9 +289,9 @@ data NotParsed
 --
 -- or @"parse":{"kind":"text-only","reason":{"kind":...},"warnings":[...]}@.
 -- Reasons: parse-error and pragma-error (message, code, span),
--- preprocessed (tool), cpp-not-supported, parser-crashed (message),
--- generated (tool), no-source (reason), not-text (size), too-large
--- (size, limit). @path@ is null for no-source.
+-- preprocessed (tool), parser-crashed (message), too-slow, generated
+-- (tool), no-source (reason), not-text (size), too-large (size,
+-- limit). @path@ is null for no-source.
 --
 -- A span is @[startLine, startCol, endLine, endCol]@, in code points,
 -- end exclusive (Note [Span convention] in "HaskellReviewer.Core.Span").
@@ -321,8 +321,8 @@ encodeModuleView (Generation g) idx v =
       ParseFailed e -> kindIs "parse-error" <> parseError e
       PragmaFailed e -> kindIs "pragma-error" <> parseError e
       Preprocessed tool -> kindIs "preprocessed" <> ("tool" .= tool)
-      CppNotSupported -> kindIs "cpp-not-supported"
       ParserCrashed t -> kindIs "parser-crashed" <> ("message" .= t)
+      TooSlow -> kindIs "too-slow"
     parseError e =
       ("message" .= e.message)
         <> ("code" .= e.code)
