@@ -42,10 +42,19 @@ import HaskellReviewer.Server.ListenTest qualified
 import HaskellReviewer.Server.RouterTest qualified
 import HaskellReviewer.Session.ClientsTest qualified
 import HaskellReviewer.Session.SnapshotTest qualified
+import SignalTest qualified
+import System.Environment (lookupEnv)
 import Test.Tasty (defaultMain, testGroup, withResource)
 
 main :: IO ()
-main = do
+main =
+  -- Re-run as the tiny program of SignalTest: nothing else first.
+  lookupEnv SignalTest.probeEnv >>= \case
+    Just mode -> SignalTest.probeMain mode
+    Nothing -> runTests
+
+runTests :: IO ()
+runTests = do
   -- Like the real main, first: the tests spawn a lot, and some check
   -- what children inherit. See Note [No inherited fds] in
   -- "HaskellReviewer.Effects.Spawn".
@@ -107,5 +116,6 @@ main = do
         HaskellReviewer.Server.RouterTest.tests,
         HaskellReviewer.Session.ClientsTest.tests,
         HaskellReviewer.Session.SnapshotTest.tests,
-        ExeTest.tests
+        ExeTest.tests,
+        SignalTest.tests
       ]

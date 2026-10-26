@@ -191,6 +191,7 @@ test-suite haskell-reviewer-test
     ModulesDump
     ParseDump
     ProjectDump
+    SignalTest
     TestSupport
 
   ghc-options:        -threaded

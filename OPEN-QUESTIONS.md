@@ -6,25 +6,23 @@ is updated if needed (§10.3).
 
 ## To verify during implementation (not blocking the spec)
 - **Q-MACOS-SIGINT**: On the macos-15 (arm64) CI runner a stop test
-  ("SIGINT: exit 0", later "SIGTERM: exit 0") sometimes hangs: no exit
-  within 10 s of the signal. Seen on GHC 9.12 and 9.14, never on 9.10 or
-  Linux. Known: the signal is delivered (not blocked, not pending); it
-  came right after the URL line, while the listing runs; the process
-  sleeps (`sample`: main thread waiting, timer manager in `poll`, IO
-  manager in `kevent`, idle workers). A second SIGINT 10 s later exits 0,
-  so Haskell handlers run by then. Without --verbose that can't tell "the
-  first signal was lost" from "the first was handled and the shutdown is
-  stuck": both exit 0. Ruled out: a blocked mask (haskell/process#384),
-  the CPP warm-up, our shutdown waits (none can block forever without
-  connections), and an early signal dropped because the RTS doesn't know
-  the timer manager's pipe yet: the RTS sets that pipe during hs_init,
-  before main, on 9.10, 9.12 and 9.14 (Note [Blocked signals]). Not
-  reproducible on Linux (thousands of runs, early and random signals, one
-  CPU). All stop tests now run with --verbose, one repeats a stop right
-  after the URL 20 times, and the second-signal probe says which case it
-  is. Candidate fixes once we know: our own signal pipe read by a
-  `forkOS` thread, or a logged watchdog that exits 5 s after a stop
-  (hides the bug).
+  sometimes hangs: no exit within 10 s of the signal. Seen on GHC 9.12
+  and 9.14, never on 9.10 or Linux. The signal was sent right after the
+  URL line, while the listing runs. The kernel delivers it (not blocked,
+  not pending), but our Haskell handler never runs: no "stop: got" line.
+  A second SIGINT 10 s later does reach it and the shutdown is clean.
+  The process sleeps (`sample`: main thread waiting, timer manager in
+  `poll`, IO manager in `kevent`, idle workers). Ruled out: a blocked
+  mask (haskell/process#384), the CPP warm-up, a stuck shutdown, and an
+  RTS that doesn't know the timer manager's pipe yet (it is set in
+  hs_init, before main, on all 3 GHCs; Note [Blocked signals]). Not
+  reproducible on Linux. Experiments in `test/SignalTest.hs`, run
+  everywhere (Linux is the control), each reporting lost/stuck counts
+  with timings: (1) late signals to an idle real server, i.e. are only
+  early signals lost; (2) a tiny program with only `installHandler` and
+  an MVar, idle or busy for 50 ms, signalled right after it starts, i.e.
+  is it GHC or our start-up. Candidate fixes once we know: our own
+  signal pipe read by a `forkOS` thread, or a logged watchdog.
 - **Q-RTS-BLACKHOLE**: On GHC 9.12 and 9.14 (not 9.10) the threaded test
   binary sometimes hung (about 5% of runs of the PackageGlob tests): several
   capabilities spin on a `CAF_BLACKHOLE` whose blocking queue was already

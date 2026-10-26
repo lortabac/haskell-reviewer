@@ -4,7 +4,7 @@
 -- wait for the URL line on stderr, poke it, and stop it with a signal.
 -- Every run passes --no-open, except the tests of the opener, which
 -- control PATH.
-module ExeTest (tests) where
+module ExeTest (tests, findExe) where
 
 import Control.Concurrent (threadDelay)
 import Control.Exception
