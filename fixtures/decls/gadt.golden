@@ -1,0 +1,62 @@
+type:Expr data name@7:6-7:10 exported
+  extent:
+    doc @6:1-6:18
+    head @7:1-13:14
+  head: data Expr :: Type -> Type where IntE , BoolE :: Int -> Expr Int If :: Expr Bool -> Expr a -> Expr a -> Expr a Pair :: { first :: Expr a , second :: ! ( Expr b ) } -> Expr ( a , b ) deriving ( )
+  haddock @6:1-6:18
+    |  Expressions.
+  con:IntE constructor name@9:3-9:7 exported
+    extent:
+      doc @8:3-8:17
+      head @9:3-9:33
+    head: IntE , BoolE :: Int -> Expr Int
+    haddock @8:3-8:17
+      |  Literals.
+    gadt
+    arg @9:18-9:21 "Int"
+  con:BoolE constructor name@9:9-9:14 exported
+    extent:
+      doc @8:3-8:17
+      head @9:3-9:33
+    head: IntE , BoolE :: Int -> Expr Int
+    haddock @8:3-8:17
+      |  Literals.
+    gadt
+    arg @9:18-9:21 "Int"
+  con:If constructor name@10:3-10:5 exported
+    extent:
+      head @10:3-10:48
+    head: If :: Expr Bool -> Expr a -> Expr a -> Expr a
+    gadt
+    arg @10:9-10:18 "Expr Bool"
+    arg @10:22-10:28 "Expr a"
+    arg @10:32-10:38 "Expr a"
+  con:Pair constructor name@12:3-12:7 exported
+    extent:
+      doc @11:3-11:21
+      head @12:3-12:66
+    head: Pair :: { first :: Expr a , second :: ! ( Expr b ) } -> Expr ( a , b )
+    haddock @11:3-11:21
+      |  A record one.
+    gadt record
+    field:Expr.first field name@12:13-12:18 exported
+      extent:
+        head @12:13-12:28
+      head: first :: Expr a
+      type @12:22-12:28 "Expr a"
+    field:Expr.second field name@12:30-12:36 exported
+      extent:
+        head @12:30-12:49
+      head: second :: ! ( Expr b )
+      type @12:41-12:49 "(Expr b)" strict
+  deriving @13:3-13:14
+type:T data name@15:6-15:7 exported
+  extent:
+    head @15:1-16:38
+  head: data T a where MkT :: forall a . Show a => a -> T a
+  con:MkT constructor name@16:3-16:6 exported
+    extent:
+      head @16:3-16:38
+    head: MkT :: forall a . Show a => a -> T a
+    gadt
+    arg @16:30-16:31 "a"

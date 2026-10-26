@@ -1,0 +1,8 @@
+val:a equations name@8:1-8:2 exported
+  extent:
+    body @8:1-8:6
+  head: 
+val:b equations name@20:1-20:2 exported
+  extent:
+    body @20:1-20:6
+  head: 

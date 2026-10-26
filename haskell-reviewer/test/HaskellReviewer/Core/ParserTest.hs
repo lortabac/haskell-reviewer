@@ -1,12 +1,42 @@
 module HaskellReviewer.Core.ParserTest (tests) where
 
 import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar)
-import Data.List (nub)
+import Data.List (nub, sort)
+import Data.List.NonEmpty qualified as NonEmpty
 import Data.Text qualified as Text
 import GHC.Clock (getMonotonicTime)
 import HaskellReviewer.Core.Cpp (CppProblem (..), CppWarning (..))
+import HaskellReviewer.Core.Decls
+  ( ArgType (..),
+    ClassDecl (..),
+    ConArg (..),
+    ConArgs (..),
+    ConDecl (..),
+    DataBody (..),
+    Decl (..),
+    DeclInfo (..),
+    Definition (..),
+    DerivStrategy (..),
+    DerivingClause (..),
+    Extent (..),
+    FieldDecl (..),
+    MethodDecl (..),
+    NewtypeBody (..),
+    Part (..),
+    PartRole (..),
+    PatSynDecl (..),
+    PatSynDir (..),
+    Signature (..),
+    Strictness (..),
+    TypeDecl (..),
+    TypeForm (..),
+    Unpack (..),
+    ValueDecl (..),
+    declInfo,
+  )
 import HaskellReviewer.Core.ModuleModel
-  ( ModuleParse (..),
+  ( DocItem (..),
+    ModuleParse (..),
     ParseWarning (..),
     TextOnlyReason (..),
     renderParseWarning,
@@ -28,9 +58,11 @@ import HaskellReviewer.Core.Parser
   )
 import HaskellReviewer.Core.Project (Extension (..))
 import HaskellReviewer.Core.Span (renderSpan)
+import HaskellReviewer.Core.Tokens (Token (..), TokenClass (..), tokenList)
 import HaskellReviewer.Effects.Parser
   ( cppParseWarmUp,
     cppSettings,
+    declsWarmUp,
     parseGuarded,
     parseWithin,
   )
@@ -159,6 +191,12 @@ tests =
               PragmaFailed _ -> pure ()
               other -> assertFailure (show other)
           other -> assertFailure (show other),
+      testCase "the declarations warm-up has every kind (Q-RTS-BLACKHOLE)" $
+        parsed defaultParseSettings declsWarmUp $ \m -> do
+          m.warnings @?= []
+          sort (nub (declKinds m)) @?= sort allDeclKinds
+          sort (nub [t.kind | t <- tokenList m.tokens])
+            @?= [c | c <- [minBound .. maxBound], c /= Macro],
       testCase "a parse over the time limit stops soon" $
         mapM_ stopsWithin [20_000, 200_000],
       testCase "after a stopped parse, another thread parses" $ do
@@ -173,6 +211,167 @@ tests =
   where
     on n = Extension {name = n, enabled = True}
     has n m = n `elem` m.extensions.enabled
+
+-- | What kinds of things a module's declarations have, as names. See
+-- 'declsWarmUp'.
+declKinds :: Model.ParsedModule -> [Text.Text]
+declKinds m =
+  concatMap decl m.declarations
+    <> [ case d of
+           DocHeading _ -> "heading"
+           DocChunk _ _ -> "chunk"
+       | d <- m.docItems
+       ]
+  where
+    decl d =
+      info (declInfo d) <> case d of
+        TypeD t -> typeDecl t
+        ClassD c ->
+          ["class"]
+            <> ["superclasses" | Just _ <- [c.context]]
+            <> ["fundeps" | not (null c.fundeps)]
+            <> ["minimal" | Just _ <- [c.minimal]]
+            <> concatMap method c.methods
+            <> concatMap (\t -> "associated" : info t.info <> typeDecl t) c.associated
+        ValueD v ->
+          [ case v.definition of
+              Equations -> "equations"
+              PatternBound -> "pattern bound"
+              NoDefinition -> "no definition"
+          ]
+            <> ["shared signature" | Just s <- [v.signature], length s.names > 1]
+            <> ["value fixity" | Just _ <- [v.fixity]]
+        PatSynD p ->
+          [ case p.direction of
+              Unidirectional -> "unidirectional"
+              ImplicitBidirectional -> "bidirectional"
+              ExplicitBidirectional -> "explicitly bidirectional"
+          ]
+            <> ["pattern signature" | Just _ <- [p.signature]]
+            <> ["pattern field" | not (null p.fields)]
+    info i =
+      ["exported" | i.exported]
+        <> ["not exported" | not i.exported]
+        <> ["haddock" | not (null i.haddock)]
+        <> [ case p.role of
+               HeadPart -> "head part"
+               BodyPart -> "body part"
+               PragmaPart -> "pragma part"
+               DocPart -> "doc part"
+           | p <- NonEmpty.toList i.extent.parts
+           ]
+    method mt =
+      ["method"]
+        <> ["default signature" | Just _ <- [mt.defaultSig]]
+        <> ["default method" | mt.hasDefault]
+        <> ["method fixity" | Just _ <- [mt.fixity]]
+    typeDecl t =
+      [ case t.form of
+          DataType _ -> "data"
+          Newtype _ -> "newtype"
+          TypeData _ -> "type data"
+          Synonym -> "synonym"
+          OpenFamily [] -> "open family"
+          OpenFamily _ -> "family default"
+          DataFamily -> "data family"
+          ClosedFamily _ -> "closed family"
+      ]
+        <> ["kind signature" | Just _ <- [t.kindSig]]
+        <> ["type fixity" | Just _ <- [t.fixity]]
+        <> case t.form of
+          DataType b -> concatMap con b.constructors <> concatMap deriving_ b.derivings
+          TypeData b -> concatMap con b.constructors <> concatMap deriving_ b.derivings
+          Newtype b -> con b.constructor <> concatMap deriving_ b.derivings
+          _ -> []
+    con c =
+      ["constructor fixity" | Just _ <- [c.fixity]] <> case c.args of
+        PrefixArgs as -> "prefix" : concatMap arg as
+        InfixArgs a b -> "infix" : arg a <> arg b
+        RecordArgs fs -> "record" : concatMap field fs
+        GadtArgs as -> "gadt" : concatMap arg as
+        GadtRecordArgs fs -> "gadt record" : concatMap field fs
+    field f = "field" : info f.info <> argType f.type_
+    arg a = argType a.type_ <> ["arg doc" | Just _ <- [a.doc]]
+    argType a =
+      [ case a.strictness of
+          Unmarked -> "unmarked"
+          Strict -> "strict"
+          Lazy -> "lazy",
+        case a.unpack of
+          NoUnpackPragma -> "no unpack pragma"
+          Unpack -> "unpack"
+          NoUnpack -> "nounpack"
+      ]
+    deriving_ dc =
+      [ case dc.strategy of
+          NoStrategy -> "no strategy"
+          StockStrategy -> "stock"
+          NewtypeStrategy -> "newtype strategy"
+          AnyclassStrategy -> "anyclass"
+          ViaStrategy _ -> "via"
+      ]
+
+-- | Every name 'declKinds' can give.
+allDeclKinds :: [Text.Text]
+allDeclKinds =
+  [ "anyclass",
+    "arg doc",
+    "associated",
+    "bidirectional",
+    "body part",
+    "chunk",
+    "class",
+    "closed family",
+    "constructor fixity",
+    "data",
+    "data family",
+    "default method",
+    "default signature",
+    "doc part",
+    "equations",
+    "explicitly bidirectional",
+    "exported",
+    "family default",
+    "field",
+    "fundeps",
+    "gadt",
+    "gadt record",
+    "haddock",
+    "head part",
+    "heading",
+    "infix",
+    "kind signature",
+    "lazy",
+    "method",
+    "method fixity",
+    "minimal",
+    "newtype",
+    "newtype strategy",
+    "no definition",
+    "no strategy",
+    "no unpack pragma",
+    "not exported",
+    "nounpack",
+    "open family",
+    "pattern bound",
+    "pattern field",
+    "pattern signature",
+    "pragma part",
+    "prefix",
+    "record",
+    "shared signature",
+    "stock",
+    "strict",
+    "superclasses",
+    "synonym",
+    "type data",
+    "type fixity",
+    "unidirectional",
+    "unmarked",
+    "unpack",
+    "value fixity",
+    "via"
+  ]
 
 -- | A pragma, after a #warning, in #if 1.
 pragmaAfterCpp :: Text.Text

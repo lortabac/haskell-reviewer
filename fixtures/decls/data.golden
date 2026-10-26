@@ -1,0 +1,116 @@
+type:Shape data name@5:6-5:11 exported
+  extent:
+    doc @4:1-4:14
+    head @5:1-13:24
+  head: data Shape a = Circle ! Double | Rect {-# UNPACK #-} ! Int ~ Int | a :+ a deriving ( Eq , Show ) deriving stock ( Ord ) deriving anyclass ( C )
+  haddock @4:1-4:14
+    |  A shape.
+  con:Circle constructor name@7:5-7:11 exported
+    extent:
+      doc @6:5-6:19
+      head @7:5-7:19
+    head: Circle ! Double
+    haddock @6:5-6:19
+      |  A circle.
+    prefix
+    arg @7:13-7:19 "Double" strict
+  con:Rect constructor name@8:5-8:9 exported
+    extent:
+      head @8:5-8:34
+    head: Rect {-# UNPACK #-} ! Int ~ Int
+    prefix
+    arg @8:26-8:29 "Int" strict unpack
+    arg @8:31-8:34 "Int" lazy
+  con::+ constructor name@9:7-9:9 exported
+    extent:
+      head @9:5-9:11
+      doc @10:3-10:21
+      head @31:1-31:12
+    head: a :+ a infixr 5 :+
+    haddock @10:3-10:21
+      |  An infix one.
+    fixity infixr 5 @31:1-31:12
+    infix
+    arg @9:5-9:6 "a"
+    arg @9:10-9:11 "a"
+  deriving @11:3-11:22
+    class Eq
+    class Show
+  deriving @12:3-12:23 stock
+    class Ord
+  deriving @13:3-13:24 anyclass
+    class C
+type:Config data name@16:6-16:12 exported
+  extent:
+    doc @15:1-15:13
+    head @16:1-23:37
+  head: data Config = Config { port :: {-# NOUNPACK #-} ! Int , host , user :: String } | Other { port :: Int } deriving newtype Show deriving ( Semigroup ) via ( Max Int )
+  haddock @15:1-15:13
+    |  Config.
+  con:Config constructor name@16:15-16:21 exported
+    extent:
+      head @16:15-20:4
+    head: Config { port :: {-# NOUNPACK #-} ! Int , host , user :: String }
+    record
+    field:Config.port field name@18:5-18:9 exported
+      extent:
+        doc @17:5-17:19
+        head @18:5-18:34
+      head: port :: {-# NOUNPACK #-} ! Int
+      haddock @17:5-17:19
+        |  The port.
+      type @18:31-18:34 "Int" strict nounpack
+    field:Config.host field name@19:5-19:9 exported
+      extent:
+        head @19:5-19:25
+        doc @19:26-19:45
+      head: host , user :: String
+      haddock @19:26-19:45
+        |  Host and user.
+      type @19:19-19:25 "String"
+    field:Config.user field name@19:11-19:15 exported
+      extent:
+        head @19:5-19:25
+        doc @19:26-19:45
+      head: host , user :: String
+      haddock @19:26-19:45
+        |  Host and user.
+      type @19:19-19:25 "String"
+  con:Other constructor name@21:5-21:10 exported
+    extent:
+      head @21:5-21:26
+    head: Other { port :: Int }
+    record
+    field:Config.port field name@21:13-21:17 exported
+      extent:
+        head @21:13-21:24
+      head: port :: Int
+      type @21:21-21:24 "Int"
+  deriving @22:3-22:24 newtype
+    class Show
+  deriving @23:3-23:37 via "(Max Int)"
+    class Semigroup
+type:Ctx data name@25:15-25:18 exported
+  extent:
+    head @25:1-25:28
+  head: data Ord a => Ctx a = Ctx a
+  con:Ctx constructor name@25:23-25:26 exported
+    extent:
+      head @25:23-25:28
+    head: Ctx a
+    prefix
+    arg @25:27-25:28 "a"
+type:Exists data name@27:6-27:12 exported
+  extent:
+    head @27:1-27:43
+  head: data Exists = forall a . Show a => Exists a
+  con:Exists constructor name@27:35-27:41 exported
+    extent:
+      head @27:15-27:43
+    head: forall a . Show a => Exists a
+    prefix
+    arg @27:42-27:43 "a"
+type:Empty data name@29:6-29:11 exported
+  extent:
+    head @29:1-29:11
+  head: data Empty

@@ -1,0 +1,34 @@
+type:Age newtype name@5:9-5:12 exported
+  extent:
+    doc @4:1-4:12
+    head @5:1-6:29
+  head: newtype Age = Age Int deriving newtype ( Eq , Num )
+  haddock @4:1-4:12
+    |  Wraps.
+  con:Age constructor name@5:15-5:18 exported
+    extent:
+      head @5:15-5:22
+    head: Age Int
+    prefix
+    arg @5:19-5:22 "Int"
+  deriving @6:3-6:29 newtype
+    class Eq
+    class Num
+type:Rec newtype name@8:9-8:12 exported
+  extent:
+    head @8:1-8:33
+    doc @8:34-8:54
+  head: newtype Rec a = Rec { unRec :: a }
+  con:Rec constructor name@8:17-8:20 exported
+    extent:
+      head @8:17-8:33
+      doc @8:34-8:54
+    head: Rec { unRec :: a }
+    haddock @8:34-8:54
+      |  Record newtype.
+    record
+    field:Rec.unRec field name@8:22-8:27 exported
+      extent:
+        head @8:22-8:32
+      head: unRec :: a
+      type @8:31-8:32 "a"

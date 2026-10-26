@@ -1,0 +1,120 @@
+type:T data name@16:6-16:7 exported
+  extent:
+    head @16:1-16:28
+  head: data T = T1 | T2 { t :: Int }
+  con:T1 constructor name@16:10-16:12 exported
+    extent:
+      head @16:10-16:12
+    head: T1
+    prefix
+  con:T2 constructor name@16:15-16:17 exported
+    extent:
+      head @16:15-16:28
+    head: T2 { t :: Int }
+    record
+    field:T.t field name@16:19-16:20 exported
+      extent:
+        head @16:19-16:27
+      head: t :: Int
+      type @16:24-16:27 "Int"
+type:U data name@17:6-17:7 exported
+  extent:
+    head @17:1-17:44
+  head: data U = A | B { field :: Int , other :: Int }
+  con:A constructor name@17:10-17:11 exported
+    extent:
+      head @17:10-17:11
+    head: A
+    prefix
+  con:B constructor name@17:14-17:15
+    extent:
+      head @17:14-17:44
+    head: B { field :: Int , other :: Int }
+    record
+    field:U.field field name@17:17-17:22 exported
+      extent:
+        head @17:17-17:29
+      head: field :: Int
+      type @17:26-17:29 "Int"
+    field:U.other field name@17:31-17:36
+      extent:
+        head @17:31-17:43
+      head: other :: Int
+      type @17:40-17:43 "Int"
+type:V data name@18:6-18:7 exported
+  extent:
+    head @18:1-18:11
+  head: data V = V
+  con:V constructor name@18:10-18:11
+    extent:
+      head @18:10-18:11
+    head: V
+    prefix
+class:C class name@19:7-19:8 exported
+  extent:
+    head @19:1-21:9
+  head: class C a where m :: a n :: a
+  val:m method name@20:3-20:4 exported
+    extent:
+      head @20:3-20:9
+    head: m :: a
+    signature @20:3-20:9 m
+  val:n method name@21:3-21:4
+    extent:
+      head @21:3-21:9
+    head: n :: a
+    signature @21:3-21:9 n
+class:D class name@22:7-22:8 exported
+  extent:
+    head @22:1-24:9
+  head: class D a where type F a d :: a
+  val:d method name@24:3-24:4 exported
+    extent:
+      head @24:3-24:9
+    head: d :: a
+    signature @24:3-24:9 d
+  type:F open family name@23:8-23:9 exported
+    extent:
+      head @23:3-23:11
+    head: type F a
+type::+: data name@25:8-25:11 exported
+  extent:
+    head @25:1-25:23
+  head: data a :+: b = a :+: b
+  con::+: constructor name@25:18-25:21
+    extent:
+      head @25:16-25:23
+    head: a :+: b
+    infix
+    arg @25:16-25:17 "a"
+    arg @25:22-25:23 "b"
+val:x equations name@26:1-26:2 exported
+  extent:
+    head @26:1-26:18
+    body @27:1-27:6
+  head: x , y , z , w :: Int
+  signature @26:1-26:18 x, y, z, w
+val:y equations name@26:4-26:5 exported
+  extent:
+    head @26:1-26:18
+    body @28:1-28:6
+  head: x , y , z , w :: Int
+  signature @26:1-26:18 x, y, z, w
+val:z equations name@26:7-26:8
+  extent:
+    head @26:1-26:18
+    body @29:1-29:6
+  head: x , y , z , w :: Int
+  signature @26:1-26:18 x, y, z, w
+val:w equations name@26:10-26:11
+  extent:
+    head @26:1-26:18
+    body @30:1-30:6
+  head: x , y , z , w :: Int
+  signature @26:1-26:18 x, y, z, w
+pat:Pat pattern bidirectional name@31:9-31:12 exported
+  extent:
+    head @31:1-31:19
+    body @32:1-32:16
+  head: pattern Pat :: Int
+  signature @31:1-31:19 Pat

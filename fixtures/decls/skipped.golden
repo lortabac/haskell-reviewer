@@ -1,0 +1,27 @@
+type:T data name@4:6-4:7 exported
+  extent:
+    head @4:1-4:15
+  head: data T a = T a
+  con:T constructor name@4:12-4:13 exported
+    extent:
+      head @4:12-4:15
+    head: T a
+    prefix
+    arg @4:14-4:15 "a"
+type:F open family name@15:13-15:14 exported
+  extent:
+    head @15:1-15:16
+  head: type family F a
+type:D data family name@18:13-18:14 exported
+  extent:
+    head @18:1-18:16
+  head: data family D a
+val:kept equations name@32:1-32:5 exported
+  extent:
+    doc @31:1-31:11
+    head @32:1-32:12
+    body @33:1-33:9
+  head: kept :: Int
+  haddock @31:1-31:11
+    |  Kept.
+  signature @32:1-32:12 kept

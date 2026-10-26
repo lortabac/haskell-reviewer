@@ -15,6 +15,7 @@ module HaskellReviewer.Core.Cpp.Positions
 
     -- * Mapping
     mapSpan,
+    inExpansion,
   )
 where
 
@@ -123,6 +124,17 @@ mapSpan pm s =
     end = max start (mapEnd pm (Pos (lineOf s.endLine) (colOf s.endCol)))
     lineOf (Line l) = fromIntegral l
     colOf (Col c) = fromIntegral c
+
+-- | Does the output span start in text a macro made?
+inExpansion :: PositionMap -> Span -> Bool
+inExpansion (PositionMap m) s = case IntMap.lookup line m >>= IntMap.lookupLE col of
+  Just (_, Expanded _ _) -> True
+  _ -> False
+  where
+    Line l = s.startLine
+    Col c = s.startCol
+    line = fromIntegral l
+    col = fromIntegral c
 
 -- | Where the char at an output place comes from.
 mapPos :: PositionMap -> Pos -> Pos

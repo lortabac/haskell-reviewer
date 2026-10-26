@@ -1235,8 +1235,9 @@ on the module, never a crash.
 
 #### 11.4.4 Parsing and the module model
 
-(D-61) Each module is lexed and parsed once with `ghc-lib-parser`, and at
-once converted into **our own compact module model**. The GHC AST is then
+(D-61) Each module is parsed once with `ghc-lib-parser` (plus one lex for
+the token stream, D-140), and at once converted into **our own compact
+module model**. The GHC AST is then
 dropped, since keeping ASTs for two sides of a large project would break
 the memory budget (§10.2). The model holds:
 - header, exports, imports, extensions in effect;

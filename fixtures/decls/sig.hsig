@@ -1,0 +1,9 @@
+signature Sig (T, f) where
+
+-- | Abstract.
+data T
+
+f :: T -> Int
+
+class C a where
+  m :: a

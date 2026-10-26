@@ -1,0 +1,16 @@
+val:a equations name@3:1-3:2 exported
+  extent:
+    body @3:1-3:6
+  head: 
+val:b equations name@5:1-5:2 exported
+  extent:
+    body @5:1-5:29
+  head: 
+val:c equations name@7:1-7:2 exported
+  extent:
+    body @7:1-7:6
+  head: 
+val:e equations name@9:1-9:2 exported
+  extent:
+    body @9:1-9:6
+  head: 
