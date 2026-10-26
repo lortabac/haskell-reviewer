@@ -3,25 +3,29 @@ module HaskellReviewer.Core.DeclsTest (tests, linearTests) where
 
 import Control.Exception (evaluate)
 import Data.List.NonEmpty (NonEmpty (..))
+import Data.Maybe (maybeToList)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import HaskellReviewer.Core.Decls
   ( ClassDecl (..),
     ConArgs (..),
     ConDecl (..),
-    DataBody (..),
     Decl (..),
     DeclInfo (..),
     Extent (..),
+    FamInstDecl (..),
     FieldDecl (..),
+    InstanceBody (..),
+    InstanceDecl (..),
+    InstanceForm (..),
     MethodDecl (..),
-    NewtypeBody (..),
     Part (..),
     PartRole (..),
     PatSynDecl (..),
     TypeDecl (..),
-    TypeForm (..),
     declInfo,
+    famInstConstructors,
+    formConstructors,
     mkExtent,
   )
 import HaskellReviewer.Core.ModuleModel
@@ -119,6 +123,29 @@ tests =
             fmap (renderSpan . (.span)) m.header.name @?= Just "3:8-3:9"
             map (renderSpan . (.span)) m.imports @?= ["4:1-4:17"]
           TextOnly _ -> assertFailure "not parsed",
+      testCase "exported: instances always" $
+        exported
+          "module M (x) where\ninstance Show T\ntype instance F Int = Bool\nx = 1\n"
+          @?= [("inst:Show:T", True), ("inst:F:Int", True), ("val:x", True)],
+      testCase "exported: D(..) covers its data instances' constructors and fields" $ do
+        let src = "data family D a\ndata instance D Int = A {f :: Int}\n"
+        exported ("module M (D (..)) where\n" <> src)
+          @?= [ ("type:D", True),
+                ("inst:D:Int", True),
+                ("con:A", True),
+                ("field:A.f", True)
+              ]
+        exported ("module M (D) where\n" <> src)
+          @?= [ ("type:D", True),
+                ("inst:D:Int", True),
+                ("con:A", False),
+                ("field:A.f", False)
+              ],
+      testCase "exported: Ext.D(..) covers local instances of an external family" $
+        exported
+          "module M (Ext.D (..)) where\nimport qualified Ext\n\
+          \data instance Ext.D Int = DInt\n"
+          @?= [("inst:D:Int", True), ("con:DInt", True)],
       testCase "exported: a bundled pattern synonym" $
         exported
           (patterns <> "module M (T (.., P)) where\ndata T = A\npattern P = A\n")
@@ -166,7 +193,50 @@ linearTests =
         testCase "LINE pragmas" $
           linear $ \k ->
             Text.unlines
-              (concat [["{-# LINE " <> n i <> " \"G.y\" #-}", eq "f" i] | i <- [1 .. k]])
+              (concat [["{-# LINE " <> n i <> " \"G.y\" #-}", eq "f" i] | i <- [1 .. k]]),
+        testCase "instances" $
+          linear $ \k ->
+            Text.unlines ["instance C" <> n i <> " (T a) where m = 1" | i <- [1 .. k]],
+        testCase "a deep instance head" $
+          linear $ \k ->
+            "instance C "
+              <> Text.replicate k "(Maybe "
+              <> "a"
+              <> Text.replicate k ")"
+              <> "\n",
+        testCase "many variables in an instance head" $
+          linear $ \k ->
+            "instance C (T " <> Text.unwords ["a" <> n i | i <- [1 .. k]] <> ")\n",
+        testCase "instances of one family" $
+          linear $ \k ->
+            "{-# LANGUAGE TypeFamilies #-}\ntype family F a\n"
+              <> Text.unlines ["type instance F T" <> n i <> " = Int" | i <- [1 .. k]],
+        testCase "deriving classes" $
+          linear $ \k ->
+            "data T a = T deriving ("
+              <> Text.intercalate ", " ["C" <> n i | i <- [1 .. k]]
+              <> ")\n",
+        testCase "alternating equations in an instance" $
+          linear $ \k ->
+            "instance C T where\n"
+              <> Text.unlines
+                (concat [["  " <> eq "f" i, "  " <> eq "g" i] | i <- [1 .. k]]),
+        testCase "deriving: n parameters, n classes" $
+          linear $ \k ->
+            "data T "
+              <> Text.unwords ["a" <> n i | i <- [1 .. k]]
+              <> " = T deriving ("
+              <> Text.intercalate ", " ["C" <> n i | i <- [1 .. k]]
+              <> ")\n",
+        testCase "deriving: n parameters, n classes with arguments" $
+          linear $ \k ->
+            "data T "
+              <> Text.unwords ["a" <> n i | i <- [1 .. k]]
+              <> " = T deriving ("
+              <> Text.intercalate ", " ["C" <> n i <> " X" | i <- [1 .. k]]
+              <> ")\n",
+        testCase "warnings on one name" $
+          linear (\k -> "f = 1\n" <> Text.replicate k "{-# DEPRECATED f \"x\" #-}\n")
       ]
   where
     n :: Int -> Text
@@ -202,7 +272,7 @@ exported src = case parseSource defaultParseSettings src of
   TextOnly _ -> [("not parsed", False)]
   where
     one i = (renderDeclId i.id, i.exported)
-    decl d = one (declInfo d) : inner d
+    decl d = map one (maybeToList (declInfo d)) <> inner d
     inner = \case
       TypeD t -> typeInner t
       ClassD c ->
@@ -210,11 +280,13 @@ exported src = case parseSource defaultParseSettings src of
           <> concatMap (\t -> one t.info : typeInner t) c.associated
       ValueD _ -> []
       PatSynD p -> map one p.fields
-    typeInner t = concatMap con $ case t.form of
-      DataType b -> b.constructors
-      TypeData b -> b.constructors
-      Newtype b -> [b.constructor]
-      _ -> []
+      InstanceD i -> case i.form of
+        ExplicitInstance b -> concatMap (\f -> one f.info : famInner f) b.associated
+        _ -> []
+      FamInstD f -> famInner f
+      SpliceD _ -> []
+    famInner f = concatMap con (famInstConstructors f.form)
+    typeInner t = concatMap con (formConstructors t.form)
     con c = one c.info : map (\f -> one f.info) (fields c.args)
     fields = \case
       RecordArgs fs -> fs

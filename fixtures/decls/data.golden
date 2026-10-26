@@ -34,12 +34,30 @@ type:Shape data name@5:6-5:11 exported
     arg @9:5-9:6 "a"
     arg @9:10-9:11 "a"
   deriving @11:3-11:22
-    class Eq
-    class Show
+    class Eq inst:Eq:Shape a
+    class Show inst:Show:Shape a
   deriving @12:3-12:23 stock
-    class Ord
+    class Ord inst:Ord:Shape a
   deriving @13:3-13:24 anyclass
-    class C
+    class C inst:C:Shape a
+inst:Eq:Shape a derived on type:Shape name@11:13-11:15 exported
+  extent:
+    head @11:13-11:15
+  head: Eq
+inst:Show:Shape a derived on type:Shape name@11:17-11:21 exported
+  extent:
+    head @11:17-11:21
+  head: Show
+inst:Ord:Shape a derived stock on type:Shape name@12:19-12:22 exported
+  extent:
+    head @12:12-12:17
+    head @12:19-12:22
+  head: stock Ord
+inst:C:Shape a derived anyclass on type:Shape name@13:22-13:23 exported
+  extent:
+    head @13:12-13:20
+    head @13:22-13:23
+  head: anyclass C
 type:Config data name@16:6-16:12 exported
   extent:
     doc @15:1-15:13
@@ -87,9 +105,19 @@ type:Config data name@16:6-16:12 exported
       head: port :: Int
       type @21:21-21:24 "Int"
   deriving @22:3-22:24 newtype
-    class Show
+    class Show inst:Show:Config
   deriving @23:3-23:37 via "(Max Int)"
-    class Semigroup
+    class Semigroup inst:Semigroup:Config
+inst:Show:Config derived newtype on type:Config name@22:20-22:24 exported
+  extent:
+    head @22:12-22:19
+    head @22:20-22:24
+  head: newtype Show
+inst:Semigroup:Config derived via "(Max Int)" on type:Config name@23:13-23:22 exported
+  extent:
+    head @23:13-23:22
+    head @23:24-23:37
+  head: Semigroup via ( Max Int )
 type:Ctx data name@25:15-25:18 exported
   extent:
     head @25:1-25:28

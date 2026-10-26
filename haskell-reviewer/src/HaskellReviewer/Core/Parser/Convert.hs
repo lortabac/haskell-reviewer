@@ -24,7 +24,6 @@ import GHC.Hs
     LIE,
     LIEWrappedName,
     LImportDecl,
-    WithHsDocIdentifiers (..),
     XModulePs (..),
   )
 import GHC.Hs qualified as Ghc (ImportDeclQualifiedStyle (..))
@@ -33,11 +32,6 @@ import GHC.Types.Name.Reader (isQual_maybe)
 import GHC.Types.PkgQual (RawPkgQual (..))
 import GHC.Types.SourceText (StringLiteral (..))
 import GHC.Types.SrcLoc (GenLocated (..), Located, unLoc)
-import GHC.Unit.Module.Warnings
-  ( InWarningCategory (..),
-    WarningCategory (..),
-    WarningTxt (..),
-  )
 import HaskellReviewer.Core.Exported (markExported)
 import HaskellReviewer.Core.ModuleModel
   ( Export (..),
@@ -59,18 +53,16 @@ import HaskellReviewer.Core.ModuleModel
     Section (..),
     SubList (..),
     Subs (..),
-    WarningKind (..),
-    WarningText (..),
   )
 import HaskellReviewer.Core.ModuleModel qualified as Model (Located (..))
-import HaskellReviewer.Core.Parser.ConvertDecls (convertDecls)
+import HaskellReviewer.Core.Parser.ConvertDecls (Converted (..), convertDecls)
 import HaskellReviewer.Core.Parser.Helpers
   ( SpanMap,
     moduleName,
     occText,
     rawDoc,
   )
-import HaskellReviewer.Core.Parser.Helpers qualified as Helpers (spanOf)
+import HaskellReviewer.Core.Parser.Helpers qualified as Helpers (spanOf, warningText)
 import HaskellReviewer.Core.Tokens (Tokens)
 import Language.Haskell.Syntax.ImpExp.IsBoot (IsBootInterface (..))
 
@@ -90,8 +82,9 @@ convertModule spans exts warnings tokens (L _ m) =
       imports = map importDecl (hsmodImports m),
       extensions = exts,
       warnings = warnings,
-      declarations = markExported ((.value) <$> header.name) exports decls,
-      docItems = docItems,
+      declarations = markExported self exports converted.decls,
+      docItems = converted.docItems,
+      pragmas = converted.pragmas,
       tokens = tokens
     }
   where
@@ -103,7 +96,8 @@ convertModule spans exts warnings tokens (L _ m) =
           warning = warningText <$> hsmodDeprecMessage ext
         }
     exports = map export . unLoc <$> hsmodExports m
-    (decls, docItems) = convertDecls spans (hsmodDecls m)
+    self = (.value) <$> header.name
+    converted = convertDecls spans self (hsmodDecls m)
 
     spanOf = Helpers.spanOf spans
 
@@ -112,19 +106,7 @@ convertModule spans exts warnings tokens (L _ m) =
     doc :: LHsDoc GhcPs -> RawDoc
     doc = rawDoc spans
 
-    warningText w =
-      WarningText
-        { span = spanOf (getLocA w),
-          kind = case unLoc w of
-            WarningTxt category _ _ -> WarningPragma (categoryText <$> category)
-            DeprecatedTxt _ _ -> DeprecatedPragma,
-          messages = case unLoc w of
-            WarningTxt _ _ ms -> map message ms
-            DeprecatedTxt _ ms -> map message ms
-        }
-    categoryText (L _ c) = case unLoc c.iwc_wc of
-      WarningCategory fs -> Text.pack (unpackFS fs)
-    message (L _ s) = Text.pack (unpackFS s.hsDocString.sl_fs)
+    warningText w = Helpers.warningText (spanOf (getLocA w)) (unLoc w)
 
     export :: LIE GhcPs -> Export
     export lie@(L _ ie) = case ie of

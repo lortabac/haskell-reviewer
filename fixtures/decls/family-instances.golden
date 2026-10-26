@@ -1,0 +1,152 @@
+type:F open family name@7:13-7:14 exported
+  extent:
+    head @7:1-7:16
+  head: type family F a
+  instance inst:F:[a]
+  instance inst:F:Maybe a
+inst:F:[a] type instance of F name@8:15-8:16 exported
+  extent:
+    head @8:1-8:24
+  head: type instance F [ a ] = a
+inst:F:Maybe a type instance of F name@10:15-10:16 exported
+  extent:
+    doc @9:1-9:30
+    head @10:1-10:30
+  head: type instance F ( Maybe b ) = b
+  haddock @9:1-9:30
+    |  Same key shape as above.
+type:D data family name@12:13-12:14 exported
+  extent:
+    head @12:1-12:16
+  head: data family D a
+  instance inst:D:Int
+  instance inst:D:Bool
+  instance inst:D:[a]
+inst:D:Int data instance of D name@14:15-14:16 exported
+  extent:
+    doc @13:1-13:67
+    head @14:1-15:18
+  head: data instance D Int = DInt { dx :: Int } | DInt2 { dx :: Int } deriving ( Show )
+  haddock @13:1-13:67
+    |  A data instance. Fields have the first constructor as parent.
+  con:DInt constructor name@14:23-14:27 exported
+    extent:
+      head @14:23-14:41
+    head: DInt { dx :: Int }
+    record
+    field:DInt.dx field name@14:30-14:32 exported
+      extent:
+        head @14:30-14:39
+      head: dx :: Int
+      type @14:36-14:39 "Int"
+  con:DInt2 constructor name@14:44-14:49 exported
+    extent:
+      head @14:44-14:63
+    head: DInt2 { dx :: Int }
+    record
+    field:DInt.dx field name@14:52-14:54 exported
+      extent:
+        head @14:52-14:61
+      head: dx :: Int
+      type @14:58-14:61 "Int"
+  deriving @15:3-15:18
+    class Show inst:Show:D Int
+inst:Show:D Int derived on inst:D:Int name@15:13-15:17 exported
+  extent:
+    head @15:13-15:17
+  head: Show
+inst:D:Bool newtype instance of D name@16:18-16:19 exported
+  extent:
+    head @16:1-16:57
+  head: newtype instance D Bool = DBool Bool deriving newtype Eq
+  con:DBool constructor name@16:27-16:32 exported
+    extent:
+      head @16:27-16:37
+    head: DBool Bool
+    prefix
+    arg @16:33-16:37 "Bool"
+  deriving @16:38-16:57 newtype
+    class Eq inst:Eq:D Bool
+inst:Eq:D Bool derived newtype on inst:D:Bool name@16:55-16:57 exported
+  extent:
+    head @16:47-16:54
+    head @16:55-16:57
+  head: newtype Eq
+inst:D:[a] data instance of D name@17:15-17:16 exported
+  extent:
+    head @17:1-18:32
+  head: data instance D [ a ] where DList :: { dl :: a } -> D [ a ]
+  con:DList constructor name@18:3-18:8 exported
+    extent:
+      head @18:3-18:32
+    head: DList :: { dl :: a } -> D [ a ]
+    gadt record
+    field:DList.dl field name@18:14-18:16 exported
+      extent:
+        head @18:14-18:21
+      head: dl :: a
+      type @18:20-18:21 "a"
+type:G open family name@20:13-20:14
+  extent:
+    head @20:1-20:18
+  head: type family G a b
+  instance inst:G:a (b a)
+inst:G:a (b a) type instance of G name@21:15-21:16 exported
+  extent:
+    head @21:1-21:30
+  head: type instance G a ( f a ) = Int
+inst:Fam:Int type instance of Fam orphan name@24:15-24:22 exported
+  extent:
+    head @24:1-24:33
+  head: type instance Ext.Fam Int = Bool
+class:K class name@26:7-26:8 exported
+  extent:
+    head @26:1-28:12
+  head: class K a where type KT a data KD a
+  type:KT open family name@27:8-27:10 exported
+    extent:
+      head @27:3-27:12
+    head: type KT a
+    instance inst:KT:Int
+  type:KD data family name@28:8-28:10 exported
+    extent:
+      head @28:3-28:12
+    head: data KD a
+    instance inst:KD:Int
+inst:K:Int instance name@30:10-30:11 exported
+  extent:
+    head @30:1-32:48
+  head: instance K Int where type KT Int = Bool data KD Int = KDInt { kd :: Int } deriving Eq
+  inst:KT:Int type instance of KT name@31:8-31:10 exported
+    extent:
+      head @31:3-31:21
+    head: type KT Int = Bool
+  inst:KD:Int data instance of KD name@32:8-32:10 exported
+    extent:
+      head @32:3-32:48
+    head: data KD Int = KDInt { kd :: Int } deriving Eq
+    con:KDInt constructor name@32:17-32:22
+      extent:
+        head @32:17-32:36
+      head: KDInt { kd :: Int }
+      record
+      field:KDInt.kd field name@32:25-32:27
+        extent:
+          head @32:25-32:34
+        head: kd :: Int
+        type @32:31-32:34 "Int"
+    deriving @32:37-32:48
+      class Eq inst:Eq:KD Int
+inst:Eq:KD Int derived on inst:KD:Int name@32:46-32:48 exported
+  extent:
+    head @32:46-32:48
+  head: Eq
+type:H open family name@35:13-35:14
+  extent:
+    head @35:1-35:23
+  head: type family H ( a :: k )
+  instance inst:H:Int
+inst:H:Int type instance of H name@36:15-36:16 exported
+  extent:
+    head @36:1-36:31
+  head: type instance H @ Type Int = ( )

@@ -6,7 +6,8 @@ import Data.List.NonEmpty qualified as NonEmpty
 import Data.Text (Text)
 import Data.Text qualified as Text
 import HaskellReviewer.Core.Decls
-  ( ArgType (..),
+  ( AnnTarget (..),
+    ArgType (..),
     ClassDecl (..),
     ConArg (..),
     ConArgs (..),
@@ -16,17 +17,28 @@ import HaskellReviewer.Core.Decls
     DeclInfo (..),
     Definition (..),
     DerivStrategy (..),
+    Derived (..),
+    DerivedClass (..),
     DerivingClause (..),
     Extent (..),
+    FamInstDecl (..),
+    FamInstForm (..),
     FieldDecl (..),
     Fixity (..),
     FixityDir (..),
+    InstanceBody (..),
+    InstanceDecl (..),
+    InstanceForm (..),
+    InstanceMethod (..),
     MethodDecl (..),
+    ModulePragma (..),
     NewtypeBody (..),
+    OpenFamilyBody (..),
     Part (..),
     PartRole (..),
     PatSynDecl (..),
     PatSynDir (..),
+    PragmaKind (..),
     RawDoc (..),
     Signature (..),
     Strictness (..),
@@ -34,6 +46,8 @@ import HaskellReviewer.Core.Decls
     TypeForm (..),
     Unpack (..),
     ValueDecl (..),
+    WarningKind (..),
+    WarningText (..),
     headPieces,
   )
 import HaskellReviewer.Core.ModuleModel
@@ -61,6 +75,7 @@ dumpDecls src = \case
       ]
         <> concatMap docItem m.docItems
         <> concatMap (decl (sourceLines src) m.tokens) m.declarations
+        <> map pragma m.pragmas
 
 -- | Every token with its class and text.
 dumpTokens :: Text -> ModuleParse -> Text
@@ -73,6 +88,20 @@ dumpTokens src = \case
       ]
   where
     ls = sourceLines src
+
+-- | One line per pragma of the Pragmas block.
+pragma :: ModulePragma -> Text
+pragma p =
+  Text.unwords $
+    ["pragma", at p.span] <> case p.kind of
+      Rules ns -> "rules" : ns
+      Complete ns t -> "complete" : ns <> maybe [] (\x -> [":: " <> x]) t
+      Annotation t ->
+        ["ann"] <> case t of
+          AnnValue n -> [n]
+          AnnType n -> ["type", n]
+          AnnModule -> ["module"]
+      Default c -> "default" : maybe [] pure c
 
 docItem :: DocItem -> [Text]
 docItem = \case
@@ -88,6 +117,7 @@ decl src ts = \case
         ( opt "context" c.context
             <> map (("fundep " <>) . at) c.fundeps
             <> opt "kind sig" c.kindSig
+            <> opt "roles" c.roles
             <> fixity c.fixity
             <> opt "minimal" c.minimal
             <> concatMap method c.methods
@@ -104,7 +134,11 @@ decl src ts = \case
             )
   ValueD v ->
     infoLines src ts (definition v.definition) v.info
-      <> nested (maybe [] signature v.signature <> fixity v.fixity)
+      <> nested
+        ( maybe [] signature v.signature
+            <> map (("foreign export " <>) . at) v.foreignExports
+            <> fixity v.fixity
+        )
   PatSynD p ->
     infoLines src ts ("pattern " <> direction p.direction) p.info
       <> nested
@@ -112,20 +146,59 @@ decl src ts = \case
             <> fixity p.fixity
             <> concatMap (infoLines src ts "field") p.fields
         )
+  InstanceD i -> instanceDecl src ts i
+  FamInstD f -> famInstDecl src ts f
+  SpliceD e -> "splice" : nested (extentLines src ts e)
   where
     definition = \case
       Equations -> "equations"
       PatternBound -> "pattern bound"
+      ForeignImport -> "foreign import"
       NoDefinition -> "no definition"
     direction = \case
       Unidirectional -> "unidirectional"
       ImplicitBidirectional -> "bidirectional"
       ExplicitBidirectional -> "explicitly bidirectional"
 
+-- | An instance, its methods and associated instances.
+instanceDecl :: SourceLines -> Tokens -> InstanceDecl -> [Text]
+instanceDecl src ts i =
+  infoLines src ts (Text.unwords (kind <> ["orphan" | i.orphan])) i.info
+    <> nested body
+  where
+    (kind, body) = case i.form of
+      ExplicitInstance b ->
+        ( ["instance"],
+          concatMap method b.methods <> concatMap (famInstDecl src ts) b.associated
+        )
+      StandaloneDeriving s -> ("standalone deriving" : strategy src s, [])
+      DerivedInstance d ->
+        ("derived" : strategy src d.strategy <> ["on", renderDeclId d.onType], [])
+    method m =
+      ("method " <> m.name.value <> " name" <> at m.name.span)
+        : nested (extentLines src ts m.extent)
+
+-- | A type or data instance.
+famInstDecl :: SourceLines -> Tokens -> FamInstDecl -> [Text]
+famInstDecl src ts f =
+  infoLines src ts (Text.unwords ([kind, "of", f.family] <> ["orphan" | f.orphan])) f.info
+    <> nested body
+  where
+    (kind, body) = case f.form of
+      TypeInstance -> ("type instance", [])
+      DataInstance b -> ("data instance", dataBody src ts b.constructors b.derivings)
+      NewtypeInstance b ->
+        ("newtype instance", dataBody src ts [b.constructor] b.derivings)
+
 typeDecl :: SourceLines -> Tokens -> TypeDecl -> [Text]
 typeDecl src ts t =
   infoLines src ts (form t.form) t.info
-    <> nested (opt "kind sig" t.kindSig <> fixity t.fixity <> formLines t.form)
+    <> nested
+      ( opt "kind sig" t.kindSig
+          <> opt "roles" t.roles
+          <> fixity t.fixity
+          <> formLines t.form
+      )
   where
     form = \case
       DataType _ -> "data"
@@ -133,18 +206,24 @@ typeDecl src ts t =
       TypeData _ -> "type data"
       Synonym -> "synonym"
       OpenFamily _ -> "open family"
-      DataFamily -> "data family"
+      DataFamily _ -> "data family"
       ClosedFamily _ -> "closed family"
     formLines = \case
-      OpenFamily ds -> map (("default " <>) . slice) ds
+      OpenFamily b ->
+        map (("default " <>) . slice) b.defaults <> map instanceLine b.instances
       ClosedFamily es -> map (("equation " <>) . slice) es
-      DataType b -> dataBody b.constructors b.derivings
-      TypeData b -> dataBody b.constructors b.derivings
-      Newtype b -> dataBody [b.constructor] b.derivings
+      DataType b -> dataBody src ts b.constructors b.derivings
+      TypeData b -> dataBody src ts b.constructors b.derivings
+      Newtype b -> dataBody src ts [b.constructor] b.derivings
       Synonym -> []
-      DataFamily -> []
-    dataBody :: [ConDecl] -> [DerivingClause] -> [Text]
-    dataBody cs ds = concatMap con cs <> concatMap deriving_ ds
+      DataFamily is -> map instanceLine is
+    instanceLine = ("instance " <>) . renderDeclId
+    slice = sliceSpan src
+
+-- | Constructors and deriving clauses.
+dataBody :: SourceLines -> Tokens -> [ConDecl] -> [DerivingClause] -> [Text]
+dataBody src ts cs ds = concatMap con cs <> concatMap deriving_ ds
+  where
     con (c :: ConDecl) =
       infoLines src ts "constructor" c.info
         <> nested (fixity c.fixity <> conArgs c.args)
@@ -171,15 +250,18 @@ typeDecl src ts t =
       Unpack -> ["unpack"]
       NoUnpack -> ["nounpack"]
     deriving_ d =
-      Text.unwords (["deriving", at d.span] <> strategy d.strategy)
-        : map (indent . ("class " <>) . slice) d.classes
-    strategy = \case
-      NoStrategy -> []
-      StockStrategy -> ["stock"]
-      NewtypeStrategy -> ["newtype"]
-      AnyclassStrategy -> ["anyclass"]
-      ViaStrategy s -> ["via", quote (slice s)]
+      Text.unwords (["deriving", at d.span] <> strategy src d.strategy)
+        : map (indent . derived) d.classes
+    derived c = Text.unwords ["class", slice c.span, renderDeclId c.id]
     slice = sliceSpan src
+
+strategy :: SourceLines -> DerivStrategy -> [Text]
+strategy src = \case
+  NoStrategy -> []
+  StockStrategy -> ["stock"]
+  NewtypeStrategy -> ["newtype"]
+  AnyclassStrategy -> ["anyclass"]
+  ViaStrategy s -> ["via", quote (sliceSpan src s)]
 
 -- | The lines every declaration has: id, kind, flags, extent, head,
 -- Haddock.
@@ -188,10 +270,24 @@ infoLines src ts kind i =
   Text.unwords
     ([renderDeclId i.id, kind, "name" <> at i.nameSpan] <> ["exported" | i.exported])
     : nested
-      ( ("extent:" : map (indent . part) (NonEmpty.toList i.extent.parts))
-          <> ["head: " <> Text.unwords (headPieces src ts i.extent)]
+      ( extentLines src ts i.extent
           <> concatMap (doc "haddock") i.haddock
+          <> maybe [] warning i.warning
       )
+  where
+    warning w =
+      Text.unwords ["warning", warningKind w.kind, at w.span]
+        : map (indent . ("| " <>)) w.messages
+    warningKind = \case
+      DeprecatedPragma -> "deprecated"
+      WarningPragma Nothing -> "warning"
+      WarningPragma (Just c) -> "warning in " <> c
+
+-- | The parts of an extent and its head tokens.
+extentLines :: SourceLines -> Tokens -> Extent -> [Text]
+extentLines src ts e =
+  ("extent:" : map (indent . part) (NonEmpty.toList e.parts))
+    <> ["head: " <> Text.unwords (headPieces src ts e)]
   where
     part p = role p.role <> " " <> at p.span
     role = \case

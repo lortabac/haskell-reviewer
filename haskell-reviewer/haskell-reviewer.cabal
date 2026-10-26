@@ -59,6 +59,7 @@ library
     HaskellReviewer.Core.Parser.Convert
     HaskellReviewer.Core.Parser.ConvertDecls
     HaskellReviewer.Core.Parser.Helpers
+    HaskellReviewer.Core.Parser.InstanceKey
     HaskellReviewer.Core.Parser.Lex
     HaskellReviewer.Core.Project
     HaskellReviewer.Core.ProjectFile
@@ -172,6 +173,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.DeclsTest
     HaskellReviewer.Core.FileListTest
     HaskellReviewer.Core.GitTest
+    HaskellReviewer.Core.InstanceKeyTest
     HaskellReviewer.Core.ModulesGoldenTest
     HaskellReviewer.Core.ModulesTest
     HaskellReviewer.Core.PackageGlobTest

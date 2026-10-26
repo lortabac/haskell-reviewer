@@ -13,17 +13,20 @@ module HaskellReviewer.Core.Parser.Helpers
     occText,
     moduleName,
     rawDoc,
+    warningText,
   )
 where
 
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import GHC.Data.FastString (unpackFS)
 import GHC.Hs (GhcPs, LHsDoc, WithHsDocIdentifiers (..))
 import GHC.Hs.DocString (renderHsDocString)
 import GHC.Parser.Annotation (HasLoc, getHasLoc)
 import GHC.Types.Name.Occurrence (occNameString)
 import GHC.Types.Name.Reader (RdrName, rdrNameOcc)
+import GHC.Types.SourceText (StringLiteral (..))
 import GHC.Types.SrcLoc
   ( GenLocated (..),
     SrcSpan (..),
@@ -31,9 +34,15 @@ import GHC.Types.SrcLoc
     srcSpanEndLine,
     srcSpanStartCol,
     srcSpanStartLine,
+    unLoc,
+  )
+import GHC.Unit.Module.Warnings
+  ( InWarningCategory (..),
+    WarningCategory (..),
+    WarningTxt (..),
   )
 import HaskellReviewer.Core.Cpp (PositionMap, mapSpan)
-import HaskellReviewer.Core.Decls (RawDoc (..))
+import HaskellReviewer.Core.Decls (RawDoc (..), WarningKind (..), WarningText (..))
 import HaskellReviewer.Core.Project (ModuleName (..))
 import HaskellReviewer.Core.SourceText (ColumnMap, GhcRange (..), ghcToSpan)
 import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
@@ -88,3 +97,20 @@ moduleName = ModuleName . Text.pack . Ghc.moduleNameString
 rawDoc :: SpanMap -> LHsDoc GhcPs -> RawDoc
 rawDoc spans d@(L _ w) =
   RawDoc {span = locatedSpan spans d, text = Text.pack (renderHsDocString w.hsDocString)}
+
+-- | A @DEPRECATED@ or @WARNING@ pragma's text, at this span.
+warningText :: Span -> WarningTxt GhcPs -> WarningText
+warningText s w =
+  WarningText
+    { span = s,
+      kind = case w of
+        WarningTxt category _ _ -> WarningPragma (categoryText <$> category)
+        DeprecatedTxt _ _ -> DeprecatedPragma,
+      messages = case w of
+        WarningTxt _ _ ms -> map message ms
+        DeprecatedTxt _ ms -> map message ms
+    }
+  where
+    categoryText (L _ c) = case unLoc c.iwc_wc of
+      WarningCategory fs -> Text.pack (unpackFS fs)
+    message (L _ m) = Text.pack (unpackFS m.hsDocString.sl_fs)

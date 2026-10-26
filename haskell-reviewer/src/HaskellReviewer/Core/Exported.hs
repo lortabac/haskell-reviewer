@@ -20,7 +20,12 @@ import HaskellReviewer.Core.Decls
     DataBody (..),
     Decl (..),
     DeclInfo (..),
+    FamInstDecl (..),
+    FamInstForm (..),
     FieldDecl (..),
+    InstanceBody (..),
+    InstanceDecl (..),
+    InstanceForm (..),
     MethodDecl (..),
     NewtypeBody (..),
     PatSynDecl (..),
@@ -38,7 +43,7 @@ import HaskellReviewer.Core.ModuleModel
     Subs (..),
   )
 import HaskellReviewer.Core.ModuleModel qualified as Model (Located (..))
-import HaskellReviewer.Core.Names (DeclId (..))
+import HaskellReviewer.Core.Names (DeclId (..), InstanceKey (..))
 import HaskellReviewer.Core.Project (ModuleName)
 
 {- Note [Exported]
@@ -54,8 +59,12 @@ import HaskellReviewer.Core.Project (ModuleName)
 - @pattern P@: a pattern synonym or a constructor. @data x@: any
   value-level name.
 - @M.x@ counts only when M is this module.
+- A data family's @D(..)@ (or @D(A)@) also covers the constructors and
+  fields of its instances here, even as @M.D(..)@ for a family from
+  another module M (GHC does the same).
 
-Instances are always exported. Fixities follow their target.
+Instances and type and data instances are always exported. Fixities
+follow their target.
 -}
 
 -- | What the export list names.
@@ -69,7 +78,11 @@ data Wanted = Wanted
     -- | @T(A, b)@.
     someOf :: Map Text (Set Text),
     -- | Every name in some @T(A, b)@.
-    listedSubs :: Set Text
+    listedSubs :: Set Text,
+    -- | @D(..)@ and @D(A)@ again, with any qualifier: a data family's
+    -- children can be instances here of a family from elsewhere.
+    familyAllOf :: Set Text,
+    familySomeOf :: Map Text (Set Text)
   }
 
 -- | Set the exported flags. See Note [Exported].
@@ -88,15 +101,31 @@ markExported self exports = map (decl wanted)
           patterns = Set.empty,
           allOf = Set.empty,
           someOf = Map.empty,
-          listedSubs = Set.empty
+          listedSubs = Set.empty,
+          familyAllOf = Set.empty,
+          familySomeOf = Map.empty
         }
 
 export :: ModuleName -> Export -> Wanted -> Wanted
 export self e w = case e of
   ExportModule m | m.name.value == self -> w {everything = True}
-  ExportItem i | ours i.name -> item i
+  ExportItem i
+    | ours i.name -> family i (item i)
+    | otherwise -> family i w
   _ -> w
   where
+    family i w' = case i.subs of
+      NoSubs -> w'
+      AllSubs -> w' {familyAllOf = Set.insert i.name.occ w'.familyAllOf}
+      SomeSubs l ->
+        let listed = Set.fromList (map (.occ) l.names)
+         in w'
+              { familyAllOf =
+                  if null l.wildcardAt
+                    then w'.familyAllOf
+                    else Set.insert i.name.occ w'.familyAllOf,
+                familySomeOf = Map.insertWith Set.union i.name.occ listed w'.familySomeOf
+              }
     ours n = maybe True (== self) n.qualifier
     item i =
       let n = i.name.occ
@@ -149,6 +178,7 @@ decl w = \case
               context = c.context,
               fundeps = c.fundeps,
               kindSig = c.kindSig,
+              roles = c.roles,
               fixity = c.fixity,
               methods = map method c.methods,
               associated = map assoc c.associated,
@@ -160,6 +190,7 @@ decl w = \case
         { info = mark w (has w.values (nameOf v.info)) v.info,
           signature = v.signature,
           definition = v.definition,
+          foreignExports = v.foreignExports,
           fixity = v.fixity
         }
   PatSynD p ->
@@ -174,6 +205,39 @@ decl w = \case
                 [mark w (patField (nameOf f)) f | f <- p.fields],
               fixity = p.fixity
             }
+  InstanceD i ->
+    InstanceD
+      InstanceDecl
+        { info = mark w True i.info,
+          orphan = i.orphan,
+          form = case i.form of
+            ExplicitInstance b ->
+              ExplicitInstance
+                InstanceBody
+                  { methods = b.methods,
+                    associated = map (famInst w) b.associated
+                  }
+            other -> other
+        }
+  FamInstD f -> FamInstD (famInst w f)
+  SpliceD e -> SpliceD e
+
+-- | A type or data instance: always exported. Its constructors and
+-- fields go with the family.
+famInst :: Wanted -> FamInstDecl -> FamInstDecl
+famInst w f =
+  FamInstDecl
+    { info = mark w True f.info,
+      family = f.family,
+      form = case f.form of
+        TypeInstance -> TypeInstance
+        DataInstance b -> DataInstance (dataBody fw f.family b)
+        NewtypeInstance b -> NewtypeInstance (newtypeBody fw f.family b),
+      orphan = f.orphan
+    }
+  where
+    -- The family's name may be qualified with another module.
+    fw = w {allOf = w.familyAllOf, someOf = w.familySomeOf}
 
 -- | A type (exported or not), its constructors and fields.
 typeDecl :: Wanted -> Bool -> TypeDecl -> TypeDecl
@@ -181,28 +245,39 @@ typeDecl w exported t =
   TypeDecl
     { info = mark w exported t.info,
       kindSig = t.kindSig,
+      roles = t.roles,
       form = case t.form of
-        DataType b -> DataType (dataBody b)
-        TypeData b -> TypeData (dataBody b)
-        Newtype b ->
-          Newtype NewtypeBody {constructor = con b.constructor, derivings = b.derivings}
+        DataType b -> DataType (dataBody w parent b)
+        TypeData b -> TypeData (dataBody w parent b)
+        Newtype b -> Newtype (newtypeBody w parent b)
         other -> other,
       fixity = t.fixity
     }
   where
-    dataBody b = DataBody {constructors = map con b.constructors, derivings = b.derivings}
     parent = nameOf t.info
+
+dataBody :: Wanted -> Text -> DataBody -> DataBody
+dataBody w parent b =
+  DataBody {constructors = map (con w parent) b.constructors, derivings = b.derivings}
+
+newtypeBody :: Wanted -> Text -> NewtypeBody -> NewtypeBody
+newtypeBody w parent b =
+  NewtypeBody {constructor = con w parent b.constructor, derivings = b.derivings}
+
+-- | A constructor and its fields, of this type (or data family).
+con :: Wanted -> Text -> ConDecl -> ConDecl
+con w parent c =
+  ConDecl
+    { info = mark w (has w.patterns n || sub w parent n) c.info,
+      args = case c.args of
+        RecordArgs fs -> RecordArgs (map field fs)
+        GadtRecordArgs fs -> GadtRecordArgs (map field fs)
+        other -> other,
+      fixity = c.fixity
+    }
+  where
+    n = nameOf c.info
     child i = has w.values (nameOf i) || sub w parent (nameOf i)
-    con (c :: ConDecl) =
-      let n = nameOf c.info
-       in ConDecl
-            { info = mark w (has w.patterns n || sub w parent n) c.info,
-              args = case c.args of
-                RecordArgs fs -> RecordArgs (map field fs)
-                GadtRecordArgs fs -> GadtRecordArgs (map field fs)
-                other -> other,
-              fixity = c.fixity
-            }
     field (f :: FieldDecl) =
       FieldDecl {info = mark w (child f.info) f.info, type_ = f.type_}
 
@@ -227,3 +302,5 @@ nameOf :: DeclInfo -> Text
 nameOf i = case i.id of
   Named _ n -> n
   Field _ n -> n
+  -- Instances are always exported: the name isn't looked up.
+  Inst k -> k.name

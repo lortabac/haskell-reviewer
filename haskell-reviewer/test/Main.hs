@@ -16,6 +16,7 @@ import HaskellReviewer.Core.DeclsGoldenTest qualified
 import HaskellReviewer.Core.DeclsTest qualified
 import HaskellReviewer.Core.FileListTest qualified
 import HaskellReviewer.Core.GitTest qualified
+import HaskellReviewer.Core.InstanceKeyTest qualified
 import HaskellReviewer.Core.ModulesGoldenTest qualified
 import HaskellReviewer.Core.ModulesTest qualified
 import HaskellReviewer.Core.PackageGlobTest qualified
@@ -97,6 +98,7 @@ main = do
               HaskellReviewer.Core.DeclsGoldenTest.tests,
               HaskellReviewer.Core.DeclsTest.tests,
               HaskellReviewer.Core.DeclsTest.linearTests,
+              HaskellReviewer.Core.InstanceKeyTest.tests,
               HaskellReviewer.Core.ParseGoldenTest.tests,
               HaskellReviewer.Core.ParserTest.tests,
               HaskellReviewer.Core.SourceTextTest.tests,
