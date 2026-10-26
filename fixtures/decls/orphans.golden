@@ -1,0 +1,81 @@
+type:Local data name@6:6-6:11 exported
+  extent:
+    head @6:1-6:19
+  head: data Local = Local
+  con:Local constructor name@6:14-6:19 exported
+    extent:
+      head @6:14-6:19
+    head: Local
+    prefix
+class:LocalC class name@7:7-7:13 exported
+  extent:
+    head @7:1-7:15
+  head: class LocalC a
+type:Syn synonym name@8:6-8:9 exported
+  extent:
+    head @8:1-8:15
+  head: type Syn = Int
+type:F open family name@9:13-9:14 exported
+  extent:
+    head @9:1-9:16
+  head: type family F a
+  instance inst:F:Int
+inst:Show:Local instance name@12:10-12:14 exported
+  extent:
+    head @12:1-12:20
+  head: instance Show Local
+inst:LocalC:Int instance name@13:10-13:16 exported
+  extent:
+    head @13:1-13:20
+  head: instance LocalC Int
+inst:Show:Syn instance name@14:10-14:14 exported
+  extent:
+    head @14:1-14:18
+  head: instance Show Syn
+inst:Show:Proxy 'Local instance name@15:10-15:14 exported
+  extent:
+    head @15:1-15:29
+  head: instance Show ( Proxy ' Local )
+inst:Show:Local instance name@16:10-16:14 exported
+  extent:
+    head @16:1-16:28
+  head: instance Show Orphans.Local
+inst:Show:Maybe Int instance orphan name@18:10-18:14 exported
+  extent:
+    head @18:1-18:26
+  head: instance Show ( Maybe Int )
+inst:Show:Local instance orphan name@19:10-19:14 exported
+  extent:
+    head @19:1-19:26
+  head: instance Show Other.Local
+inst:Eq:Maybe Bool standalone deriving orphan name@20:19-20:21 exported
+  extent:
+    head @20:1-20:34
+  head: deriving instance Eq ( Maybe Bool )
+inst:F:Int type instance of F name@23:15-23:16 exported
+  extent:
+    head @23:1-23:27
+  head: type instance F Int = Bool
+inst:G:Int type instance of G orphan name@24:15-24:16 exported
+  extent:
+    head @24:1-24:27
+  head: type instance G Int = Bool
+inst:G:Local type instance of G name@25:15-25:16 exported
+  extent:
+    head @25:1-25:29
+  head: type instance G Local = Bool
+type:X data name@28:6-28:7 exported
+  extent:
+    head @28:1-28:33
+  head: data X = X deriving ( Other.Show )
+  con:X constructor name@28:10-28:11 exported
+    extent:
+      head @28:10-28:11
+    head: X
+    prefix
+  deriving @28:12-28:33
+    class Other.Show inst:Show:X
+inst:Show:X derived on type:X name@28:22-28:32 exported
+  extent:
+    head @28:22-28:32
+  head: Other.Show

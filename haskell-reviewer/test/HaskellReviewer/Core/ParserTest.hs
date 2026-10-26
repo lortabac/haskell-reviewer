@@ -19,13 +19,21 @@ import HaskellReviewer.Core.Decls
     DerivStrategy (..),
     DerivingClause (..),
     Extent (..),
+    FamInstDecl (..),
+    FamInstForm (..),
     FieldDecl (..),
+    InstanceBody (..),
+    InstanceDecl (..),
+    InstanceForm (..),
     MethodDecl (..),
+    ModulePragma (..),
     NewtypeBody (..),
+    OpenFamilyBody (..),
     Part (..),
     PartRole (..),
     PatSynDecl (..),
     PatSynDir (..),
+    PragmaKind (..),
     Signature (..),
     Strictness (..),
     TypeDecl (..),
@@ -222,12 +230,20 @@ declKinds m =
            DocChunk _ _ -> "chunk"
        | d <- m.docItems
        ]
+    <> [ case p.kind of
+           Rules _ -> "rules"
+           Complete _ _ -> "complete"
+           Annotation _ -> "ann"
+           Default _ -> "default"
+       | p <- m.pragmas
+       ]
   where
     decl d =
-      info (declInfo d) <> case d of
+      maybe [] info (declInfo d) <> case d of
         TypeD t -> typeDecl t
         ClassD c ->
           ["class"]
+            <> ["class roles" | Just _ <- [c.roles]]
             <> ["superclasses" | Just _ <- [c.context]]
             <> ["fundeps" | not (null c.fundeps)]
             <> ["minimal" | Just _ <- [c.minimal]]
@@ -237,8 +253,10 @@ declKinds m =
           [ case v.definition of
               Equations -> "equations"
               PatternBound -> "pattern bound"
+              ForeignImport -> "foreign import"
               NoDefinition -> "no definition"
           ]
+            <> ["foreign export" | not (null v.foreignExports)]
             <> ["shared signature" | Just s <- [v.signature], length s.names > 1]
             <> ["value fixity" | Just _ <- [v.fixity]]
         PatSynD p ->
@@ -249,8 +267,30 @@ declKinds m =
           ]
             <> ["pattern signature" | Just _ <- [p.signature]]
             <> ["pattern field" | not (null p.fields)]
+        InstanceD i ->
+          ["orphan" | i.orphan] <> case i.form of
+            ExplicitInstance b ->
+              "instance"
+                : map (const "instance method") b.methods
+                  <> concatMap (\f -> "associated instance" : famInst f) b.associated
+            StandaloneDeriving _ -> ["standalone deriving"]
+            DerivedInstance _ -> ["derived instance"]
+        FamInstD f -> famInst f
+        SpliceD _ -> ["splice"]
+    famInst f =
+      info f.info
+        <> ["orphan family instance" | f.orphan]
+        <> case f.form of
+          TypeInstance -> ["type instance"]
+          DataInstance b ->
+            "data instance"
+              : concatMap con b.constructors
+                <> concatMap deriving_ b.derivings
+          NewtypeInstance b ->
+            "newtype instance" : con b.constructor <> concatMap deriving_ b.derivings
     info i =
-      ["exported" | i.exported]
+      ["warning" | Just _ <- [i.warning]]
+        <> ["exported" | i.exported]
         <> ["not exported" | not i.exported]
         <> ["haddock" | not (null i.haddock)]
         <> [ case p.role of
@@ -271,12 +311,19 @@ declKinds m =
           Newtype _ -> "newtype"
           TypeData _ -> "type data"
           Synonym -> "synonym"
-          OpenFamily [] -> "open family"
+          OpenFamily b | null b.defaults -> "open family"
           OpenFamily _ -> "family default"
-          DataFamily -> "data family"
+          DataFamily _ -> "data family"
           ClosedFamily _ -> "closed family"
       ]
+        <> [ "family instances"
+           | case t.form of
+               OpenFamily b -> not (null b.instances)
+               DataFamily is -> not (null is)
+               _ -> False
+           ]
         <> ["kind signature" | Just _ <- [t.kindSig]]
+        <> ["type roles" | Just _ <- [t.roles]]
         <> ["type fixity" | Just _ <- [t.fixity]]
         <> case t.form of
           DataType b -> concatMap con b.constructors <> concatMap deriving_ b.derivings
@@ -314,25 +361,35 @@ declKinds m =
 -- | Every name 'declKinds' can give.
 allDeclKinds :: [Text.Text]
 allDeclKinds =
-  [ "anyclass",
+  [ "ann",
+    "anyclass",
     "arg doc",
     "associated",
+    "associated instance",
     "bidirectional",
     "body part",
     "chunk",
     "class",
+    "class roles",
     "closed family",
+    "complete",
     "constructor fixity",
     "data",
     "data family",
+    "data instance",
+    "default",
     "default method",
     "default signature",
+    "derived instance",
     "doc part",
     "equations",
     "explicitly bidirectional",
     "exported",
     "family default",
+    "family instances",
     "field",
+    "foreign export",
+    "foreign import",
     "fundeps",
     "gadt",
     "gadt record",
@@ -340,12 +397,15 @@ allDeclKinds =
     "head part",
     "heading",
     "infix",
+    "instance",
+    "instance method",
     "kind signature",
     "lazy",
     "method",
     "method fixity",
     "minimal",
     "newtype",
+    "newtype instance",
     "newtype strategy",
     "no definition",
     "no strategy",
@@ -353,24 +413,32 @@ allDeclKinds =
     "not exported",
     "nounpack",
     "open family",
+    "orphan",
+    "orphan family instance",
     "pattern bound",
     "pattern field",
     "pattern signature",
     "pragma part",
     "prefix",
     "record",
+    "rules",
     "shared signature",
+    "splice",
+    "standalone deriving",
     "stock",
     "strict",
     "superclasses",
     "synonym",
     "type data",
     "type fixity",
+    "type instance",
+    "type roles",
     "unidirectional",
     "unmarked",
     "unpack",
     "value fixity",
-    "via"
+    "via",
+    "warning"
   ]
 
 -- | A pragma, after a #warning, in #if 1.

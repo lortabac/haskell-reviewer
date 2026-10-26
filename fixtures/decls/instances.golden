@@ -1,0 +1,176 @@
+class:C class name@9:7-9:8 exported
+  extent:
+    head @9:1-12:22
+  head: class C a b where type AT a b data AD a cm :: a -> b -> Int
+  val:cm method name@12:3-12:5 exported
+    extent:
+      head @12:3-12:22
+    head: cm :: a -> b -> Int
+    signature @12:3-12:22 cm
+  type:AT open family name@10:8-10:10 exported
+    extent:
+      head @10:3-10:14
+    head: type AT a b
+    instance inst:AT:[a] (Maybe b)
+  type:AD data family name@11:8-11:10 exported
+    extent:
+      head @11:3-11:12
+    head: data AD a
+    instance inst:AD:[a]
+type:Box data name@14:6-14:9 exported
+  extent:
+    head @14:1-14:19
+  head: data Box a = Box a
+  con:Box constructor name@14:14-14:17 exported
+    extent:
+      head @14:14-14:19
+    head: Box a
+    prefix
+    arg @14:18-14:19 "a"
+inst:Show:Box a instance name@17:20-17:24 exported
+  extent:
+    doc @16:1-16:21
+    head @17:1-18:3
+    body @18:3-18:80
+    head @18:80-19:3
+    body @19:3-19:21
+  head: instance Show a => Show ( Box a ) where
+  haddock @16:1-16:21
+    |  With a context.
+  method showsPrec name@18:3-18:12
+    extent:
+      body @18:3-18:80
+    head: 
+  method show name@19:3-19:7
+    extent:
+      body @19:3-19:21
+    head: 
+inst:Eq:Box a instance name@22:18-22:20 exported
+  extent:
+    doc @21:1-21:43
+    head @22:1-23:3
+    body @23:3-23:26
+  head: instance Eq b => Eq ( Box b ) where
+  haddock @21:1-21:43
+    |  Other variable names, same key shape.
+  method == name@23:9-23:11
+    extent:
+      body @23:3-23:26
+    head: 
+inst:C:[a] (Maybe b) instance name@26:10-26:11 exported
+  extent:
+    doc @25:1-25:44
+    head @26:1-30:3
+    body @30:3-30:13
+  head: instance C [ x ] ( Maybe y ) where type AT [ x ] ( Maybe y ) = x data AD [ x ] = ADList x
+  haddock @25:1-25:44
+    |  Multi-parameter, associated instances.
+  method cm name@30:3-30:5
+    extent:
+      body @30:3-30:13
+    head: 
+  inst:AT:[a] (Maybe b) type instance of AT name@28:8-28:10 exported
+    extent:
+      head @28:3-28:28
+    head: type AT [ x ] ( Maybe y ) = x
+  inst:AD:[a] data instance of AD name@29:8-29:10 exported
+    extent:
+      head @29:3-29:25
+    head: data AD [ x ] = ADList x
+    con:ADList constructor name@29:17-29:23 exported
+      extent:
+        head @29:17-29:25
+      head: ADList x
+      prefix
+      arg @29:24-29:25 "x"
+inst:C:Int Int instance name@33:30-33:31 exported
+  extent:
+    doc @32:1-32:57
+    head @33:1-35:3
+    pragma @35:3-35:20
+    head @35:20-36:3
+    body @36:3-37:17
+    head @37:17-38:3
+    pragma @38:3-38:40
+  head: instance {-# OVERLAPPING #-} C Int Int where cm :: Int -> Int -> Int
+  haddock @32:1-32:57
+    |  OVERLAPPING, an instance signature, method pragmas.
+  method cm name@34:3-34:5
+    extent:
+      head @34:3-34:26
+      pragma @35:3-35:20
+      body @36:3-37:17
+    head: cm :: Int -> Int -> Int
+inst:MonadState:a (StateT a b) instance orphan name@40:33-40:43 exported
+  extent:
+    head @40:1-41:3
+    body @41:3-41:18
+    head @41:18-42:3
+    body @42:3-42:20
+  head: instance forall s m . Monad m => MonadState s ( StateT s m ) where
+  method get name@41:3-41:6
+    extent:
+      body @41:3-41:18
+    head: 
+  method put name@42:3-42:6
+    extent:
+      body @42:3-42:20
+    head: 
+type::+: data name@44:8-44:11 exported
+  extent:
+    head @44:1-44:25
+  head: data a :+: b = L a | R b
+  con:L constructor name@44:16-44:17 exported
+    extent:
+      head @44:16-44:19
+    head: L a
+    prefix
+    arg @44:18-44:19 "a"
+  con:R constructor name@44:22-44:23 exported
+    extent:
+      head @44:22-44:25
+    head: R b
+    prefix
+    arg @44:24-44:25 "b"
+inst:Semigroup:a :+: b instance name@46:40-46:49 exported
+  extent:
+    head @46:1-47:3
+    body @47:3-47:13
+  head: instance ( Semigroup x , Semigroup y ) => Semigroup ( x :+: y ) where
+  method <> name@47:5-47:7
+    extent:
+      body @47:3-47:13
+    head: 
+inst:Monoid:a :+: b instance name@50:10-50:16 exported
+  extent:
+    head @50:1-51:3
+    body @51:3-51:21
+  head: instance Monoid ( ( :+: ) p q ) where
+  method mempty name@51:3-51:9
+    extent:
+      body @51:3-51:21
+    head: 
+inst:C:'[] '(1, "s") instance name@54:10-54:11 exported
+  extent:
+    head @54:1-54:25
+  head: instance C ' [ ] ' ( 1 , "s" )
+inst:C:(Proxy '[Int, Bool]) ([a], (a, b), ()) instance name@55:10-55:11 exported
+  extent:
+    head @55:1-55:50
+  head: instance C ( Proxy ' [ Int , Bool ] ) ( [ a ] , ( a , b ) , ( ) )
+inst:C:(Map a b) (a -> b) instance name@56:10-56:11 exported
+  extent:
+    head @56:1-56:32
+  head: instance C ( M.Map k v ) ( k -> v )
+inst:C:(Maybe (Maybe a)) (Either (Maybe a) b) instance name@57:10-57:11 exported
+  extent:
+    head @57:1-57:50
+  head: instance C ( Maybe ( Maybe c ) ) ( Either ( Maybe c ) d )
+inst:Show:Proxy a instance orphan name@60:10-60:14 exported
+  extent:
+    head @60:1-60:30
+  head: instance Show ( Proxy @ Type a )
+inst:Show:Proxy (a :: b) instance orphan name@61:10-61:14 exported
+  extent:
+    head @61:1-61:31
+  head: instance Show ( Proxy ( a :: k ) )

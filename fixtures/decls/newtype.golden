@@ -12,8 +12,18 @@ type:Age newtype name@5:9-5:12 exported
     prefix
     arg @5:19-5:22 "Int"
   deriving @6:3-6:29 newtype
-    class Eq
-    class Num
+    class Eq inst:Eq:Age
+    class Num inst:Num:Age
+inst:Eq:Age derived newtype on type:Age name@6:21-6:23 exported
+  extent:
+    head @6:12-6:19
+    head @6:21-6:23
+  head: newtype Eq
+inst:Num:Age derived newtype on type:Age name@6:25-6:28 exported
+  extent:
+    head @6:12-6:19
+    head @6:25-6:28
+  head: newtype Num
 type:Rec newtype name@8:9-8:12 exported
   extent:
     head @8:1-8:33

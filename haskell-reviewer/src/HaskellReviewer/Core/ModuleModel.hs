@@ -50,7 +50,17 @@ where
 
 import Data.Text (Text)
 import HaskellReviewer.Core.Cpp.Warning (CppWarning, renderCppWarning)
-import HaskellReviewer.Core.Decls (Decl, Located (..), RawDoc (..), forceDecls)
+import HaskellReviewer.Core.Decls
+  ( Decl,
+    Located (..),
+    ModulePragma,
+    RawDoc (..),
+    WarningKind (..),
+    WarningText (..),
+    forceDecls,
+    forcePragmas,
+    forceWarningText,
+  )
 import HaskellReviewer.Core.Project (ModuleName)
 import HaskellReviewer.Core.Span (Span)
 import HaskellReviewer.Core.Tokens (Tokens)
@@ -145,6 +155,8 @@ data ParsedModule = ParsedModule
     -- | Sorted by where they start.
     declarations :: [Decl],
     docItems :: [DocItem],
+    -- | The Pragmas block (SPEC §4.2), in source order.
+    pragmas :: [ModulePragma],
     -- | The whole module's, after CPP (Note [Packed tokens] in
     -- "HaskellReviewer.Core.Tokens").
     tokens :: Tokens
@@ -168,22 +180,6 @@ data ModuleHeader = ModuleHeader
     -- | A @DEPRECATED@ or @WARNING@ pragma on the module.
     warning :: Maybe WarningText
   }
-  deriving (Eq, Show)
-
--- | @{-# DEPRECATED "..." #-}@ or @{-# WARNING "..." #-}@, on the module
--- or on an export.
-data WarningText = WarningText
-  { span :: Span,
-    kind :: WarningKind,
-    messages :: [Text]
-  }
-  deriving (Eq, Show)
-
--- | Which pragma.
-data WarningKind
-  = DeprecatedPragma
-  | -- | With its category, if given (@WARNING in "x-foo"@).
-    WarningPragma (Maybe Text)
   deriving (Eq, Show)
 
 -- | One entry of the export list.
@@ -341,22 +337,19 @@ forceModuleParse = \case
                 list m.warnings `seq`
                   forceDecls m.declarations `seq`
                     list m.docItems `seq`
-                      m.tokens `seq`
-                        ()
-    header h = whnf h.name `seq` whnf h.haddock `seq` maybe () warningText h.warning
-    warningText w = list w.messages `seq` warningKind w.kind
-    warningKind = \case
-      WarningPragma c -> whnf c
-      DeprecatedPragma -> ()
+                      forcePragmas m.pragmas `seq`
+                        m.tokens `seq`
+                          ()
+    header h = whnf h.name `seq` whnf h.haddock `seq` maybe () forceWarningText h.warning
     export = \case
       ExportItem i -> item i
-      ExportModule m -> maybe () warningText m.warning
+      ExportModule m -> maybe () forceWarningText m.warning
       _ -> ()
     item i =
       itemName i.name `seq`
         subs i.subs `seq`
           whnf i.doc `seq`
-            maybe () warningText i.warning
+            maybe () forceWarningText i.warning
     itemName n = whnf n.qualifier
     subs = \case
       SomeSubs l -> each itemName l.names `seq` whnf l.wildcardAt

@@ -1,0 +1,97 @@
+pat:P pattern bidirectional name@9:9-9:10 exported
+  extent:
+    head @9:1-9:17
+    body @10:1-10:14
+    pragma @26:1-26:45
+  head: pattern P :: Int
+  warning deprecated @26:1-26:45
+    | field and pattern
+  signature @9:1-9:17 P
+type:T data name@14:6-14:7 exported
+  extent:
+    head @14:1-14:29
+    pragma @24:1-24:38
+  head: data T = A | B { fb :: Int }
+  warning deprecated @24:1-24:38
+    | type only
+  con:A constructor name@14:10-14:11 exported
+    extent:
+      head @14:10-14:11
+      pragma @23:1-23:52
+    head: A
+    warning warning in x-partial @23:1-23:52
+      | one
+      | two
+    prefix
+  con:B constructor name@14:14-14:15 exported
+    extent:
+      head @14:14-14:29
+      pragma @25:1-25:38
+    head: B { fb :: Int }
+    warning deprecated @25:1-25:38
+      | data only
+    record
+    field:T.fb field name@14:18-14:20 exported
+      extent:
+        head @14:18-14:27
+        pragma @26:1-26:45
+      head: fb :: Int
+      warning deprecated @26:1-26:45
+        | field and pattern
+      type @14:24-14:27 "Int"
+class:Cl class name@16:7-16:9 exported
+  extent:
+    head @16:1-17:10
+  head: class Cl a where cm :: a
+  val:cm method name@17:3-17:5 exported
+    extent:
+      head @17:3-17:10
+      pragma @23:1-23:52
+    head: cm :: a
+    warning warning in x-partial @23:1-23:52
+      | one
+      | two
+    signature @17:3-17:10 cm
+val:f equations name@19:1-19:2 exported
+  extent:
+    head @19:1-19:9
+    body @20:1-20:6
+    pragma @22:1-22:29
+    head @40:1-40:30
+  head: f :: Int foreign export ccall f :: Int
+  warning deprecated @22:1-22:29
+    | use g
+  signature @19:1-19:9 f
+  foreign export @40:1-40:30
+splice
+  extent:
+    head @36:1-36:11
+  head: $ ( pure [ ] )
+splice
+  extent:
+    head @37:1-37:15
+  head: makeLenses '' T
+val:c_sin foreign import name@39:42-39:47 exported
+  extent:
+    head @39:1-39:67
+  head: foreign import ccall unsafe "math.h sin" c_sin :: Double -> Double
+  signature @39:1-39:67 c_sin
+type:R data name@45:6-45:7 exported
+  extent:
+    head @44:1-44:20
+    head @45:1-45:13
+  head: type role R nominal data R a = R
+  roles @44:1-44:20
+  con:R constructor name@45:12-45:13 exported
+    extent:
+      head @45:12-45:13
+    head: R
+    prefix
+pragma @4:1-7:6 rules map/map id
+pragma @11:1-11:19 complete P
+pragma @12:1-12:26 complete P :: Int
+pragma @29:1-29:22 ann f
+pragma @30:1-30:26 ann type T
+pragma @31:1-31:28 ann module
+pragma @33:1-33:26 default
+pragma @34:1-34:17 default Cl

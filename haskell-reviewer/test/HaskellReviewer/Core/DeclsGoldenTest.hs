@@ -79,9 +79,19 @@ cases =
     plain "tabs-unicode.hs",
     (plain "bird.lhs") {settings = defaultParseSettings {literate = BirdOrLatex}},
     (plain "sig.hsig") {settings = defaultParseSettings {kind = SignatureFile}},
-    -- Instances and other kinds not in the model: skipped, docs kept
-    -- off their neighbours.
-    plain "skipped.hs",
+    -- One of each other kind, with docs: each keeps its own, or GHC
+    -- drops them, but they never go to a neighbour.
+    plain "other-kinds.hs",
+    -- Keys (contexts, multi-param, operators, lists, promoted,
+    -- qualifiers, kinds), methods, associated instances.
+    plain "instances.hs",
+    -- Clause keys with the arity table, standalone deriving.
+    plain "deriving.hs",
+    plain "orphans.hs",
+    -- Local and external families, data instance field parents.
+    plain "family-instances.hs",
+    -- RULES, COMPLETE, warnings, ANN, default, splices, foreign, roles.
+    plain "pragmas.hs",
     (plain "tokens.hs") {dumper = dumpTokens},
     -- Checked against ghc -haddock --show-iface (9.14).
     plain "haddock-pairing.hs",

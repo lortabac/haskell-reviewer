@@ -1,0 +1,123 @@
+type:T data name@4:6-4:7 exported
+  extent:
+    head @4:1-4:15
+    head @13:1-13:29
+  head: data T a = T a type role T representational
+  roles @13:1-13:29
+  con:T constructor name@4:12-4:13 exported
+    extent:
+      head @4:12-4:15
+    head: T a
+    prefix
+    arg @4:14-4:15 "a"
+inst:Show:T a instance name@7:10-7:14 exported
+  extent:
+    doc @6:1-6:40
+    head @7:1-8:3
+    body @8:3-8:15
+  head: instance Show ( T a ) where
+  haddock @6:1-6:40
+    |  Instance doc: not on the next one.
+  method show name@8:3-8:7
+    extent:
+      body @8:3-8:15
+    head: 
+inst:Eq:T a standalone deriving name@11:27-11:29 exported
+  extent:
+    doc @10:1-10:15
+    head @11:1-11:35
+  head: deriving instance Eq a => Eq ( T a )
+  haddock @10:1-10:15
+    |  Deriving.
+type:F open family name@15:13-15:14 exported
+  extent:
+    head @15:1-15:16
+  head: type family F a
+  instance inst:F:Int
+inst:F:Int type instance of F name@17:15-17:16 exported
+  extent:
+    doc @16:1-16:24
+    head @17:1-17:27
+  head: type instance F Int = Bool
+  haddock @16:1-16:24
+    |  Type instance doc.
+type:D data family name@19:13-19:14 exported
+  extent:
+    head @19:1-19:16
+  head: data family D a
+  instance inst:D:Int
+inst:D:Int data instance of D name@21:15-21:16 exported
+  extent:
+    doc @20:1-20:24
+    head @21:1-21:27
+  head: data instance D Int = DInt
+  haddock @20:1-20:24
+    |  Data instance doc.
+  con:DInt constructor name@21:23-21:27 exported
+    extent:
+      head @21:23-21:27
+    head: DInt
+    prefix
+inst:Semigroup:T a instance name@23:10-23:19 exported
+  extent:
+    head @23:1-24:3
+    body @24:3-24:13
+    doc @25:1-25:24
+  head: instance Semigroup ( T a ) where
+  haddock @25:1-25:24
+    |  After an instance.
+  method <> name@24:5-24:7
+    extent:
+      body @24:3-24:13
+    head: 
+val:c_sin foreign import name@27:28-27:33 exported
+  extent:
+    head @27:1-27:53
+  head: foreign import ccall "sin" c_sin :: Double -> Double
+  signature @27:1-27:53 c_sin
+val:exported equations name@34:1-34:9 exported
+  extent:
+    head @30:1-30:37
+    head @34:1-34:16
+    body @35:1-35:13
+  head: foreign export ccall exported :: Int exported :: Int
+  signature @34:1-34:16 exported
+  foreign export @30:1-30:37
+val:afterExport equations name@31:1-31:12 exported
+  extent:
+    head @31:1-31:19
+    body @32:1-32:16
+    pragma @45:16-45:33
+  head: afterExport :: Int
+  warning deprecated @45:16-45:33
+    | one
+  signature @31:1-31:19 afterExport
+val:afterDefault equations name@39:1-39:13 exported
+  extent:
+    head @39:1-39:20
+    body @40:1-40:17
+    pragma @45:35-45:53
+  head: afterDefault :: Int
+  warning deprecated @45:35-45:53
+    | two
+  signature @39:1-39:20 afterDefault
+val:kept equations name@49:1-49:5 exported
+  extent:
+    pragma @44:1-44:30
+    doc @48:1-48:11
+    head @49:1-49:12
+    body @50:1-50:9
+  head: kept :: Int
+  haddock @48:1-48:11
+    |  Kept.
+  warning deprecated @44:1-44:30
+    | old
+  signature @49:1-49:12 kept
+splice
+  extent:
+    head @53:1-53:11
+  head: $ ( pure [ ] )
+pragma @38:1-38:14 default
+pragma @42:1-42:38 rules id
+pragma @43:1-43:19 complete T
+pragma @46:1-46:24 ann kept

@@ -1,0 +1,149 @@
+type:T data name@7:6-7:7 exported
+  extent:
+    head @7:1-10:29
+  head: data T a b = T a b deriving ( Eq , Functor ) deriving stock ( Foldable ) deriving anyclass ( NFData )
+  con:T constructor name@7:14-7:15 exported
+    extent:
+      head @7:14-7:19
+    head: T a b
+    prefix
+    arg @7:16-7:17 "a"
+    arg @7:18-7:19 "b"
+  deriving @8:3-8:25
+    class Eq inst:Eq:T a b
+    class Functor inst:Functor:T a
+  deriving @9:3-9:28 stock
+    class Foldable inst:Foldable:T a
+  deriving @10:3-10:29 anyclass
+    class NFData inst:NFData:T a b
+inst:Eq:T a b derived on type:T name@8:13-8:15 exported
+  extent:
+    head @8:13-8:15
+  head: Eq
+inst:Functor:T a derived on type:T name@8:17-8:24 exported
+  extent:
+    head @8:17-8:24
+  head: Functor
+inst:Foldable:T a derived stock on type:T name@9:19-9:27 exported
+  extent:
+    head @9:12-9:17
+    head @9:19-9:27
+  head: stock Foldable
+inst:NFData:T a b derived anyclass on type:T name@10:22-10:28 exported
+  extent:
+    head @10:12-10:20
+    head @10:22-10:28
+  head: anyclass NFData
+type:App newtype name@12:9-12:12 exported
+  extent:
+    head @12:1-13:63
+  head: newtype App a = App ( StateT S IO a ) deriving newtype ( Functor , Applicative , Monad , MonadState S )
+  con:App constructor name@12:17-12:20 exported
+    extent:
+      head @12:17-12:36
+    head: App ( StateT S IO a )
+    prefix
+    arg @12:21-12:36 "(StateT S IO a)"
+  deriving @13:3-13:63 newtype
+    class Functor inst:Functor:App
+    class Applicative inst:Applicative:App
+    class Monad inst:Monad:App
+    class MonadState S inst:MonadState:S App
+inst:Functor:App derived newtype on type:App name@13:21-13:28 exported
+  extent:
+    head @13:12-13:19
+    head @13:21-13:28
+  head: newtype Functor
+inst:Applicative:App derived newtype on type:App name@13:30-13:41 exported
+  extent:
+    head @13:12-13:19
+    head @13:30-13:41
+  head: newtype Applicative
+inst:Monad:App derived newtype on type:App name@13:43-13:48 exported
+  extent:
+    head @13:12-13:19
+    head @13:43-13:48
+  head: newtype Monad
+inst:MonadState:S App derived newtype on type:App name@13:50-13:62 exported
+  extent:
+    head @13:12-13:19
+    head @13:50-13:62
+  head: newtype MonadState S
+type:P data name@16:6-16:7 exported
+  extent:
+    head @16:1-16:38
+  head: data P a b c = P deriving ( Bifunctor )
+  con:P constructor name@16:16-16:17 exported
+    extent:
+      head @16:16-16:17
+    head: P
+    prefix
+  deriving @16:18-16:38
+    class Bifunctor inst:Bifunctor:P a
+inst:Bifunctor:P a derived on type:P name@16:28-16:37 exported
+  extent:
+    head @16:28-16:37
+  head: Bifunctor
+type:Z data name@17:6-17:7 exported
+  extent:
+    head @17:1-17:30
+  head: data Z = Z deriving ( Functor )
+  con:Z constructor name@17:10-17:11 exported
+    extent:
+      head @17:10-17:11
+    head: Z
+    prefix
+  deriving @17:12-17:30
+    class Functor inst:Functor:Z
+inst:Functor:Z derived on type:Z name@17:22-17:29 exported
+  extent:
+    head @17:22-17:29
+  head: Functor
+type:Q data name@20:6-20:7 exported
+  extent:
+    head @20:1-20:29
+  head: data Q = Q deriving ( P.Show )
+  con:Q constructor name@20:10-20:11 exported
+    extent:
+      head @20:10-20:11
+    head: Q
+    prefix
+  deriving @20:12-20:29
+    class P.Show inst:Show:Q
+inst:Show:Q derived on type:Q name@20:22-20:28 exported
+  extent:
+    head @20:22-20:28
+  head: P.Show
+type:N newtype name@22:9-22:10 exported
+  extent:
+    head @22:1-22:18
+  head: newtype N = N Int
+  con:N constructor name@22:13-22:14 exported
+    extent:
+      head @22:13-22:18
+    head: N Int
+    prefix
+    arg @22:15-22:18 "Int"
+inst:Show:T a b standalone deriving name@25:29-25:33 exported
+  extent:
+    doc @24:1-24:32
+    head @25:1-25:41
+  head: deriving instance Show a => Show ( T a b )
+  haddock @24:1-24:32
+    |  Standalone, each strategy.
+inst:Ord:T a b standalone deriving stock name@26:25-26:28 exported
+  extent:
+    head @26:1-26:36
+  head: deriving stock instance Ord ( T a b )
+inst:Num:N standalone deriving newtype name@27:27-27:30 exported
+  extent:
+    head @27:1-27:32
+  head: deriving newtype instance Num N
+inst:ToJSON:T a b standalone deriving anyclass name@28:28-28:34 exported
+  extent:
+    head @28:1-28:42
+  head: deriving anyclass instance ToJSON ( T x y )
+inst:Semigroup:N standalone deriving via "(Sum Int)" name@29:33-29:42 exported
+  extent:
+    head @29:1-29:44
+  head: deriving via ( Sum Int ) instance Semigroup N
