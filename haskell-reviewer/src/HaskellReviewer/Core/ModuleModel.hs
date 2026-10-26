@@ -4,8 +4,8 @@
 -- built, nothing in it may point back at the GHC AST (D-61).
 
 -- | Our own model of a module, built from the GHC AST, which is then
--- dropped (SPEC §11.4.4, D-61). Has the header, exports, imports and
--- extensions.
+-- dropped (SPEC §11.4.4, D-61). Has the header, exports, imports,
+-- extensions, declarations and tokens.
 module HaskellReviewer.Core.ModuleModel
   ( -- * Result of a parse
     ModuleParse (..),
@@ -22,6 +22,7 @@ module HaskellReviewer.Core.ModuleModel
     WarningKind (..),
     Located (..),
     RawDoc (..),
+    DocItem (..),
     Export (..),
     ModuleExport (..),
     Section (..),
@@ -49,8 +50,10 @@ where
 
 import Data.Text (Text)
 import HaskellReviewer.Core.Cpp.Warning (CppWarning, renderCppWarning)
+import HaskellReviewer.Core.Decls (Decl, Located (..), RawDoc (..), forceDecls)
 import HaskellReviewer.Core.Project (ModuleName)
 import HaskellReviewer.Core.Span (Span)
+import HaskellReviewer.Core.Tokens (Tokens)
 
 -- * Result of a parse
 
@@ -112,6 +115,8 @@ data ParseWarning
   | -- | Two Safe Haskell modes (first, then second). GHC fails; we keep
     -- the first, like GHC does before failing.
     SafeModesClash Text Text
+  | -- | The parse worked but the second lex didn't: no tokens.
+    CouldNotLex
   deriving (Eq, Show)
 
 -- | For the user, like @unknown extension: Foo@.
@@ -125,6 +130,7 @@ renderParseWarning = \case
   NoMarkdownCode -> "no Haskell code block"
   SafeTurnsOff t -> "turned off by Safe: " <> t
   SafeModesClash a b -> "Safe Haskell modes clash: " <> a <> ", " <> b <> " ignored"
+  CouldNotLex -> "could not lex"
 
 -- * Parsed module
 
@@ -135,8 +141,22 @@ data ParsedModule = ParsedModule
     exports :: Maybe [Export],
     imports :: [Import],
     extensions :: Extensions,
-    warnings :: [ParseWarning]
+    warnings :: [ParseWarning],
+    -- | Sorted by where they start.
+    declarations :: [Decl],
+    docItems :: [DocItem],
+    -- | The whole module's, after CPP (Note [Packed tokens] in
+    -- "HaskellReviewer.Core.Tokens").
+    tokens :: Tokens
   }
+  deriving (Eq, Show)
+
+-- | A doc comment among the declarations that isn't on one.
+data DocItem
+  = -- | @-- * Heading@.
+    DocHeading Section
+  | -- | @-- $name@, with its text.
+    DocChunk (Located Text) RawDoc
   deriving (Eq, Show)
 
 -- | The @module@ line and what comes with it.
@@ -164,20 +184,6 @@ data WarningKind
   = DeprecatedPragma
   | -- | With its category, if given (@WARNING in "x-foo"@).
     WarningPragma (Maybe Text)
-  deriving (Eq, Show)
-
--- | A value and where it is.
-data Located a = Located
-  { span :: Span,
-    value :: a
-  }
-  deriving (Eq, Show)
-
--- | A Haddock comment as written, without the @|@ or @^@.
-data RawDoc = RawDoc
-  { span :: Span,
-    text :: Text
-  }
   deriving (Eq, Show)
 
 -- | One entry of the export list.
@@ -332,7 +338,11 @@ forceModuleParse = \case
           each importDecl m.imports `seq`
             list m.extensions.enabled `seq`
               list m.extensions.fromPragmas `seq`
-                list m.warnings
+                list m.warnings `seq`
+                  forceDecls m.declarations `seq`
+                    list m.docItems `seq`
+                      m.tokens `seq`
+                        ()
     header h = whnf h.name `seq` whnf h.haddock `seq` maybe () warningText h.warning
     warningText w = list w.messages `seq` warningKind w.kind
     warningKind = \case

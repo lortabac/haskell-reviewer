@@ -1,0 +1,49 @@
+pat:Zero pattern bidirectional name@5:9-5:13 exported
+  extent:
+    doc @4:1-4:11
+    head @5:1-5:20
+    body @6:1-6:17
+  head: pattern Zero :: Int
+  haddock @4:1-4:11
+    |  Zero.
+  signature @5:1-5:20 Zero
+pat:Cons pattern explicitly bidirectional name@8:9-8:13 exported
+  extent:
+    head @8:1-8:32
+    body @9:1-11:23
+    head @20:1-20:16
+  head: pattern Cons :: a -> [ a ] -> [ a ] infixr 5 ` Cons `
+  signature @8:1-8:32 Cons
+  fixity infixr 5 @20:1-20:16
+pat:Point pattern bidirectional name@14:9-14:14
+  extent:
+    doc @13:1-13:19
+    head @14:1-14:42
+    body @15:1-15:34
+  head: pattern Point :: Int -> Int -> ( Int , Int )
+  haddock @13:1-13:19
+    |  A record one.
+  signature @14:1-14:42 Point
+  field:Point.px field name@15:16-15:18
+    extent:
+      head @15:16-15:18
+    head: px
+  field:Point.py field name@15:20-15:22
+    extent:
+      head @15:20-15:22
+    head: py
+pat:X pattern unidirectional name@17:9-17:10 exported
+  extent:
+    head @17:1-17:17
+    body @18:1-18:29
+  head: pattern X :: Int
+  signature @17:1-17:17 X
+type:Point data name@22:6-22:11 exported
+  extent:
+    head @22:1-22:15
+  head: data Point = P
+  con:P constructor name@22:14-22:15 exported
+    extent:
+      head @22:14-22:15
+    head: P
+    prefix

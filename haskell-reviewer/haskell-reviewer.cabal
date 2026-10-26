@@ -46,6 +46,8 @@ library
     HaskellReviewer.Core.Cpp.Macros
     HaskellReviewer.Core.Cpp.Positions
     HaskellReviewer.Core.Cpp.Warning
+    HaskellReviewer.Core.Decls
+    HaskellReviewer.Core.Exported
     HaskellReviewer.Core.FileContent
     HaskellReviewer.Core.FileList
     HaskellReviewer.Core.Git
@@ -55,6 +57,9 @@ library
     HaskellReviewer.Core.PackageGlob
     HaskellReviewer.Core.Parser
     HaskellReviewer.Core.Parser.Convert
+    HaskellReviewer.Core.Parser.ConvertDecls
+    HaskellReviewer.Core.Parser.Helpers
+    HaskellReviewer.Core.Parser.Lex
     HaskellReviewer.Core.Project
     HaskellReviewer.Core.ProjectFile
     HaskellReviewer.Core.ProjectLoad
@@ -62,6 +67,7 @@ library
     HaskellReviewer.Core.Root
     HaskellReviewer.Core.SourceText
     HaskellReviewer.Core.Span
+    HaskellReviewer.Core.Tokens
 
     -- Effects
     HaskellReviewer.Effects.Browser
@@ -120,6 +126,7 @@ library
     , text                  >=2.1    && <2.2
     , time                  >=1.12   && <1.16
     , unix                  >=2.8    && <2.9
+    , vector                >=0.13   && <0.14
     , wai                   >=3.2.4  && <3.3
     , warp                  >=3.4    && <3.5
 
@@ -152,6 +159,7 @@ test-suite haskell-reviewer-test
     Bench.RtsStatsTest
     Bench.Stats
     Bench.StatsTest
+    DeclsDump
     ExeTest
     HaskellReviewer.App.CliTest
     HaskellReviewer.App.RunTest
@@ -160,6 +168,8 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.CppGoldenTest
     HaskellReviewer.Core.CppPropertyTest
     HaskellReviewer.Core.CppTest
+    HaskellReviewer.Core.DeclsGoldenTest
+    HaskellReviewer.Core.DeclsTest
     HaskellReviewer.Core.FileListTest
     HaskellReviewer.Core.GitTest
     HaskellReviewer.Core.ModulesGoldenTest
@@ -174,6 +184,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.RelPathTest
     HaskellReviewer.Core.RootTest
     HaskellReviewer.Core.SourceTextTest
+    HaskellReviewer.Core.TokensTest
     HaskellReviewer.Effects.FileSystemTest
     HaskellReviewer.Effects.GitTest
     HaskellReviewer.Effects.HelperTest

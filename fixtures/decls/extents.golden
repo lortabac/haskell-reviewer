@@ -1,0 +1,36 @@
+heading 1 @21:1-21:15
+  |  A section
+chunk chunk @23:1-24:20
+  | 
+  |  Some named text.
+val:far equations name@5:1-5:4 exported
+  extent:
+    pragma @3:1-3:19
+    doc @4:1-4:10
+    head @5:1-5:18
+    body @10:1-13:14
+  head: far :: Int -> Int
+  haddock @4:1-4:10
+    |  Far.
+  signature @5:1-5:18 far
+val:other equations name@7:1-7:6 exported
+  extent:
+    head @7:1-7:13
+    body @8:1-8:10
+  head: other :: Int
+  signature @7:1-7:13 other
+val:before equations name@16:1-16:7 exported
+  extent:
+    doc @15:1-15:13
+    head @16:1-16:14
+    doc @17:1-17:26
+    body @18:1-18:11
+    doc @19:1-19:24
+  head: before :: Int
+  haddock @15:1-15:13
+    |  Before.
+  haddock @17:1-17:26
+    |  After the signature.
+  haddock @19:1-19:24
+    |  After the binding.
+  signature @16:1-16:14 before

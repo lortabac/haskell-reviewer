@@ -1,0 +1,21 @@
+type:T data name@4:6-4:7 exported
+  extent:
+    doc @3:1-3:15
+    head @4:1-4:7
+  head: data T
+  haddock @3:1-3:15
+    |  Abstract.
+val:f no definition name@6:1-6:2 exported
+  extent:
+    head @6:1-6:14
+  head: f :: T -> Int
+  signature @6:1-6:14 f
+class:C class name@8:7-8:8
+  extent:
+    head @8:1-9:9
+  head: class C a where m :: a
+  val:m method name@9:3-9:4
+    extent:
+      head @9:3-9:9
+    head: m :: a
+    signature @9:3-9:9 m

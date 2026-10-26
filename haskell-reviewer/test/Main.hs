@@ -12,6 +12,8 @@ import HaskellReviewer.Core.AddressTest qualified
 import HaskellReviewer.Core.CabalFileTest qualified
 import HaskellReviewer.Core.CppGoldenTest qualified
 import HaskellReviewer.Core.CppTest qualified
+import HaskellReviewer.Core.DeclsGoldenTest qualified
+import HaskellReviewer.Core.DeclsTest qualified
 import HaskellReviewer.Core.FileListTest qualified
 import HaskellReviewer.Core.GitTest qualified
 import HaskellReviewer.Core.ModulesGoldenTest qualified
@@ -26,6 +28,7 @@ import HaskellReviewer.Core.ProjectTest qualified
 import HaskellReviewer.Core.RelPathTest qualified
 import HaskellReviewer.Core.RootTest qualified
 import HaskellReviewer.Core.SourceTextTest qualified
+import HaskellReviewer.Core.TokensTest qualified
 import HaskellReviewer.Effects.FileSystemTest qualified
 import HaskellReviewer.Effects.GitTest qualified
 import HaskellReviewer.Effects.HelperTest qualified
@@ -76,6 +79,7 @@ main = do
         HaskellReviewer.Core.ProjectTest.tests,
         HaskellReviewer.Core.RelPathTest.tests,
         HaskellReviewer.Core.RootTest.tests,
+        HaskellReviewer.Core.TokensTest.tests,
         HaskellReviewer.Effects.FileSystemTest.tests,
         HaskellReviewer.Effects.GitTest.tests,
         HaskellReviewer.Effects.HelperTest.tests,
@@ -90,6 +94,9 @@ main = do
             "Parsing"
             [ HaskellReviewer.Core.CppGoldenTest.tests,
               HaskellReviewer.Core.CppTest.tests,
+              HaskellReviewer.Core.DeclsGoldenTest.tests,
+              HaskellReviewer.Core.DeclsTest.tests,
+              HaskellReviewer.Core.DeclsTest.linearTests,
               HaskellReviewer.Core.ParseGoldenTest.tests,
               HaskellReviewer.Core.ParserTest.tests,
               HaskellReviewer.Core.SourceTextTest.tests,

@@ -1,0 +1,78 @@
+class:Container class name@5:25-5:34 exported
+  extent:
+    doc @4:1-4:17
+    head @5:1-14:3
+    body @14:3-14:17
+    head @14:17-15:3
+    pragma @15:3-15:24
+    head @15:24-18:3
+    body @18:3-18:16
+    head @18:16-22:31
+  head: class ( Eq a , Show a ) => Container f a | f -> a where type Elem f type Elem f = a data Key f empty , none :: f insert :: a -> f -> f default size :: ( Foldable g , f ~ g a ) => f -> Int size :: f -> Int ( <+> ) :: f -> f -> f infixr 5 <+> {-# MINIMAL empty , ( <+> ) #-}
+  haddock @4:1-4:17
+    |  Containers.
+  context @5:7-5:21
+  fundep @5:41-5:47
+  minimal @22:3-22:31
+  val:empty method name@11:3-11:8 exported
+    extent:
+      doc @10:3-10:14
+      head @11:3-11:19
+    head: empty , none :: f
+    haddock @10:3-10:14
+      |  Empty.
+    signature @11:3-11:19 empty, none
+  val:none method name@11:10-11:14 exported
+    extent:
+      doc @10:3-10:14
+      head @11:3-11:19
+    head: empty , none :: f
+    haddock @10:3-10:14
+      |  Empty.
+    signature @11:3-11:19 empty, none
+  val:insert method name@13:3-13:9 exported
+    extent:
+      doc @12:3-12:15
+      head @13:3-13:24
+      body @14:3-14:17
+      pragma @15:3-15:24
+      head @26:1-26:18
+    head: insert :: a -> f -> f infixl 4 ` insert `
+    haddock @12:3-12:15
+      |  Insert.
+    signature @13:3-13:24 insert
+    has default
+    fixity infixl 4 @26:1-26:18
+  val:size method name@17:3-17:7 exported
+    extent:
+      head @16:3-16:52
+      head @17:3-17:19
+      body @18:3-18:16
+    head: default size :: ( Foldable g , f ~ g a ) => f -> Int size :: f -> Int
+    signature @17:3-17:19 size
+    default sig @16:3-16:52
+    has default
+  val:<+> method name@20:3-20:8 exported
+    extent:
+      head @20:3-20:23
+      head @21:3-21:15
+    head: ( <+> ) :: f -> f -> f infixr 5 <+>
+    signature @20:3-20:23 <+>
+    fixity infixr 5 @21:3-21:15
+  type:Elem open family name@7:8-7:12 exported
+    extent:
+      doc @6:3-6:25
+      head @7:3-7:14
+      head @8:3-8:18
+    head: type Elem f type Elem f = a
+    haddock @6:3-6:25
+      |  The element type.
+    default type Elem f = a
+  type:Key data family name@9:8-9:11 exported
+    extent:
+      head @9:3-9:13
+    head: data Key f
+class:~~ class name@24:9-24:11 exported
+  extent:
+    head @24:1-24:13
+  head: class a ~~ b

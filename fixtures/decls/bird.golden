@@ -1,0 +1,18 @@
+val:x equations name@6:3-6:4 exported
+  extent:
+    doc @5:3-5:12
+    head @6:3-6:11
+    body @7:3-7:8
+  head: x :: Int
+  haddock @5:3-5:12
+    |  Doc.
+  signature @6:3-6:11 x
+type:T data name@11:8-11:9 exported
+  extent:
+    head @11:3-11:13
+  head: data T = T
+  con:T constructor name@11:12-11:13 exported
+    extent:
+      head @11:12-11:13
+    head: T
+    prefix

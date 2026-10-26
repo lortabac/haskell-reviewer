@@ -27,6 +27,7 @@ module HaskellReviewer.Core.Cpp
     Pos (..),
     sameLines,
     mapSpan,
+    inExpansion,
 
     -- * Helpers
     isDirective,
@@ -83,6 +84,7 @@ import HaskellReviewer.Core.Cpp.Positions
   ( Piece (..),
     Pos (..),
     PositionMap (..),
+    inExpansion,
     insertLine,
     mapSpan,
     sameLines,

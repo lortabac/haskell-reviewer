@@ -14,13 +14,21 @@ module HaskellReviewer.Core.SourceText
     columnMap,
     GhcRange (..),
     ghcToSpan,
+
+    -- * Slicing
+    blankSpans,
+    SourceLines,
+    sourceLines,
+    sliceSpan,
   )
 where
 
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IntMap
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Vector qualified as Vector
 import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
 
 {- Note [Unlit]
@@ -137,6 +145,65 @@ fromGhcCol :: IntMap Int -> Int -> Int
 fromGhcCol stops target = case IntMap.lookupLT target stops of
   Nothing -> target
   Just (ghc, ours) -> ours + 1 + max 0 (target - nextTab ghc)
+
+-- * Slicing
+
+-- | A file's text by line, to cut out spans.
+newtype SourceLines = SourceLines (Vector.Vector Text)
+
+-- | From the file's text, as stored. A BOM is dropped (columns on line 1
+-- don't count it), and so is the @\r@ of a CRLF.
+sourceLines :: Text -> SourceLines
+sourceLines = SourceLines . Vector.fromList . map noCr . Text.splitOn "\n" . stripBom
+  where
+    noCr l = fromMaybe l (Text.stripSuffix "\r" l)
+
+-- | The text of a span (Note [Span convention] in
+-- "HaskellReviewer.Core.Span"). Lines are joined with @\n@; a span past
+-- the end gives what there is.
+sliceSpan :: SourceLines -> Span -> Text
+sliceSpan (SourceLines ls) s
+  | l1 == l2 = cut (c1 - 1) (c2 - c1) (line l1)
+  | otherwise =
+      Text.intercalate "\n" $
+        [Text.drop (c1 - 1) (line l1)]
+          <> [line l | l <- [l1 + 1 .. l2 - 1]]
+          <> [Text.take (c2 - 1) (line l2)]
+  where
+    Span (Line a) (Col b) (Line c) (Col d) = s
+    (l1, c1, l2, c2) = (fromIntegral a, fromIntegral b, fromIntegral c, fromIntegral d)
+    line n = fromMaybe "" (ls Vector.!? (n - 1))
+    cut from n = Text.take n . Text.drop from
+
+-- | Spaces over these spans, newlines and tabs kept, so nothing else
+-- moves. Columns as in Note [Span convention] in
+-- "HaskellReviewer.Core.Span". Linear: the cuts are grouped by line.
+blankSpans :: [Span] -> Text -> Text
+blankSpans [] t = t
+blankSpans ss t = overLines (zipWith blank [1 ..]) t
+  where
+    -- For each line, the column ranges to blank (0-based, end exclusive;
+    -- Nothing for the end of the line).
+    cuts :: IntMap [(Int, Maybe Int)]
+    cuts =
+      IntMap.fromListWith
+        (<>)
+        [ (n, [(from, to)])
+        | Span (Line a1) (Col b1) (Line a2) (Col b2) <- ss,
+          let (l1, c1, l2, c2) = (int a1, int b1, int a2, int b2),
+          n <- [l1 .. l2],
+          let from = if n == l1 then c1 - 1 else 0
+              to = if n == l2 then Just (c2 - 1) else Nothing
+        ]
+    int :: (Integral a) => a -> Int
+    int = fromIntegral
+    blank :: Int -> Text -> Text
+    blank n l = maybe l (foldr cut l) (IntMap.lookup n cuts)
+    cut (from, to) l =
+      let (a, rest) = Text.splitAt from l
+          (b, c) = Text.splitAt (maybe (Text.length rest) (subtract from) to) rest
+       in a <> Text.map space b <> c
+    space c = if c == '\t' then c else ' '
 
 -- * Internal
 

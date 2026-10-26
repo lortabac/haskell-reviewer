@@ -1,0 +1,21 @@
+val:main equations name@1:1-1:5 exported
+  extent:
+    head @1:1-1:14
+    body @2:1-2:15
+  head: main :: IO ( )
+  signature @1:1-1:14 main
+val:helper equations name@4:1-4:7
+  extent:
+    head @4:1-4:14
+    body @5:1-5:11
+  head: helper :: Int
+  signature @4:1-4:14 helper
+type:T data name@7:6-7:7
+  extent:
+    head @7:1-7:11
+  head: data T = T
+  con:T constructor name@7:10-7:11
+    extent:
+      head @7:10-7:11
+    head: T
+    prefix

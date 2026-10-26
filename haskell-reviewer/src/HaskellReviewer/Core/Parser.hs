@@ -127,7 +127,9 @@ import HaskellReviewer.Core.Modules
     Tools (..),
     toolsFrom,
   )
-import HaskellReviewer.Core.Parser.Convert (SpanMap (..), convertModule, toSpan)
+import HaskellReviewer.Core.Parser.Convert (convertModule)
+import HaskellReviewer.Core.Parser.Helpers (SpanMap (..), toSpan)
+import HaskellReviewer.Core.Parser.Lex (Lexed (..), lexTokens)
 import HaskellReviewer.Core.Project
   ( Extension (..),
     GhcVersion,
@@ -138,11 +140,13 @@ import HaskellReviewer.Core.Project
 import HaskellReviewer.Core.Project qualified as Project (Language (..))
 import HaskellReviewer.Core.RelPath (relPathName)
 import HaskellReviewer.Core.SourceText
-  ( columnMap,
+  ( blankSpans,
+    columnMap,
     stripBom,
     unlitBirdLatex,
     unlitMarkdown,
   )
+import HaskellReviewer.Core.Tokens (noTokens)
 
 {- Note [Parser settings]
 
@@ -322,12 +326,24 @@ run settings input = case readPragmas (initParserOpts comp.dflags) (toBuffer tex
               | otherwise ->
                   parseWith (applyPragmas comp.dflags args) out.text spans notes
     parseWith pragmas t spans notes =
-      case unP parser (initParserState opts (toBuffer t) startLoc) of
+      case unP parser (initParserState opts parseBuf startLoc) of
         PFailed st -> failed (errorsOf st)
         POk st m -> case errorsOf st of
-          [] -> spans `seq` Parsed (convertModule spans exts (early <> later) m)
+          [] ->
+            spans `seq`
+              Parsed (convertModule spans exts (early <> later <> lexWarnings) tokens m)
           errs -> failed errs
       where
+        -- See Note [Second lex] and Note [LINE pragmas] in
+        -- HaskellReviewer.Core.Parser.Lex.
+        lexed = lexTokens opts spans startLoc (toBuffer t)
+        (tokens, lexWarnings) = case lexed of
+          Just l -> (l.tokens, [])
+          Nothing -> (noTokens, [CouldNotLex])
+        parseBuf = case lexed of
+          Just l
+            | not (null l.positionPragmas) -> toBuffer (blankSpans l.positionPragmas t)
+          _ -> toBuffer t
         later = pragmas.warnings <> notes
         parser = case settings.kind of
           ModuleFile -> Ghc.parseModule

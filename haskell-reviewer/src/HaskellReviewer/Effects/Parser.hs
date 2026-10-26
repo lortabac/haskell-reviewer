@@ -13,6 +13,7 @@ module HaskellReviewer.Effects.Parser
     parseWithin,
     cppParseWarmUp,
     cppSettings,
+    declsWarmUp,
     cppWarmUp,
     cppLimitsWarmUp,
   )
@@ -60,6 +61,7 @@ import HaskellReviewer.Core.Project
     hostPlatform,
     parserGhcVersion,
   )
+import HaskellReviewer.Core.Tokens (noTokens)
 import System.Timeout (timeout)
 
 -- | 'parseSource', fully forced, within 'parseTimeLimit'. If GHC
@@ -153,7 +155,7 @@ rethrowAsync e = case fromException e of
 -- and ghc-lib-parser's) are built before parallel threads use them
 -- (Q-RTS-BLACKHOLE). Each one takes a different path: pragmas and
 -- extension names, Haddock, tabs, a parse error, a pragma error, a
--- signature, and CPP modules end to end.
+-- signature, every kind of declaration, and CPP modules end to end.
 warmUpParser :: IO ()
 warmUpParser = do
   mapM_
@@ -164,6 +166,8 @@ warmUpParser = do
       "{-# LANGUAGE NoSuchThing #-}\nmodule M where\n"
     ]
   _ <- parse defaultParseSettings {kind = SignatureFile} "signature S (T) where\ndata T\n"
+  _ <- parse defaultParseSettings declsWarmUp
+  _ <- evaluate noTokens
   mapM_ (parse cppSettings) cppParseWarmUp
   -- The CPP evaluator, on every kind of line (Q-RTS-BLACKHOLE).
   _ <- evaluate (forceCpp cppWarmUp)
@@ -173,6 +177,72 @@ warmUpParser = do
   where
     -- No time limit (Note [Parse time limit]).
     parse s t = tryParse (parseSource s t)
+
+-- | A module with every kind of declaration, every constructor and
+-- export form, for the warm-up. A test checks it has them all.
+declsWarmUp :: Text
+declsWarmUp =
+  Text.unlines
+    [ "{-# LANGUAGE TypeFamilies, TypeFamilyDependencies, TypeData, GADTs #-}",
+      "{-# LANGUAGE PatternSynonyms, DerivingVia, DeriveAnyClass #-}",
+      "{-# LANGUAGE FunctionalDependencies, DefaultSignatures, MagicHash #-}",
+      "module W (T (..), U (A), C, x, pattern P, type (+), module M, W.y, z) where",
+      "-- * Heading",
+      "-- $chunk",
+      "-- Text.",
+      "",
+      "-- | A type.",
+      "data T a = -- | Con.",
+      "    A !Int {-# UNPACK #-} !Int ~Int | a :+ a | R {f, g :: {-# NOUNPACK #-} Int}",
+      "  -- ^ After.",
+      "  deriving (Eq) deriving stock Show deriving anyclass (C)",
+      "  deriving newtype (D) deriving (E) via (F a)",
+      "data Ad = Ad",
+      "  Int -- ^ First.",
+      "  Bool -- ^ Second.",
+      "newtype N = N Int",
+      "data G a where { G1, G2 :: Int -> G Int; GR :: {gr :: a} -> G a }",
+      "type data K = K1",
+      "type S :: Type",
+      "type S = Int",
+      "type family O a",
+      "type family J a = r | r -> a",
+      "type family Q a where { Q Int = Bool; Q a = a }",
+      "data family V a",
+      "type a + b = Either a b",
+      "infixl 6 +, :+",
+      "class (Eq a) => C a b | a -> b where",
+      "  type AT a",
+      "  type AT a = a",
+      "  data AD a",
+      "  m, m2 :: a -> b",
+      "  m _ = undefined",
+      "  {-# INLINE m #-}",
+      "  default d :: a",
+      "  d :: a",
+      "  infixr 5 `m`",
+      "  {-# MINIMAL m #-}",
+      "instance C Int Int",
+      "x, y :: Int",
+      "x = 1",
+      "y = 2",
+      "{-# INLINE x #-}",
+      "{-# SPECIALISE x :: Int #-}",
+      "{-# SPECIALISE x @Int #-}",
+      "{-# OPAQUE y #-}",
+      "{-# SCC y #-}",
+      "infixr 0 `y`",
+      "(z, Just w) = (1, Just 2)",
+      "lonely :: Int",
+      "pattern P :: Int",
+      "pattern P = 0",
+      "pattern Q2 x <- Just x where Q2 x = Just x",
+      "pattern U2 <- 1",
+      "pattern Rec {r1, r2} = (r1, r2)",
+      "h = 'c' : \"s\" <> show 1.5 <> show 1#",
+      "{-# LINE 100 \"Other.y\" #-}",
+      "-- The end."
+    ]
 
 -- | CPP modules for the parser's warm-up, with 'cppSettings': CPP, then
 -- the pragmas again, spans mapped back, CPP notes; then a parse error
