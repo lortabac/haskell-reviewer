@@ -40,6 +40,7 @@ import HaskellReviewer.Core.Decls
     Derived (..),
     DerivedClass (..),
     DerivingClause (..),
+    DocComment (..),
     Extent (..),
     FamInstDecl (..),
     FamInstForm (..),
@@ -60,7 +61,6 @@ import HaskellReviewer.Core.Decls
     PatSynDecl (..),
     PatSynDir (..),
     PragmaKind (..),
-    RawDoc (..),
     Signature (..),
     Strictness (..),
     TypeDecl (..),
@@ -78,9 +78,10 @@ import HaskellReviewer.Core.ModuleModel (DocItem (..), Section (..))
 import HaskellReviewer.Core.Names (DeclId (..), DeclNs (..), InstanceKey (..), keyHead)
 import HaskellReviewer.Core.Parser.Helpers
   ( SpanMap,
+    docComment,
+    headingComment,
     locatedSpan,
     occText,
-    rawDoc,
     spanOf,
     warningText,
   )
@@ -101,6 +102,7 @@ import HaskellReviewer.Core.Parser.InstanceKey
     typeArgs,
   )
 import HaskellReviewer.Core.Project (ModuleName (..))
+import HaskellReviewer.Core.RichText (Doc)
 import HaskellReviewer.Core.Span (Span (..))
 import Language.Haskell.Syntax.Basic qualified as Ghc (FixityDirection (..))
 import Language.Haskell.Syntax.Basic qualified as GhcBasic (Fixity (..))
@@ -173,12 +175,12 @@ Grouping is linear: lists are built by consing, and reversed once
 
 -- | A doc comment, or something it can go with, or something comments
 -- skip (Note [Haddock pairing]).
-data Slot a = DocNext RawDoc | DocPrev RawDoc | Slot a | Unpaired a
+data Slot a = DocNext (DocComment Doc) | DocPrev (DocComment Doc) | Slot a | Unpaired a
 
 -- | Something with the doc comments paired with it.
 data WithDocs a = WithDocs
   { value :: a,
-    docs :: [RawDoc]
+    docs :: [DocComment Doc]
   }
 
 -- | One declaration of a list, before grouping. Spans are converted.
@@ -436,13 +438,14 @@ userSig = \case
 -- | A doc comment as items.
 docSlot :: SpanMap -> Span -> Ghc.DocDecl GhcPs -> [Slot Item]
 docSlot spans s = \case
-  Ghc.DocCommentNext d -> [DocNext (rawDoc spans d)]
-  Ghc.DocCommentPrev d -> [DocPrev (rawDoc spans d)]
+  Ghc.DocCommentNext d -> [DocNext (docComment spans d)]
+  Ghc.DocCommentPrev d -> [DocPrev (docComment spans d)]
   Ghc.DocCommentNamed n d ->
     let chunk = Located {span = s, value = Text.pack n}
-     in [Slot (DocOnlyItem (DocChunk chunk (rawDoc spans d)))]
+     in [Slot (DocOnlyItem (DocChunk chunk (docComment spans d)))]
   Ghc.DocGroup level d ->
-    [Slot (DocOnlyItem (DocHeading Section {level = level, heading = rawDoc spans d}))]
+    let heading = headingComment spans d
+     in [Slot (DocOnlyItem (DocHeading Section {level = level, heading = heading}))]
 
 -- | A binding.
 bindItem :: SpanMap -> Span -> Ghc.HsBind GhcPs -> Item
@@ -606,7 +609,7 @@ familySyntax s Ghc.FamilyDecl {Ghc.fdInfo = fi, Ghc.fdLName = n} =
 -- | A type, with what is attached to it: fixities (its own and its
 -- constructors'), a kind signature, roles, a warning, associated
 -- defaults, family instances.
-buildType :: SpanMap -> Attached -> [RawDoc] -> TypeSyntax -> TypeDecl
+buildType :: SpanMap -> Attached -> [DocComment Doc] -> TypeSyntax -> TypeDecl
 buildType spans at docs t =
   TypeDecl
     { info =
@@ -729,9 +732,9 @@ conDecl spans at here parent lc@(L _ c) = case c of
               fixity = fixity
             }
     docs d = maybeToList (doc d)
-    doc :: Maybe (Ghc.LHsDoc GhcPs) -> Maybe RawDoc
+    doc :: Maybe (Ghc.LHsDoc GhcPs) -> Maybe (DocComment Doc)
     doc d = case here of
-      KeepDocs -> rawDoc spans <$> d
+      KeepDocs -> docComment spans <$> d
       DropDocs -> Nothing
     argType (f :: Ghc.HsConDeclField GhcPs) =
       ArgType
@@ -809,7 +812,7 @@ data ClassSyntax = ClassSyntax
 -- | A class, with its body paired and grouped like the top level (but
 -- see Note [Haddock pairing]). Fixities in the body come before the top
 -- level's.
-buildClass :: SpanMap -> Attached -> [RawDoc] -> ClassSyntax -> ClassDecl
+buildClass :: SpanMap -> Attached -> [DocComment Doc] -> ClassSyntax -> ClassDecl
 buildClass spans top docs c =
   ClassDecl
     { info =
@@ -950,7 +953,7 @@ data Bits = Bits
     ffiImports :: [Span],
     ffiExports :: [Span],
     pragmas :: [Span],
-    docs :: [RawDoc]
+    docs :: [DocComment Doc]
   }
 
 instance Semigroup Bits where
@@ -1193,7 +1196,7 @@ instItem spans s = \case
 -- | An @instance@, its methods grouped by name like values. Its body is
 -- head but for the method equations and pragmas (Note [Extents] in
 -- "HaskellReviewer.Core.Decls").
-buildInstance :: SpanMap -> Attached -> [RawDoc] -> InstSyntax -> InstanceDecl
+buildInstance :: SpanMap -> Attached -> [DocComment Doc] -> InstSyntax -> InstanceDecl
 buildInstance spans at docs i =
   InstanceDecl
     { info =
@@ -1229,7 +1232,7 @@ buildInstance spans at docs i =
       ]
 
 -- | A standalone deriving: all head.
-buildDeriving :: SpanMap -> Attached -> [RawDoc] -> DerivSyntax -> InstanceDecl
+buildDeriving :: SpanMap -> Attached -> [DocComment Doc] -> DerivSyntax -> InstanceDecl
 buildDeriving spans at docs d = case d.decl of
   Ghc.DerivDecl {Ghc.deriv_type = ty, Ghc.deriv_strategy = strategy} ->
     let poly = Ghc.hswc_body ty
@@ -1255,7 +1258,7 @@ headNameSpan spans h poly = maybe (locatedSpan spans poly) (spanOf spans) h.clas
 -- | A type or data instance. Data instance fields have the first
 -- constructor as parent (D-88).
 buildFamInst ::
-  SpanMap -> Attached -> DocsHere -> [RawDoc] -> FamInstSyntax -> FamInstDecl
+  SpanMap -> Attached -> DocsHere -> [DocComment Doc] -> FamInstSyntax -> FamInstDecl
 buildFamInst spans at here docs f =
   FamInstDecl
     { info =
@@ -1363,7 +1366,7 @@ data NewInfo = NewInfo
   { id :: DeclId,
     nameSpan :: Span,
     parts :: [Part],
-    docs :: [RawDoc],
+    docs :: [DocComment Doc],
     warning :: Maybe WarningText
   }
 

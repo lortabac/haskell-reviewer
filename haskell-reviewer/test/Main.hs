@@ -14,8 +14,10 @@ import HaskellReviewer.Core.CppGoldenTest qualified
 import HaskellReviewer.Core.CppTest qualified
 import HaskellReviewer.Core.DeclsGoldenTest qualified
 import HaskellReviewer.Core.DeclsTest qualified
+import HaskellReviewer.Core.DocLinksTest qualified
 import HaskellReviewer.Core.FileListTest qualified
 import HaskellReviewer.Core.GitTest qualified
+import HaskellReviewer.Core.HaddockTest qualified
 import HaskellReviewer.Core.InstanceKeyTest qualified
 import HaskellReviewer.Core.ModulesGoldenTest qualified
 import HaskellReviewer.Core.ModulesTest qualified
@@ -27,6 +29,7 @@ import HaskellReviewer.Core.ProjectGoldenTest qualified
 import HaskellReviewer.Core.ProjectLoadTest qualified
 import HaskellReviewer.Core.ProjectTest qualified
 import HaskellReviewer.Core.RelPathTest qualified
+import HaskellReviewer.Core.RichTextGoldenTest qualified
 import HaskellReviewer.Core.RootTest qualified
 import HaskellReviewer.Core.SourceTextTest qualified
 import HaskellReviewer.Core.TokensTest qualified
@@ -98,9 +101,13 @@ main = do
               HaskellReviewer.Core.DeclsGoldenTest.tests,
               HaskellReviewer.Core.DeclsTest.tests,
               HaskellReviewer.Core.DeclsTest.linearTests,
+              HaskellReviewer.Core.DocLinksTest.tests,
+              HaskellReviewer.Core.HaddockTest.tests,
+              HaskellReviewer.Core.HaddockTest.linearTests,
               HaskellReviewer.Core.InstanceKeyTest.tests,
               HaskellReviewer.Core.ParseGoldenTest.tests,
               HaskellReviewer.Core.ParserTest.tests,
+              HaskellReviewer.Core.RichTextGoldenTest.tests,
               HaskellReviewer.Core.SourceTextTest.tests,
               -- Both share the API fixtures: built once, here.
               withResource forceFixtures (const (pure ())) $ \_ ->

@@ -14,6 +14,7 @@ module HaskellReviewer.Effects.Parser
     cppParseWarmUp,
     cppSettings,
     declsWarmUp,
+    haddockWarmUp,
     cppWarmUp,
     cppLimitsWarmUp,
   )
@@ -155,7 +156,8 @@ rethrowAsync e = case fromException e of
 -- and ghc-lib-parser's) are built before parallel threads use them
 -- (Q-RTS-BLACKHOLE). Each one takes a different path: pragmas and
 -- extension names, Haddock, tabs, a parse error, a pragma error, a
--- signature, every kind of declaration, and CPP modules end to end.
+-- signature, every kind of declaration, every kind of Haddock markup,
+-- and CPP modules end to end.
 warmUpParser :: IO ()
 warmUpParser = do
   mapM_
@@ -167,6 +169,7 @@ warmUpParser = do
     ]
   _ <- parse defaultParseSettings {kind = SignatureFile} "signature S (T) where\ndata T\n"
   _ <- parse defaultParseSettings declsWarmUp
+  _ <- parse defaultParseSettings haddockWarmUp
   _ <- evaluate noTokens
   mapM_ (parse cppSettings) cppParseWarmUp
   -- The CPP evaluator, on every kind of line (Q-RTS-BLACKHOLE).
@@ -279,6 +282,64 @@ declsWarmUp =
       "$(pure [])",
       "{-# LINE 100 \"Other.y\" #-}",
       "-- The end."
+    ]
+
+-- | A module with every kind of Haddock markup (haddock-library has
+-- shared values too), for the warm-up. A test checks it has them all.
+haddockWarmUp :: Text
+haddockWarmUp =
+  Text.unlines
+    [ "-- | Header.",
+      "--",
+      "-- = Heading",
+      "--",
+      "-- Text /emph/ __bold__ @code@ 'x' v'y' t'T' '(+)' '`elem`' 'M.x' 'case'",
+      "-- \"M\" \"M#a\" [label](\"M\") #anchor# &#65; &#x42; \\(x\\) \\[y\\] a\\/b",
+      "-- <http://a.b> <https://a.b label> [l](https://a.b) http://a.b/c. ftp://a.b",
+      "-- <javascript:x> <<http://a.b/i.png>> <<i.png t>> ![alt](http://a.b/i.png)",
+      "--",
+      "-- @",
+      "-- code /block/",
+      "-- @",
+      "--",
+      "-- > bird",
+      "--",
+      "-- * item",
+      "--",
+      "--     * nested",
+      "--",
+      "-- 1. one",
+      "--",
+      "-- (2) two",
+      "--",
+      "-- [term]: definition",
+      "--",
+      "-- >>> 1 + 1",
+      "-- 2",
+      "--",
+      "-- prop> x == x",
+      "--",
+      "-- +---+---+",
+      "-- | a | b |",
+      "-- +===+===+",
+      "-- | c | d |",
+      "-- +---+---+",
+      "--",
+      "-- @since 1.2.3",
+      "module W (",
+      "  -- * Section 'x'",
+      "  x,",
+      ") where",
+      "",
+      "-- $chunk",
+      "-- [l](http://a.b) starts this paragraph.",
+      "--",
+      "-- @since base-4.5",
+      "",
+      "-- | Plain text (Note [Haddock cost]):",
+      "-- +" <> Text.replicate 90 "-" <> "+",
+      "x :: Int",
+      "x = 1"
     ]
 
 -- | CPP modules for the parser's warm-up, with 'cppSettings': CPP, then

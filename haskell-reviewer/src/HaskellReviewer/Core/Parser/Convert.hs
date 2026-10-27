@@ -34,7 +34,8 @@ import GHC.Types.SourceText (StringLiteral (..))
 import GHC.Types.SrcLoc (GenLocated (..), Located, unLoc)
 import HaskellReviewer.Core.Exported (markExported)
 import HaskellReviewer.Core.ModuleModel
-  ( Export (..),
+  ( DocComment (..),
+    Export (..),
     Extensions,
     Import (..),
     ImportLevel (..),
@@ -49,7 +50,6 @@ import HaskellReviewer.Core.ModuleModel
     ParseWarning,
     ParsedModule (..),
     Qualified (..),
-    RawDoc (..),
     Section (..),
     SubList (..),
     Subs (..),
@@ -58,11 +58,13 @@ import HaskellReviewer.Core.ModuleModel qualified as Model (Located (..))
 import HaskellReviewer.Core.Parser.ConvertDecls (Converted (..), convertDecls)
 import HaskellReviewer.Core.Parser.Helpers
   ( SpanMap,
+    docComment,
+    headingComment,
     moduleName,
     occText,
-    rawDoc,
   )
 import HaskellReviewer.Core.Parser.Helpers qualified as Helpers (spanOf, warningText)
+import HaskellReviewer.Core.RichText (Doc)
 import HaskellReviewer.Core.Tokens (Tokens)
 import Language.Haskell.Syntax.ImpExp.IsBoot (IsBootInterface (..))
 
@@ -103,8 +105,8 @@ convertModule spans exts warnings tokens (L _ m) =
 
     located f lx@(L _ x) = Model.Located {span = spanOf (getLocA lx), value = f x}
 
-    doc :: LHsDoc GhcPs -> RawDoc
-    doc = rawDoc spans
+    doc :: LHsDoc GhcPs -> DocComment Doc
+    doc = docComment spans
 
     warningText w = Helpers.warningText (spanOf (getLocA w)) (unLoc w)
 
@@ -118,7 +120,7 @@ convertModule spans exts warnings tokens (L _ m) =
         ExportModule
           ModuleExport {name = located moduleName mn, warning = warningText <$> w}
       IEGroup _ level heading ->
-        ExportSection Section {level = level, heading = doc heading}
+        ExportSection Section {level = level, heading = headingComment spans heading}
       IEDoc _ d -> ExportDoc (doc d)
       IEDocNamed _ chunk ->
         ExportDocNamed

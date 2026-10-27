@@ -6,7 +6,7 @@
 module HaskellReviewer.Core.Decls
   ( -- * Shared
     Located (..),
-    RawDoc (..),
+    DocComment (..),
     WarningText (..),
     WarningKind (..),
 
@@ -76,6 +76,7 @@ module HaskellReviewer.Core.Decls
     forceDecls,
     forcePragmas,
     forceWarningText,
+    forceDocComment,
   )
 where
 
@@ -83,6 +84,7 @@ import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Text (Text)
 import HaskellReviewer.Core.Names (DeclId, forceDeclId)
+import HaskellReviewer.Core.RichText (Doc, forceDoc)
 import HaskellReviewer.Core.SourceText (SourceLines, sliceSpan)
 import HaskellReviewer.Core.Span (Span (..))
 import HaskellReviewer.Core.Tokens (Token (..), TokenClass (..), Tokens, tokensIn)
@@ -96,10 +98,13 @@ data Located a = Located
   }
   deriving (Eq, Show)
 
--- | A Haddock comment as written, without the @|@ or @^@.
-data RawDoc = RawDoc
+-- | A Haddock comment: the text as written, without the @|@ or @^@, and
+-- what it says. The text is what the wire sends for now.
+data DocComment a = DocComment
   { span :: Span,
-    text :: Text
+    text :: Text,
+    -- | A 'Doc', or inline text for a section heading.
+    parsed :: a
   }
   deriving (Eq, Show)
 
@@ -144,7 +149,7 @@ data DeclInfo = DeclInfo
     extent :: Extent,
     -- | The doc comments GHC pairs with it, in order (Note [Haddock
     -- pairing] in "HaskellReviewer.Core.Parser.ConvertDecls").
-    haddock :: [RawDoc],
+    haddock :: [DocComment Doc],
     -- | A @DEPRECATED@ or @WARNING@ pragma on its name.
     warning :: Maybe WarningText,
     exported :: Bool
@@ -335,7 +340,7 @@ data ConArgs
 -- | One positional argument.
 data ConArg = ConArg
   { type_ :: ArgType,
-    doc :: Maybe RawDoc
+    doc :: Maybe (DocComment Doc)
   }
   deriving (Eq, Show)
 
@@ -611,7 +616,7 @@ forceDecls = each decl
     info i =
       forceDeclId i.id `seq`
         extent i.extent `seq`
-          list i.haddock `seq`
+          each forceDocComment i.haddock `seq`
             maybe () forceWarningText i.warning
     typeDecl t =
       info t.info `seq`
@@ -636,7 +641,7 @@ forceDecls = each decl
       RecordArgs fs -> each field fs
       GadtArgs as -> each arg as
       GadtRecordArgs fs -> each field fs
-    arg a = whnf a.doc
+    arg a = maybe () forceDocComment a.doc
     field f = info f.info
     deriving_ d = whnf d.strategySpan `seq` each (forceDeclId . (.id)) d.classes
     classDecl c =
@@ -691,6 +696,10 @@ forceWarningText w = list w.messages `seq` kind w.kind
     kind = \case
       WarningPragma c -> whnf c
       DeprecatedPragma -> ()
+
+-- | Like 'forceDecls', for a doc comment.
+forceDocComment :: DocComment Doc -> ()
+forceDocComment d = forceDoc d.parsed
 
 -- | Force each element with the function.
 each :: (a -> ()) -> [a] -> ()

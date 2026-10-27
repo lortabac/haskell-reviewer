@@ -5,7 +5,8 @@ module ParseDump (dumpParse) where
 import Data.Text (Text)
 import Data.Text qualified as Text
 import HaskellReviewer.Core.ModuleModel
-  ( Export (..),
+  ( DocComment (..),
+    Export (..),
     Extensions (..),
     Import (..),
     ImportLevel (..),
@@ -22,7 +23,6 @@ import HaskellReviewer.Core.ModuleModel
     ParseError (..),
     ParsedModule (..),
     Qualified (..),
-    RawDoc (..),
     Section (..),
     SubList (..),
     Subs (..),
@@ -154,7 +154,7 @@ reason = \case
         <> quote e.message
 
 -- | A doc comment: a title line, then the text.
-doc :: Text -> RawDoc -> [Text]
+doc :: Text -> DocComment a -> [Text]
 doc title d = (title <> " " <> at d.span) : map (indent . ("| " <>)) (Text.lines d.text)
 
 at :: Span -> Text

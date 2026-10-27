@@ -47,6 +47,7 @@ library
     HaskellReviewer.Core.Cpp.Positions
     HaskellReviewer.Core.Cpp.Warning
     HaskellReviewer.Core.Decls
+    HaskellReviewer.Core.DocLinks
     HaskellReviewer.Core.Exported
     HaskellReviewer.Core.FileContent
     HaskellReviewer.Core.FileList
@@ -58,6 +59,7 @@ library
     HaskellReviewer.Core.Parser
     HaskellReviewer.Core.Parser.Convert
     HaskellReviewer.Core.Parser.ConvertDecls
+    HaskellReviewer.Core.Parser.Haddock
     HaskellReviewer.Core.Parser.Helpers
     HaskellReviewer.Core.Parser.InstanceKey
     HaskellReviewer.Core.Parser.Lex
@@ -65,6 +67,7 @@ library
     HaskellReviewer.Core.ProjectFile
     HaskellReviewer.Core.ProjectLoad
     HaskellReviewer.Core.RelPath
+    HaskellReviewer.Core.RichText
     HaskellReviewer.Core.Root
     HaskellReviewer.Core.SourceText
     HaskellReviewer.Core.Span
@@ -118,6 +121,7 @@ library
     , file-embed            >=0.0.16 && <0.1
     , filepath              >=1.5    && <1.6
     , ghc-lib-parser        >=9.14.1.20251220 && <9.15
+    , haddock-library       >=1.11   && <1.12
     , http-types            >=0.12.4 && <0.13
     , network               >=3.2    && <3.3
     , optparse-applicative  >=0.18   && <0.20
@@ -171,8 +175,10 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.CppTest
     HaskellReviewer.Core.DeclsGoldenTest
     HaskellReviewer.Core.DeclsTest
+    HaskellReviewer.Core.DocLinksTest
     HaskellReviewer.Core.FileListTest
     HaskellReviewer.Core.GitTest
+    HaskellReviewer.Core.HaddockTest
     HaskellReviewer.Core.InstanceKeyTest
     HaskellReviewer.Core.ModulesGoldenTest
     HaskellReviewer.Core.ModulesTest
@@ -184,6 +190,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.ProjectLoadTest
     HaskellReviewer.Core.ProjectTest
     HaskellReviewer.Core.RelPathTest
+    HaskellReviewer.Core.RichTextGoldenTest
     HaskellReviewer.Core.RootTest
     HaskellReviewer.Core.SourceTextTest
     HaskellReviewer.Core.TokensTest
@@ -204,6 +211,7 @@ test-suite haskell-reviewer-test
     ModulesDump
     ParseDump
     ProjectDump
+    RichDump
     TestSupport
 
   ghc-options:        -threaded

@@ -21,7 +21,7 @@ module HaskellReviewer.Core.ModuleModel
     WarningText (..),
     WarningKind (..),
     Located (..),
-    RawDoc (..),
+    DocComment (..),
     DocItem (..),
     Export (..),
     ModuleExport (..),
@@ -52,16 +52,18 @@ import Data.Text (Text)
 import HaskellReviewer.Core.Cpp.Warning (CppWarning, renderCppWarning)
 import HaskellReviewer.Core.Decls
   ( Decl,
+    DocComment (..),
     Located (..),
     ModulePragma,
-    RawDoc (..),
     WarningKind (..),
     WarningText (..),
     forceDecls,
+    forceDocComment,
     forcePragmas,
     forceWarningText,
   )
 import HaskellReviewer.Core.Project (ModuleName)
+import HaskellReviewer.Core.RichText (Doc, Inline, forceInlines)
 import HaskellReviewer.Core.Span (Span)
 import HaskellReviewer.Core.Tokens (Tokens)
 
@@ -168,7 +170,7 @@ data DocItem
   = -- | @-- * Heading@.
     DocHeading Section
   | -- | @-- $name@, with its text.
-    DocChunk (Located Text) RawDoc
+    DocChunk (Located Text) (DocComment Doc)
   deriving (Eq, Show)
 
 -- | The @module@ line and what comes with it.
@@ -176,7 +178,7 @@ data ModuleHeader = ModuleHeader
   { -- | 'Nothing': no @module@ line (so it's @Main@).
     name :: Maybe (Located ModuleName),
     -- | The Haddock comment before @module@.
-    haddock :: Maybe RawDoc,
+    haddock :: Maybe (DocComment Doc),
     -- | A @DEPRECATED@ or @WARNING@ pragma on the module.
     warning :: Maybe WarningText
   }
@@ -189,7 +191,7 @@ data Export
   | -- | @-- * Heading@.
     ExportSection Section
   | -- | A doc comment in the list.
-    ExportDoc RawDoc
+    ExportDoc (DocComment Doc)
   | -- | @-- $name@: a chunk defined further down.
     ExportDocNamed (Located Text)
   deriving (Eq, Show)
@@ -205,7 +207,7 @@ data ModuleExport = ModuleExport
 data Section = Section
   { -- | How many stars.
     level :: Int,
-    heading :: RawDoc
+    heading :: DocComment [Inline]
   }
   deriving (Eq, Show)
 
@@ -215,7 +217,7 @@ data Item = Item
     name :: ItemName,
     subs :: Subs,
     -- | Export lists only: @f -- ^ doc@.
-    doc :: Maybe RawDoc,
+    doc :: Maybe (DocComment Doc),
     -- | Export lists only: @{-# DEPRECATED "..." #-} f@.
     warning :: Maybe WarningText
   }
@@ -336,19 +338,28 @@ forceModuleParse = \case
               list m.extensions.fromPragmas `seq`
                 list m.warnings `seq`
                   forceDecls m.declarations `seq`
-                    list m.docItems `seq`
+                    each docItem m.docItems `seq`
                       forcePragmas m.pragmas `seq`
                         m.tokens `seq`
                           ()
-    header h = whnf h.name `seq` whnf h.haddock `seq` maybe () forceWarningText h.warning
+    header h =
+      whnf h.name `seq`
+        maybe () forceDocComment h.haddock `seq`
+          maybe () forceWarningText h.warning
     export = \case
       ExportItem i -> item i
       ExportModule m -> maybe () forceWarningText m.warning
-      _ -> ()
+      ExportSection s -> section s
+      ExportDoc d -> forceDocComment d
+      ExportDocNamed _ -> ()
+    docItem = \case
+      DocHeading s -> section s
+      DocChunk _ d -> forceDocComment d
+    section s = forceInlines s.heading.parsed
     item i =
       itemName i.name `seq`
         subs i.subs `seq`
-          whnf i.doc `seq`
+          maybe () forceDocComment i.doc `seq`
             maybe () forceWarningText i.warning
     itemName n = whnf n.qualifier
     subs = \case

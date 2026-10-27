@@ -1,0 +1,24 @@
+heading 1 @2:5-2:41
+  "Section with "
+  name f as "f" -> val:f
+  " and "
+  emphasis
+    "emphasis"
+heading 2 @5:5-5:23
+  "A subsection"
+export doc @8:5-8:35
+  para
+    "A doc in the export list."
+chunk chunk @14:1-15:28
+  para
+    "A named chunk, with "
+    name g as "g" -> val:g
+    "."
+heading 1 @17:1-17:28
+  "Among the declarations"
+val:f @19:1-19:8
+  para
+    "F."
+val:g @23:1-23:8
+  para
+    "G."
