@@ -1,0 +1,108 @@
+module @1:1-56:3
+  since 1.2.3
+  para
+    "Module      : Markup\nDescription : Every kind of markup.\nCopyright   : (c) Someone"
+  para
+    "The fields above stay text for now."
+  heading 1
+    "A heading"
+  para
+    "Text with "
+    emphasis
+      "emphasis"
+    ", "
+    bold
+      "bold"
+    ", "
+    code
+      "code with "
+      emphasis
+        "markup"
+    ", AB and a/b.\nMath: "
+    math "x^2"
+    " and "
+    display math "\\sum_i x_i"
+    ". An  shows nothing."
+  code block
+    "code block\n  with "
+    name f as "f" -> val:f
+    " in it\n"
+  code block
+    "bird track\ntwo lines"
+  heading 2
+    "A smaller heading"
+  list
+    item
+      para
+        "an item"
+      list
+        item
+          para
+            "a nested item"
+  list
+    item
+      para
+        "another item"
+  ordered list
+    item 1
+      para
+        "first"
+    item 2
+      para
+        "second"
+    item 10
+      para
+        "tenth"
+  definitions
+    term
+      "term"
+    definition
+      para
+        "definition"
+    term
+      "other term"
+    definition
+      para
+        "another one"
+  examples
+    >>> "1 + 1"
+      "2"
+  examples
+    >>> "putStr \"a\\n\\nb\""
+      "a"
+      ""
+      "b"
+  property "\\x -> x == (x :: Int)"
+  table
+    header row
+      cell 1x1
+        "head"
+      cell 1x1
+        "er"
+    row
+      cell 2x1
+        "one cell"
+    row
+      cell 1x1
+        "a"
+      cell 1x1
+        "b"
+val:f @59:1-61:14
+  since 0.1
+  para
+    "A function."
+type:T @65:1-65:13
+  para
+    "A type."
+con:A @67:5-67:24
+  para
+    "A constructor."
+arg of con:A @70:7-70:33
+  para
+    "Its "
+    emphasis
+      "first"
+    " argument."
+field:T.field @71:21-71:34
+  para
+    "A field."

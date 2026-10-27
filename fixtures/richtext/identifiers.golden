@@ -1,0 +1,71 @@
+module @3:1-5:75
+  para
+    "Some names: "
+    name T as "T" -> type:T
+    " (the type, not the constructor), "
+    name v:T as "T" -> con:T
+    " (the constructor),\n "
+    name t:T as "T" -> type:T
+    ", "
+    name f as "f" -> val:f
+    ", "
+    name +++ as "(+++)" -> val:+++
+    ", "
+    name f as "`f`" -> val:f
+    ", "
+    name field as "field" -> field:T.field
+    ", "
+    name Identifiers.f as "Identifiers.f" -> val:f
+    ", "
+    name Other.f as "Other.f"
+    ", "
+    name C as "C" -> class:C
+    ",\n "
+    name m as "m" -> val:m
+    ", "
+    name Assoc as "Assoc" -> type:Assoc
+    ", "
+    name P as "P" -> pat:P
+    ", "
+    name Ext as "Ext"
+    ", "
+    name missing as "missing"
+    ", 'case', 'Identifiers.case', don't."
+type:T @8:1-8:22
+  para
+    "See "
+    name f as "f" -> val:f
+    " and "
+    name T as "T" -> type:T
+    "."
+class:C @11:1-11:27
+  para
+    "Uses "
+    name m as "m" -> val:m
+    " and "
+    name Assoc as "Assoc" -> type:Assoc
+    "."
+val:m @14:3-14:20
+  para
+    name C as "C" -> class:C
+    " and "
+    name T as "T" -> type:T
+    "."
+val:f @17:1-17:16
+  para
+    name f as "f" -> val:f
+    " again."
+val:+++ @21:1-21:15
+  para
+    "Operator."
+pat:P @25:1-25:19
+  para
+    name P as "P" -> pat:P
+    " and "
+    name v:P as "P" -> pat:P
+    "."
+inst:Show:T @29:1-29:49
+  para
+    "Instances have no name: "
+    name Show as "Show"
+    " isn't local."

@@ -37,7 +37,8 @@ import HaskellReviewer.Core.FileList
     ListSource (..),
   )
 import HaskellReviewer.Core.ModuleModel
-  ( Export (..),
+  ( DocComment (..),
+    Export (..),
     Extensions (..),
     Import (..),
     ImportLevel (..),
@@ -54,7 +55,6 @@ import HaskellReviewer.Core.ModuleModel
     ParseError (..),
     ParsedModule (..),
     Qualified (..),
-    RawDoc (..),
     Section (..),
     SubList (..),
     Subs (..),
@@ -349,7 +349,7 @@ parsedFields m =
     header h =
       Aeson.pairs $
         Encoding.pair "name" (nullable (located moduleName) h.name)
-          <> Encoding.pair "haddock" (nullable rawDoc h.haddock)
+          <> Encoding.pair "haddock" (nullable docComment h.haddock)
           <> Encoding.pair "warning" (nullable warningText h.warning)
     -- {"span":[...],"kind":"deprecated"|"warning","category":null,"messages":[...]}
     warningText w =
@@ -371,7 +371,7 @@ parsedFields m =
         Aeson.pairs $
           kindIs "section"
             <> ("level" .= s.level)
-            <> Encoding.pair "heading" (rawDoc s.heading)
+            <> Encoding.pair "heading" (docComment s.heading)
       ExportDoc d -> Aeson.pairs (kindIs "doc" <> docFields d)
       ExportDocNamed n ->
         Aeson.pairs $
@@ -385,7 +385,7 @@ parsedFields m =
           <> Encoding.pair "span" (spanJson i.span)
           <> Encoding.pair "name" (itemName i.name)
           <> Encoding.pair "subs" (subs i.subs)
-          <> Encoding.pair "doc" (nullable rawDoc i.doc)
+          <> Encoding.pair "doc" (nullable docComment i.doc)
           <> Encoding.pair "warning" (nullable warningText i.warning)
     itemName n =
       Aeson.pairs $
@@ -444,7 +444,10 @@ parsedFields m =
     located f l =
       Aeson.pairs (Encoding.pair "span" (spanJson l.span) <> ("value" .= f l.value))
     moduleName = moduleNameText
-    rawDoc d = Aeson.pairs (docFields d)
+    -- Only the text for now: the AST goes on the wire later.
+    docComment :: DocComment a -> Aeson.Encoding
+    docComment d = Aeson.pairs (docFields d)
+    docFields :: DocComment a -> Series
     docFields d = Encoding.pair "span" (spanJson d.span) <> ("text" .= d.text)
     nullable = maybe Encoding.null_
 

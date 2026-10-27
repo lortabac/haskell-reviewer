@@ -12,7 +12,8 @@ module HaskellReviewer.Core.Parser.Helpers
     -- * Names and docs
     occText,
     moduleName,
-    rawDoc,
+    docComment,
+    headingComment,
     warningText,
   )
 where
@@ -42,8 +43,10 @@ import GHC.Unit.Module.Warnings
     WarningTxt (..),
   )
 import HaskellReviewer.Core.Cpp (PositionMap, mapSpan)
-import HaskellReviewer.Core.Decls (RawDoc (..), WarningKind (..), WarningText (..))
+import HaskellReviewer.Core.Decls (DocComment (..), WarningKind (..), WarningText (..))
+import HaskellReviewer.Core.Parser.Haddock (parseDoc, parseHeading)
 import HaskellReviewer.Core.Project (ModuleName (..))
+import HaskellReviewer.Core.RichText (Doc, Inline)
 import HaskellReviewer.Core.SourceText (ColumnMap, GhcRange (..), ghcToSpan)
 import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
 import Language.Haskell.Syntax.Module.Name qualified as Ghc (ModuleName, moduleNameString)
@@ -93,10 +96,20 @@ occText = Text.pack . occNameString . rdrNameOcc
 moduleName :: Ghc.ModuleName -> ModuleName
 moduleName = ModuleName . Text.pack . Ghc.moduleNameString
 
--- | A doc comment, without the decorator.
-rawDoc :: SpanMap -> LHsDoc GhcPs -> RawDoc
-rawDoc spans d@(L _ w) =
-  RawDoc {span = locatedSpan spans d, text = Text.pack (renderHsDocString w.hsDocString)}
+-- | A doc comment, without the decorator, and parsed.
+docComment :: SpanMap -> LHsDoc GhcPs -> DocComment Doc
+docComment = withText parseDoc
+
+-- | A section heading (@-- * Title@): inline text only, as Haddock reads
+-- it.
+headingComment :: SpanMap -> LHsDoc GhcPs -> DocComment [Inline]
+headingComment = withText parseHeading
+
+withText :: (Text -> a) -> SpanMap -> LHsDoc GhcPs -> DocComment a
+withText parse spans d@(L _ w) =
+  DocComment {span = locatedSpan spans d, text = t, parsed = parse t}
+  where
+    t = Text.pack (renderHsDocString w.hsDocString)
 
 -- | A @DEPRECATED@ or @WARNING@ pragma's text, at this span.
 warningText :: Span -> WarningTxt GhcPs -> WarningText

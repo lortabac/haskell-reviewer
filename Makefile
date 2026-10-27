@@ -78,6 +78,10 @@ install: build
 #
 # The old freeze file is removed first, so we get a fresh solve against
 # the current index (run `cabal update` before).
+#
+# haddock-library ships with GHC 9.12 and later, so with those this drops
+# its line. GHC 9.10 builds it from Hackage: put
+# `any.haddock-library ==1.11.0,` back by hand.
 freeze:
 	@command -v jq >/dev/null || { echo 'make freeze needs jq' >&2; exit 1; }
 	rm -f cabal.project.freeze

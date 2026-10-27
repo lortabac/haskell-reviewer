@@ -1,0 +1,32 @@
+module @1:1-1:37
+  para
+    "Links and what could be unsafe."
+val:x @4:1-16:80
+  para
+    "Raw HTML is text: bbold/b scriptalert(1)/script\n src=x onerror=alert(1) <img> &lt;i&gt;"
+  para
+    "Images are links: "
+    link http://img.example/a.png
+    ", "
+    link https://img.example/b.png
+      "a title"
+    ",\n "
+    link http://img.example/c.png
+      "alt text"
+    "."
+  para
+    "Unsafe images are text: a.png, t <data:image/png;base64,AAAA>."
+  para
+    "Links keep the full URL: "
+    link https://example.com/a/b?c=d&e=f#g
+      "a label"
+    ",\n "
+    link http://example.com/x
+      "markdown "
+      emphasis
+        "label"
+    ", "
+    link https://example.com/auto?q=1
+    "."
+  para
+    "Only http and https: click <javascript:alert(1)>, x <javascript:alert(1>),\n mailto:a@b.example, Other.html, ftp://example.com/f, //evil.example/x."

@@ -20,6 +20,7 @@ import HaskellReviewer.Core.Decls
     Derived (..),
     DerivedClass (..),
     DerivingClause (..),
+    DocComment (..),
     Extent (..),
     FamInstDecl (..),
     FamInstForm (..),
@@ -39,7 +40,6 @@ import HaskellReviewer.Core.Decls
     PatSynDecl (..),
     PatSynDir (..),
     PragmaKind (..),
-    RawDoc (..),
     Signature (..),
     Strictness (..),
     TypeDecl (..),
@@ -317,7 +317,7 @@ opt :: Text -> Maybe Span -> [Text]
 opt title = maybe [] (\s -> [title <> " " <> at s])
 
 -- | A doc comment: a title line, then the text.
-doc :: Text -> RawDoc -> [Text]
+doc :: Text -> DocComment a -> [Text]
 doc title d = (title <> " " <> at d.span) : map (indent . ("| " <>)) (Text.lines d.text)
 
 nested :: [Text] -> [Text]
