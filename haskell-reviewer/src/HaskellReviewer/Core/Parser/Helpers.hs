@@ -107,7 +107,7 @@ headingComment = withText parseHeading
 
 withText :: (Text -> a) -> SpanMap -> LHsDoc GhcPs -> DocComment a
 withText parse spans d@(L _ w) =
-  DocComment {span = locatedSpan spans d, text = t, parsed = parse t}
+  DocComment {span = locatedSpan spans d, parsed = parse t}
   where
     t = Text.pack (renderHsDocString w.hsDocString)
 

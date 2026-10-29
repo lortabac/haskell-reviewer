@@ -103,11 +103,10 @@ data Located a = Located
   }
   deriving (Eq, Show)
 
--- | A Haddock comment: the text as written, without the @|@ or @^@, and
--- what it says. The text is what the wire sends for now.
+-- | A Haddock comment: where it is and what it says. The text as
+-- written is the span's slice of the file.
 data DocComment a = DocComment
   { span :: Span,
-    text :: Text,
     -- | A 'Doc', or inline text for a section heading.
     parsed :: a
   }
@@ -510,6 +509,11 @@ data InstanceDecl = InstanceDecl
     -- (Note [Orphans] in "HaskellReviewer.Core.Parser.InstanceKey").
     -- Never for one from a deriving clause.
     orphan :: Bool,
+    -- | The types and classes of this module the head names: the class
+    -- first, each once, in source order. For one from a deriving clause,
+    -- the class if it's from here, then the type (or the data family).
+    -- The page lists the instance under each.
+    mentions :: [Text],
     form :: InstanceForm
   }
   deriving (Eq, Show)
@@ -721,7 +725,7 @@ forceDecls = each decl
         maybe () signature p.signature `seq`
           each info p.fields `seq`
             whnf p.fixity
-    instanceDecl i = info i.info `seq` instanceForm i.form
+    instanceDecl i = info i.info `seq` list i.mentions `seq` instanceForm i.form
     instanceForm = \case
       ExplicitInstance b -> each method_ b.methods `seq` each famInst b.associated
       StandaloneDeriving _ -> ()

@@ -53,6 +53,9 @@ data TokenClass
   | ConId
   | VarSym
   | ConSym
+  | -- | @!@, @~@, @\@@, @.@, @*@, @-@, @%@ and the like: operators GHC's
+    -- lexer names on its own, as they are syntax in some places.
+    ReservedOp
   | -- | Brackets, commas, @::@, @=@, @->@ and other reserved symbols.
     Special
   | -- | Numbers.

@@ -10,7 +10,7 @@ class:Container class name@5:25-5:34 exported
     head @18:16-22:31
   head: class ( Eq a , Show a ) => Container f a | f -> a where type Elem f type Elem f = a data Key f empty , none :: f insert :: a -> f -> f default size :: ( Foldable g , f ~ g a ) => f -> Int size :: f -> Int ( <+> ) :: f -> f -> f infixr 5 <+> {-# MINIMAL empty , ( <+> ) #-}
   haddock @4:1-4:17
-    |  Containers.
+    | -- | Containers.
   context @5:7-5:21
   fundep @5:41-5:47
   minimal @22:3-22:31
@@ -20,7 +20,7 @@ class:Container class name@5:25-5:34 exported
       head @11:3-11:19
     head: empty , none :: f
     haddock @10:3-10:14
-      |  Empty.
+      | -- | Empty.
     signature @11:3-11:19 empty, none
   val:none method name@11:10-11:14 exported
     extent:
@@ -28,7 +28,7 @@ class:Container class name@5:25-5:34 exported
       head @11:3-11:19
     head: empty , none :: f
     haddock @10:3-10:14
-      |  Empty.
+      | -- | Empty.
     signature @11:3-11:19 empty, none
   val:insert method name@13:3-13:9 exported
     extent:
@@ -39,7 +39,7 @@ class:Container class name@5:25-5:34 exported
       head @26:1-26:18
     head: insert :: a -> f -> f infixl 4 ` insert `
     haddock @12:3-12:15
-      |  Insert.
+      | -- | Insert.
     signature @13:3-13:24 insert
     has default
     fixity infixl 4 @26:1-26:18
@@ -66,7 +66,7 @@ class:Container class name@5:25-5:34 exported
       head @8:3-8:18
     head: type Elem f type Elem f = a
     haddock @6:3-6:25
-      |  The element type.
+      | -- | The element type.
     default type Elem f = a
   type:Key data family name@9:8-9:11 exported
     extent:

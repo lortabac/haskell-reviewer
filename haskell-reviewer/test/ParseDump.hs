@@ -1,6 +1,6 @@
 -- | A plain text dump of a 'ModuleParse', for golden tests. One line per
 -- fact, two spaces per level. Spans are @line:col-line:col@.
-module ParseDump (dumpParse) where
+module ParseDump (dumpParse, docLines) where
 
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -33,30 +33,32 @@ import HaskellReviewer.Core.ModuleModel
     renderParseWarning,
   )
 import HaskellReviewer.Core.Project (ModuleName (..))
+import HaskellReviewer.Core.SourceText (SourceLines, sliceSpan, sourceLines)
 import HaskellReviewer.Core.Span (Span, renderSpan)
 
-dumpParse :: ModuleParse -> Text
-dumpParse =
+-- | A parse of this text.
+dumpParse :: Text -> ModuleParse -> Text
+dumpParse text =
   Text.unlines . \case
-    Parsed m -> "parsed" : parsed m
+    Parsed m -> "parsed" : parsed (sourceLines text) m
     TextOnly t ->
       ("text only: " <> reason t.reason) : map (indent . renderParseWarning) t.warnings
 
-parsed :: ParsedModule -> [Text]
-parsed m =
-  header m.header
+parsed :: SourceLines -> ParsedModule -> [Text]
+parsed src m =
+  header src m.header
     <> case m.exports of
       Nothing -> ["exports: everything"]
-      Just es -> "exports:" : concatMap (map indent . export) es
-    <> ("imports:" : concatMap (map indent . importDecl) m.imports)
+      Just es -> "exports:" : concatMap (map indent . export src) es
+    <> ("imports:" : concatMap (map indent . importDecl src) m.imports)
     <> extensions m.extensions
     <> ("warnings:" : map (indent . renderParseWarning) m.warnings)
 
-header :: ModuleHeader -> [Text]
-header h =
+header :: SourceLines -> ModuleHeader -> [Text]
+header src h =
   [ "module: " <> maybe "none" (\n -> name n.value <> " " <> at n.span) h.name
   ]
-    <> maybe [] (doc "haddock") h.haddock
+    <> maybe [] (docLines src "haddock") h.haddock
     <> maybe [] warningText h.warning
 
 warningText :: WarningText -> [Text]
@@ -68,20 +70,20 @@ warningText w =
       WarningPragma Nothing -> "warning"
       WarningPragma (Just c) -> "warning in " <> quote c
 
-export :: Export -> [Text]
-export = \case
-  ExportItem i -> item i
+export :: SourceLines -> Export -> [Text]
+export src = \case
+  ExportItem i -> item src i
   ExportModule m ->
     ("module " <> name m.name.value <> " " <> at m.name.span)
       : maybe [] (map indent . warningText) m.warning
-  ExportSection s -> doc ("section " <> Text.pack (show s.level)) s.heading
-  ExportDoc d -> doc "doc" d
+  ExportSection s -> docLines src ("section " <> Text.pack (show s.level)) s.heading
+  ExportDoc d -> docLines src "doc" d
   ExportDocNamed n -> ["named doc " <> quote n.value <> " " <> at n.span]
 
-item :: Item -> [Text]
-item i =
+item :: SourceLines -> Item -> [Text]
+item src i =
   (itemName i.name <> subs i.subs <> " " <> at i.span)
-    : maybe [] (map indent . doc "doc") i.doc
+    : maybe [] (map indent . docLines src "doc") i.doc
       <> maybe [] (map indent . warningText) i.warning
   where
     subs = \case
@@ -105,8 +107,8 @@ itemName n =
       DataKeyword -> "data "
       DefaultKeyword -> "default "
 
-importDecl :: Import -> [Text]
-importDecl i =
+importDecl :: SourceLines -> Import -> [Text]
+importDecl src i =
   Text.unwords
     ( ["import"]
         <> ["{-# SOURCE #-}" | i.source == SourceImport]
@@ -131,7 +133,7 @@ importDecl i =
             Hiding -> "hiding:"
             Only -> "only:"
         )
-          : concatMap (map indent . item) l.items
+          : concatMap (map indent . item src) l.items
 
 extensions :: Extensions -> [Text]
 extensions e =
@@ -153,9 +155,11 @@ reason = \case
         <> ": "
         <> quote e.message
 
--- | A doc comment: a title line, then the text.
-doc :: Text -> DocComment a -> [Text]
-doc title d = (title <> " " <> at d.span) : map (indent . ("| " <>)) (Text.lines d.text)
+-- | A doc comment: a title line, then its text in the file.
+docLines :: SourceLines -> Text -> DocComment a -> [Text]
+docLines src title d =
+  (title <> " " <> at d.span)
+    : map (indent . ("| " <>)) (Text.lines (sliceSpan src d.span))
 
 at :: Span -> Text
 at s = "@" <> renderSpan s

@@ -47,7 +47,7 @@ dump f = do
   bytes <- BS.readFile (fixtureDir <> f)
   let text = Text.Encoding.decodeUtf8Lenient bytes
   r <- parseGuarded defaultParseSettings text
-  pure (LBS.fromStrict (Text.Encoding.encodeUtf8 (dumpRich r)))
+  pure (LBS.fromStrict (Text.Encoding.encodeUtf8 (dumpRich text r)))
 
 -- | Fail if a fixture or golden file has no case.
 noStale :: IO ()

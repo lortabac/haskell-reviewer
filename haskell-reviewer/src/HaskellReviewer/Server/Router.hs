@@ -78,10 +78,11 @@ Paths below are what the router sees, after the token.
 - api/files/<side>: the file list, as JSON. api/file/<side>/<path...>:
   one file, as CBOR (Note [File containment] in
   "HaskellReviewer.Core.RelPath"). api/modules/<side>: the module tree,
-  as JSON. api/module/<side>/<ref...>: one module, from the index, as
-  JSON. The ref's segments are joined with /, so a loose module's path
-  works; an unknown ref, or a module whose file is gone, is a 404 with a
-  JSON body. api/indexing/<side>: how far indexing is, as JSON. The only
+  as JSON. api/module/<side>/<ref...>: one module's page, as CBOR
+  (Note [Module page] in "HaskellReviewer.Server.Wire.Page"). The ref's
+  segments are joined with /, so a loose module's path works; an
+  unknown ref, or a module whose file is gone, is a 404 with a JSON
+  body. api/indexing/<side>: how far indexing is, as JSON. The only
   side is tree; another one is a plain 404. GET only (405 otherwise,
   HEAD too).
 - Anything else: 404. index.html itself is not served under its name.

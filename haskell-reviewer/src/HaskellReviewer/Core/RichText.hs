@@ -86,7 +86,9 @@ data Header = Header
 
 -- | An item of an ordered list.
 data ListItem = ListItem
-  { number :: Int,
+  { -- | 'Nothing' when haddock-library may have got it wrong (Note [Big
+    -- numbers] in "HaskellReviewer.Core.Parser.Haddock").
+    number :: Maybe Int,
     content :: [Block]
   }
   deriving (Eq, Show)

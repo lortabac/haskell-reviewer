@@ -39,6 +39,7 @@ library
     HaskellReviewer.Core.Address
     HaskellReviewer.Core.CabalCompat
     HaskellReviewer.Core.CabalFile
+    HaskellReviewer.Core.Code
     HaskellReviewer.Core.Cpp
     HaskellReviewer.Core.Cpp.Expand
     HaskellReviewer.Core.Cpp.Expr
@@ -104,6 +105,7 @@ library
     HaskellReviewer.Server.Router
     HaskellReviewer.Server.Security
     HaskellReviewer.Server.Wire
+    HaskellReviewer.Server.Wire.Page
 
     -- App
     HaskellReviewer.App.Cli
@@ -180,6 +182,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.App.RunTest
     HaskellReviewer.Core.AddressTest
     HaskellReviewer.Core.CabalFileTest
+    HaskellReviewer.Core.CodeTest
     HaskellReviewer.Core.CppGoldenTest
     HaskellReviewer.Core.CppPropertyTest
     HaskellReviewer.Core.CppTest
@@ -216,6 +219,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Server.ApiTest
     HaskellReviewer.Server.AssetsTest
     HaskellReviewer.Server.CborTest
+    HaskellReviewer.Server.PageTest
     HaskellReviewer.Server.EventsTest
     HaskellReviewer.Server.ListenTest
     HaskellReviewer.Server.RouterTest

@@ -210,6 +210,7 @@ decl w = \case
       InstanceDecl
         { info = mark w True i.info,
           orphan = i.orphan,
+          mentions = i.mentions,
           form = case i.form of
             ExplicitInstance b ->
               ExplicitInstance

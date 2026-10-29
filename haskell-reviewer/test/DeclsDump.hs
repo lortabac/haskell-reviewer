@@ -20,7 +20,6 @@ import HaskellReviewer.Core.Decls
     Derived (..),
     DerivedClass (..),
     DerivingClause (..),
-    DocComment (..),
     Extent (..),
     FamInstDecl (..),
     FamInstForm (..),
@@ -62,18 +61,18 @@ import HaskellReviewer.Core.Names (renderDeclId)
 import HaskellReviewer.Core.SourceText (SourceLines, sliceSpan, sourceLines)
 import HaskellReviewer.Core.Span (Span, renderSpan)
 import HaskellReviewer.Core.Tokens (Token (..), Tokens, tokenList)
-import ParseDump (dumpParse)
+import ParseDump (docLines, dumpParse)
 
 -- | The declarations and doc items of a parse of this text.
 dumpDecls :: Text -> ModuleParse -> Text
 dumpDecls src = \case
-  r@(TextOnly _) -> dumpParse r
+  r@(TextOnly _) -> dumpParse src r
   Parsed m ->
     Text.unlines $
       [ "warnings: " <> Text.intercalate "; " (map renderParseWarning m.warnings)
       | not (null m.warnings)
       ]
-        <> concatMap docItem m.docItems
+        <> concatMap (docItem (sourceLines src)) m.docItems
         <> concatMap (decl (sourceLines src) m.tokens) m.declarations
         <> map pragma m.pragmas
 
@@ -103,10 +102,10 @@ pragma p =
           AnnModule -> ["module"]
       Default c -> "default" : maybe [] pure c
 
-docItem :: DocItem -> [Text]
-docItem = \case
-  DocHeading s -> doc ("heading " <> Text.pack (show s.level)) s.heading
-  DocChunk n d -> doc ("chunk " <> n.value) d
+docItem :: SourceLines -> DocItem -> [Text]
+docItem src = \case
+  DocHeading s -> docLines src ("heading " <> Text.pack (show s.level)) s.heading
+  DocChunk n d -> docLines src ("chunk " <> n.value) d
 
 decl :: SourceLines -> Tokens -> Decl -> [Text]
 decl src ts = \case
@@ -164,7 +163,7 @@ decl src ts = \case
 instanceDecl :: SourceLines -> Tokens -> InstanceDecl -> [Text]
 instanceDecl src ts i =
   infoLines src ts (Text.unwords (kind <> ["orphan" | i.orphan])) i.info
-    <> nested body
+    <> nested (Text.unwords ("mentions:" : i.mentions) : body)
   where
     (kind, body) = case i.form of
       ExplicitInstance b ->
@@ -233,7 +232,8 @@ dataBody src ts cs ds = concatMap con cs <> concatMap deriving_ ds
       RecordArgs fs -> "record" : concatMap field fs
       GadtArgs as -> "gadt" : concatMap arg as
       GadtRecordArgs fs -> "gadt record" : concatMap field fs
-    arg (a :: ConArg) = argType "arg" a.type_ : maybe [] (map indent . doc "doc") a.doc
+    arg (a :: ConArg) =
+      argType "arg" a.type_ : maybe [] (map indent . docLines src "doc") a.doc
     argType title (a :: ArgType) =
       Text.unwords
         ( [title, at a.type_, quote (slice a.type_)]
@@ -271,7 +271,7 @@ infoLines src ts kind i =
     ([renderDeclId i.id, kind, "name" <> at i.nameSpan] <> ["exported" | i.exported])
     : nested
       ( extentLines src ts i.extent
-          <> concatMap (doc "haddock") i.haddock
+          <> concatMap (docLines src "haddock") i.haddock
           <> maybe [] warning i.warning
       )
   where
@@ -315,10 +315,6 @@ fixity = \case
 
 opt :: Text -> Maybe Span -> [Text]
 opt title = maybe [] (\s -> [title <> " " <> at s])
-
--- | A doc comment: a title line, then the text.
-doc :: Text -> DocComment a -> [Text]
-doc title d = (title <> " " <> at d.span) : map (indent . ("| " <>)) (Text.lines d.text)
 
 nested :: [Text] -> [Text]
 nested = map indent

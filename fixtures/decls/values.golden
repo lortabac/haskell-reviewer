@@ -7,7 +7,7 @@ val:add equations name@5:1-5:4 exported
     pragma @13:1-13:44
   head: add :: Int -> Int -> Int
   haddock @4:1-4:11
-    |  Adds.
+    | -- | Adds.
   signature @5:1-5:25 add
 val:f equations name@16:1-16:2 exported
   extent:
@@ -16,7 +16,7 @@ val:f equations name@16:1-16:2 exported
     body @18:1-18:6
   head: f , g :: Int
   haddock @15:1-15:13
-    |  Shared.
+    | -- | Shared.
   signature @16:1-16:12 f, g
 val:g equations name@16:4-16:5 exported
   extent:
@@ -25,7 +25,7 @@ val:g equations name@16:4-16:5 exported
     body @19:1-19:6
   head: f , g :: Int
   haddock @15:1-15:13
-    |  Shared.
+    | -- | Shared.
   signature @16:1-16:12 f, g
 val:+++ equations name@21:1-21:6 exported
   extent:
@@ -47,7 +47,7 @@ val:p pattern bound name@29:2-29:3 exported
     body @29:1-29:16
   head: 
   haddock @28:1-28:24
-    |  A pattern binding.
+    | -- | A pattern binding.
 val:q pattern bound name@29:5-29:6 exported
   extent:
     body @29:1-29:16
@@ -62,7 +62,7 @@ val:lonely no definition name@34:1-34:7 exported
     head @34:1-34:14
   head: lonely :: Int
   haddock @33:1-33:17
-    |  No binding.
+    | -- | No binding.
   signature @34:1-34:14 lonely
 val:later equations name@37:1-37:6 exported
   extent:

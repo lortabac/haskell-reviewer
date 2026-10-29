@@ -1,1 +1,0 @@
-{"generation":1,"id":"pkg:lib:Lexer","ref":"Lexer","path":"pkg/src/Lexer.x","tier":{"kind":"syntactic","reason":"no-hie"},"parse":{"kind":"text-only","reason":{"kind":"generated","tool":"alex"},"warnings":[]}}

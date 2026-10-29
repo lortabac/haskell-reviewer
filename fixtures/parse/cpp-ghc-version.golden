@@ -1,7 +1,7 @@
 parsed
 module: CppGhcVersion @3:8-3:21
 haddock @2:1-2:50
-  |  Built for 914, no directive.
+  | -- | Built for __GLASGOW_HASKELL__, no directive.
 exports: everything
 imports:
 language: GHC2021

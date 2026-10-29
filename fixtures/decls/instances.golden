@@ -36,7 +36,8 @@ inst:Show:Box a instance name@17:20-17:24 exported
     body @19:3-19:21
   head: instance Show a => Show ( Box a ) where
   haddock @16:1-16:21
-    |  With a context.
+    | -- | With a context.
+  mentions: Box
   method showsPrec name@18:3-18:12
     extent:
       body @18:3-18:80
@@ -52,7 +53,8 @@ inst:Eq:Box a instance name@22:18-22:20 exported
     body @23:3-23:26
   head: instance Eq b => Eq ( Box b ) where
   haddock @21:1-21:43
-    |  Other variable names, same key shape.
+    | -- | Other variable names, same key shape.
+  mentions: Box
   method == name@23:9-23:11
     extent:
       body @23:3-23:26
@@ -64,7 +66,8 @@ inst:C:[a] (Maybe b) instance name@26:10-26:11 exported
     body @30:3-30:13
   head: instance C [ x ] ( Maybe y ) where type AT [ x ] ( Maybe y ) = x data AD [ x ] = ADList x
   haddock @25:1-25:44
-    |  Multi-parameter, associated instances.
+    | -- | Multi-parameter, associated instances.
+  mentions: C
   method cm name@30:3-30:5
     extent:
       body @30:3-30:13
@@ -94,7 +97,8 @@ inst:C:Int Int instance name@33:30-33:31 exported
     pragma @38:3-38:40
   head: instance {-# OVERLAPPING #-} C Int Int where cm :: Int -> Int -> Int
   haddock @32:1-32:57
-    |  OVERLAPPING, an instance signature, method pragmas.
+    | -- | OVERLAPPING, an instance signature, method pragmas.
+  mentions: C
   method cm name@34:3-34:5
     extent:
       head @34:3-34:26
@@ -108,6 +112,7 @@ inst:MonadState:a (StateT a b) instance orphan name@40:33-40:43 exported
     head @41:18-42:3
     body @42:3-42:20
   head: instance forall s m . Monad m => MonadState s ( StateT s m ) where
+  mentions:
   method get name@41:3-41:6
     extent:
       body @41:3-41:18
@@ -137,6 +142,7 @@ inst:Semigroup:a :+: b instance name@46:40-46:49 exported
     head @46:1-47:3
     body @47:3-47:13
   head: instance ( Semigroup x , Semigroup y ) => Semigroup ( x :+: y ) where
+  mentions: :+:
   method <> name@47:5-47:7
     extent:
       body @47:3-47:13
@@ -146,6 +152,7 @@ inst:Monoid:a :+: b instance name@50:10-50:16 exported
     head @50:1-51:3
     body @51:3-51:21
   head: instance Monoid ( ( :+: ) p q ) where
+  mentions: :+:
   method mempty name@51:3-51:9
     extent:
       body @51:3-51:21
@@ -154,23 +161,29 @@ inst:C:'[] '(1, "s") instance name@54:10-54:11 exported
   extent:
     head @54:1-54:25
   head: instance C ' [ ] ' ( 1 , "s" )
+  mentions: C
 inst:C:(Proxy '[Int, Bool]) ([a], (a, b), ()) instance name@55:10-55:11 exported
   extent:
     head @55:1-55:50
   head: instance C ( Proxy ' [ Int , Bool ] ) ( [ a ] , ( a , b ) , ( ) )
+  mentions: C
 inst:C:(Map a b) (a -> b) instance name@56:10-56:11 exported
   extent:
     head @56:1-56:32
   head: instance C ( M.Map k v ) ( k -> v )
+  mentions: C
 inst:C:(Maybe (Maybe a)) (Either (Maybe a) b) instance name@57:10-57:11 exported
   extent:
     head @57:1-57:50
   head: instance C ( Maybe ( Maybe c ) ) ( Either ( Maybe c ) d )
+  mentions: C
 inst:Show:Proxy a instance orphan name@60:10-60:14 exported
   extent:
     head @60:1-60:30
   head: instance Show ( Proxy @ Type a )
+  mentions:
 inst:Show:Proxy (a :: b) instance orphan name@61:10-61:14 exported
   extent:
     head @61:1-61:31
   head: instance Show ( Proxy ( a :: k ) )
+  mentions:

@@ -14,7 +14,7 @@ inst:F:Maybe a type instance of F name@10:15-10:16 exported
     head @10:1-10:30
   head: type instance F ( Maybe b ) = b
   haddock @9:1-9:30
-    |  Same key shape as above.
+    | -- | Same key shape as above.
 type:D data family name@12:13-12:14 exported
   extent:
     head @12:1-12:16
@@ -28,7 +28,7 @@ inst:D:Int data instance of D name@14:15-14:16 exported
     head @14:1-15:18
   head: data instance D Int = DInt { dx :: Int } | DInt2 { dx :: Int } deriving ( Show )
   haddock @13:1-13:67
-    |  A data instance. Fields have the first constructor as parent.
+    | -- | A data instance. Fields have the first constructor as parent.
   con:DInt constructor name@14:23-14:27 exported
     extent:
       head @14:23-14:41
@@ -55,6 +55,7 @@ inst:Show:D Int derived on inst:D:Int name@15:13-15:17 exported
   extent:
     head @15:13-15:17
   head: Show
+  mentions: D
 inst:D:Bool newtype instance of D name@16:18-16:19 exported
   extent:
     head @16:1-16:57
@@ -72,6 +73,7 @@ inst:Eq:D Bool derived newtype on inst:D:Bool name@16:55-16:57 exported
     head @16:47-16:54
     head @16:55-16:57
   head: newtype Eq
+  mentions: D
 inst:D:[a] data instance of D name@17:15-17:16 exported
   extent:
     head @17:1-18:32
@@ -117,6 +119,7 @@ inst:K:Int instance name@30:10-30:11 exported
   extent:
     head @30:1-32:48
   head: instance K Int where type KT Int = Bool data KD Int = KDInt { kd :: Int } deriving Eq
+  mentions: K
   inst:KT:Int type instance of KT name@31:8-31:10 exported
     extent:
       head @31:3-31:21
@@ -141,6 +144,7 @@ inst:Eq:KD Int derived on inst:KD:Int name@32:46-32:48 exported
   extent:
     head @32:46-32:48
   head: Eq
+  mentions: KD
 type:H open family name@35:13-35:14
   extent:
     head @35:1-35:23

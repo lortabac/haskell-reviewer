@@ -140,6 +140,7 @@ import HaskellReviewer.Server.Listen
     renderListenError,
   )
 import HaskellReviewer.Server.Router (Routes (..), application, warmUpGzip)
+import HaskellReviewer.Server.Wire.Page (warmUpPages)
 import HaskellReviewer.Session.Clients (newClients, waitIdle)
 import HaskellReviewer.Session.Index
   ( IndexDeps (..),
@@ -284,9 +285,9 @@ data Deps = Deps
       Platform ->
       Maybe GhcVersion ->
       IO Project,
-    -- | Build the parser's shared values. See Note [Forced snapshot] in
-    -- "HaskellReviewer.Server.Api".
-    warmUpParser :: IO (),
+    -- | Build the shared values of the parser and of the page encoder.
+    -- See Note [Forced snapshot] in "HaskellReviewer.Server.Api".
+    warmUp :: IO (),
     -- | Read one entry of the file list from disk.
     readEntry ::
       CanonicalRoot ->
@@ -322,7 +323,7 @@ newRealDeps spawnSetup = do
         listen = openListener,
         probeFiles = FileSystem.probeFiles,
         readProject = Session.Project.readProject,
-        warmUpParser = Parser.warmUpParser,
+        warmUp = Parser.warmUpParser >> warmUpPages,
         readEntry = FileSystem.readEntry,
         parse = Parser.parseGuarded,
         indexWorkers = getNumCapabilities,
@@ -528,7 +529,7 @@ runListing deps logger tracer lister slot cliGhc = do
     w2 <- deps.clock.now
     -- Warm up before the fill: requests parse. See Note [Forced
     -- snapshot] in "HaskellReviewer.Server.Api".
-    when (isRight made) (warmUp deps logger)
+    when (isRight made) (runWarmUp deps logger)
     t3 <- deps.clock.monotonic
     _ <- fill made
     -- After the fill: a slow trace file can't hold up requests.
@@ -597,11 +598,11 @@ runListing deps logger tracer lister slot cliGhc = do
     reportWarmUp (Nanoseconds ns) =
       logVerbose logger ("parser warm-up: " <> showText (ns `div` 1_000) <> " us")
 
--- | 'warmUpParser', but a crash only logs a line: the snapshot is fine
--- without it.
-warmUp :: Deps -> Logger -> IO ()
-warmUp deps logger =
-  try @SomeException deps.warmUpParser >>= \case
+-- | The deps' 'warmUp', but a crash only logs a line: the snapshot is
+-- fine without it.
+runWarmUp :: Deps -> Logger -> IO ()
+runWarmUp deps logger =
+  try @SomeException deps.warmUp >>= \case
     Right () -> pure ()
     Left e
       | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
@@ -713,7 +714,7 @@ indexAndReport deps logger tracer snap = do
           logger = logger
         }
     textOnly = \case
-      Ready (IndexedParse (TextOnly _)) -> True
+      Ready (IndexedTextOnly _) -> True
       Ready (IndexedNotText _) -> True
       Ready (IndexedTooLarge _) -> True
       _ -> False

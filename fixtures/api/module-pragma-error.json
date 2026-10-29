@@ -1,1 +1,0 @@
-{"generation":1,"id":"pkg:test:detailed:Tests","ref":"Tests","path":"pkg/test/Tests.hs","tier":{"kind":"syntactic","reason":"no-hie"},"parse":{"kind":"text-only","reason":{"kind":"pragma-error","message":"Unsupported extension: NoSuchThing","code":"GHC-46537","span":[1,14,1,25]},"warnings":[]}}

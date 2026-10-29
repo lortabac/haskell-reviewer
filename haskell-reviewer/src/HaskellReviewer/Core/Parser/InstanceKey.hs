@@ -29,10 +29,12 @@ module HaskellReviewer.Core.Parser.InstanceKey
     -- * Orphans
     Locals (..),
     isOrphan,
+    localMentions,
   )
 where
 
 import Data.Char (isAlpha, isDigit)
+import Data.Containers.ListUtils (nubOrd)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (isJust, mapMaybe)
@@ -95,7 +97,10 @@ classes stays linear. A class whose arguments have no variables
 chunk of the key's head ('KeyHead'), so nothing long is copied.
 A class whose arguments have variables (@C s@) is printed whole, as
 the renaming depends on them: n such classes on n parameters is
-quadratic. That's a known limit (such classes are rare).
+quadratic. That's a known limit (such classes are rare): in the page
+and in the index's memory, 1500 such classes on a 1500-parameter type
+turn 20 KB of source into a 9 MB page (the parse time limit caps it
+near 2000 by 2000). T13 looks at it.
 -}
 
 {- Note [Orphans]
@@ -608,11 +613,25 @@ data Locals = Locals
 
 -- | See Note [Orphans]. The class (or family) and the head's arguments.
 isOrphan :: Locals -> KName -> [KeyType] -> Bool
-isOrphan locals cls args = not (any local (cls : foldr cons [] args))
+isOrphan locals cls args = not (any (isLocal locals) (cls : headNames args))
+
+-- | The types and classes of this module an instance head names: the
+-- class first, then in source order, each once. Ticked constructors
+-- don't count. The page puts the instance under each of them.
+localMentions :: Locals -> KName -> [KeyType] -> [Text]
+localMentions locals cls args =
+  nubOrd [n.occ | n <- cls : headNames args, not n.promoted, isLocal locals n]
+
+-- | Declared in this module. See Note [Orphans].
+isLocal :: Locals -> KName -> Bool
+isLocal locals n =
+  Set.member n.occ (if n.promoted then locals.constructors else locals.types)
+    && maybe True (== locals.self) n.qualifier
+
+-- | The names in a head's arguments, in source order.
+headNames :: [KeyType] -> [KName]
+headNames = foldr cons []
   where
-    local n =
-      Set.member n.occ (if n.promoted then locals.constructors else locals.types)
-        && maybe True (== locals.self) n.qualifier
     cons t rest = case t of
       KCon n -> n : rest
       _ -> foldr cons rest (children t)

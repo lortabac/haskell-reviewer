@@ -1,22 +1,20 @@
 -- | Bodies of the API, written by hand (D-50): JSON, and CBOR for the
--- file text (D-51, Note [CBOR bodies] in "HaskellReviewer.Server.Cbor").
+-- file view (D-51, Note [CBOR bodies] in "HaskellReviewer.Server.Cbor").
+-- The module page is in "HaskellReviewer.Server.Wire.Page".
 --
 -- Field order is fixed (aeson's 'pairs', 'Cbor.obj'), so fixtures are
 -- stable. See Note [API fixtures].
 module HaskellReviewer.Server.Wire
-  ( -- * Types
-    ModuleView (..),
-    ModuleAnswer (..),
-    NotParsed (..),
-
-    -- * Bodies
+  ( -- * Bodies
     encodeFileList,
     encodeFileView,
     encodeModuleTree,
-    encodeModuleView,
     encodeModuleNotFound,
     encodeIndexing,
     helloPayload,
+
+    -- * Shared
+    noSourceReason,
   )
 where
 
@@ -39,34 +37,6 @@ import HaskellReviewer.Core.FileList
     FileList (..),
     ListSource (..),
   )
-import HaskellReviewer.Core.ModuleModel
-  ( DocComment (..),
-    Export (..),
-    Extensions (..),
-    Import (..),
-    ImportLevel (..),
-    ImportList (..),
-    ImportSource (..),
-    Item (..),
-    ItemName (..),
-    ListKind (..),
-    Located (..),
-    ModuleExport (..),
-    ModuleHeader (..),
-    ModuleParse (..),
-    NameKeyword (..),
-    ParseError (..),
-    ParsedModule (..),
-    Qualified (..),
-    Section (..),
-    SubList (..),
-    Subs (..),
-    TextOnlyModule (..),
-    TextOnlyReason (..),
-    WarningKind (..),
-    WarningText (..),
-    renderParseWarning,
-  )
 import HaskellReviewer.Core.Modules
   ( ComponentModules (..),
     GeneratedFile (..),
@@ -82,7 +52,6 @@ import HaskellReviewer.Core.Modules
     OtherFile (..),
     PackageModules (..),
     PreprocessedFile (..),
-    Preprocessor,
     moduleRef,
     renderModuleId,
     renderPreprocessor,
@@ -95,8 +64,7 @@ import HaskellReviewer.Core.Project
     renderComponentName,
     renderProjectWarning,
   )
-import HaskellReviewer.Core.RelPath (RelPath, relDirText, relPathText)
-import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
+import HaskellReviewer.Core.RelPath (relDirText, relPathText)
 import HaskellReviewer.Server.Cbor qualified as Cbor
 import HaskellReviewer.Session.Index (Progress (..))
 import HaskellReviewer.Session.Snapshot (Generation (..))
@@ -261,205 +229,6 @@ encodeModuleTree (Generation g) idx =
                 <> ("ref" .= moduleRef idx i)
       BootFile p -> Aeson.pairs (kindIs "boot" <> ("path" .= relPathText p))
 
--- | One module, for GET api\/module\/\<side>\/\<ref>.
-data ModuleView = ModuleView
-  { moduleId :: ModuleId,
-    -- | The file, if there is one.
-    path :: Maybe RelPath,
-    answer :: ModuleAnswer
-  }
-
--- | What we have for a module.
-data ModuleAnswer
-  = -- | We ran the parser on the file.
-    FromParser ModuleParse
-  | -- | Text only, without running the parser.
-    NotParsed NotParsed
-
--- | Why we didn't run the parser.
-data NotParsed
-  = -- | A preprocessor input. Known from the index.
-    GeneratedModule Preprocessor
-  | -- | -F -pgmF or -pgmL in ghc-options. Known from the index.
-    PreprocessedModule Text
-  | -- | A listed module with no file.
-    NoSourceModule NoSourceReason
-  | -- | Binary, or not UTF-8.
-    NotTextModule FileSize
-  | -- | Over the text limit.
-    TooLargeModule TooLargeInfo
-
--- | GET api\/module\/\<side>\/\<ref>:
---
--- > {"generation":1,"id":"pkg:lib:Foo","ref":"Foo","path":"pkg/src/Foo.hs",
--- >  "tier":{"kind":"syntactic","reason":"no-hie"},
--- >  "parse":{"kind":"parsed","header":{...},"exports":[...],"imports":[...],
--- >           "extensions":{...},"warnings":["unknown extension: Foo"]}}
---
--- or @"parse":{"kind":"text-only","reason":{"kind":...},"warnings":[...]}@.
--- Reasons: parse-error and pragma-error (message, code, span),
--- preprocessed (tool), parser-crashed (message), too-slow, generated
--- (tool), no-source (reason), not-text (size), too-large (size,
--- limit). @path@ is null for no-source.
---
--- A span is @[startLine, startCol, endLine, endCol]@, in code points,
--- end exclusive (Note [Span convention] in "HaskellReviewer.Core.Span").
--- Fields that may be missing are null, never left out.
-encodeModuleView :: Generation -> ModuleIndex -> ModuleView -> LBS.ByteString
-encodeModuleView (Generation g) idx v =
-  Encoding.encodingToLazyByteString . Aeson.pairs $
-    ("generation" .= g)
-      <> ("id" .= renderModuleId v.moduleId)
-      <> ("ref" .= moduleRef idx v.moduleId)
-      <> ("path" .= fmap relPathText v.path)
-      -- Always syntactic: no HIE files.
-      <> Encoding.pair "tier" (Aeson.pairs (kindIs "syntactic" <> ("reason" .= noHie)))
-      <> Encoding.pair "parse" (Aeson.pairs (answer v.answer))
-  where
-    noHie :: Text
-    noHie = "no-hie"
-    answer = \case
-      FromParser (Parsed m) -> parsedFields m
-      FromParser (TextOnly t) -> textOnly (parserReason t.reason) t.warnings
-      NotParsed r -> textOnly (notParsedReason r) []
-    textOnly reason ws =
-      kindIs "text-only"
-        <> Encoding.pair "reason" (Aeson.pairs reason)
-        <> ("warnings" .= map renderParseWarning ws)
-    parserReason = \case
-      ParseFailed e -> kindIs "parse-error" <> parseError e
-      PragmaFailed e -> kindIs "pragma-error" <> parseError e
-      Preprocessed tool -> kindIs "preprocessed" <> ("tool" .= tool)
-      ParserCrashed t -> kindIs "parser-crashed" <> ("message" .= t)
-      TooSlow -> kindIs "too-slow"
-    parseError e =
-      ("message" .= e.message)
-        <> ("code" .= e.code)
-        <> Encoding.pair "span" (maybe Encoding.null_ spanJson e.span)
-    notParsedReason = \case
-      GeneratedModule tool -> kindIs "generated" <> ("tool" .= renderPreprocessor tool)
-      PreprocessedModule tool -> kindIs "preprocessed" <> ("tool" .= tool)
-      NoSourceModule r -> kindIs "no-source" <> ("reason" .= noSourceReason r)
-      NotTextModule (FileSize n) -> kindIs "not-text" <> ("size" .= n)
-      TooLargeModule info ->
-        kindIs "too-large" <> ("size" .= bytes info.size) <> ("limit" .= bytes info.limit)
-    bytes (FileSize n) = n
-
--- | The fields of a parsed module. See 'encodeModuleView'.
-parsedFields :: ParsedModule -> Series
-parsedFields m =
-  kindIs "parsed"
-    <> Encoding.pair "header" (header m.header)
-    <> Encoding.pair "exports" (maybe Encoding.null_ (Encoding.list export) m.exports)
-    <> Encoding.pair "imports" (Encoding.list importDecl m.imports)
-    <> Encoding.pair "extensions" (extensions m.extensions)
-    <> ("warnings" .= map renderParseWarning m.warnings)
-  where
-    header h =
-      Aeson.pairs $
-        Encoding.pair "name" (nullable (located moduleName) h.name)
-          <> Encoding.pair "haddock" (nullable docComment h.haddock)
-          <> Encoding.pair "warning" (nullable warningText h.warning)
-    -- {"span":[...],"kind":"deprecated"|"warning","category":null,"messages":[...]}
-    warningText w =
-      Aeson.pairs $
-        Encoding.pair "span" (spanJson w.span) <> case w.kind of
-          DeprecatedPragma ->
-            kindIs "deprecated" <> ("category" .= Aeson.Null) <> messages
-          WarningPragma c -> kindIs "warning" <> ("category" .= c) <> messages
-      where
-        messages = "messages" .= w.messages
-    export = \case
-      ExportItem i -> item (kindIs "item") i
-      ExportModule e ->
-        Aeson.pairs $
-          kindIs "module"
-            <> Encoding.pair "name" (located moduleName e.name)
-            <> Encoding.pair "warning" (nullable warningText e.warning)
-      ExportSection s ->
-        Aeson.pairs $
-          kindIs "section"
-            <> ("level" .= s.level)
-            <> Encoding.pair "heading" (docComment s.heading)
-      ExportDoc d -> Aeson.pairs (kindIs "doc" <> docFields d)
-      ExportDocNamed n ->
-        Aeson.pairs $
-          kindIs "named-doc"
-            <> Encoding.pair "span" (spanJson n.span)
-            <> ("name" .= n.value)
-    -- Export items have a kind; import items don't need one.
-    item first i =
-      Aeson.pairs $
-        first
-          <> Encoding.pair "span" (spanJson i.span)
-          <> Encoding.pair "name" (itemName i.name)
-          <> Encoding.pair "subs" (subs i.subs)
-          <> Encoding.pair "doc" (nullable docComment i.doc)
-          <> Encoding.pair "warning" (nullable warningText i.warning)
-    itemName n =
-      Aeson.pairs $
-        Encoding.pair "span" (spanJson n.span)
-          <> ("qualifier" .= fmap moduleNameText n.qualifier)
-          <> ("occ" .= n.occ)
-          <> ("keyword" .= keyword n.keyword)
-    keyword :: NameKeyword -> Maybe Text
-    keyword = \case
-      NoKeyword -> Nothing
-      TypeKeyword -> Just "type"
-      PatternKeyword -> Just "pattern"
-      DataKeyword -> Just "data"
-      DefaultKeyword -> Just "default"
-    subs = \case
-      NoSubs -> Aeson.pairs (kindIs "none")
-      AllSubs -> Aeson.pairs (kindIs "all")
-      SomeSubs l ->
-        Aeson.pairs $
-          kindIs "some"
-            <> Encoding.pair "names" (Encoding.list itemName l.names)
-            <> ("wildcardAt" .= l.wildcardAt)
-    importDecl i =
-      Aeson.pairs $
-        Encoding.pair "span" (spanJson i.span)
-          <> Encoding.pair "name" (located moduleName i.name)
-          <> ("package" .= i.package)
-          <> ("source" .= (i.source == SourceImport))
-          <> ("safe" .= i.safe)
-          <> ("qualified" .= qualified i.qualified)
-          <> ("level" .= level i.level)
-          <> Encoding.pair "as" (nullable (located moduleName) i.as)
-          <> Encoding.pair "list" (nullable importList i.list)
-    qualified :: Qualified -> Text
-    qualified = \case
-      NotQualified -> "no"
-      QualifiedPre -> "pre"
-      QualifiedPost -> "post"
-    level :: ImportLevel -> Text
-    level = \case
-      NormalLevel -> "normal"
-      SpliceLevel -> "splice"
-      QuoteLevel -> "quote"
-    importList l =
-      Aeson.pairs $
-        ( "kind" .= case l.kind of
-            Only -> "only" :: Text
-            Hiding -> "hiding"
-        )
-          <> Encoding.pair "items" (Encoding.list (item mempty) l.items)
-    extensions e =
-      Aeson.pairs $
-        ("language" .= e.language)
-          <> ("enabled" .= e.enabled)
-          <> ("fromPragmas" .= e.fromPragmas)
-    located f l =
-      Aeson.pairs (Encoding.pair "span" (spanJson l.span) <> ("value" .= f l.value))
-    moduleName = moduleNameText
-    -- Only the text for now: the AST goes on the wire later.
-    docComment :: DocComment a -> Aeson.Encoding
-    docComment d = Aeson.pairs (docFields d)
-    docFields :: DocComment a -> Series
-    docFields d = Encoding.pair "span" (spanJson d.span) <> ("text" .= d.text)
-    nullable = maybe Encoding.null_
-
 -- | The 404 body of a module that isn't there (JSON):
 --
 -- > {"generation":1,"kind":"not-found","what":"module"}
@@ -494,17 +263,7 @@ kindIs k = "kind" .= k
 commitText :: CommitId -> Text
 commitText (CommitId c) = c
 
--- | @[startLine, startCol, endLine, endCol]@.
-spanJson :: Span -> Aeson.Encoding
-spanJson s =
-  Aeson.toEncoding [line s.startLine, col s.startCol, line s.endLine, col s.endCol]
-  where
-    line (Line n) = n
-    col (Col n) = n
-
-moduleNameText :: ModuleName -> Text
-moduleNameText (ModuleName n) = n
-
+-- | Why a listed module has no file, on the wire.
 noSourceReason :: NoSourceReason -> Text
 noSourceReason = \case
   Autogen -> "autogen"

@@ -24,34 +24,42 @@ inst:Show:Local instance name@12:10-12:14 exported
   extent:
     head @12:1-12:20
   head: instance Show Local
+  mentions: Local
 inst:LocalC:Int instance name@13:10-13:16 exported
   extent:
     head @13:1-13:20
   head: instance LocalC Int
+  mentions: LocalC
 inst:Show:Syn instance name@14:10-14:14 exported
   extent:
     head @14:1-14:18
   head: instance Show Syn
+  mentions: Syn
 inst:Show:Proxy 'Local instance name@15:10-15:14 exported
   extent:
     head @15:1-15:29
   head: instance Show ( Proxy ' Local )
+  mentions:
 inst:Show:Local instance name@16:10-16:14 exported
   extent:
     head @16:1-16:28
   head: instance Show Orphans.Local
+  mentions: Local
 inst:Show:Maybe Int instance orphan name@18:10-18:14 exported
   extent:
     head @18:1-18:26
   head: instance Show ( Maybe Int )
+  mentions:
 inst:Show:Local instance orphan name@19:10-19:14 exported
   extent:
     head @19:1-19:26
   head: instance Show Other.Local
+  mentions:
 inst:Eq:Maybe Bool standalone deriving orphan name@20:19-20:21 exported
   extent:
     head @20:1-20:34
   head: deriving instance Eq ( Maybe Bool )
+  mentions:
 inst:F:Int type instance of F name@23:15-23:16 exported
   extent:
     head @23:1-23:27
@@ -79,3 +87,4 @@ inst:Show:X derived on type:X name@28:22-28:32 exported
   extent:
     head @28:22-28:32
   head: Other.Show
+  mentions: X

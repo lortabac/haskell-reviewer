@@ -25,7 +25,8 @@ import HaskellReviewer.Core.ModuleModel
   )
 import HaskellReviewer.Core.Parser (defaultParseSettings, parseSource)
 import HaskellReviewer.Core.Parser.Haddock
-  ( maxCommentLength,
+  ( hasBigNumber,
+    maxCommentLength,
     parseDoc,
     parseHeading,
     plainOnly,
@@ -95,7 +96,24 @@ tests =
 
 safety :: [TestTree]
 safety =
-  [ testCase "raw HTML is text" $ do
+  [ testCase "numbers past Int: no item numbers, no @since (Note [Big numbers])" $ do
+      map
+        hasBigNumber
+        [ "9223372036854775807.",
+          "0009223372036854775807",
+          "9223372036854775808.",
+          "@since 18446744073709551615",
+          "99999999999999999999"
+        ]
+        @?= [False, False, True, True, True]
+      let numbers t = [i.number | OrderedList is <- (parseDoc t).blocks, i <- is]
+      numbers "7. a" @?= [Just 7]
+      numbers "9223372036854775808. a" @?= [Nothing]
+      numbers "99999999999999999999. a" @?= [Nothing]
+      (parseDoc "a\n\n@since 18446744073709551615").since @?= Nothing
+      (parseDoc "a\n\n@since 1.2").since
+        @?= Just Since {package = Nothing, version = 1 :| [2]},
+    testCase "raw HTML is text" $ do
       let d = parseDoc "<b>bold</b> <script>alert(1)</script> <img src=x onerror=y>"
       links d @?= []
       allText d @?= "bbold/b scriptalert(1)/script src=x onerror=y <img>",
@@ -193,8 +211,8 @@ markup =
             ]
       (parseDoc "1. a\n\n(5) b").blocks
         @?= [ OrderedList
-                [ ListItem {number = 1, content = [Paragraph [Str "a"]]},
-                  ListItem {number = 5, content = [Paragraph [Str "b"]]}
+                [ ListItem {number = Just 1, content = [Paragraph [Str "a"]]},
+                  ListItem {number = Just 5, content = [Paragraph [Str "b"]]}
                 ]
             ]
       (parseDoc "[term]: def").blocks
@@ -333,7 +351,7 @@ warmUp = case parseSource defaultParseSettings haddockWarmUp of
     sort (nub (concatMap (kinds . (.parsed)) docs <> concatMap headingKinds sections))
       @?= sort allKinds
     -- The last comment is plain text.
-    [d.parsed.blocks | d <- declDocs m, plainOnly d.text]
+    [d.parsed.blocks | d <- take 1 (reverse (declDocs m))]
       @?= [[Paragraph [Str ("Plain text (Note [Haddock cost]):\n " <> border)]]]
   other -> assertFailure (take 300 (show other))
   where

@@ -6,6 +6,7 @@ module ApiSupport
     fixtureApi,
     projectApi,
     implicitApi,
+    pageApi,
     forceFixtures,
     indexed,
 
@@ -122,11 +123,16 @@ projectApi = apiFor projectSnapshot
 implicitApi :: TestApi
 implicitApi = apiFor implicitSnapshot
 
+-- | Loose modules for the module page fixtures: every kind of
+-- declaration, doc markup and section.
+pageApi :: TestApi
+pageApi = apiFor pageSnapshot
+
 -- | Build the shared inputs, before parallel tests use them. See
 -- Note [Shared values in tests] in HaskellReviewer.Core.PackageGlobTest.
 forceFixtures :: IO ()
 forceFixtures = do
-  forM_ [fixtureSnapshot, projectSnapshot, implicitSnapshot] void
+  forM_ [fixtureSnapshot, projectSnapshot, implicitSnapshot, pageSnapshot] void
   forM_ contents $ \(p, c) -> evaluate p >> evaluate (forceContent c)
   where
     forceContent = \case
@@ -306,6 +312,13 @@ implicitSnapshot =
     )
     noProject
 
+pageSnapshot :: IO Snapshot
+pageSnapshot =
+  newSnapshot
+    fixtureRoot
+    (fileList [("Page.hs", EntryFile), ("Sections.hs", EntryFile)])
+    noProject
+
 -- | No cabal.project, no packages.
 noProject :: Project
 noProject =
@@ -384,6 +397,9 @@ contents =
     ),
     ("scripts/Tool.hs", TextContent "{-# OPTIONS_GHC -F -pgmF hspec-discover #-}\n"),
     ("scripts/build-docs.hs", TextContent "main = pure ()\n"),
+    -- Modules of the page fixture.
+    ("Page.hs", TextContent pageModule),
+    ("Sections.hs", TextContent sectionsModule),
     -- Modules of the implicit fixture.
     ("Main.hs", Binary (FileSize 10)),
     ( "src/Data/Deep/Mod.hs",
@@ -443,6 +459,173 @@ fooModule =
       "import \"base\" Data.Word ()",
       "import splice Language.Haskell.TH (Q)",
       "import Control.Monad quote (when)"
+    ]
+
+-- | Every kind of declaration, instance placement and doc markup.
+-- No @\@since pkg-1.0@: GHC 9.10 reads it differently (D-150).
+pageModule :: Text
+pageModule =
+  Text.unlines
+    [ "{-# LANGUAGE TypeFamilies, TypeData, GADTs, PatternSynonyms #-}",
+      "{-# LANGUAGE DerivingStrategies, StandaloneDeriving, TemplateHaskell #-}",
+      "",
+      "-- | Every kind of declaration. See 'area', 'Missing', \"Sections\",",
+      "-- \"Sections#v:x\", [the sections](\"Sections\"), \"Nowhere\" and",
+      "-- <https://example.com/a?b=1 the site>. Not a link: <javascript:alert(1)>.",
+      "-- Math: \\(a + b\\).",
+      "--",
+      "-- 9007199254740993. A big item number.",
+      "--",
+      "-- @since 9007199254740993.2",
+      "module Page",
+      "  ( Shape (..),",
+      "    Box (..),",
+      "    area,",
+      "    perimeter,",
+      "    (<+>),",
+      "    pattern Unit,",
+      "    Container (..),",
+      "    Nat,",
+      "    G (..),",
+      "    Family,",
+      "    Closed,",
+      "  )",
+      "where",
+      "",
+      "import Data.Kind (Type)",
+      "",
+      "-- | A shape, with 'Circle' and t'Shape'.",
+      "data Shape = Circle Double | Rect {width :: Double, height :: !Double}",
+      "  deriving (Eq, Show)",
+      "",
+      "-- | A box.",
+      "newtype Box a = Box a",
+      "  deriving newtype (Eq)",
+      "",
+      "-- | Both share one signature.",
+      "area, perimeter :: Shape -> Double",
+      "area _ = 0",
+      "perimeter _ = 0",
+      "",
+      "infixl 6 <+>",
+      "",
+      "(<+>) :: Shape -> Shape -> Shape",
+      "a <+> _ = a",
+      "",
+      "pattern Unit :: Shape",
+      "pattern Unit = Circle 1",
+      "",
+      "-- | A container.",
+      "--",
+      "-- = Usage",
+      "--",
+      "-- * /one/ __two__ @three@",
+      "--",
+      "-- [term]: definition",
+      "--",
+      "-- > code",
+      "--",
+      "-- >>> 1 + 1",
+      "-- 2",
+      "--",
+      "-- prop> x == x",
+      "--",
+      "-- +---+",
+      "-- | a |",
+      "-- +---+",
+      "class Container f where",
+      "  type Elem f :: Type",
+      "  empty :: f",
+      "  insert :: Elem f -> f -> f",
+      "  {-# MINIMAL empty, insert #-}",
+      "",
+      "instance Container [a] where",
+      "  type Elem [a] = a",
+      "  empty = []",
+      "  insert = (:)",
+      "",
+      "instance Ord Shape where",
+      "  compare _ _ = EQ",
+      "",
+      "instance Num Bool where",
+      "  fromInteger = (/= 0)",
+      "",
+      "type data Nat = Zero | Succ Nat",
+      "",
+      "data G a where",
+      "  GInt :: {gval :: Int} -> G Int",
+      "  GBool, GTrue :: Bool -> G Bool",
+      "",
+      "data P2 = P2 {px, py :: Double}",
+      "",
+      "-- A field in two constructors; fh's doc is fb's (B's ff).",
+      "data Fld",
+      "  = FA {ff :: Int}",
+      "  | FB",
+      "      { ff, fh :: Int",
+      "        -- ^ Shared doc.",
+      "      }",
+      "",
+      "newtype V = V Int deriving (Eq, Ord) via Int",
+      "",
+      "data Pair = Int :* Int",
+      "",
+      "type Area = Double",
+      "",
+      "data family DF a",
+      "",
+      "type family Family a",
+      "",
+      "type instance Family Shape = Double",
+      "",
+      "type family Closed a where",
+      "  Closed Int = Bool",
+      "  Closed a = a",
+      "",
+      "deriving stock instance Ord (Box Int)",
+      "",
+      "helper, helper2 :: Int",
+      "helper = 1",
+      "helper2 = 2",
+      "",
+      "{-# DEPRECATED helper, helper2 \"Use area\" #-}",
+      "{-# RULES \"area/id\" forall s. area s = area s #-}",
+      "{-# ANN helper \"note\" #-}",
+      "{-# COMPLETE Unit #-}",
+      "default (Int)",
+      "",
+      "$(pure [])"
+    ]
+
+-- | Headings, chunks and export sections.
+sectionsModule :: Text
+sectionsModule =
+  Text.unlines
+    [ "-- | Sections.",
+      "module Sections",
+      "  ( -- * Values",
+      "",
+      "    -- | Some values.",
+      "    x,",
+      "",
+      "    -- ** More",
+      "",
+      "    -- $chunk",
+      "    y,",
+      "  )",
+      "where",
+      "",
+      "-- * Body heading",
+      "",
+      "-- $chunk",
+      "-- A named chunk, about 'x'.",
+      "",
+      "x :: Int",
+      "x = 1",
+      "",
+      "-- | Like 'x'.",
+      "y :: Int",
+      "y = 2"
     ]
 
 -- * Calling the app

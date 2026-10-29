@@ -1,1 +1,0 @@
-{"generation":1,"id":"src/Data/Deep/Mod.hs","ref":"Data.Deep.Mod","path":"src/Data/Deep/Mod.hs","tier":{"kind":"syntactic","reason":"no-hie"},"parse":{"kind":"text-only","reason":{"kind":"too-large","size":2000000,"limit":1048576},"warnings":[]}}

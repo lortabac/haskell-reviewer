@@ -10,6 +10,7 @@ import HaskellReviewer.App.CliTest qualified
 import HaskellReviewer.App.RunTest qualified
 import HaskellReviewer.Core.AddressTest qualified
 import HaskellReviewer.Core.CabalFileTest qualified
+import HaskellReviewer.Core.CodeTest qualified
 import HaskellReviewer.Core.CppGoldenTest qualified
 import HaskellReviewer.Core.CppTest qualified
 import HaskellReviewer.Core.DeclsGoldenTest qualified
@@ -49,7 +50,9 @@ import HaskellReviewer.Server.AssetsTest qualified
 import HaskellReviewer.Server.CborTest qualified
 import HaskellReviewer.Server.EventsTest qualified
 import HaskellReviewer.Server.ListenTest qualified
+import HaskellReviewer.Server.PageTest qualified
 import HaskellReviewer.Server.RouterTest qualified
+import HaskellReviewer.Server.Wire.Page (warmUpPages)
 import HaskellReviewer.Session.ClientsTest qualified
 import HaskellReviewer.Session.IndexTest qualified
 import HaskellReviewer.Session.SnapshotTest qualified
@@ -97,11 +100,14 @@ main = do
         HaskellReviewer.Effects.TraceTest.tests,
         -- Build the parser's and CPP's shared values before the tests
         -- use them in parallel (Q-RTS-BLACKHOLE). A smaller warm-up
-        -- still hung once in 300 runs on 9.12. The API tests parse too.
-        withResource warmUpParser (const (pure ())) $ \_ ->
+        -- still hung once in 300 runs on 9.12. The API tests parse too,
+        -- and encode pages (Note [Page warm-up] in
+        -- "HaskellReviewer.Server.Wire.Page").
+        withResource (warmUpParser >> warmUpPages) (const (pure ())) $ \_ ->
           testGroup
             "Parsing"
-            [ HaskellReviewer.Core.CppGoldenTest.tests,
+            [ HaskellReviewer.Core.CodeTest.tests,
+              HaskellReviewer.Core.CppGoldenTest.tests,
               HaskellReviewer.Core.CppTest.tests,
               HaskellReviewer.Core.DeclsGoldenTest.tests,
               HaskellReviewer.Core.DeclsTest.tests,
@@ -122,7 +128,8 @@ main = do
                   "API"
                   [ HaskellReviewer.Server.ApiGoldenTest.tests,
                     HaskellReviewer.Server.ApiTest.tests
-                  ]
+                  ],
+              HaskellReviewer.Server.PageTest.tests
             ],
         HaskellReviewer.Server.AssetsTest.tests,
         HaskellReviewer.Server.CborTest.tests,

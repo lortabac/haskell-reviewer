@@ -9,6 +9,7 @@ module HaskellReviewer.Session.Index
     Index,
     SlotState (..),
     Indexed (..),
+    ParsedSource (..),
     IndexFailure (..),
     Progress (..),
     IndexDeps (..),
@@ -68,7 +69,11 @@ import HaskellReviewer.Core.FileContent
   )
 import HaskellReviewer.Core.IndexQueue (Job (..), Priority (..), Queue, Ticket)
 import HaskellReviewer.Core.IndexQueue qualified as Queue
-import HaskellReviewer.Core.ModuleModel (ModuleParse (..), ParsedModule (..))
+import HaskellReviewer.Core.ModuleModel
+  ( ModuleParse (..),
+    ParsedModule (..),
+    TextOnlyModule,
+  )
 import HaskellReviewer.Core.Modules
   ( ComponentSettings,
     HaskellFile (..),
@@ -94,7 +99,8 @@ no retry within a snapshot. Ready also covers modules we show as text
 (parse error, not text, too large, too slow). Failed means we have no
 answer: the file is gone, can't be read, or indexing it crashed or was
 stopped. (A big file can go back from Parsing to Pending once, see
-below.)
+below.) A module that parsed keeps its file's text in the slot, for
+the docs page (D-171); text-only ones don't.
 
 The queue has the module ids by priority (Core.IndexQueue). At first
 every module is in it, at Background, in module tree order. A request
@@ -128,11 +134,12 @@ is read twice; there are few of them.
 
 Q-RTS-BLACKHOLE: request threads read what workers write, and workers
 share the queue. So nothing shared holds a thunk. The parse result is
-fully forced by parseGuarded, the names by 'forceNames', both before
-the transaction that publishes them. The queue is a strict map with
-strict fields, written with '$!'. The rest is StrictData values written
-already evaluated. The slots and the queue are built and forced in
-'newIndex', before any worker or request sees them.
+fully forced by parseGuarded (the text is strict, read already), the
+names by 'forceNames', both before the transaction that publishes
+them. The queue is a strict map with strict fields, written with '$!'.
+The rest is StrictData values written already evaluated. The slots
+and the queue are built and forced in 'newIndex', before any worker or
+request sees them.
 -}
 
 -- * Types
@@ -169,9 +176,23 @@ data SlotState
 
 -- | What we have for a module: a parse, or why it's not text.
 data Indexed
-  = IndexedParse ModuleParse
-  | IndexedNotText FileSize
-  | IndexedTooLarge TooLargeInfo
+  = -- | It parsed: the model and the file's text.
+    IndexedParsed ParsedSource
+  | -- | We ran the parser, and show it as text, with the reason.
+    IndexedTextOnly TextOnlyModule
+  | -- | Binary, or not UTF-8.
+    IndexedNotText FileSize
+  | -- | Over the text limit.
+    IndexedTooLarge TooLargeInfo
+  deriving (Eq, Show)
+
+-- | A module that parsed, with its file's text as read: the docs page
+-- cuts declarations' heads and source out of it (D-171). One strict
+-- text, shared with nothing else.
+data ParsedSource = ParsedSource
+  { text :: Text,
+    parsed :: ParsedModule
+  }
   deriving (Eq, Show)
 
 -- | Why there is no answer for a module.
@@ -431,13 +452,13 @@ indexOne deps index c =
               r <- evaluate =<< deps.parse settings t
               -- Built and forced before the transaction: see Note
               -- [Indexing]. Here, so a throw fails only this module.
-              ns <- case r of
+              case r of
                 Parsed m -> do
                   let ns = moduleNames m.declarations
                   _ <- evaluate (forceNames ns)
-                  pure (Just ns)
-                TextOnly _ -> pure Nothing
-              pure (Done (IndexedParse r) ns)
+                  let source = ParsedSource {text = t, parsed = m}
+                  pure (Done (IndexedParsed source) (Just ns))
+                TextOnly o -> pure (Done (IndexedTextOnly o) Nothing)
         Right (Binary size) -> pure (Done (IndexedNotText size) Nothing)
         Right (TooLarge info) -> pure (Done (IndexedTooLarge info) Nothing)
         -- A link, a submodule: no longer a file.

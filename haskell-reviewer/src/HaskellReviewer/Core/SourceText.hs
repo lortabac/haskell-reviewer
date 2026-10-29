@@ -28,7 +28,9 @@ import Data.IntMap.Strict qualified as IntMap
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Text.Unsafe qualified as Text.Unsafe
 import Data.Vector qualified as Vector
+import Data.Vector.Unboxed qualified as Unboxed
 import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
 
 {- Note [Unlit]
@@ -148,32 +150,87 @@ fromGhcCol stops target = case IntMap.lookupLT target stops of
 
 -- * Slicing
 
--- | A file's text by line, to cut out spans.
-newtype SourceLines = SourceLines (Vector.Vector Text)
+{- Note [Slicing]
+
+Text has no index by code point: taking column c of a line walks c
+code points. A span per token then costs O(column), so one very long
+line (a 1 MiB module on one line) cost O(n^2) per page. So each line
+of 'SourceLines' carries, built lazily the first time a column past
+'shortColumns' is cut, the byte offset of each of its code points:
+slicing is then two lookups and an O(1) slice of the line, linear over
+a page. Short lines and small columns use plain take and drop.
+-}
+
+-- | A file's text by line, to cut out spans. Build it once per request
+-- and keep it for that request only: it can hold one offset array per
+-- long line. See Note [Slicing].
+newtype SourceLines = SourceLines (Vector.Vector SourceLine)
+
+-- | One line, and where each code point starts in it.
+data SourceLine = SourceLine
+  { text :: Text,
+    -- | Byte offsets, one per code point, then the length. Built on
+    -- first use.
+    offsets :: ~(Unboxed.Vector Int)
+  }
 
 -- | From the file's text, as stored. A BOM is dropped (columns on line 1
 -- don't count it), and so is the @\r@ of a CRLF.
 sourceLines :: Text -> SourceLines
-sourceLines = SourceLines . Vector.fromList . map noCr . Text.splitOn "\n" . stripBom
+sourceLines =
+  SourceLines . Vector.fromList . map line . Text.splitOn "\n" . stripBom
   where
     noCr l = fromMaybe l (Text.stripSuffix "\r" l)
+    line l = let t = noCr l in SourceLine {text = t, offsets = offsetsOf t}
+
+-- | Where each code point of a line starts, in UTF-8 bytes, then the
+-- length.
+offsetsOf :: Text -> Unboxed.Vector Int
+offsetsOf t =
+  Unboxed.fromListN (Text.length t + 1) (scanl (+) 0 (map utf8Size (Text.unpack t)))
+  where
+    utf8Size c
+      | c < '\x80' = 1
+      | c < '\x800' = 2
+      | c < '\x10000' = 3
+      | otherwise = 4
+
+-- | Columns up to this are cut with take and drop. See Note [Slicing].
+shortColumns :: Int
+shortColumns = 256
 
 -- | The text of a span (Note [Span convention] in
 -- "HaskellReviewer.Core.Span"). Lines are joined with @\n@; a span past
--- the end gives what there is.
+-- the end gives what there is. Constant time per span, plus the copy of
+-- a multi-line span (Note [Slicing]).
 sliceSpan :: SourceLines -> Span -> Text
 sliceSpan (SourceLines ls) s
-  | l1 == l2 = cut (c1 - 1) (c2 - c1) (line l1)
+  | l1 == l2 = cutLine (c1 - 1) (c2 - c1) (line l1)
   | otherwise =
       Text.intercalate "\n" $
-        [Text.drop (c1 - 1) (line l1)]
-          <> [line l | l <- [l1 + 1 .. l2 - 1]]
-          <> [Text.take (c2 - 1) (line l2)]
+        [cutLine (c1 - 1) maxBound (line l1)]
+          <> [maybe "" (.text) (line l) | l <- [l1 + 1 .. l2 - 1]]
+          <> [cutLine 0 (c2 - 1) (line l2)]
   where
     Span (Line a) (Col b) (Line c) (Col d) = s
     (l1, c1, l2, c2) = (fromIntegral a, fromIntegral b, fromIntegral c, fromIntegral d)
-    line n = fromMaybe "" (ls Vector.!? (n - 1))
-    cut from n = Text.take n . Text.drop from
+    -- No line past the end: no shared empty line (Q-RTS-BLACKHOLE).
+    line n = ls Vector.!? (n - 1)
+
+-- | @n@ code points of a line from code point @from@ (both from 0), as
+-- @take n . drop from@.
+cutLine :: Int -> Int -> Maybe SourceLine -> Text
+cutLine _ _ Nothing = ""
+cutLine from n (Just l)
+  | n <= 0 = ""
+  | from + min n shortColumns <= shortColumns = Text.take n (Text.drop from l.text)
+  | otherwise =
+      let os = l.offsets
+          end = Unboxed.length os - 1
+          at k = os Unboxed.! max 0 (min end k)
+          b1 = at from
+          b2 = at (if n >= maxBound - from then end else from + max 0 n)
+       in Text.Unsafe.takeWord8 (b2 - b1) (Text.Unsafe.dropWord8 b1 l.text)
 
 -- | Spaces over these spans, newlines and tabs kept, so nothing else
 -- moves. Columns as in Note [Span convention] in
