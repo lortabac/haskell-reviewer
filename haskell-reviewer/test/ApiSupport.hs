@@ -12,6 +12,7 @@ module ApiSupport
     -- * Calling the app
     ApiResult (..),
     getApi,
+    getApiWith,
     requestApi,
     callApp,
     apiToken,
@@ -458,9 +459,17 @@ data ApiResult = ApiResult
 getApi :: TestApi -> [Text] -> IO ApiResult
 getApi = requestApi "GET"
 
+-- | Like 'getApi', with these request headers.
+getApiWith :: [Header] -> TestApi -> [Text] -> IO ApiResult
+getApiWith = requestApiWith "GET"
+
 -- | Like 'getApi', with the method given.
 requestApi :: ByteString -> TestApi -> [Text] -> IO ApiResult
-requestApi method api path = do
+requestApi method = requestApiWith method []
+
+-- | Like 'requestApi', with these request headers.
+requestApiWith :: ByteString -> [Header] -> TestApi -> [Text] -> IO ApiResult
+requestApiWith method headers api path = do
   listed <- api.snapshot
   clients <- newClients
   let events =
@@ -479,7 +488,9 @@ requestApi method api path = do
           }
       app = application (Port 8080) apiToken Routes {events = events, files = files}
       call = do
-        r <- timeout 10_000_000 (callApp app method host (tokenText apiToken : path))
+        r <-
+          timeout 10_000_000 $
+            callAppWith app method headers host (tokenText apiToken : path)
         maybe (assertFailure ("no answer within 10 s: " <> show path)) pure r
       host = "127.0.0.1:8080"
   case listed of
@@ -490,10 +501,16 @@ requestApi method api path = do
 
 -- | Call an app with a request that ends. The path has the token.
 callApp :: Application -> ByteString -> ByteString -> [Text] -> IO ApiResult
-callApp app method host path = do
+callApp app method = callAppWith app method []
+
+-- | Like 'callApp', with these request headers.
+callAppWith ::
+  Application -> ByteString -> [Header] -> ByteString -> [Text] -> IO ApiResult
+callAppWith app method headers host path = do
   let req =
         defaultRequest
           { requestMethod = method,
+            requestHeaders = headers,
             requestHeaderHost = Just host,
             pathInfo = path
           }

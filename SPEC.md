@@ -1376,7 +1376,8 @@ following:
   `X-Content-Type-Options: nosniff`, and `Cache-Control: no-store` for API
   responses. Static assets also live under the token path, and their
   hashed names let the browser cache them as immutable;
-- gzips large responses, except the event stream (from M1).
+- gzips responses of 860 bytes or more (JSON, CBOR, HTML, CSS, JS) when
+  the browser accepts gzip; never the event stream (D-169).
 
 The listening socket sets `TCP_MAXSEG` to 1460, so a big response doesn't
 stall on loopback (D-86).
@@ -1389,8 +1390,11 @@ a framework would cost more than it saves.
 - **Reads** are `GET` requests. Small or structural payloads (module tree,
   search results, threads, prefs) are JSON. **Token-heavy** payloads (docs
   pages, full source, inline source, diff, expanded diff) are **CBOR**
-  (D-51). Every response carries its snapshot generation id, and the client
-  caches by *(generation, resource)*.
+  (D-51), with only what JSON has (text-keyed maps, arrays, text, ints,
+  bools, null). Each route has one encoding (D-165). Every response
+  carries its snapshot generation id, and the client caches by
+  *(generation, resource)*. A module that doesn't exist is a 404 with a
+  small JSON body (D-166); other errors are plain text.
 - **Actions** (ask, stop, reload, set preference, …) are `POST` requests
   with JSON bodies.
 - **Push** (D-52): **one SSE connection per browser**, held by a

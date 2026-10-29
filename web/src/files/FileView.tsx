@@ -11,7 +11,7 @@ import {
   Show,
   Switch,
 } from "solid-js";
-import { getJson } from "../api/client";
+import { getCbor } from "../api/client";
 import { decodeFileView, type FileView as View } from "../api/files";
 import { bannerText } from "../modules/notices";
 import { useModules } from "../modules/store";
@@ -35,7 +35,7 @@ function FilePage(props: { path: string }): JSX.Element {
   const fromMain = focusInMain();
   const [file] = createResource(
     () => props.path,
-    (p) => getJson(apiFileUrl(p), decodeFileView),
+    (p) => getCbor(apiFileUrl(p), decodeFileView),
   );
   const slow = createDelay(() => file.loading, 300);
   // Generated or preprocessed: say why there's only text. Needs the

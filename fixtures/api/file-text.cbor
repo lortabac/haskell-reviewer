@@ -1,0 +1,5 @@
+�jgenerationdkinddtextdtextxsmodule Main (main) where
+
+-- <script>alert(1)</script>
+main :: IO ()
+main = putStrLn "héllo, wörld → ✓"

@@ -61,7 +61,8 @@ Framing:
   state comes by itself on each new stream.
 
 No Content-Length, so warp sends it chunked. No Cache-Control here:
-Security adds no-store. Never gzipped (no gzip middleware covers it).
+Security adds no-store. Never gzipped: see Note [Compression] in
+"HaskellReviewer.Server.Router".
 
 Warp's timeout (30 s by default) would kill the stream. We turn it off
 with pauseTimeout. It must be called inside the streaming body: warp

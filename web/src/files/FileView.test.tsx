@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fixture, stubFetch } from "../../test/fixtures";
+import { cbor, cborFixture, fixture, stubFetch } from "../../test/fixtures";
 import { mountAppAt, unmountApp } from "../../test/mount";
 import { lineCount } from "./FileView";
 
@@ -37,7 +37,7 @@ afterEach(() => {
 
 describe("FileView", () => {
   it("shows text as text, with line numbers", async () => {
-    const main = await open("app/Main.hs", 200, fixture("file-text"));
+    const main = await open("app/Main.hs", 200, cborFixture("file-text"));
     expect(main.querySelector("h1")?.textContent).toBe("app/Main.hs");
     expect(document.title).toBe("app/Main.hs — haskell-reviewer");
     const code = main.querySelector("pre.file-code");
@@ -54,12 +54,16 @@ describe("FileView", () => {
   });
 
   it("decodes the path from the URL", async () => {
-    const main = await open("a%20b/%C3%A9%23.hs", 200, fixture("file-text"));
+    const main = await open(
+      "a%20b/%C3%A9%23.hs",
+      200,
+      cborFixture("file-text"),
+    );
     expect(main.querySelector("h1")?.textContent).toBe("a b/é#.hs");
   });
 
   it("binary", async () => {
-    const main = await open("assets/logo.png", 200, fixture("file-binary"));
+    const main = await open("assets/logo.png", 200, cborFixture("file-binary"));
     expect(main.textContent).toContain(
       "This file is not UTF-8 text, so it isn't shown (2,048 bytes).",
     );
@@ -67,43 +71,47 @@ describe("FileView", () => {
   });
 
   it("too large", async () => {
-    const main = await open("data/big.csv", 200, fixture("file-too-large"));
+    const main = await open("data/big.csv", 200, cborFixture("file-too-large"));
     expect(main.textContent).toContain(
       "This file is too large to show (5,242,880 bytes; the limit is 1 MiB).",
     );
   });
 
   it("symlink, resolved: links to the target file", async () => {
-    const main = await open("docs/guide.md", 200, fixture("file-symlink"));
+    const main = await open("docs/guide.md", 200, cborFixture("file-symlink"));
     expect(main.textContent).toContain("Symbolic link to ../shared/guide.md");
     const a = main.querySelector("a");
     expect(a?.getAttribute("href")).toBe("/tok/src/tree/shared/guide.md");
   });
 
   it("symlink, not resolved: no link", async () => {
-    const main = await open("docs/old.md", 200, {
-      generation: 1,
-      kind: "symlink",
-      target: "/etc/passwd",
-      resolved: null,
-    });
+    const main = await open(
+      "docs/old.md",
+      200,
+      cbor({
+        generation: 1,
+        kind: "symlink",
+        target: "/etc/passwd",
+        resolved: null,
+      }),
+    );
     expect(main.textContent).toContain("Symbolic link to /etc/passwd");
     expect(main.querySelector("a")).toBeNull();
   });
 
   it("submodule", async () => {
-    const main = await open("vendor/dep", 200, fixture("file-submodule"));
+    const main = await open("vendor/dep", 200, cborFixture("file-submodule"));
     expect(main.textContent).toContain(
       "Submodule at commit 0123456789abcdef0123456789abcdef01234567. Its files aren't shown.",
     );
   });
 
   it("nested repo", async () => {
-    const main = await open("vendor/nested", 200, {
-      generation: 1,
-      kind: "submodule",
-      commit: null,
-    });
+    const main = await open(
+      "vendor/nested",
+      200,
+      cbor({ generation: 1, kind: "submodule", commit: null }),
+    );
     expect(main.textContent).toContain(
       "Nested git repository. Its files aren't shown.",
     );
@@ -127,7 +135,7 @@ describe("FileView", () => {
       "Preprocessed by hspec-discover: shown as text, not indexed.",
     ],
   ])("banner for %s", async (path, text) => {
-    const main = await open(path, 200, fixture("file-text"), [
+    const main = await open(path, 200, cborFixture("file-text"), [
       200,
       fixture("modules"),
     ]);
@@ -145,7 +153,7 @@ describe("FileView", () => {
     const main = await open(
       "pkg/src/Foo.hs",
       200,
-      fixture("file-text"),
+      cborFixture("file-text"),
       modules,
     );
     await vi.waitFor(() => {
@@ -161,7 +169,12 @@ describe("FileView", () => {
   });
 
   it("bad payload", async () => {
-    const main = await open("x.hs", 200, { kind: "text" });
+    const main = await open("x.hs", 200, cbor({ kind: "text" }));
+    expect(main.textContent).toContain("Couldn't load this file.");
+  });
+
+  it("JSON instead of CBOR", async () => {
+    const main = await open("x.hs", 200, fixture("file-text"));
     expect(main.textContent).toContain("Couldn't load this file.");
   });
 });
@@ -191,7 +204,7 @@ describe("FileView navigation", () => {
   it("a sidebar link navigates under the token, focus stays", async () => {
     stubFetch({
       "/tok/api/files/tree": [200, fixture("files")],
-      "/tok/api/file/tree/app/Main.hs": [200, fixture("file-text")],
+      "/tok/api/file/tree/app/Main.hs": [200, cborFixture("file-text")],
     });
     const root = mountAppAt("/tok");
     const nav = root.querySelector("nav");
@@ -216,8 +229,8 @@ describe("FileView navigation", () => {
   it("a link in main moves focus to the new heading", async () => {
     stubFetch({
       "/tok/api/files/tree": [200, fixture("files")],
-      "/tok/api/file/tree/docs/guide.md": [200, fixture("file-symlink")],
-      "/tok/api/file/tree/shared/guide.md": [200, fixture("file-text")],
+      "/tok/api/file/tree/docs/guide.md": [200, cborFixture("file-symlink")],
+      "/tok/api/file/tree/shared/guide.md": [200, cborFixture("file-text")],
     });
     const main = mountAppAt("/tok/src/tree/docs/guide.md").querySelector(
       "main",
@@ -239,6 +252,8 @@ describe("FileView navigation", () => {
     let late: ((r: Response) => void) | undefined;
     const json = (body: unknown) =>
       new Response(JSON.stringify(body), { status: 200 });
+    const ok = (bytes: Uint8Array<ArrayBuffer>) =>
+      new Response(bytes, { status: 200 });
     vi.stubGlobal(
       "fetch",
       vi.fn((url: string): Promise<Response> => {
@@ -249,7 +264,7 @@ describe("FileView navigation", () => {
           return new Promise((resolve) => (late = resolve));
         }
         return Promise.resolve(
-          json({ generation: 1, kind: "text", text: "new file\n" }),
+          ok(cbor({ generation: 1, kind: "text", text: "new file\n" })),
         );
       }),
     );
@@ -272,7 +287,7 @@ describe("FileView navigation", () => {
     await vi.waitFor(() => {
       expect(main.querySelector(".file-code")?.textContent).toBe("new file\n");
     });
-    late?.(json(fixture("file-text")));
+    late?.(ok(cborFixture("file-text")));
     await new Promise((r) => setTimeout(r, 50));
     expect(main.querySelector("h1")?.textContent).toBe("shared/guide.md");
     expect(main.querySelector(".file-code")?.textContent).toBe("new file\n");

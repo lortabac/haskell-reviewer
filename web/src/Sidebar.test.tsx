@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fixture, stubFetch } from "../test/fixtures";
+import { cborFixture, fixture, stubFetch } from "../test/fixtures";
 import { mountAppAt, unmountApp } from "../test/mount";
 
 interface Parts {
@@ -18,7 +18,7 @@ function mount(
   stubFetch({
     "/tok/api/files/tree": [200, files],
     "/tok/api/modules/tree": modules,
-    "/tok/api/file/tree/app/Main.hs": [200, fixture("file-text")],
+    "/tok/api/file/tree/app/Main.hs": [200, cborFixture("file-text")],
   });
   const nav = mountAppAt(at).querySelector("nav");
   const group = nav?.querySelector('[role="group"]');

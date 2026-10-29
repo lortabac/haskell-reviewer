@@ -1,7 +1,8 @@
--- | JSON bodies of the API, written by hand (D-50).
+-- | Bodies of the API, written by hand (D-50): JSON, and CBOR for the
+-- file text (D-51, Note [CBOR bodies] in "HaskellReviewer.Server.Cbor").
 --
--- Field order is fixed (aeson's 'pairs'), so fixtures are stable. See
--- Note [API fixtures].
+-- Field order is fixed (aeson's 'pairs', 'Cbor.obj'), so fixtures are
+-- stable. See Note [API fixtures].
 module HaskellReviewer.Server.Wire
   ( -- * Types
     ModuleView (..),
@@ -13,6 +14,7 @@ module HaskellReviewer.Server.Wire
     encodeFileView,
     encodeModuleTree,
     encodeModuleView,
+    encodeModuleNotFound,
     encodeIndexing,
     helloPayload,
   )
@@ -95,16 +97,20 @@ import HaskellReviewer.Core.Project
   )
 import HaskellReviewer.Core.RelPath (RelPath, relDirText, relPathText)
 import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
+import HaskellReviewer.Server.Cbor qualified as Cbor
 import HaskellReviewer.Session.Index (Progress (..))
 import HaskellReviewer.Session.Snapshot (Generation (..))
 
 {- Note [API fixtures]
 
-D-50: the JSON types are written by hand, here and in web/src/api/.
+D-50: the wire types are written by hand, here and in web/src/api/.
 To keep them in sync, the Haskell tests (ApiGoldenTest) call the real
-app with fixed data and write each body to fixtures/api/<name>.json.
-The TypeScript tests feed every fixture to the decoder that production
-uses, and check that each decoder case has a fixture.
+app with fixed data and write each body to fixtures/api/: a JSON body
+to <name>.json, a CBOR body to <name>.cbor plus its JSON dump
+(cborToJson) to <name>.cbor.json, so diffs stay readable. The
+TypeScript tests feed every fixture to the decoder that production
+uses (a CBOR one through cbor-x, checked against the dump), and check
+that each decoder case has a fixture.
 
 A change here changes a fixture: the golden test fails until the
 fixture is updated (--accept), and then the TS test checks the
@@ -139,7 +145,7 @@ encodeFileList (Generation g) fl =
       EntrySubmodule c -> kindIs "submodule" <> ("commit" .= commitText c)
       EntryNestedRepo -> kindIs "submodule" <> ("commit" .= Aeson.Null)
 
--- | GET api\/file\/\<side>\/\<path>: one of
+-- | GET api\/file\/\<side>\/\<path>, as CBOR. In JSON terms, one of
 --
 -- > {"generation":1,"kind":"text","text":"..."}
 -- > {"generation":1,"kind":"binary","size":123}
@@ -150,21 +156,22 @@ encodeFileList (Generation g) fl =
 -- @resolved@ may be null, and @commit@ too (a nested repo).
 encodeFileView :: Generation -> FileContent -> LBS.ByteString
 encodeFileView (Generation g) content =
-  Encoding.encodingToLazyByteString . Aeson.pairs $
-    ("generation" .= g) <> fields
+  Cbor.cborBody . Cbor.obj $ ("generation", Cbor.word64 g) : fields
   where
     fields = case content of
-      TextContent t -> kindIs "text" <> ("text" .= t)
-      Binary (FileSize n) -> kindIs "binary" <> ("size" .= n)
+      TextContent t -> [kind "text", ("text", Cbor.text t)]
+      Binary size -> [kind "binary", ("size", bytes size)]
       TooLarge info ->
-        kindIs "too-large" <> ("size" .= bytes info.size) <> ("limit" .= bytes info.limit)
+        [kind "too-large", ("size", bytes info.size), ("limit", bytes info.limit)]
       Link info ->
-        kindIs "symlink"
-          <> ("target" .= info.target)
-          <> ("resolved" .= fmap relPathText info.resolved)
-      Submodule c -> kindIs "submodule" <> ("commit" .= commitText c)
-      NestedRepo -> kindIs "submodule" <> ("commit" .= Aeson.Null)
-    bytes (FileSize n) = n
+        [ kind "symlink",
+          ("target", Cbor.text info.target),
+          ("resolved", Cbor.nullable (Cbor.text . relPathText) info.resolved)
+        ]
+      Submodule c -> [kind "submodule", ("commit", Cbor.text (commitText c))]
+      NestedRepo -> [kind "submodule", ("commit", Cbor.null_)]
+    kind k = ("kind", Cbor.text k)
+    bytes (FileSize n) = Cbor.int n
 
 -- | GET api\/modules\/\<side>: the module tree.
 --
@@ -452,6 +459,14 @@ parsedFields m =
     docFields :: DocComment a -> Series
     docFields d = Encoding.pair "span" (spanJson d.span) <> ("text" .= d.text)
     nullable = maybe Encoding.null_
+
+-- | The 404 body of a module that isn't there (JSON):
+--
+-- > {"generation":1,"kind":"not-found","what":"module"}
+encodeModuleNotFound :: Generation -> LBS.ByteString
+encodeModuleNotFound (Generation g) =
+  Encoding.encodingToLazyByteString . Aeson.pairs $
+    ("generation" .= g) <> kindIs "not-found" <> ("what" .= ("module" :: Text))
 
 -- | The data of the @hello@ event: @{}@.
 helloPayload :: ByteString
