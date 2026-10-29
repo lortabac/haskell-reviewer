@@ -362,8 +362,9 @@ inWorkTree logger git = do
       pure (Right ListFromDisk)
 
 -- | git found no repo at all, from ROOT up. Not "fatal: not a git
--- repository: <path>", which is a .git file pointing nowhere: a broken
--- repo, so an error.
+-- repository: <path>" (or, since git 2.56, "fatal: gitfile does not
+-- point to a valid repository"), which is a .git file pointing nowhere: a
+-- broken repo, so an error.
 notARepo :: ByteString -> Bool
 notARepo err =
   any

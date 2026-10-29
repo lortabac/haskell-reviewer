@@ -792,6 +792,11 @@ signalTests =
         when hasDevFull $
           withTemp $ \dir ->
             withServer id ["--trace-file", "/dev/full", dir] $ \server -> do
+              -- Wait for a 200: the listing only starts once `ready` has
+              -- written the startup span (and hit the warning), so this
+              -- avoids a race where SIGTERM lands first.
+              r <- getPath server "api/files/tree"
+              r.status @?= 200
               (code, err) <- stopServer server sigTERM
               code @?= ExitSuccess
               assertContains "haskell-reviewer: warning: trace file:" err
