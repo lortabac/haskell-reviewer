@@ -4,14 +4,14 @@ type:Expr data name@7:6-7:10 exported
     head @7:1-13:14
   head: data Expr :: Type -> Type where IntE , BoolE :: Int -> Expr Int If :: Expr Bool -> Expr a -> Expr a -> Expr a Pair :: { first :: Expr a , second :: ! ( Expr b ) } -> Expr ( a , b ) deriving ( )
   haddock @6:1-6:18
-    |  Expressions.
+    | -- | Expressions.
   con:IntE constructor name@9:3-9:7 exported
     extent:
       doc @8:3-8:17
       head @9:3-9:33
     head: IntE , BoolE :: Int -> Expr Int
     haddock @8:3-8:17
-      |  Literals.
+      | -- | Literals.
     gadt
     arg @9:18-9:21 "Int"
   con:BoolE constructor name@9:9-9:14 exported
@@ -20,7 +20,7 @@ type:Expr data name@7:6-7:10 exported
       head @9:3-9:33
     head: IntE , BoolE :: Int -> Expr Int
     haddock @8:3-8:17
-      |  Literals.
+      | -- | Literals.
     gadt
     arg @9:18-9:21 "Int"
   con:If constructor name@10:3-10:5 exported
@@ -37,7 +37,7 @@ type:Expr data name@7:6-7:10 exported
       head @12:3-12:66
     head: Pair :: { first :: Expr a , second :: ! ( Expr b ) } -> Expr ( a , b )
     haddock @11:3-11:21
-      |  A record one.
+      | -- | A record one.
     gadt record
     field:Expr.first field name@12:13-12:18 exported
       extent:

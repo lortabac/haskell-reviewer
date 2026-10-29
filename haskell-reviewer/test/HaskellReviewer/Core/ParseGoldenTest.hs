@@ -189,8 +189,9 @@ fixtureDir = "../fixtures/parse/"
 dump :: Case -> IO LBS.ByteString
 dump c = do
   bytes <- BS.readFile (fixtureDir <> c.file)
-  r <- parseGuarded c.settings (decode bytes)
-  pure (LBS.fromStrict (Text.Encoding.encodeUtf8 (dumpParse r)))
+  let text = decode bytes
+  r <- parseGuarded c.settings text
+  pure (LBS.fromStrict (Text.Encoding.encodeUtf8 (dumpParse text r)))
   where
     decode :: BS.ByteString -> Text
     decode = Text.Encoding.decodeUtf8Lenient

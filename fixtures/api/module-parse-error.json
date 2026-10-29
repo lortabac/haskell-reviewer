@@ -1,1 +1,0 @@
-{"generation":1,"id":"pkg:exe:app:Main","ref":"pkg:exe:app:Main","path":"pkg/app/Main.hs","tier":{"kind":"syntactic","reason":"no-hie"},"parse":{"kind":"text-only","reason":{"kind":"parse-error","message":"parse error on input `='","code":"GHC-58481","span":[2,8,2,9]},"warnings":[]}}

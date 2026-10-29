@@ -265,18 +265,20 @@ tokenClass = \case
   ITconsym _ -> Just ConSym
   ITqconsym _ -> Just ConSym
   ITcolon -> Just ConSym
-  -- Operators the lexer names on its own.
-  ITminus -> Just VarSym
-  ITprefixminus -> Just VarSym
-  ITbang -> Just VarSym
-  ITtilde -> Just VarSym
-  ITat -> Just VarSym
-  ITtypeApp -> Just VarSym
-  ITpercent -> Just VarSym
-  ITstar _ -> Just VarSym
-  ITdot -> Just VarSym
-  ITproj _ -> Just VarSym
-  ITlolly -> Just VarSym
+  -- Operators the lexer names on its own: they are syntax too (a
+  -- strictness mark, forall's dot, a type application), so they never
+  -- link to a local operator.
+  ITminus -> Just ReservedOp
+  ITprefixminus -> Just ReservedOp
+  ITbang -> Just ReservedOp
+  ITtilde -> Just ReservedOp
+  ITat -> Just ReservedOp
+  ITtypeApp -> Just ReservedOp
+  ITpercent -> Just ReservedOp
+  ITstar _ -> Just ReservedOp
+  ITdot -> Just ReservedOp
+  ITproj _ -> Just ReservedOp
+  ITlolly -> Just ReservedOp
   -- Literals.
   ITinteger _ -> Just Literal
   ITrational _ -> Just Literal

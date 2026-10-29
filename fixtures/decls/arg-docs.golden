@@ -16,7 +16,7 @@ type:D data name@7:6-7:7 exported
       doc @7:16-7:29
     head: D Int
     haddock @7:16-7:29
-      |  last arg
+      | -- ^ last arg
     prefix
     arg @7:12-7:15 "Int"
 type:T data name@9:6-9:7 exported
@@ -31,10 +31,10 @@ type:T data name@9:6-9:7 exported
     prefix
     arg @9:12-9:15 "Int"
       doc @9:16-9:26
-        |  con A
+        | -- ^ con A
     arg @10:12-10:16 "Bool"
       doc @10:17-10:27
-        |  arg 2
+        | -- ^ arg 2
   con:B constructor name@11:10-11:11 exported
     extent:
       head @11:10-12:13
@@ -46,7 +46,7 @@ type:T data name@9:6-9:7 exported
         doc @11:25-11:37
       head: fld :: Int
       haddock @11:25-11:37
-        |  fld doc
+        | -- ^ fld doc
       type @11:21-11:24 "Int"
 type:G data name@14:6-14:7 exported
   extent:
@@ -60,7 +60,7 @@ type:G data name@14:6-14:7 exported
     gadt
     arg @15:9-15:12 "Int"
       doc @15:13-15:26
-        |  gadt arg
+        | -- ^ gadt arg
   con:GR constructor name@17:3-17:5 exported
     extent:
       head @17:3-18:15
@@ -72,7 +72,7 @@ type:G data name@14:6-14:7 exported
         doc @17:21-17:34
       head: gf :: Int
       haddock @17:21-17:34
-        |  gr field
+        | -- ^ gr field
       type @17:17-17:20 "Int"
 class:C class name@20:7-20:8 exported
   extent:

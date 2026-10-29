@@ -16,6 +16,7 @@ module HaskellReviewer.Core.Names
     KeyHead,
     keyHead,
     keyHeadChunks,
+    keyHeadParts,
     headText,
     renderDeclId,
     declName,
@@ -100,6 +101,10 @@ keyHead t = KeyHead [t]
 -- | A head of several chunks, joined with nothing between them.
 keyHeadChunks :: [Text] -> KeyHead
 keyHeadChunks = KeyHead
+
+-- | The chunks, as built. Joined, they are the text.
+keyHeadParts :: KeyHead -> [Text]
+keyHeadParts (KeyHead ts) = ts
 
 -- | The whole text. A new copy: don't keep it.
 headText :: KeyHead -> Text

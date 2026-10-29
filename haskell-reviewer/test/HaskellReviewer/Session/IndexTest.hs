@@ -58,6 +58,7 @@ import HaskellReviewer.Session.Index
     IndexDeps (..),
     IndexFailure (..),
     Indexed (..),
+    ParsedSource (..),
     Progress (..),
     SlotState (..),
     awaitModule,
@@ -97,13 +98,13 @@ tests =
             poll request >>= assertBool "answered before the parse" . isNothing
             release fake "A"
             r <- within (waitCatch request)
-            either (assertFailure . show) (@?= Just (Right (IndexedParse textOnly))) r,
+            either (assertFailure . show) (@?= Just (Right textOnlyResult)) r,
       testCase "a done module: answered at once; no slot: Nothing" $ do
         fake <- newFake []
         index <- indexOf ["A"]
         within (runWorkers fake.deps 2 index)
         r <- within (awaitModule index (m "A"))
-        r @?= Just (Right (IndexedParse textOnly))
+        r @?= Just (Right (IndexedTextOnly textOnlyModule))
         none <- within (awaitModule index (m "Z"))
         none @?= Nothing,
       testCase "two requests for one module: one parse" $ do
@@ -135,11 +136,11 @@ tests =
         within (runWorkers deps 2 index)
         states <- atomically (readStates index)
         Map.toList states
-          @?= [ (m "A", Ready (IndexedParse textOnly)),
+          @?= [ (m "A", Ready (IndexedTextOnly textOnlyModule)),
                 (m "B", Failed SourceGone),
                 (m "C", Failed (SourceUnreadable "Permission denied")),
                 (m "D", Failed (IndexCrashed "user error (boom)")),
-                (m "E", Ready (IndexedParse textOnly))
+                (m "E", Ready (IndexedTextOnly textOnlyModule))
               ]
         atomically (readProgress index)
           >>= (@?= Progress {total = 5, ready = 2, failed = 3})
@@ -163,7 +164,7 @@ tests =
         Map.elems states
           @?= [ Ready (IndexedNotText (FileSize 10)),
                 Failed SourceGone,
-                Ready (IndexedParse textOnly)
+                Ready (IndexedTextOnly textOnlyModule)
               ],
       testCase "progress counts at each step" $ do
         fake <- newFake ["A", "B", "C"]
@@ -237,7 +238,7 @@ tests =
             either (assertFailure . show) (@?= Just (Left crashed)) w
         states <- atomically (readStates index)
         Map.elems states
-          @?= Ready (IndexedParse textOnly) : replicate 3 (Failed crashed)
+          @?= Ready (IndexedTextOnly textOnlyModule) : replicate 3 (Failed crashed)
         atomically (readProgress index)
           >>= (@?= Progress {total = 4, ready = 1, failed = 3}),
       testCase "a log line that can't be written doesn't stop indexing" $ do
@@ -254,9 +255,9 @@ tests =
         within (runWorkers deps 1 index)
         states <- atomically (readStates index)
         Map.elems states
-          @?= [ Ready (IndexedParse textOnly),
+          @?= [ Ready (IndexedTextOnly textOnlyModule),
                 Failed (SourceUnreadable "Permission denied"),
-                Ready (IndexedParse textOnly)
+                Ready (IndexedTextOnly textOnlyModule)
               ],
       testCase "big files: one at a time, never in the way of small ones" $ do
         let FileSize limit = bigFileSize
@@ -283,7 +284,7 @@ tests =
             release fake (big "C")
             release fake (big "D")
             r <- within (waitCatch requested)
-            either (assertFailure . show) (@?= Just (Right (IndexedParse textOnly))) r
+            either (assertFailure . show) (@?= Just (Right textOnlyResult)) r
           waitDone index
         readTVarIO fake.bigMost >>= (@?= 1)
         sort <$> readTVarIO fake.parsed >>= (@?= [big "C", big "D", "E", "F"]),
@@ -354,6 +355,11 @@ parsingTests =
           waitDone index
         names <- atomically (readNames index)
         Map.keys names @?= [m "A", m "B"]
+        -- A parsed module keeps its text, for the docs page.
+        atomically (slotState index (m "A")) >>= \case
+          Just (Ready (IndexedParsed p)) ->
+            p.text @?= "module A (a) where\ndata T = K\na = 1\n"
+          other -> assertFailure (take 300 (show other))
     ]
 
 -- * Fakes
@@ -427,7 +433,13 @@ release fake t = case Map.lookup t fake.gates of
   Nothing -> assertFailure ("not held: " <> show t)
 
 textOnly :: ModuleParse
-textOnly = TextOnly TextOnlyModule {reason = TooSlow, warnings = []}
+textOnly = TextOnly textOnlyModule
+
+textOnlyModule :: TextOnlyModule
+textOnlyModule = TextOnlyModule {reason = TooSlow, warnings = []}
+
+textOnlyResult :: Indexed
+textOnlyResult = IndexedTextOnly textOnlyModule
 
 -- | An index of loose modules, one per name (@A@ is @A.hs@).
 indexOf :: [Text] -> IO Index

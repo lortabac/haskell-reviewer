@@ -10,6 +10,7 @@ module HaskellReviewer.Core.Parser.Haddock
 
     -- * For tests
     plainOnly,
+    hasBigNumber,
     maxCommentLength,
   )
 where
@@ -48,11 +49,44 @@ import HaskellReviewer.Core.RichText
 parseDoc :: Text -> Doc
 parseDoc raw
   | plainOnly t = plainDoc t
-  | otherwise =
-      let H.MetaDoc meta d = parseParas t
-       in Doc {blocks = toBlocks (H.overIdentifier identifier d), since = sinceOf meta}
+  | hasBigNumber t = doc {blocks = map noNumbers doc.blocks, since = Nothing}
+  | otherwise = doc
   where
     t = noCR raw
+    doc =
+      let H.MetaDoc meta d = parseParas t
+       in Doc {blocks = toBlocks (H.overIdentifier identifier d), since = sinceOf meta}
+
+{- Note [Big numbers]
+
+haddock-library reads list item numbers and @\@since@ versions into an
+Int with no overflow check: @9223372036854775808.@ comes out negative,
+@99999999999999999999.@ as some other positive number. We can't tell
+which digits gave which number, so if the comment has any run of digits
+over 'maxBound' (leading zeros don't count), its list items have no
+number and it has no @\@since@. The page then numbers the items itself.
+-}
+
+-- | A run of digits over 'maxBound' @:: Int@. See Note [Big numbers].
+hasBigNumber :: Text -> Bool
+hasBigNumber = any big . Text.split (not . isDigit)
+  where
+    maxText = Text.pack (show (maxBound :: Int))
+    big run =
+      let d = Text.dropWhile (== '0') run
+       in Text.length d > Text.length maxText
+            || (Text.length d == Text.length maxText && d > maxText)
+
+-- | The blocks, with no list item numbers. See Note [Big numbers].
+noNumbers :: Block -> Block
+noNumbers = \case
+  OrderedList items ->
+    OrderedList
+      [ListItem {number = Nothing, content = map noNumbers i.content} | i <- items]
+  UnorderedList items -> UnorderedList (map (map noNumbers) items)
+  DefinitionList items ->
+    DefinitionList [i {definition = map noNumbers i.definition} | i <- items]
+  b -> b
 
 -- | haddock-library drops every @\\r@ before it parses, so we drop them
 -- first too: 'plainOnly' must see the text it will parse.
@@ -341,7 +375,7 @@ block = \case
   H.DocWarning x -> Just (toBlocks x)
   _ -> Nothing
   where
-    item (n, x) = ListItem {number = n, content = toBlocks x}
+    item (n, x) = ListItem {number = Just n, content = toBlocks x}
     definition (a, b) = DefItem {term = toInlines a, definition = toBlocks b}
     example (H.Example e rs) = Example (Text.pack e) (map Text.pack rs)
     row (H.TableRow cs) = map cell cs

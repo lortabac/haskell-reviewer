@@ -1,1 +1,0 @@
-{"generation":1,"id":"pkg:lib:Foo","ref":"Foo","path":"pkg/src/Foo.hs","tier":{"kind":"syntactic","reason":"no-hie"},"parse":{"kind":"text-only","reason":{"kind":"too-slow"},"warnings":[]}}

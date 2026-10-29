@@ -21,19 +21,26 @@ import {
   type ModuleEntry,
 } from "./modules";
 import {
+  conShapes,
+  declKinds,
   decodeModuleNotFound,
-  decodeModuleView,
+  decodeModulePage,
+  docItemKinds,
   exportKinds,
   importLevels,
+  instanceForms,
   listKinds,
   nameKeywords,
+  pragmaKinds,
   qualifiedKinds,
   reasonKinds,
   subsKinds,
+  typeForms,
   warningKinds,
   type ItemName,
-  type ModuleView,
+  type ModulePage,
 } from "./module";
+import { blockKinds, inlineKinds } from "./richtext";
 import {
   cbor,
   cborFixture,
@@ -55,28 +62,28 @@ const decoders: Record<string, (value: unknown) => unknown> = {
   "file-submodule": decodeFileView,
   modules: decodeModuleTree,
   "modules-implicit": decodeModuleTree,
-  "module-parsed": decodeModuleView,
-  "module-parse-error": decodeModuleView,
-  "module-pragma-error": decodeModuleView,
-  "module-preprocessed": decodeModuleView,
-  "module-cpp": decodeModuleView,
-  "module-crashed": decodeModuleView,
-  "module-too-slow": decodeModuleView,
-  "module-generated": decodeModuleView,
-  "module-no-source": decodeModuleView,
-  "module-not-text": decodeModuleView,
-  "module-too-large": decodeModuleView,
+  "module-parsed": decodeModulePage,
+  "module-parse-error": decodeModulePage,
+  "module-pragma-error": decodeModulePage,
+  "module-preprocessed": decodeModulePage,
+  "module-cpp": decodeModulePage,
+  "module-crashed": decodeModulePage,
+  "module-too-slow": decodeModulePage,
+  "module-generated": decodeModulePage,
+  "module-no-source": decodeModulePage,
+  "module-not-text": decodeModulePage,
+  "module-too-large": decodeModulePage,
+  "module-page": decodeModulePage,
+  "module-page-sections": decodeModulePage,
   "module-not-found": decodeModuleNotFound,
 };
 
 // The fixtures that are CBOR (D-51), with a JSON dump next to them.
-const cborNames = [
-  "file-text",
-  "file-binary",
-  "file-too-large",
-  "file-symlink",
-  "file-submodule",
-];
+const cborNames = Object.keys(decoders).filter(
+  (n) =>
+    n.startsWith("file-") ||
+    (n.startsWith("module-") && n !== "module-not-found"),
+);
 
 const sorted = (xs: Iterable<string>) => [...new Set(xs)].sort();
 
@@ -152,17 +159,61 @@ describe("API fixtures", () => {
   it("the module fixtures cover every reason", () => {
     const views = [...fixtures.keys()]
       .filter((n) => n.startsWith("module-") && n !== "module-not-found")
-      .map((n) => decodeModuleView(fixture(n)));
+      .map((n) => decodeModulePage(fixture(n)));
     const reasons = views.flatMap((v) =>
       v.parse.kind === "text-only" ? [v.parse.reason.kind] : [],
     );
     expect(sorted(reasons)).toEqual(sorted(reasonKinds));
     expect(views.some((v) => v.parse.kind === "parsed")).toBe(true);
     expect(views.some((v) => v.path === null)).toBe(true);
+    expect(views.some((v) => v.package !== null)).toBe(true);
+    expect(views.some((v) => v.package === null)).toBe(true);
+  });
+
+  it("the page fixtures cover every kind of declaration, doc and pragma", () => {
+    const parsed = ["module-page", "module-page-sections"].flatMap((n) => {
+      const p = decodeModulePage(fixture(n)).parse;
+      return p.kind === "parsed" ? [p] : [];
+    });
+    const decls = parsed.flatMap((p) => p.declarations);
+    const kinds = new Set<string>();
+    const walk = (v: unknown): void => {
+      if (Array.isArray(v)) v.forEach(walk);
+      else if (typeof v === "object" && v !== null) {
+        const k = (v as { kind?: unknown }).kind;
+        if (typeof k === "string") kinds.add(k);
+        Object.values(v).forEach(walk);
+      }
+    };
+    parsed.forEach(walk);
+    for (const k of [...blockKinds, ...inlineKinds, ...declKinds]) {
+      expect(kinds.has(k), k).toBe(true);
+    }
+    const types = decls.flatMap((d) => (d.kind === "type" ? [d] : []));
+    expect(sorted(types.map((t) => t.form))).toEqual(sorted(typeForms));
+    expect(
+      sorted(types.flatMap((t) => t.constructors.map((c) => c.shape))),
+    ).toEqual(sorted(conShapes));
+    expect(
+      sorted(
+        decls.flatMap((d) => (d.kind === "instance" ? [d.form.kind] : [])),
+      ),
+    ).toEqual(sorted(instanceForms));
+    expect(sorted(parsed.flatMap((p) => p.pragmas.map((x) => x.kind)))).toEqual(
+      sorted(pragmaKinds),
+    );
+    expect(
+      sorted(parsed.flatMap((p) => p.docItems.map((x) => x.kind))),
+    ).toEqual(sorted(docItemKinds));
+    // Placement: some instances attached, one not.
+    const attached = decls.flatMap((d) =>
+      d.kind === "instance" ? [d.attached] : [],
+    );
+    expect(sorted(attached.map(String))).toEqual(["false", "true"]);
   });
 
   it("the parsed module fixture covers every kind of export and import", () => {
-    const view: ModuleView = decodeModuleView(fixture("module-parsed"));
+    const view: ModulePage = decodeModulePage(fixture("module-parsed"));
     expect(view.parse.kind).toBe("parsed");
     if (view.parse.kind !== "parsed") return;
     const m = view.parse;
@@ -357,12 +408,14 @@ describe("decoders reject bad shapes", () => {
     }
   });
 
-  it("module view", () => {
+  it("module page", () => {
     const view = {
       generation: 1,
       id: "p:lib:A",
       ref: "A",
       path: "A.hs",
+      package: { name: "p", version: "1" },
+      component: "lib",
       tier: { kind: "syntactic", reason: "no-hie" },
       parse: {
         kind: "text-only",
@@ -370,7 +423,7 @@ describe("decoders reject bad shapes", () => {
         warnings: [],
       },
     };
-    expect(decodeModuleView(view)).toEqual(view);
+    expect(decodeModulePage(view)).toEqual(view);
     const parsed = (m: object) => ({
       ...view,
       parse: {
@@ -380,10 +433,14 @@ describe("decoders reject bad shapes", () => {
         imports: [],
         extensions: { language: "GHC2021", enabled: [], fromPragmas: [] },
         warnings: [],
+        idParts: [],
+        declarations: [],
+        docItems: [],
+        pragmas: [],
         ...m,
       },
     });
-    expect(decodeModuleView(parsed({}))).toEqual(parsed({}));
+    expect(decodeModulePage(parsed({}))).toEqual(parsed({}));
     const reason = (r: object) => ({
       ...view,
       parse: { kind: "text-only", reason: r, warnings: [] },
@@ -391,6 +448,8 @@ describe("decoders reject bad shapes", () => {
     for (const bad of [
       { ...view, generation: -1 },
       { ...view, path: undefined },
+      { ...view, package: { name: "p" } },
+      { ...view, component: undefined },
       { ...view, tier: { kind: "precise", reason: "no-hie" } },
       { ...view, parse: { kind: "maybe" } },
       { ...view, parse: { ...view.parse, warnings: undefined } },
@@ -411,8 +470,12 @@ describe("decoders reject bad shapes", () => {
       parsed({ header: { name: null, haddock: null } }),
       parsed({ imports: [{ span: [1, 1, 1, 2] }] }),
       parsed({ extensions: { language: "GHC2021", enabled: [] } }),
+      parsed({ declarations: undefined }),
+      parsed({ declarations: [{ kind: "thing" }] }),
+      parsed({ docItems: [{ kind: "chunk", name: "x" }] }),
+      parsed({ pragmas: [{ kind: "rules", span: [1, 1, 1, 2], names: [] }] }),
     ]) {
-      expect(() => decodeModuleView(bad), JSON.stringify(bad)).toThrow(
+      expect(() => decodeModulePage(bad), JSON.stringify(bad)).toThrow(
         DecodeError,
       );
     }

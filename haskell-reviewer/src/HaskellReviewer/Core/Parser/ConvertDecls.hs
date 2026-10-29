@@ -9,6 +9,7 @@ module HaskellReviewer.Core.Parser.ConvertDecls
   )
 where
 
+import Data.Containers.ListUtils (nubOrd)
 import Data.Foldable (toList)
 import Data.List (find, sortOn)
 import Data.List.NonEmpty (NonEmpty (..))
@@ -75,7 +76,13 @@ import HaskellReviewer.Core.Decls
     mkExtent,
   )
 import HaskellReviewer.Core.ModuleModel (DocItem (..), Section (..))
-import HaskellReviewer.Core.Names (DeclId (..), DeclNs (..), InstanceKey (..), keyHead)
+import HaskellReviewer.Core.Names
+  ( DeclId (..),
+    DeclNs (..),
+    InstanceKey (..),
+    declName,
+    keyHead,
+  )
 import HaskellReviewer.Core.Parser.Helpers
   ( SpanMap,
     docComment,
@@ -97,6 +104,7 @@ import HaskellReviewer.Core.Parser.InstanceKey
     instanceHead,
     instanceKey,
     isOrphan,
+    localMentions,
     plainName,
     renderArgs,
     typeArgs,
@@ -335,7 +343,7 @@ convertDecls spans self ds =
            ]
     decls =
       built
-        <> map InstanceD (concatMap derivedInstances built)
+        <> map InstanceD (concatMap (derivedInstances at.locals) built)
         <> [SpliceD (mkExtent (Part s HeadPart :| [])) | SpliceItem s <- items]
 
 -- | The items of one top-level declaration.
@@ -1209,6 +1217,7 @@ buildInstance spans at docs i =
               warning = Nothing
             },
       orphan = isOrphan at.locals h.className h.args,
+      mentions = localMentions at.locals h.className h.args,
       form =
         ExplicitInstance
           InstanceBody
@@ -1248,6 +1257,7 @@ buildDeriving spans at docs d = case d.decl of
                     warning = Nothing
                   },
             orphan = isOrphan at.locals h.className h.args,
+            mentions = localMentions at.locals h.className h.args,
             form = StandaloneDeriving (strategyOf spans strategy)
           }
 
@@ -1292,8 +1302,8 @@ buildFamInst spans at here docs f =
 -- instances already built (top-level, or in an instance). Each takes
 -- the key its clause has. Head: the class and the strategy (with the
 -- via type).
-derivedInstances :: Decl -> [InstanceDecl]
-derivedInstances = \case
+derivedInstances :: Locals -> Decl -> [InstanceDecl]
+derivedInstances locals = \case
   TypeD t -> case t.form of
     DataType b -> fromClauses t.info.id b.derivings
     Newtype b -> fromClauses t.info.id b.derivings
@@ -1320,11 +1330,23 @@ derivedInstances = \case
                     warning = Nothing
                   },
             orphan = False,
+            mentions = derivedMentions c.id tyId,
             form = DerivedInstance Derived {strategy = d.strategy, onType = tyId}
           }
       | d <- ds,
         c <- d.classes
       ]
+    -- The class if it's from here, then the type, or the data family
+    -- if it's from here.
+    derivedMentions clsId tyId =
+      nubOrd (filter local (keyName clsId) <> typeName tyId)
+    typeName = \case
+      Inst k -> filter local [k.name]
+      i -> toList (declName i)
+    keyName = \case
+      Inst k -> [k.name]
+      _ -> []
+    local n = Set.member n locals.types
 
 -- * Fixities and warnings
 

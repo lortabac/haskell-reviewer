@@ -1389,9 +1389,9 @@ a framework would cost more than it saves.
 
 - **Reads** are `GET` requests. Small or structural payloads (module tree,
   search results, threads, prefs) are JSON. **Token-heavy** payloads (docs
-  pages, full source, inline source, diff, expanded diff) are **CBOR**
-  (D-51), with only what JSON has (text-keyed maps, arrays, text, ints,
-  bools, null). Each route has one encoding (D-165). Every response
+  pages with their inline source, full source, diff, expanded diff) are
+  **CBOR** (D-51), with only what JSON has (text-keyed maps, arrays, text,
+  ints, bools, null). Each route has one encoding (D-165). Every response
   carries its snapshot generation id, and the client caches by
   *(generation, resource)*. A module that doesn't exist is a 404 with a
   small JSON body (D-166); other errors are plain text.

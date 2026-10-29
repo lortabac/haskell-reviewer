@@ -13,7 +13,7 @@ import ApiSupport
   )
 import Codec.Compression.GZip qualified as GZip
 import Control.Exception (evaluate)
-import Control.Monad (forM)
+import Control.Monad (forM, forM_)
 import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Lazy qualified as LBS
@@ -283,10 +283,10 @@ moduleTests =
             (show c, r.status) @?= (show c, 404)
         )
         [link, Submodule commit, NestedRepo],
-    testCase "module: JSON with a length, no-store" $ do
+    testCase "module: CBOR with a length, no-store" $ do
       r <- getApi projectApi ["api", "module", "tree", "Foo"]
       r.status @?= 200
-      lookup "Content-Type" r.headers @?= Just "application/json"
+      lookup "Content-Type" r.headers @?= Just "application/cbor"
       lookup "Content-Length" r.headers
         @?= Just (Char8.pack (show (LBS.length r.body)))
       assertNoStore r
@@ -316,12 +316,12 @@ bigTests getBig =
       assertNoStore r
       assertBool "gzip didn't make it smaller" (LBS.length r.body < LBS.length plain.body)
       GZip.decompress r.body @?= plain.body,
-    testCase "gzip: JSON too" $ do
-      let modulePath = ["api", "module", "tree", "Foo"]
-      plain <- getApi projectApi modulePath
-      r <- getApiWith [("Accept-Encoding", "gzip")] projectApi modulePath
-      lookup "Content-Encoding" r.headers @?= Just "gzip"
-      GZip.decompress r.body @?= plain.body,
+    testCase "gzip: JSON and the module page too" $
+      forM_ [["api", "modules", "tree"], ["api", "module", "tree", "Foo"]] $ \p -> do
+        plain <- getApi projectApi p
+        r <- getApiWith [("Accept-Encoding", "gzip")] projectApi p
+        (p, lookup "Content-Encoding" r.headers) @?= (p, Just "gzip")
+        GZip.decompress r.body @?= plain.body,
     testCase "gzip: small bodies, plain-text errors and q=0 are left alone" $ do
       let check api p headers = do
             plain <- getApi api p
@@ -388,9 +388,13 @@ countingReads api = do
         readCount = count
       }
 
+-- | The body has this, as JSON (a CBOR body through 'cborToJson').
 assertHas :: BS.ByteString -> ApiResult -> Assertion
-assertHas part r =
-  assertBool (show r.body) (part `BS.isInfixOf` LBS.toStrict r.body)
+assertHas part r = do
+  body <- case lookup "Content-Type" r.headers of
+    Just "application/cbor" -> either (assertFailure . show) pure (cborToJson r.body)
+    _ -> pure r.body
+  assertBool (show body) (part `BS.isInfixOf` LBS.toStrict body)
 
 assertNoStore :: ApiResult -> Assertion
 assertNoStore r = [v | (n, v) <- r.headers, n == "Cache-Control"] @?= ["no-store"]

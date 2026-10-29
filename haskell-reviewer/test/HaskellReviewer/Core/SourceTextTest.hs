@@ -1,20 +1,27 @@
 module HaskellReviewer.Core.SourceTextTest (tests) where
 
 import Control.Exception (evaluate)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import HaskellReviewer.Core.SourceText
   ( GhcRange (..),
     columnMap,
     ghcToSpan,
+    sliceSpan,
+    sourceLines,
     stripBom,
     unlitBirdLatex,
     unlitMarkdown,
   )
 import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
+import Hedgehog (forAll, property, (===))
+import Hedgehog.Gen qualified as Gen
+import Hedgehog.Range qualified as Range
 import System.Timeout (timeout)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
+import Test.Tasty.Hedgehog (testProperty)
 
 tests :: TestTree
 tests =
@@ -64,11 +71,47 @@ tests =
               Span _ (Col c) _ _ -> c
         r <- timeout 5_000_000 (evaluate (sum (map ourCol [0 .. n - 1])))
         r @?= Just (sum [fromIntegral (2 * k + 2) | k <- [0 .. n - 1]]),
+      testCase "slicing: a 1 MiB line, every token, is fast (Note [Slicing])" $ do
+        -- 210,000 tokens on one line. Slicing with take and drop from the
+        -- line's start took minutes.
+        let n = 210000
+            src = sourceLines (Text.replicate n "é𝑥 ")
+            col k = fromIntegral (3 * k + 1)
+            token k = sliceSpan src (spanOf 1 (col k) 1 (col k + 2))
+            tokens = map token [0 .. n - 1]
+        r <- timeout 5_000_000 (evaluate (length (filter (== "é𝑥") tokens)))
+        r @?= Just n,
+      testProperty "slicing: like take and drop on the lines" . property $ do
+        let piece = Gen.element ["a", "é", "𝑥", "\t", " ", "\r\n", "\n", "\xFEFF"]
+        long <- forAll Gen.bool
+        let pieces = Range.linear 0 (if long then 900 else 60)
+        t <- forAll (Text.concat <$> Gen.list pieces piece)
+        let width = if long then 700 else 40
+            pos = Gen.int (Range.linear 0 width)
+        l1 <- forAll (Gen.int (Range.linear 1 4))
+        l2 <- forAll (Gen.int (Range.linear l1 5))
+        c1 <- forAll pos
+        c2 <- forAll pos
+        let w = fromIntegral
+            s = spanOf (w l1) (w c1) (w l2) (w c2)
+        sliceSpan (sourceLines t) s === reference t (l1, c1, l2, c2),
       testCase "columns: astral code points count as one" $
         -- GHC counts code points too: nothing to do.
         ghcToSpan (columnMap "\x1D465 = \t1") (range 1 1 1 2) @?= spanOf 1 1 1 2
     ]
   where
+    -- The plain way, linear in the column.
+    reference t (l1, c1, l2, c2) =
+      let ls = map noCr (Text.splitOn "\n" (stripBom t))
+          noCr l = fromMaybe l (Text.stripSuffix "\r" l)
+          line n = if n >= 1 && n <= length ls then ls !! (n - 1) else ""
+       in if l1 == l2
+            then Text.take (c2 - c1) (Text.drop (c1 - 1) (line l1))
+            else
+              Text.intercalate "\n" $
+                [Text.drop (c1 - 1) (line l1)]
+                  <> [line l | l <- [l1 + 1 .. l2 - 1]]
+                  <> [Text.take (c2 - 1) (line l2)]
     lineCount :: Text -> Int
     lineCount = length . Text.splitOn "\n"
     range a b c d = GhcRange {startLine = a, startCol = b, endLine = c, endCol = d}

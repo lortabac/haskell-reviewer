@@ -411,7 +411,7 @@ filesTests =
                   \\"other\":[{\"kind\":\"module\",\"path\":\"Foo.hs\",\
                   \\"name\":\"Foo\",\"id\":\"Foo.hs\",\"ref\":\"Foo\"}],\
                   \\"warnings\":[]}",
-      testCase "module: from the index; a symlink is never read" $
+      testCase "module: a CBOR page, gzipped too; a symlink is never read" $
         withCanonicalTemp $ \dir -> do
           writeFile (dir </> "Foo.hs") "module Foo (x) where\nx = 1\n"
           writeFile (dir </> "secret.txt") "module Secret where\n"
@@ -419,8 +419,28 @@ filesTests =
           withServer id [dir] $ \server -> do
             r <- getPath server "api/module/tree/Foo"
             r.status @?= 200
-            assertContains "\"kind\":\"parsed\"" (Char8.unpack r.body)
-            assertContains "\"occ\":\"x\"" (Char8.unpack r.body)
+            lookup "content-type" r.headers @?= Just "application/cbor"
+            let asJson bytes = case cborToJson bytes of
+                  Left e -> assertFailure (Text.unpack (renderCborJsonError e))
+                  Right j -> pure (LChar8.unpack j)
+            j <- asJson (LBS.fromStrict r.body)
+            assertContains "\"kind\":\"parsed\"" j
+            assertContains "\"occ\":\"x\"" j
+            assertContains
+              "\"source\":[{\"span\":[2,1,2,6],\"role\":\"body\",\"text\":\"x = 1\"}]"
+              j
+            z <-
+              rawHttp
+                server.port
+                ( requestBytes
+                    "GET"
+                    (goodHost server)
+                    (tokenPath server <> "api/module/tree/Foo")
+                    "Accept-Encoding: gzip\r\n"
+                )
+            lookup "content-encoding" z.headers @?= Just "gzip"
+            jz <- asJson (GZip.decompress (LBS.fromStrict z.body))
+            jz @?= j
             -- Symlinks are only in the file tree: not a module.
             gone <- getPath server "api/module/tree/Bar"
             gone.status @?= 404,

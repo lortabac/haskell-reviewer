@@ -4,14 +4,14 @@ type:Shape data name@5:6-5:11 exported
     head @5:1-13:24
   head: data Shape a = Circle ! Double | Rect {-# UNPACK #-} ! Int ~ Int | a :+ a deriving ( Eq , Show ) deriving stock ( Ord ) deriving anyclass ( C )
   haddock @4:1-4:14
-    |  A shape.
+    | -- | A shape.
   con:Circle constructor name@7:5-7:11 exported
     extent:
       doc @6:5-6:19
       head @7:5-7:19
     head: Circle ! Double
     haddock @6:5-6:19
-      |  A circle.
+      | -- | A circle.
     prefix
     arg @7:13-7:19 "Double" strict
   con:Rect constructor name@8:5-8:9 exported
@@ -28,7 +28,7 @@ type:Shape data name@5:6-5:11 exported
       head @31:1-31:12
     head: a :+ a infixr 5 :+
     haddock @10:3-10:21
-      |  An infix one.
+      | -- ^ An infix one.
     fixity infixr 5 @31:1-31:12
     infix
     arg @9:5-9:6 "a"
@@ -44,27 +44,31 @@ inst:Eq:Shape a derived on type:Shape name@11:13-11:15 exported
   extent:
     head @11:13-11:15
   head: Eq
+  mentions: Shape
 inst:Show:Shape a derived on type:Shape name@11:17-11:21 exported
   extent:
     head @11:17-11:21
   head: Show
+  mentions: Shape
 inst:Ord:Shape a derived stock on type:Shape name@12:19-12:22 exported
   extent:
     head @12:12-12:17
     head @12:19-12:22
   head: stock Ord
+  mentions: Shape
 inst:C:Shape a derived anyclass on type:Shape name@13:22-13:23 exported
   extent:
     head @13:12-13:20
     head @13:22-13:23
   head: anyclass C
+  mentions: Shape
 type:Config data name@16:6-16:12 exported
   extent:
     doc @15:1-15:13
     head @16:1-23:37
   head: data Config = Config { port :: {-# NOUNPACK #-} ! Int , host , user :: String } | Other { port :: Int } deriving newtype Show deriving ( Semigroup ) via ( Max Int )
   haddock @15:1-15:13
-    |  Config.
+    | -- | Config.
   con:Config constructor name@16:15-16:21 exported
     extent:
       head @16:15-20:4
@@ -76,7 +80,7 @@ type:Config data name@16:6-16:12 exported
         head @18:5-18:34
       head: port :: {-# NOUNPACK #-} ! Int
       haddock @17:5-17:19
-        |  The port.
+        | -- | The port.
       type @18:31-18:34 "Int" strict nounpack
     field:Config.host field name@19:5-19:9 exported
       extent:
@@ -84,7 +88,7 @@ type:Config data name@16:6-16:12 exported
         doc @19:26-19:45
       head: host , user :: String
       haddock @19:26-19:45
-        |  Host and user.
+        | -- ^ Host and user.
       type @19:19-19:25 "String"
     field:Config.user field name@19:11-19:15 exported
       extent:
@@ -92,7 +96,7 @@ type:Config data name@16:6-16:12 exported
         doc @19:26-19:45
       head: host , user :: String
       haddock @19:26-19:45
-        |  Host and user.
+        | -- ^ Host and user.
       type @19:19-19:25 "String"
   con:Other constructor name@21:5-21:10 exported
     extent:
@@ -113,11 +117,13 @@ inst:Show:Config derived newtype on type:Config name@22:20-22:24 exported
     head @22:12-22:19
     head @22:20-22:24
   head: newtype Show
+  mentions: Config
 inst:Semigroup:Config derived via "(Max Int)" on type:Config name@23:13-23:22 exported
   extent:
     head @23:13-23:22
     head @23:24-23:37
   head: Semigroup via ( Max Int )
+  mentions: Config
 type:Ctx data name@25:15-25:18 exported
   extent:
     head @25:1-25:28

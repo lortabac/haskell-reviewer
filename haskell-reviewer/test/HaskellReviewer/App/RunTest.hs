@@ -323,7 +323,7 @@ listingTests =
             fmap (.status) r @?= Just 200,
       testCase "the parser warms up before requests get the snapshot" $ do
         release <- newEmptyMVar
-        let slowWarmUp d = d {warmUpParser = readMVar release}
+        let slowWarmUp d = d {warmUp = readMVar release}
             empty _ = fakeLister (pure (Right (mkFileList FromDisk 0 [])))
         withRunningWith slowWarmUp empty $ \_ app ->
           withAsync (getFiles app) $ \request -> do
@@ -344,7 +344,7 @@ listingTests =
             deps =
               (idleDeps fake stop serve)
                 { probeFiles = \_ _ -> pure (Right empty),
-                  warmUpParser = putMVar warming () >> busy
+                  warmUp = putMVar warming () >> busy
                 }
         withAsync (run deps ["--idle-exit", "0"]) $ \running -> do
           started <- timeout 5_000_000 (takeMVar warming)
@@ -353,7 +353,7 @@ listingTests =
           code <- timeout 5_000_000 (wait running)
           code @?= Just ExitSuccess,
       testCase "warm-up: runs when the project crashes, not when listing fails" $ do
-        let counting ref d = d {warmUpParser = modifyIORef' ref (+ 1)}
+        let counting ref d = d {warmUp = modifyIORef' ref (+ 1)}
             crash ref d =
               (counting ref d) {readProject = \_ _ _ _ -> ioError (userError "boom")}
             empty _ = fakeLister (pure (Right (mkFileList FromDisk 0 [])))
@@ -369,7 +369,7 @@ listingTests =
           r.status @?= 500
         readIORef failed >>= (@?= 0),
       testCase "warm-up throws: a line, the snapshot is still filled" $ do
-        let throwing d = d {warmUpParser = ioError (userError "boom")}
+        let throwing d = d {warmUp = ioError (userError "boom")}
             empty _ = fakeLister (pure (Right (mkFileList FromDisk 0 [])))
         withRunningWith throwing empty $ \fake app -> do
           r <- getFiles app
@@ -740,7 +740,7 @@ newFake = do
             readProject = Session.Project.readProject,
             -- No real parse here: see Note [Shared values in tests] in
             -- HaskellReviewer.Core.PackageGlobTest.
-            warmUpParser = pure (),
+            warmUp = pure (),
             readEntry = \_ _ _ -> pure (Right (TextContent "module A where\n")),
             parse = \_ _ -> pure textOnly,
             indexWorkers = pure 1,

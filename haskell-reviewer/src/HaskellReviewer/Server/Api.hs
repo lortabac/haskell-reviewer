@@ -57,15 +57,17 @@ import HaskellReviewer.Effects.FileSystem (ListError, ReadError (..))
 import HaskellReviewer.Effects.Log (Logger, logInfo)
 import HaskellReviewer.Server.Security (methodNotAllowed, notFound)
 import HaskellReviewer.Server.Wire
-  ( ModuleAnswer (..),
-    ModuleView (..),
-    NotParsed (..),
-    encodeFileList,
+  ( encodeFileList,
     encodeFileView,
     encodeIndexing,
     encodeModuleNotFound,
     encodeModuleTree,
-    encodeModuleView,
+  )
+import HaskellReviewer.Server.Wire.Page
+  ( ModuleAnswer (..),
+    ModuleView (..),
+    NotParsed (..),
+    encodeModulePage,
   )
 import HaskellReviewer.Session.Index
   ( IndexFailure (..),
@@ -103,11 +105,14 @@ On GHC 9.12 and 9.14, threads that force the same thunk at once can
 livelock the RTS (Q-RTS-BLACKHOLE). Request threads and parse workers
 all read the same snapshot. So 'newSnapshot' builds it fully
 ('forceSnapshot', 'newIndex') before the listing thread fills the slot:
-the other threads then find no thunk to force. The listing thread also
-warms up the parser before the fill (warmUpParser), so the workers find
-the parser's shared values built too. 'newSnapshot' also encodes a file
-view of each kind ('cborWarmUp'), so the shared values of cborg and of
-our CBOR code are built before request threads race on them. The gzip
+the other threads then find no thunk to force.
+
+The listing thread also warms up before the fill: it runs the parser
+(warmUpParser), so the workers find the parser's shared values built,
+and encodes some pages (Note [Page warm-up] in
+"HaskellReviewer.Server.Wire.Page"). 'newSnapshot' encodes a file view
+of each kind ('cborWarmUp'), so the shared values of cborg and of our
+CBOR code are built before request threads race on them. The gzip
 path gets the same before warp listens (Note [Compression] in
 "HaskellReviewer.Server.Router").
 
@@ -195,8 +200,9 @@ fileApp api side segs req respond
                 respond (cbor (encodeFileView snap.generation (inSnapshot snap content)))
   | otherwise = respond notFound
 
--- | @GET api\/module\/\<side>\/\<ref segments>@: one module. The
--- segments are joined with @/@, so a loose module's path works too.
+-- | @GET api\/module\/\<side>\/\<ref segments>@: one module's page, as
+-- CBOR ('encodeModulePage'), built per request. The segments are joined
+-- with @/@, so a loose module's path works too.
 --
 -- A module we parse comes from its slot: if it's not done, it jumps the
 -- queue and we wait for it (Note [Indexing] in
@@ -229,14 +235,16 @@ moduleApp api side segs req respond
       m <- findModule snap.modules i
       Just (i, m)
     missing snap = jsonWith status404 (encodeModuleNotFound snap.generation)
-    view snap v = respond (json (encodeModuleView snap.generation snap.modules v))
+    view snap v = respond (cbor (encodeModulePage snap.generation snap.modules v))
     answer snap i path r =
       view snap ModuleView {moduleId = i, path = path, answer = NotParsed r}
     -- The worker logged read errors and crashes already.
     fromIndex snap i path =
       awaitModule snap.index i >>= \case
-        Just (Right (IndexedParse r)) ->
-          view snap ModuleView {moduleId = i, path = Just path, answer = FromParser r}
+        Just (Right (IndexedParsed p)) ->
+          view snap ModuleView {moduleId = i, path = Just path, answer = ParsedAnswer p}
+        Just (Right (IndexedTextOnly t)) ->
+          view snap ModuleView {moduleId = i, path = Just path, answer = TextOnlyAnswer t}
         Just (Right (IndexedNotText size)) ->
           answer snap i (Just path) (NotTextModule size)
         Just (Right (IndexedTooLarge info)) ->

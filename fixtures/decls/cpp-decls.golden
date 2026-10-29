@@ -5,7 +5,7 @@ val:value equations name@7:1-7:5 exported
     body @8:1-8:15
   head: NAME :: TY(Int)
   haddock @6:1-6:26
-    |  A macro in the head.
+    | -- | A macro in the head.
   signature @7:1-7:16 value
 val:shown equations name@13:1-13:6 exported
   extent:

@@ -5,7 +5,7 @@ pat:Zero pattern bidirectional name@5:9-5:13 exported
     body @6:1-6:17
   head: pattern Zero :: Int
   haddock @4:1-4:11
-    |  Zero.
+    | -- | Zero.
   signature @5:1-5:20 Zero
 pat:Cons pattern explicitly bidirectional name@8:9-8:13 exported
   extent:
@@ -22,7 +22,7 @@ pat:Point pattern bidirectional name@14:9-14:14
     body @15:1-15:34
   head: pattern Point :: Int -> Int -> ( Int , Int )
   haddock @13:1-13:19
-    |  A record one.
+    | -- | A record one.
   signature @14:1-14:42 Point
   field:Point.px field name@15:16-15:18
     extent:

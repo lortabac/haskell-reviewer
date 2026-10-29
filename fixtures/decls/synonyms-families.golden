@@ -4,7 +4,7 @@ type:Name synonym name@7:6-7:10 exported
     head @7:1-7:19
   head: type Name = String
   haddock @6:1-6:16
-    |  A synonym.
+    | -- | A synonym.
 type:Pair synonym name@11:6-11:10 exported
   extent:
     head @9:1-9:26
@@ -12,7 +12,7 @@ type:Pair synonym name@11:6-11:10 exported
     head @11:1-11:21
   head: type Pair :: Type -> Type type Pair a = ( a , a )
   haddock @10:1-10:12
-    |  Pairs.
+    | -- | Pairs.
   kind sig @9:1-9:26
 type:Elem open family name@14:13-14:17 exported
   extent:
@@ -20,21 +20,21 @@ type:Elem open family name@14:13-14:17 exported
     head @14:1-14:19
   head: type family Elem c
   haddock @13:1-13:11
-    |  Open.
+    | -- | Open.
 type:Inj open family name@17:13-17:16 exported
   extent:
     doc @16:1-16:16
     head @17:1-17:31
   head: type family Inj a = r | r -> a
   haddock @16:1-16:16
-    |  Injective.
+    | -- | Injective.
 type:IsInt closed family name@20:13-20:18 exported
   extent:
     doc @19:1-19:13
     head @20:1-22:19
   head: type family IsInt a where IsInt Int = ' True IsInt a = ' False
   haddock @19:1-19:13
-    |  Closed.
+    | -- | Closed.
   equation IsInt Int = 'True
   equation IsInt a = 'False
 type:Abstract closed family name@24:13-24:21 exported

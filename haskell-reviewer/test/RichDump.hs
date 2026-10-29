@@ -58,9 +58,9 @@ import ParseDump (dumpParse)
 
 -- | Every doc comment of a parse: the module's, the export list's, the
 -- doc items, then the declarations'.
-dumpRich :: ModuleParse -> Text
-dumpRich = \case
-  r@(TextOnly _) -> dumpParse r
+dumpRich :: Text -> ModuleParse -> Text
+dumpRich src = \case
+  r@(TextOnly _) -> dumpParse src r
   Parsed m ->
     let names = localNames ((.value) <$> m.header.name) m.declarations
      in Text.unlines $
@@ -133,7 +133,7 @@ block names = \case
   where
     inlines = nested . concatMap (inline names)
     blocks = nested . concatMap (block names)
-    numbered i = ("item " <> showT i.number) : blocks i.content
+    numbered i = ("item " <> maybe "?" showT i.number) : blocks i.content
     definition i = ("term" : inlines i.term) <> ("definition" : blocks i.definition)
     example e = (">>> " <> quote e.expression) : nested (map quote e.results)
     rows title = concatMap (\r -> title : nested (concatMap cell r))

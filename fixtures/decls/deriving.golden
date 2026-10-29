@@ -20,20 +20,24 @@ inst:Eq:T a b derived on type:T name@8:13-8:15 exported
   extent:
     head @8:13-8:15
   head: Eq
+  mentions: T
 inst:Functor:T a derived on type:T name@8:17-8:24 exported
   extent:
     head @8:17-8:24
   head: Functor
+  mentions: T
 inst:Foldable:T a derived stock on type:T name@9:19-9:27 exported
   extent:
     head @9:12-9:17
     head @9:19-9:27
   head: stock Foldable
+  mentions: T
 inst:NFData:T a b derived anyclass on type:T name@10:22-10:28 exported
   extent:
     head @10:12-10:20
     head @10:22-10:28
   head: anyclass NFData
+  mentions: T
 type:App newtype name@12:9-12:12 exported
   extent:
     head @12:1-13:63
@@ -54,21 +58,25 @@ inst:Functor:App derived newtype on type:App name@13:21-13:28 exported
     head @13:12-13:19
     head @13:21-13:28
   head: newtype Functor
+  mentions: App
 inst:Applicative:App derived newtype on type:App name@13:30-13:41 exported
   extent:
     head @13:12-13:19
     head @13:30-13:41
   head: newtype Applicative
+  mentions: App
 inst:Monad:App derived newtype on type:App name@13:43-13:48 exported
   extent:
     head @13:12-13:19
     head @13:43-13:48
   head: newtype Monad
+  mentions: App
 inst:MonadState:S App derived newtype on type:App name@13:50-13:62 exported
   extent:
     head @13:12-13:19
     head @13:50-13:62
   head: newtype MonadState S
+  mentions: App
 type:P data name@16:6-16:7 exported
   extent:
     head @16:1-16:38
@@ -84,6 +92,7 @@ inst:Bifunctor:P a derived on type:P name@16:28-16:37 exported
   extent:
     head @16:28-16:37
   head: Bifunctor
+  mentions: P
 type:Z data name@17:6-17:7 exported
   extent:
     head @17:1-17:30
@@ -99,6 +108,7 @@ inst:Functor:Z derived on type:Z name@17:22-17:29 exported
   extent:
     head @17:22-17:29
   head: Functor
+  mentions: Z
 type:Q data name@20:6-20:7 exported
   extent:
     head @20:1-20:29
@@ -114,6 +124,7 @@ inst:Show:Q derived on type:Q name@20:22-20:28 exported
   extent:
     head @20:22-20:28
   head: P.Show
+  mentions: Q
 type:N newtype name@22:9-22:10 exported
   extent:
     head @22:1-22:18
@@ -130,20 +141,25 @@ inst:Show:T a b standalone deriving name@25:29-25:33 exported
     head @25:1-25:41
   head: deriving instance Show a => Show ( T a b )
   haddock @24:1-24:32
-    |  Standalone, each strategy.
+    | -- | Standalone, each strategy.
+  mentions: T
 inst:Ord:T a b standalone deriving stock name@26:25-26:28 exported
   extent:
     head @26:1-26:36
   head: deriving stock instance Ord ( T a b )
+  mentions: T
 inst:Num:N standalone deriving newtype name@27:27-27:30 exported
   extent:
     head @27:1-27:32
   head: deriving newtype instance Num N
+  mentions: N
 inst:ToJSON:T a b standalone deriving anyclass name@28:28-28:34 exported
   extent:
     head @28:1-28:42
   head: deriving anyclass instance ToJSON ( T x y )
+  mentions: T
 inst:Semigroup:N standalone deriving via "(Sum Int)" name@29:33-29:42 exported
   extent:
     head @29:1-29:44
   head: deriving via ( Sum Int ) instance Semigroup N
+  mentions: N

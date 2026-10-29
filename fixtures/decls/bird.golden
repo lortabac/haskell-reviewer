@@ -5,7 +5,7 @@ val:x equations name@6:3-6:4 exported
     body @7:3-7:8
   head: x :: Int
   haddock @5:3-5:12
-    |  Doc.
+    | -- | Doc.
   signature @6:3-6:11 x
 type:T data name@11:8-11:9 exported
   extent:

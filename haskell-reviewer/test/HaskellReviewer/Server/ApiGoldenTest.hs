@@ -11,6 +11,7 @@ import ApiSupport
     getApi,
     implicitApi,
     indexed,
+    pageApi,
     projectApi,
   )
 import Data.ByteString (ByteString)
@@ -84,17 +85,20 @@ cases =
     json "modules-implicit" (okJson implicitApi ["api", "modules", "tree"]),
     -- One per reason a module is text only, a parsed one and one after
     -- CPP.
-    json "module-parsed" (okJson projectApi (modulePath "Foo")),
-    json "module-parse-error" (okJson projectApi (modulePath "pkg:exe:app:Main")),
-    json "module-pragma-error" (okJson projectApi (modulePath "Tests")),
-    json "module-preprocessed" (okJson projectApi (modulePath "pkg:test:spec:Main")),
-    json "module-cpp" (okJson projectApi (modulePath "pkg:bench:slow:Main")),
-    json "module-crashed" (okJson crashingApi (modulePath "Foo")),
-    json "module-too-slow" (okJson slowApi (modulePath "Foo")),
-    json "module-generated" (okJson projectApi (modulePath "Lexer")),
-    json "module-no-source" (okJson projectApi (modulePath "Gone")),
-    json "module-not-text" (okJson implicitApi (modulePath "Main")),
-    json "module-too-large" (okJson implicitApi (modulePath "Data.Deep.Mod")),
+    cbor "module-parsed" (okCbor projectApi (modulePath "Foo")),
+    cbor "module-parse-error" (okCbor projectApi (modulePath "pkg:exe:app:Main")),
+    cbor "module-pragma-error" (okCbor projectApi (modulePath "Tests")),
+    cbor "module-preprocessed" (okCbor projectApi (modulePath "pkg:test:spec:Main")),
+    cbor "module-cpp" (okCbor projectApi (modulePath "pkg:bench:slow:Main")),
+    cbor "module-crashed" (okCbor crashingApi (modulePath "Foo")),
+    cbor "module-too-slow" (okCbor slowApi (modulePath "Foo")),
+    cbor "module-generated" (okCbor projectApi (modulePath "Lexer")),
+    cbor "module-no-source" (okCbor projectApi (modulePath "Gone")),
+    cbor "module-not-text" (okCbor implicitApi (modulePath "Main")),
+    cbor "module-too-large" (okCbor implicitApi (modulePath "Data.Deep.Mod")),
+    -- The page: every kind of declaration and doc markup; sections.
+    cbor "module-page" (okCbor pageApi (modulePath "Page")),
+    cbor "module-page-sections" (okCbor pageApi (modulePath "Sections")),
     json "module-not-found" (notFoundJson projectApi (modulePath "Nope"))
   ]
   where
