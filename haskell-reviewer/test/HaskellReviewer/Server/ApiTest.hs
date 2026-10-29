@@ -1,35 +1,30 @@
 -- | The snapshot routes, in process: status codes and containment.
 module HaskellReviewer.Server.ApiTest (tests) where
 
-import ApiSupport (ApiResult (..), fixtureApi, getApi, projectApi, requestApi)
-import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (wait, withAsync)
-import Control.Concurrent.MVar (newEmptyMVar, putMVar, readMVar)
+import ApiSupport
+  ( ApiResult (..),
+    TestApi (..),
+    fixtureApi,
+    getApi,
+    indexed,
+    projectApi,
+    requestApi,
+  )
+import Control.Monad (forM)
 import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Lazy qualified as LBS
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef)
-import Data.Text (Text)
 import HaskellReviewer.Core.FileContent (FileContent (..), LinkInfo (..))
-import HaskellReviewer.Core.FileList (CommitId (..))
-import HaskellReviewer.Core.ModuleModel
-  ( ModuleParse (..),
-    TextOnlyModule (..),
-    TextOnlyReason (..),
-  )
+import HaskellReviewer.Core.FileList (CommitId (..), EntryKind (..))
 import HaskellReviewer.Core.Modules (Literate (..))
-import HaskellReviewer.Core.Parser
-  ( FileKind (..),
-    ParseSettings (..),
-    defaultParseSettings,
-  )
+import HaskellReviewer.Core.Parser (FileKind (..), ParseSettings (..))
 import HaskellReviewer.Core.Project (Extension (..), Language (..))
+import HaskellReviewer.Core.RelPath (relPathFromBytes)
 import HaskellReviewer.Effects.FileSystem (ListError (..), ReadError (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), newLogger)
-import HaskellReviewer.Effects.Parser (oneAtATime)
-import HaskellReviewer.Server.Api (FilesApi (..))
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (Assertion, assertBool, testCase, (@?=))
+import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 
 tests :: TestTree
 tests =
@@ -40,7 +35,8 @@ tests =
               fixtureApi
                 { readEntry = \s p k -> do
                     modifyIORef' calls (+ 1)
-                    fixtureApi.readEntry s p k
+                    fixtureApi.readEntry s p k,
+                  workers = 0
                 }
         mapM_
           ( \path -> do
@@ -73,7 +69,9 @@ tests =
         r3 <- getApi fixtureApi ["api", "modules", "head"]
         r3.status @?= 404
         r4 <- getApi projectApi ["api", "module", "head", "Foo"]
-        r4.status @?= 404,
+        r4.status @?= 404
+        r5 <- getApi projectApi ["api", "indexing", "head"]
+        r5.status @?= 404,
       testCase "not GET: 405, Allow: GET" $
         mapM_
           ( \(method, path) -> do
@@ -87,7 +85,8 @@ tests =
               [ ["api", "files", "tree"],
                 ["api", "file", "tree", "app", "Main.hs"],
                 ["api", "modules", "tree"],
-                ["api", "module", "tree", "Foo"]
+                ["api", "module", "tree", "Foo"],
+                ["api", "indexing", "tree"]
               ]
           ],
       testCase "JSON with a length, no-store" $ do
@@ -111,7 +110,9 @@ tests =
         let with e =
               fixtureApi
                 { readEntry = \_ _ _ -> pure (Left e),
-                  logger = newLogger LevelInfo (\l -> modifyIORef' logged (<> [l]))
+                  logger = newLogger LevelInfo (\l -> modifyIORef' logged (<> [l])),
+                  -- No worker: it would read and log too.
+                  workers = 0
                 }
             path = ["api", "file", "tree", "app", "Main.hs"]
         gone <- getApi (with ReadGone) path
@@ -140,8 +141,18 @@ tests =
           [ ["api", "files", "tree"],
             ["api", "file", "tree", "app", "Main.hs"],
             ["api", "modules", "tree"],
-            ["api", "module", "tree", "Foo"]
-          ]
+            ["api", "module", "tree", "Foo"],
+            ["api", "indexing", "tree"]
+          ],
+      testCase "indexing: JSON with a length, no-store; done once indexed" $ do
+        r <- getApi (indexed projectApi) ["api", "indexing", "tree"]
+        r.status @?= 200
+        lookup "Content-Type" r.headers @?= Just "application/json"
+        lookup "Content-Length" r.headers
+          @?= Just (Char8.pack (show (LBS.length r.body)))
+        assertNoStore r
+        -- pkg/src/Lexer.hs is a loose module readEntry doesn't have.
+        r.body @?= "{\"generation\":1,\"total\":9,\"ready\":8,\"failed\":1}"
     ]
       <> moduleTests
 
@@ -149,7 +160,7 @@ tests =
 moduleTests :: [TestTree]
 moduleTests =
   [ testCase "module: unknown or ambiguous ref: 404, nothing read" $ do
-      api <- countingReads projectApi
+      api <- countingReads projectApi {workers = 0}
       mapM_
         ( \path -> do
             r <- getApi api.files (["api", "module", "tree"] <> path)
@@ -171,7 +182,7 @@ moduleTests =
         ]
       readIORef api.readCount >>= (@?= 0),
     testCase "module: generated, preprocessed, no source: nothing read" $ do
-      api <- countingReads projectApi
+      api <- countingReads projectApi {workers = 0}
       mapM_
         ( \ref -> do
             r <- getApi api.files ["api", "module", "tree", ref]
@@ -180,17 +191,32 @@ moduleTests =
         ["Lexer", "pkg:test:spec:Main", "Gone", "Gen", "Linked", "pkg:exe:outside:Main"]
       readIORef api.readCount >>= (@?= 0),
     testCase "module: component settings reach the parser" $ do
+      -- Workers parse other modules too: find each one by its text.
       seen <- newIORef []
       let api =
             projectApi
               { parse = \settings t -> do
-                  modifyIORef' seen (<> [settings])
+                  atomicModifyIORef' seen (\xs -> ((t, settings) : xs, ()))
                   projectApi.parse settings t
               }
-      mapM_
-        (\ref -> getApi api ["api", "module", "tree", ref])
-        ["Foo", "Lit", "Sig", "Tool"]
-      got <- readIORef seen
+      snap <- either (const (assertFailure "not listed")) pure =<< api.snapshot
+      got <-
+        forM
+          [ ("Foo", "pkg/src/Foo.hs"),
+            ("Lit", "pkg/src/Lit.lhs"),
+            ("Sig", "pkg/src/Sig.hsig"),
+            ("Tool", "scripts/Tool.hs")
+          ]
+          $ \(ref, path) -> do
+            r <- getApi api ["api", "module", "tree", ref]
+            r.status @?= 200
+            p <- maybe (assertFailure "bad path") pure (relPathFromBytes path)
+            api.readEntry snap p EntryFile >>= \case
+              Right (TextContent t) ->
+                maybe (assertFailure ("not parsed: " <> show path)) pure
+                  . lookup t
+                  =<< readIORef seen
+              other -> assertFailure (show other)
       map (\x -> (x.language, x.literate, x.kind)) got
         @?= [ (Haskell2010, NotLiterate, ModuleFile),
               (Haskell2010, BirdOrLatex, ModuleFile),
@@ -224,8 +250,15 @@ moduleTests =
       failed <- getApi (with (ReadFailed "Permission denied")) path
       failed.status @?= 500
       failed.body @?= "cannot read file"
-      readIORef logged
-        >>= (@?= ["haskell-reviewer: cannot read pkg/src/Foo.hs: Permission denied"]),
+      -- The worker logs it, for each module it reads.
+      lines' <- readIORef logged
+      assertBool (show lines') $
+        "haskell-reviewer: cannot read pkg/src/Foo.hs: Permission denied" `elem` lines',
+    testCase "module: indexing crashed: 500" $ do
+      let api = projectApi {parse = \_ _ -> ioError (userError "boom")}
+      r <- getApi api ["api", "module", "tree", "Foo"]
+      r.status @?= 500
+      r.body @?= "cannot index module",
     testCase "module: a listed file that became a link or a submodule: 404" $ do
       let with c = projectApi {readEntry = \_ _ _ -> pure (Right c)}
           link = Link LinkInfo {target = "elsewhere.hs", resolved = Nothing}
@@ -236,29 +269,6 @@ moduleTests =
             (show c, r.status) @?= (show c, 404)
         )
         [link, Submodule commit, NestedRepo],
-    testCase "module: one parse at a time" $ do
-      gate <- newEmptyMVar
-      active <- newIORef (0 :: Int)
-      most <- newIORef 0
-      entered <- newIORef (0 :: Int)
-      let slow :: ParseSettings -> Text -> IO ModuleParse
-          slow _ _ = do
-            n <- atomicModifyIORef' active (\a -> (a + 1, a + 1))
-            atomicModifyIORef' most (\m -> (max m n, ()))
-            atomicModifyIORef' entered (\e -> (e + 1, ()))
-            readMVar gate
-            atomicModifyIORef' active (\a -> (a - 1, ()))
-            pure (TextOnly TextOnlyModule {reason = TooSlow, warnings = []})
-      limited <- oneAtATime slow
-      withAsync (limited defaultParseSettings "") $ \a1 ->
-        withAsync (limited defaultParseSettings "") $ \a2 -> do
-          -- Never fails by being slow: at worst it checks too early.
-          threadDelay 100_000
-          readIORef entered >>= (@?= 1)
-          putMVar gate ()
-          mapM_ wait [a1, a2]
-      readIORef entered >>= (@?= 2)
-      readIORef most >>= (@?= 1),
     testCase "module: JSON with a length, no-store" $ do
       r <- getApi projectApi ["api", "module", "tree", "Foo"]
       r.status @?= 200
@@ -270,11 +280,11 @@ moduleTests =
 
 -- | An API that counts its reads.
 data Counting = Counting
-  { files :: FilesApi,
+  { files :: TestApi,
     readCount :: IORef Int
   }
 
-countingReads :: FilesApi -> IO Counting
+countingReads :: TestApi -> IO Counting
 countingReads api = do
   count <- newIORef 0
   pure

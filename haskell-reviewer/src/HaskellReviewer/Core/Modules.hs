@@ -36,6 +36,7 @@ module HaskellReviewer.Core.Modules
     -- * Lookup
     FoundModule (..),
     findModule,
+    looseModule,
 
     -- * Identity
     ModuleId (..),
@@ -388,7 +389,7 @@ looseSettings =
     }
 
 -- | Force the settings fully. They come from the project, which is
--- lazy, and request threads read them. See Note [Forced snapshot] in
+-- lazy, and parse workers read them. See Note [Forced snapshot] in
 -- "HaskellReviewer.Server.Api".
 forceSettings :: ComponentSettings -> ()
 forceSettings s =
@@ -426,10 +427,13 @@ findModule idx = \case
   LooseModule path -> listToMaybe $ do
     OtherModule f <- idx.other
     guard (f.path == path)
-    -- No tools for other files: always plain Haskell, maybe literate.
-    pure FoundModule {source = fileSource noTools path, settings = looseSettings}
-  where
-    noTools = toolsFrom []
+    pure (looseModule path)
+
+-- | An other file's module: plain Haskell, maybe literate (no tools for
+-- other files), with 'looseSettings'.
+looseModule :: RelPath -> FoundModule
+looseModule path =
+  FoundModule {source = fileSource (toolsFrom []) path, settings = looseSettings}
 
 -- * Identity
 

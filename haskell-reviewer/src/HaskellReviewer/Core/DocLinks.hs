@@ -18,25 +18,13 @@ import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import HaskellReviewer.Core.Decls
-  ( ClassDecl (..),
-    ConArgs (..),
-    ConDecl (..),
-    Decl (..),
+  ( Decl,
     DeclInfo (..),
-    FamInstDecl (..),
-    FieldDecl (..),
-    InstanceBody (..),
-    InstanceDecl (..),
-    InstanceForm (..),
-    MethodDecl (..),
-    PatSynDecl (..),
-    TypeDecl (..),
-    TypeForm (..),
-    ValueDecl (..),
-    famInstConstructors,
-    formConstructors,
+    NameLevel (..),
+    NamedDecl (..),
+    namedDecls,
   )
-import HaskellReviewer.Core.Names (DeclId (..))
+import HaskellReviewer.Core.Names (DeclId, declName)
 import HaskellReviewer.Core.Project (ModuleName (..))
 import HaskellReviewer.Core.RichText (NameRef (..), RefNamespace (..))
 
@@ -71,49 +59,13 @@ localNames :: Maybe ModuleName -> [Decl] -> LocalNames
 localNames name decls =
   LocalNames
     { self = fromMaybe (ModuleName "Main") name,
-      types = table [i | (Types, i) <- entries],
-      values = table [i | (Values, i) <- entries]
+      types = table [n.info.id | n <- entries, n.level == TypeLevel],
+      values = table [n.info.id | n <- entries, n.level == ValueLevel]
     }
   where
-    entries = concatMap decl decls
+    entries = concatMap namedDecls decls
     -- Keep the first.
-    table is = Map.fromListWith (\_ old -> old) [(k, i) | i <- is, Just k <- [key i]]
-    key = \case
-      Named _ n -> Just n
-      Field _ n -> Just n
-      Inst _ -> Nothing
-
--- | Which table a name goes in.
-data Table = Types | Values
-
--- | The names one declaration brings, nested ones too, in source order.
-decl :: Decl -> [(Table, DeclId)]
-decl = \case
-  TypeD t -> typeDecl t
-  ClassD c ->
-    (Types, c.info.id)
-      : concatMap typeDecl c.associated
-        <> [(Values, m.info.id) | m <- c.methods]
-  ValueD v -> [(Values, v.info.id)]
-  PatSynD p -> (Values, p.info.id) : [(Values, f.id) | f <- p.fields]
-  InstanceD i -> case i.form of
-    ExplicitInstance b -> concatMap famInst b.associated
-    _ -> []
-  FamInstD f -> famInst f
-  SpliceD _ -> []
-  where
-    typeDecl t =
-      (Types, t.info.id) : concatMap (con (conTable t.form)) (formConstructors t.form)
-    conTable = \case
-      TypeData _ -> Types
-      _ -> Values
-    famInst f = concatMap (con Values) (famInstConstructors f.form)
-    con tbl c = (tbl, c.info.id) : [(Values, i) | i <- fields c.args]
-    fields = \case
-      RecordArgs fs -> map fieldId fs
-      GadtRecordArgs fs -> map fieldId fs
-      _ -> []
-    fieldId (f :: FieldDecl) = f.info.id
+    table is = Map.fromListWith (\_ old -> old) [(k, i) | i <- is, Just k <- [declName i]]
 
 -- | The local declaration a name in a comment means, if any.
 resolveLocal :: LocalNames -> NameRef -> Maybe DeclId

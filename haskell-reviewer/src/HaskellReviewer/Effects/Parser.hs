@@ -1,10 +1,9 @@
--- | Running the parser from IO: a time limit, crash catching, one
--- parse at a time, and a warm-up.
+-- | Running the parser from IO: a time limit, crash catching, and a
+-- warm-up.
 module HaskellReviewer.Effects.Parser
   ( -- * Parsing
     parseGuarded,
     parseTimeLimit,
-    oneAtATime,
 
     -- * Warm-up
     warmUpParser,
@@ -20,11 +19,9 @@ module HaskellReviewer.Effects.Parser
   )
 where
 
-import Control.Concurrent.QSem (newQSem, signalQSem, waitQSem)
 import Control.Exception
   ( SomeAsyncException,
     SomeException,
-    bracket_,
     displayException,
     evaluate,
     fromException,
@@ -126,25 +123,6 @@ tryParse parse = do
       case shown of
         Right t -> pure (Left t)
         Left e2 -> Left "parser crashed" <$ rethrowAsync e2
-
-{- Note [One parse at a time]
-
-A parse can take a lot of memory: a hostile 1 MiB module peaked at
-0.7-1.2 GB of RSS, and 8 such requests at once at 8.3 GB. The budget is
-2 GiB for a large project (SPEC §10.2). So requests parse one at a time
-('oneAtATime'). A parse of a normal module takes a few ms, so waiting
-costs little.
-
-The warm-up doesn't go through the limit: it runs before any request
-can parse, so it can't wait on one.
--}
-
--- | Wrap a parse function so only one call runs at a time. See
--- Note [One parse at a time].
-oneAtATime :: (a -> b -> IO c) -> IO (a -> b -> IO c)
-oneAtATime f = do
-  sem <- newQSem 1
-  pure (\a b -> bracket_ (waitQSem sem) (signalQSem sem) (f a b))
 
 -- | Throw it again if it's async.
 rethrowAsync :: SomeException -> IO ()

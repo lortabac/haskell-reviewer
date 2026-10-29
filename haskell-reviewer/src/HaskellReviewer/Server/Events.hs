@@ -6,6 +6,7 @@ module HaskellReviewer.Server.Events
     -- * Application
     eventsApp,
     keepAliveInterval,
+    indexingGap,
 
     -- * Framing
     renderEvent,
@@ -13,9 +14,10 @@ module HaskellReviewer.Server.Events
   )
 where
 
+import Control.Applicative ((<|>))
 import Control.Concurrent (threadDelay)
+import Control.Concurrent.STM (STM, atomically, check, readTVar, registerDelay, retry)
 import Control.Exception (finally)
-import Control.Monad (forever)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Builder (Builder, byteString, word64Dec)
@@ -24,7 +26,7 @@ import Data.Text qualified as Text
 import HaskellReviewer.Effects.Clock (Microseconds (..))
 import HaskellReviewer.Effects.Log (Logger, logVerbose)
 import HaskellReviewer.Server.Security (methodNotAllowed)
-import HaskellReviewer.Server.Wire (helloPayload)
+import HaskellReviewer.Server.Wire (encodeIndexing, helloPayload)
 import HaskellReviewer.Session.Clients
   ( Clients,
     EventId (..),
@@ -32,6 +34,7 @@ import HaskellReviewer.Session.Clients
     openCount,
     withClient,
   )
+import HaskellReviewer.Session.Snapshot (IndexingState (..))
 import Network.HTTP.Types (hContentType, methodGet, status200)
 import Network.Wai (Application, Request (..), responseStream)
 import Network.Wai.Handler.Warp qualified as Warp
@@ -47,9 +50,15 @@ Framing:
 - Each event has an id (global counter, see Clients), a name and data.
   Data with newlines becomes several data: lines.
 - On open we send `hello` with data {}.
+- Then `indexing`, with the indexing progress (encodeIndexing), as soon
+  as the files are listed. Again each time it changes, at most once per
+  minGap (100 ms): we send the state, not each step, so the last state
+  always gets there and a slow client never piles up a backlog. Never
+  if the listing failed.
 - Every keepAliveInterval (15 s) we send the comment ": keep-alive".
 - Last-Event-ID is ignored. There is no replay: after a reconnect the
-  client fetches what it shows again (SPEC §11.6.2).
+  client fetches what it shows again (SPEC §11.6.2). The indexing
+  state comes by itself on each new stream.
 
 No Content-Length, so warp sends it chunked. No Cache-Control here:
 Security adds no-store. Never gzipped (no gzip middleware covers it).
@@ -74,12 +83,22 @@ data EventStream = EventStream
   { clients :: Clients,
     -- | Time between two keep-alives. 'keepAliveInterval' in real use.
     keepAlive :: Microseconds,
+    -- | The indexing progress. Retries until the files are listed;
+    -- 'Nothing' if the listing failed.
+    indexing :: STM (Maybe IndexingState),
+    -- | Least time between two @indexing@ events. 'indexingGap' in real
+    -- use.
+    minGap :: Microseconds,
     logger :: Logger
   }
 
 -- | 15 s. See Note [Event stream].
 keepAliveInterval :: Microseconds
 keepAliveInterval = Microseconds 15_000_000
+
+-- | 100 ms. See Note [Event stream].
+indexingGap :: Microseconds
+indexingGap = Microseconds 100_000
 
 -- | The stream route. GET only: anything else (HEAD too) gets 405.
 eventsApp :: EventStream -> Application
@@ -95,13 +114,34 @@ eventsApp es req respond
                   hello <- nextEventId es.clients
                   write (renderEvent hello "hello" helloPayload)
                   flush
-                  forever $ do
-                    threadDelay delay
-                    write keepAliveFrame
-                    flush
+                  timer <- registerDelay delay
+                  loop write flush timer Nothing
             stream `finally` logCount "event stream closed"
   where
     Microseconds delay = es.keepAlive
+    Microseconds gap = es.minGap
+    -- Waits for a new indexing state or the keep-alive timer, whichever
+    -- comes first. Never returns: a failed write ends it.
+    loop write flush timer sent = do
+      next <-
+        atomically $
+          (Left <$> changed sent) <|> (Right () <$ (readTVar timer >>= check))
+      case next of
+        Left now -> do
+          i <- nextEventId es.clients
+          write (renderEvent i "indexing" (encodeIndexing now.generation now.progress))
+          flush
+          threadDelay gap
+          loop write flush timer (Just now)
+        Right () -> do
+          write keepAliveFrame
+          flush
+          timer' <- registerDelay delay
+          loop write flush timer' sent
+    changed sent =
+      es.indexing >>= \case
+        Just now | Just now /= sent -> pure now
+        _ -> retry
     logCount what = do
       n <- openCount es.clients
       logVerbose es.logger (what <> " (" <> Text.pack (show n) <> " open)")

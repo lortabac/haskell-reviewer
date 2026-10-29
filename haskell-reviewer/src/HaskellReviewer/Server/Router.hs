@@ -12,7 +12,14 @@ import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
 import HaskellReviewer.Core.Address (Port, Token)
-import HaskellReviewer.Server.Api (FilesApi, fileApp, filesApp, moduleApp, modulesApp)
+import HaskellReviewer.Server.Api
+  ( FilesApi,
+    fileApp,
+    filesApp,
+    indexingApp,
+    moduleApp,
+    modulesApp,
+  )
 import HaskellReviewer.Server.Assets (Asset (..), lookupAsset, shellFor)
 import HaskellReviewer.Server.Events (EventStream, eventsApp)
 import HaskellReviewer.Server.Security
@@ -47,9 +54,10 @@ Paths below are what the router sees, after the token.
 - api/files/<side>: the file list, as JSON. api/file/<side>/<path...>:
   one file (Note [File containment] in "HaskellReviewer.Core.RelPath").
   api/modules/<side>: the module tree, as JSON. api/module/<side>/<ref...>:
-  one module, parsed on demand, as JSON. The ref's segments are joined
-  with /, so a loose module's path works. The only side is tree;
-  another one is a 404. GET only (405 otherwise, HEAD too).
+  one module, from the index, as JSON. The ref's segments are joined
+  with /, so a loose module's path works. api/indexing/<side>: how far
+  indexing is, as JSON. The only side is tree; another one is a 404.
+  GET only (405 otherwise, HEAD too).
 - Anything else: 404. index.html itself is not served under its name.
   So are api, api/x and api/events/x: the api/ namespace has only the
   routes listed here.
@@ -87,6 +95,7 @@ router shell routes req respond = case req.pathInfo of
   "api" : "file" : side : path -> fileApp routes.files side path req respond
   ["api", "modules", side] -> modulesApp routes.files side req respond
   "api" : "module" : side : ref -> moduleApp routes.files side ref req respond
+  ["api", "indexing", side] -> indexingApp routes.files side req respond
   _ -> respond notFound
   where
     getOnly r

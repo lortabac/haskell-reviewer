@@ -197,9 +197,16 @@ tests =
           r <- probeReal root
           case r of
             Left (GitFailed f) ->
+              -- git 2.56 reworded this: "gitfile does not point to a valid
+              -- repository" instead of "not a git repository". Accept both.
               assertBool
                 (show f.stderr)
-                ("not a git repository" `Text.isInfixOf` f.stderr)
+                ( any
+                    (`Text.isInfixOf` f.stderr)
+                    [ "not a git repository",
+                      "gitfile does not point to a valid repository"
+                    ]
+                )
             _ -> assertFailure "expected GitFailed",
       testCase "real git: a garbage .git file is an error" $
         withDirs $ \root _ -> do

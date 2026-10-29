@@ -4,7 +4,15 @@
 -- Tests run from the package dir, so fixtures/api is one level up.
 module HaskellReviewer.Server.ApiGoldenTest (tests) where
 
-import ApiSupport (ApiResult (..), fixtureApi, getApi, implicitApi, projectApi)
+import ApiSupport
+  ( ApiResult (..),
+    TestApi (..),
+    fixtureApi,
+    getApi,
+    implicitApi,
+    indexed,
+    projectApi,
+  )
 import Data.ByteString.Lazy qualified as LBS
 import Data.List (sort)
 import Data.Text (Text)
@@ -13,8 +21,9 @@ import HaskellReviewer.Core.ModuleModel
     TextOnlyModule (..),
     TextOnlyReason (..),
   )
-import HaskellReviewer.Server.Api (FilesApi (..))
-import HaskellReviewer.Server.Wire (helloPayload)
+import HaskellReviewer.Server.Wire (encodeIndexing, helloPayload)
+import HaskellReviewer.Session.Index (Progress (..))
+import HaskellReviewer.Session.Snapshot (Generation (..))
 import System.Directory qualified as Dir
 import System.FilePath (dropExtension, takeExtension)
 import Test.Tasty (TestTree, testGroup)
@@ -31,6 +40,9 @@ tests =
 cases :: [(String, IO LBS.ByteString)]
 cases =
   [ ("events-hello", pure (LBS.fromStrict helloPayload <> "\n")),
+    ("events-indexing", pure (event (encodeIndexing (Generation 1) halfway))),
+    -- Done, with a failed module (a loose file readEntry doesn't have).
+    ("indexing", okBody (indexed projectApi) ["api", "indexing", "tree"]),
     ("files", okBody fixtureApi ["api", "files", "tree"]),
     ("file-text", okBody fixtureApi (file ["app", "Main.hs"])),
     ("file-binary", okBody fixtureApi (file ["assets", "logo.png"])),
@@ -58,6 +70,8 @@ cases =
     modulePath ref = ["api", "module", "tree", ref]
     crashingApi = answering (ParserCrashed "boom")
     slowApi = answering TooSlow
+    halfway = Progress {total = 358, ready = 120, failed = 2}
+    event e = LBS.fromStrict e <> "\n"
     answering r =
       projectApi
         { parse = \_ _ -> pure (TextOnly TextOnlyModule {reason = r, warnings = []})
@@ -75,7 +89,7 @@ noStale = do
   [f | f <- files, takeExtension f /= ".json"] @?= []
 
 -- | GET through the real app; must be a 200 with JSON.
-okBody :: FilesApi -> [Text] -> IO LBS.ByteString
+okBody :: TestApi -> [Text] -> IO LBS.ByteString
 okBody api path = do
   r <- getApi api path
   r.status @?= 200

@@ -12,6 +12,7 @@ module HaskellReviewer.App.Run
   )
 where
 
+import Control.Concurrent (getNumCapabilities)
 import Control.Concurrent.Async (race, withAsync)
 import Control.Concurrent.MVar
   ( newEmptyMVar,
@@ -20,6 +21,7 @@ import Control.Concurrent.MVar
     tryPutMVar,
     withMVar,
   )
+import Control.Concurrent.STM (atomically)
 import Control.Exception
   ( SomeAsyncException,
     SomeException,
@@ -32,6 +34,7 @@ import Control.Exception
 import Control.Monad (unless, void, when)
 import Crypto.Random (getRandomBytes)
 import Data.Either (isRight)
+import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as Text.IO
@@ -53,8 +56,14 @@ import HaskellReviewer.Core.Address
     tokenByteCount,
     tokenFromBytes,
   )
-import HaskellReviewer.Core.FileList (FileList (..), ListSource (..), fileListCap)
-import HaskellReviewer.Core.ModuleModel (ModuleParse)
+import HaskellReviewer.Core.FileContent (FileContent)
+import HaskellReviewer.Core.FileList
+  ( EntryKind (..),
+    FileList (..),
+    ListSource (..),
+    fileListCap,
+  )
+import HaskellReviewer.Core.ModuleModel (ModuleParse (..))
 import HaskellReviewer.Core.Modules
   ( ComponentModules (..),
     ModuleIndex (..),
@@ -73,6 +82,7 @@ import HaskellReviewer.Core.Project
     renderGhcSource,
     renderGhcVersion,
   )
+import HaskellReviewer.Core.RelPath (RelPath)
 import HaskellReviewer.Core.Root (CanonicalRoot, Root (..))
 import HaskellReviewer.Effects.Browser qualified as Browser
 import HaskellReviewer.Effects.Clock
@@ -86,6 +96,7 @@ import HaskellReviewer.Effects.Clock
 import HaskellReviewer.Effects.FileSystem
   ( ListError (..),
     Lister (..),
+    ReadError (..),
     RootError,
     renderListError,
     renderRootError,
@@ -116,8 +127,12 @@ import HaskellReviewer.Effects.Trace
     openFileTracer,
     renderTraceFileError,
   )
-import HaskellReviewer.Server.Api (FilesApi (..), forceSnapshot, newSnapshot)
-import HaskellReviewer.Server.Events (EventStream (..), keepAliveInterval)
+import HaskellReviewer.Server.Api (FilesApi (..), newSnapshot)
+import HaskellReviewer.Server.Events
+  ( EventStream (..),
+    indexingGap,
+    keepAliveInterval,
+  )
 import HaskellReviewer.Server.Listen
   ( ListenError,
     Listener (..),
@@ -126,13 +141,26 @@ import HaskellReviewer.Server.Listen
   )
 import HaskellReviewer.Server.Router (Routes (..), application)
 import HaskellReviewer.Session.Clients (newClients, waitIdle)
+import HaskellReviewer.Session.Index
+  ( IndexDeps (..),
+    IndexFailure (..),
+    Indexed (..),
+    Progress (..),
+    SlotState (..),
+    failUnfinished,
+    readProgress,
+    readStates,
+    runWorkers,
+  )
 import HaskellReviewer.Session.Project qualified as Session.Project
 import HaskellReviewer.Session.Snapshot
   ( Snapshot (..),
     SnapshotSlot,
     awaitSnapshot,
     fillSnapshot,
+    indexingState,
     newSnapshotSlot,
+    snapshotSTM,
   )
 import System.Environment (getArgs)
 import System.Exit (ExitCode (..), exitWith)
@@ -218,13 +246,20 @@ both (Session.Snapshot), so an early request is just slower. The
 snapshot is fully built before the routes see it (Note [Forced
 snapshot] in "HaskellReviewer.Server.Api").
 
+Once the slot is filled, the same thread runs the parse workers, one
+per capability (Note [Indexing] in "HaskellReviewer.Session.Index").
+So parsing never delays the URL either. Not when the listing failed:
+there is nothing to index. However the thread ends after the fill (a
+crash, or a cancel at shutdown), the modules not done are set Failed,
+so no request waits for ever.
+
 If reading the project crashes (a bug), the snapshot gets no packages
 and a warning, logged and shown in the module tree. The file routes
 still work.
 
 The thread lives as long as the server (withAsync): on exit it is
-cancelled, and a git it runs is killed (Note [Git hardening] in
-"HaskellReviewer.Effects.Git").
+cancelled, with the workers, and a git it runs is killed (Note [Git
+hardening] in "HaskellReviewer.Effects.Git").
 -}
 
 -- | Everything 'run' needs from the outside world. Tests plug in fakes.
@@ -252,8 +287,16 @@ data Deps = Deps
     -- | Build the parser's shared values. See Note [Forced snapshot] in
     -- "HaskellReviewer.Server.Api".
     warmUpParser :: IO (),
+    -- | Read one entry of the file list from disk.
+    readEntry ::
+      CanonicalRoot ->
+      RelPath ->
+      EntryKind ->
+      IO (Either ReadError FileContent),
     -- | Parse one module, fully forced.
     parse :: ParseSettings -> Text -> IO ModuleParse,
+    -- | How many parse workers to run.
+    indexWorkers :: IO Int,
     -- | Open the URL in the browser. Must not block or throw.
     openBrowser :: Logger -> Root -> Text -> IO (),
     -- | Catch the stop signals. The level says if the handler logs.
@@ -269,8 +312,6 @@ newRealDeps :: SpawnSetup -> IO Deps
 newRealDeps spawnSetup = do
   -- Lines from warp's threads and the browser opener must not mix.
   lock <- newMVar ()
-  -- See Note [One parse at a time] in "HaskellReviewer.Effects.Parser".
-  parse <- Parser.oneAtATime Parser.parseGuarded
   pure
     Deps
       { console = \line -> withMVar lock (\_ -> Text.IO.hPutStrLn stderr line),
@@ -282,7 +323,9 @@ newRealDeps spawnSetup = do
         probeFiles = FileSystem.probeFiles,
         readProject = Session.Project.readProject,
         warmUpParser = Parser.warmUpParser,
-        parse = parse,
+        readEntry = FileSystem.readEntry,
+        parse = Parser.parseGuarded,
+        indexWorkers = getNumCapabilities,
         openBrowser = Browser.openBrowser,
         installShutdown = installShutdownHandlers,
         idleMinute = Microseconds 60_000_000,
@@ -410,13 +453,14 @@ serve deps logger opts root lister tracer shutdown t0 w0 = do
                 EventStream
                   { clients = clients,
                     keepAlive = keepAliveInterval,
+                    indexing = indexingState slot,
+                    minGap = indexingGap,
                     logger = logger
                   }
               files =
                 FilesApi
                   { snapshot = awaitSnapshot slot,
-                    readEntry = \snap -> FileSystem.readEntry snap.root,
-                    parse = deps.parse,
+                    readEntry = \snap -> deps.readEntry snap.root,
                     logger = logger
                   }
               routes = Routes {events = events, files = files}
@@ -434,8 +478,13 @@ serve deps logger opts root lister tracer shutdown t0 w0 = do
               -- Shutdown steps, for --verbose: a hang shows where it is.
               step msg = logVerbose logger ("stop: " <> msg)
               -- Scoped: on the way out it's cancelled, and git with it.
-              listing =
-                takeMVar start >> runListing deps logger tracer lister slot opts.ghc
+              -- The finally covers a cancel anywhere after the fill.
+              listing = do
+                takeMVar start
+                ( runListing deps logger tracer lister slot opts.ghc
+                    >>= mapM_ (runIndexing deps logger tracer)
+                  )
+                  `finally` stopIndexing slot
               serving _ = do
                 r <- race waitStop (listener.serve ready app)
                 step "warp stopped, stopping the listing"
@@ -450,13 +499,20 @@ serve deps logger opts root lister tracer shutdown t0 w0 = do
               pure ExitSuccess
             Right () -> throwIO (userError "the HTTP server stopped")
 
--- | Make the file list, read the project, fill the slot, report. See
--- Note [Listing after the URL].
+-- | Make the file list, read the project, fill the slot, report. Gives
+-- back the snapshot in the slot, if there is one. See Note [Listing
+-- after the URL].
 --
 -- The slot is always filled, or requests would wait for ever: with the
 -- list, or with an error if anything goes wrong (even a cancel).
 runListing ::
-  Deps -> Logger -> Tracer -> Lister -> SnapshotSlot -> Maybe GhcVersion -> IO ()
+  Deps ->
+  Logger ->
+  Tracer ->
+  Lister ->
+  SnapshotSlot ->
+  Maybe GhcVersion ->
+  IO (Maybe Snapshot)
 runListing deps logger tracer lister slot cliGhc = do
   result <- try @SomeException $ do
     t0 <- deps.clock.monotonic
@@ -482,9 +538,10 @@ runListing deps logger tracer lister slot cliGhc = do
         reportFiles snap.files (elapsed t0 t1)
         reportProject snap.modules (elapsed t1 t2)
         reportWarmUp (elapsed t2 t3)
-      Left e -> reportError e
+        pure (Just snap)
+      Left e -> Nothing <$ reportError e
   case result of
-    Right () -> pure ()
+    Right listed -> pure listed
     Left e
       | Just (_ :: SomeAsyncException) <- fromException e -> do
           _ <- fill (Left (ListCrashed "the listing was stopped"))
@@ -493,6 +550,9 @@ runListing deps logger tracer lister slot cliGhc = do
           let err = ListCrashed (exceptionMessage e)
           filled <- fill (Left err)
           when filled (reportError err)
+          -- It may have crashed after the fill: then the snapshot is
+          -- served, and its modules still need the workers.
+          either (const Nothing) Just <$> awaitSnapshot slot
   where
     fill = fillSnapshot slot
     reportError e =
@@ -560,7 +620,7 @@ snapshotOf deps logger root fl cliGhc = do
         <> " ("
         <> renderGhcSource project.ghc.source
         <> ")"
-    built (newSnapshot root fl project)
+    newSnapshot root fl project
   case result of
     Right snap -> pure snap
     Left e
@@ -568,9 +628,8 @@ snapshotOf deps logger root fl cliGhc = do
       | otherwise -> do
           let msg = exceptionMessage e
           logInfo logger ("haskell-reviewer: cannot read the project: " <> msg)
-          built (newSnapshot root fl (crashed msg))
+          newSnapshot root fl (crashed msg)
   where
-    built snap = forceSnapshot snap >> pure snap
     -- Not the implicit source: there may be a project we failed to read.
     -- Never got to with-compiler: --ghc, else the parser's version.
     crashed msg =
@@ -582,6 +641,79 @@ snapshotOf deps logger root fl cliGhc = do
           brokenPackages = [],
           warnings = [ProjectCrashed msg]
         }
+
+-- | Run the parse workers until every module is done, then report.
+-- A crash (even before the workers start) fails the modules not done;
+-- a cancel goes on to 'stopIndexing'. See Note [Listing after the URL].
+runIndexing :: Deps -> Logger -> Tracer -> Snapshot -> IO ()
+runIndexing deps logger tracer snap =
+  indexAndReport deps logger tracer snap `catch` \e -> case fromException e of
+    Just (_ :: SomeAsyncException) -> throwIO e
+    Nothing -> do
+      let msg = exceptionMessage e
+      failUnfinished snap.index (IndexCrashed msg)
+      logInfo logger ("haskell-reviewer: indexing crashed: " <> msg)
+
+-- | However the listing thread ends, no module is left Pending or
+-- Parsing: requests would wait for ever. For a cancel (shutdown), or a
+-- crash after the fill.
+stopIndexing :: SnapshotSlot -> IO ()
+stopIndexing slot =
+  atomically (snapshotSTM slot) >>= \case
+    Just (Right snap) ->
+      failUnfinished snap.index (IndexCrashed "indexing was stopped")
+    _ -> pure ()
+
+indexAndReport :: Deps -> Logger -> Tracer -> Snapshot -> IO ()
+indexAndReport deps logger tracer snap = do
+  workers <- deps.indexWorkers
+  total <- (.total) <$> atomically (readProgress snap.index)
+  logVerbose logger $
+    "indexing: "
+      <> showText total
+      <> " modules, "
+      <> showText workers
+      <> " workers"
+  t0 <- deps.clock.monotonic
+  w0 <- deps.clock.now
+  result <- try @SomeException (runWorkers indexDeps workers snap.index)
+  t1 <- deps.clock.monotonic
+  case result of
+    Right () -> pure ()
+    Left e
+      | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
+      | otherwise ->
+          logInfo logger ("haskell-reviewer: indexing crashed: " <> exceptionMessage e)
+  states <- Map.elems <$> atomically (readStates snap.index)
+  tracer.record Span {name = "indexing", start = w0, duration = elapsed t0 t1}
+  let Nanoseconds ns = elapsed t0 t1
+  logVerbose logger $
+    "indexing: done, "
+      <> showText total
+      <> " modules ("
+      <> showText (length [() | Ready _ <- states])
+      <> " ready, "
+      <> showText (length [() | Failed _ <- states])
+      <> " failed, "
+      <> showText (length (filter textOnly states))
+      <> " text only) in "
+      <> showText (ns `div` 1_000_000)
+      <> " ms"
+  where
+    indexDeps =
+      IndexDeps
+        { readModule = \p -> case Map.lookup p snap.files.entries of
+            -- Slots only have files of the list.
+            Just EntryFile -> deps.readEntry snap.root p EntryFile
+            _ -> pure (Left ReadGone),
+          parse = deps.parse,
+          logger = logger
+        }
+    textOnly = \case
+      Ready (IndexedParse (TextOnly _)) -> True
+      Ready (IndexedNotText _) -> True
+      Ready (IndexedTooLarge _) -> True
+      _ -> False
 
 showText :: (Show a) => a -> Text
 showText = Text.pack . show
