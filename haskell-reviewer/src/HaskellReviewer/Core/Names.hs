@@ -18,6 +18,7 @@ module HaskellReviewer.Core.Names
     keyHeadChunks,
     headText,
     renderDeclId,
+    declName,
     forceDeclId,
   )
 where
@@ -103,6 +104,14 @@ keyHeadChunks = KeyHead
 -- | The whole text. A new copy: don't keep it.
 headText :: KeyHead -> Text
 headText (KeyHead ts) = Text.concat ts
+
+-- | The name a declaration brings, as written (operators without
+-- parens). Instances have none.
+declName :: DeclId -> Maybe Text
+declName = \case
+  Named _ n -> Just n
+  Field _ n -> Just n
+  Inst _ -> Nothing
 
 -- | Force the chunks too, so a key holds no thunk.
 forceDeclId :: DeclId -> ()

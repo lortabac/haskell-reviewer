@@ -1,21 +1,22 @@
 -- | The routes that read the snapshot: file list, file text, module
--- tree, one module.
+-- tree, one module, indexing progress.
 module HaskellReviewer.Server.Api
   ( -- * Types
     FilesApi (..),
 
     -- * Snapshots
     newSnapshot,
-    forceSnapshot,
 
     -- * Routes
     filesApp,
     fileApp,
     modulesApp,
     moduleApp,
+    indexingApp,
   )
 where
 
+import Control.Concurrent.STM (atomically)
 import Control.Exception (evaluate)
 import Control.Monad (void)
 import Data.ByteString.Char8 qualified as Char8
@@ -26,7 +27,6 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import HaskellReviewer.Core.FileContent (FileContent (..), LinkInfo (..))
 import HaskellReviewer.Core.FileList (EntryKind (..), FileList (..))
-import HaskellReviewer.Core.ModuleModel (ModuleParse)
 import HaskellReviewer.Core.Modules
   ( ComponentModules (..),
     FoundModule (..),
@@ -41,7 +41,6 @@ import HaskellReviewer.Core.Modules
     forceSettings,
     resolveModuleRef,
   )
-import HaskellReviewer.Core.Parser (ParseSettings, moduleParseSettings)
 import HaskellReviewer.Core.Project (GhcVersion (..), Project)
 import HaskellReviewer.Core.RelPath (RelPath, relPathFromSegments, relPathText)
 import HaskellReviewer.Core.Root (CanonicalRoot)
@@ -54,8 +53,16 @@ import HaskellReviewer.Server.Wire
     NotParsed (..),
     encodeFileList,
     encodeFileView,
+    encodeIndexing,
     encodeModuleTree,
     encodeModuleView,
+  )
+import HaskellReviewer.Session.Index
+  ( IndexFailure (..),
+    Indexed (..),
+    awaitModule,
+    newIndex,
+    readProgress,
   )
 import HaskellReviewer.Session.Snapshot (Snapshot (..), firstGeneration)
 import Network.HTTP.Types
@@ -74,9 +81,6 @@ data FilesApi = FilesApi
     -- | Read one entry from disk. See Note [File containment] in
     -- "HaskellReviewer.Core.RelPath".
     readEntry :: Snapshot -> RelPath -> EntryKind -> IO (Either ReadError FileContent),
-    -- | Parse a module, fully forced: 'parseGuarded' in
-    -- "HaskellReviewer.Effects.Parser".
-    parse :: ParseSettings -> Text -> IO ModuleParse,
     -- | For read errors.
     logger :: Logger
   }
@@ -84,37 +88,43 @@ data FilesApi = FilesApi
 {- Note [Forced snapshot]
 
 On GHC 9.12 and 9.14, threads that force the same thunk at once can
-livelock the RTS (Q-RTS-BLACKHOLE). Request threads all read the same
-snapshot. So the listing thread builds it fully ('forceSnapshot')
-before it fills the slot: request threads then find no thunk to force.
-It also warms up the parser first (warmUpParser), since every request
-that parses a module uses the parser's shared values.
+livelock the RTS (Q-RTS-BLACKHOLE). Request threads and parse workers
+all read the same snapshot. So 'newSnapshot' builds it fully
+('forceSnapshot', 'newIndex') before the listing thread fills the slot:
+the other threads then find no thunk to force. The listing thread also
+warms up the parser before the fill (warmUpParser), so the workers find
+the parser's shared values built too.
 
-A parse in a request thread is fine: its result is the thread's own,
-and parseGuarded forces it fully before it's encoded.
+What the workers put in the slots is forced before it gets there (Note
+[Indexing] in "HaskellReviewer.Session.Index").
 -}
 
--- | The snapshot of a file list and its project, with the JSON bodies.
--- Lazy: call 'forceSnapshot' before requests see it.
-newSnapshot :: CanonicalRoot -> FileList -> Project -> Snapshot
-newSnapshot root fl project =
-  Snapshot
-    { generation = firstGeneration,
-      root = root,
-      files = fl,
-      modules = modules,
-      fileListJson = encodeFileList firstGeneration fl,
+-- | The snapshot of a file list and its project, with the JSON bodies
+-- and an index with every module Pending. Fully built before it
+-- returns. See Note [Forced snapshot].
+newSnapshot :: CanonicalRoot -> FileList -> Project -> IO Snapshot
+newSnapshot root fl project = do
+  let modules = buildModuleIndex project fl
+      fileListJson = encodeFileList firstGeneration fl
       moduleTreeJson = encodeModuleTree firstGeneration modules
-    }
-  where
-    modules = buildModuleIndex project fl
+  forceSnapshot modules fileListJson moduleTreeJson
+  index <- newIndex modules
+  pure
+    Snapshot
+      { generation = firstGeneration,
+        root = root,
+        files = fl,
+        modules = modules,
+        fileListJson = fileListJson,
+        moduleTreeJson = moduleTreeJson,
+        index = index
+      }
 
 -- | Force both JSON bodies, the module index (strict fields), every
 -- list of its name maps, the id set and the parse settings. The JSON
 -- walks the rest of the index. See Note [Forced snapshot].
-forceSnapshot :: Snapshot -> IO ()
-forceSnapshot snap = do
-  let idx = snap.modules
+forceSnapshot :: ModuleIndex -> LBS.ByteString -> LBS.ByteString -> IO ()
+forceSnapshot idx fileListJson moduleTreeJson = do
   void (evaluate idx)
   mapM_ (mapM_ evaluate) (Map.elems idx.ownedByName)
   mapM_ (mapM_ evaluate) (Map.elems idx.looseByName)
@@ -124,8 +134,8 @@ forceSnapshot snap = do
   mapM_
     (\c -> evaluate (forceSettings c.settings))
     [c | p <- idx.packages, c <- p.components]
-  void (evaluate (LBS.length snap.fileListJson))
-  void (evaluate (LBS.length snap.moduleTreeJson))
+  void (evaluate (LBS.length fileListJson))
+  void (evaluate (LBS.length moduleTreeJson))
 
 -- | @GET api\/files\/\<side>@: the file list. The only side is @tree@.
 filesApp :: FilesApi -> Text -> Application
@@ -168,14 +178,14 @@ fileApp api side segs req respond
                 respond (json (encodeFileView snap.generation (inSnapshot snap content)))
   | otherwise = respond notFound
 
--- | @GET api\/module\/\<side>\/\<ref segments>@: one module, parsed
--- now, in this thread. The segments are joined with @/@, so a loose
--- module's path works too. Not cached.
+-- | @GET api\/module\/\<side>\/\<ref segments>@: one module. The
+-- segments are joined with @/@, so a loose module's path works too.
 --
--- The file is read like the file route reads it (Note [File
--- containment] in "HaskellReviewer.Core.RelPath"). Generated,
--- preprocessed and no-source modules answer from the index, without
--- reading anything.
+-- A module we parse comes from its slot: if it's not done, it jumps the
+-- queue and we wait for it (Note [Indexing] in
+-- "HaskellReviewer.Session.Index"). Generated, preprocessed and
+-- no-source modules answer from the module index, without reading
+-- anything.
 moduleApp :: FilesApi -> Text -> [Text] -> Application
 moduleApp api side segs req respond
   | req.requestMethod /= methodGet = respond (methodNotAllowed "GET")
@@ -188,7 +198,7 @@ moduleApp api side segs req respond
         Right snap -> case found snap of
           Nothing -> respond notFound
           Just (i, m) -> case m.source of
-            HaskellSource f -> readAndParse snap i m f
+            HaskellSource f -> fromIndex snap i f.path
             GeneratedSource f -> answer snap i (Just f.path) (GeneratedModule f.tool)
             PreprocessedSource f ->
               answer snap i (Just f.path) (PreprocessedModule f.tool)
@@ -201,20 +211,33 @@ moduleApp api side segs req respond
     view snap v = respond (json (encodeModuleView snap.generation snap.modules v))
     answer snap i path r =
       view snap ModuleView {moduleId = i, path = path, answer = NotParsed r}
-    readAndParse snap i m f = case Map.lookup f.path snap.files.entries of
-      -- The index only has files of the list.
-      Just EntryFile ->
-        api.readEntry snap f.path EntryFile >>= \case
-          Left ReadGone -> respond notFound
-          Left (ReadFailed why) -> respond =<< readFailed api f.path why
-          Right (TextContent t) -> do
-            r <- api.parse (moduleParseSettings snap.modules.ghc m.settings f) t
-            view snap ModuleView {moduleId = i, path = Just f.path, answer = FromParser r}
-          Right (Binary size) -> answer snap i (Just f.path) (NotTextModule size)
-          Right (TooLarge info) -> answer snap i (Just f.path) (TooLargeModule info)
-          -- No longer a file: like gone.
-          Right _ -> respond notFound
-      _ -> respond notFound
+    -- The worker logged read errors and crashes already.
+    fromIndex snap i path =
+      awaitModule snap.index i >>= \case
+        Just (Right (IndexedParse r)) ->
+          view snap ModuleView {moduleId = i, path = Just path, answer = FromParser r}
+        Just (Right (IndexedNotText size)) ->
+          answer snap i (Just path) (NotTextModule size)
+        Just (Right (IndexedTooLarge info)) ->
+          answer snap i (Just path) (TooLargeModule info)
+        Just (Left SourceGone) -> respond notFound
+        Just (Left (SourceUnreadable _)) -> respond (serverError "cannot read file")
+        Just (Left (IndexCrashed _)) -> respond (serverError "cannot index module")
+        -- Every Haskell source has a slot.
+        Nothing -> respond notFound
+
+-- | @GET api\/indexing\/\<side>@: how far indexing is. The only side is
+-- @tree@. The same body as the @indexing@ event.
+indexingApp :: FilesApi -> Text -> Application
+indexingApp api side req respond
+  | req.requestMethod /= methodGet = respond (methodNotAllowed "GET")
+  | side /= "tree" = respond notFound
+  | otherwise =
+      api.snapshot >>= \case
+        Left _ -> respond cannotList
+        Right snap -> do
+          p <- atomically (readProgress snap.index)
+          respond (json (LBS.fromStrict (encodeIndexing snap.generation p)))
 
 -- * Internal
 

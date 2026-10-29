@@ -1,4 +1,4 @@
-// One module, parsed on demand. Shape: see encodeModuleView in
+// One module, from the index. Shape: see encodeModuleView in
 // HaskellReviewer.Server.Wire.
 import {
   array,

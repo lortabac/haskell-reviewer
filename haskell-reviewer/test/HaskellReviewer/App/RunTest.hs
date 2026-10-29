@@ -13,7 +13,7 @@ import Control.Concurrent.MVar
     tryPutMVar,
   )
 import Control.Exception (AsyncException (..), evaluate, throwIO, try)
-import Control.Monad (forever, void)
+import Control.Monad (forever, void, when)
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as LBS
 import Data.IORef
@@ -24,6 +24,7 @@ import Data.IORef
     readIORef,
     writeIORef,
   )
+import Data.List (elemIndex)
 import Data.Maybe (isNothing)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -31,9 +32,21 @@ import Data.Time.Calendar (fromGregorian)
 import Data.Time.Clock (UTCTime (..))
 import HaskellReviewer.App.Run (Deps (..), run)
 import HaskellReviewer.Core.Address (Port (..), Token, tokenFromBytes, tokenText)
-import HaskellReviewer.Core.FileList (FileList (..), ListSource (..), mkFileList)
+import HaskellReviewer.Core.FileContent (FileContent (..))
+import HaskellReviewer.Core.FileList
+  ( EntryKind (..),
+    FileList (..),
+    ListSource (..),
+    mkFileList,
+  )
 import HaskellReviewer.Core.Git (GitVersion (..))
+import HaskellReviewer.Core.ModuleModel
+  ( ModuleParse (..),
+    TextOnlyModule (..),
+    TextOnlyReason (..),
+  )
 import HaskellReviewer.Core.Project (GhcVersion (..))
+import HaskellReviewer.Core.RelPath (relPathFromBytes)
 import HaskellReviewer.Core.Root (CanonicalRoot (..), Root (..))
 import HaskellReviewer.Effects.Clock
   ( Clock (..),
@@ -41,9 +54,12 @@ import HaskellReviewer.Effects.Clock
     MonotonicTime (..),
     Nanoseconds (..),
   )
-import HaskellReviewer.Effects.FileSystem (ListError (..), Lister (..), RootError (..))
+import HaskellReviewer.Effects.FileSystem
+  ( ListError (..),
+    Lister (..),
+    RootError (..),
+  )
 import HaskellReviewer.Effects.Git (GitError (..), TooOld (..))
-import HaskellReviewer.Effects.Parser (parseGuarded)
 import HaskellReviewer.Effects.Shutdown (Shutdown (..))
 import HaskellReviewer.Effects.Spawn (SoftLimit (..), SpawnSetup (..))
 import HaskellReviewer.Effects.Trace (Span (..), TraceFileError (..), Tracer (..))
@@ -133,6 +149,7 @@ tests =
               ]
         readIORef fake.closed >>= (@?= True),
       listingTests,
+      indexingTests,
       testCase "--port is passed to listen" $ do
         fake <- newFake
         ports <- newIORef []
@@ -400,6 +417,98 @@ listingTests =
                 ]
     ]
 
+-- * Indexing
+
+indexingTests :: TestTree
+indexingTests =
+  testGroup
+    "indexing"
+    [ testCase "workers start after the URL line; verbose lines and span" $ do
+        let marking d = d {parse = \_ _ -> d.console "parsing" >> pure textOnly}
+            args = ["--idle-exit", "0", "--verbose", "--trace-file", "t.jsonl"]
+        withRunningArgs args marking (\_ -> fakeLister (pure (Right oneModule))) $
+          \fake _ -> do
+            let isDone = ("indexing: done" `Text.isPrefixOf`)
+            ok <- waitFor 5 (any isDone <$> readIORef fake.console)
+            out <- readIORef fake.console
+            assertBool (show out) ok
+            let url = "haskell-reviewer: serving at " <> fakeUrl
+            assertBool (show out) (elemIndex url out < elemIndex "parsing" out)
+            let indexing = filter ("indexing: " `Text.isPrefixOf`) out
+            indexing
+              @?= [ "indexing: 1 modules, 1 workers",
+                    "indexing: 1/1",
+                    "indexing: done, 1 modules (1 ready, 0 failed, 1 text only) in 0 ms"
+                  ]
+            spans <- readIORef fake.spans
+            assertBool (show spans) ("indexing" `elem` map (.name) spans),
+      testCase "stop during indexing: exit 0 within 5 s" $ do
+        fake <- newFake
+        stop <- newEmptyMVar
+        parsing <- newEmptyMVar
+        let serve ready _ = ready >> blockForever
+            -- Pure work that never ends, like a slow parse.
+            busy = mapM_ (\n -> evaluate (length (show (n * n :: Integer)))) [1 ..]
+            deps =
+              (idleDeps fake stop serve)
+                { probeFiles = \_ _ -> pure (Right (fakeLister (pure (Right oneModule)))),
+                  parse = \_ _ -> putMVar parsing () >> busy >> pure textOnly
+                }
+        withAsync (run deps ["--idle-exit", "0"]) $ \running -> do
+          started <- timeout 5_000_000 (takeMVar parsing)
+          started @?= Just ()
+          putMVar stop ()
+          code <- timeout 5_000_000 (wait running)
+          code @?= Just ExitSuccess,
+      testCase "a crash after the fill: still indexed" $ do
+        let failing d =
+              d
+                { openTracer = \_ _ ->
+                    pure . Right $
+                      Tracer
+                        { record = \sp ->
+                            when (sp.name == "files") (ioError (userError "boom")),
+                          close = pure ()
+                        }
+                }
+            args = ["--idle-exit", "0", "--verbose", "--trace-file", "t.jsonl"]
+        withRunningArgs args failing (\_ -> fakeLister (pure (Right oneModule))) $
+          \fake _ -> do
+            let isDone = ("indexing: done" `Text.isPrefixOf`)
+            ok <- waitFor 5 (any isDone <$> readIORef fake.console)
+            out <- readIORef fake.console
+            assertBool (show out) ok,
+      testCase "indexing throws before the workers: requests get a 500, no hang" $ do
+        let failing d = d {indexWorkers = ioError (userError "boom")}
+            lister _ = fakeLister (pure (Right oneModule))
+        withRunningWith failing lister $ \fake app -> do
+          let path = [tokenText fakeToken, "api", "module", "tree", "A"]
+          r <- timeout 5_000_000 (callApp app "GET" "127.0.0.1:4321" path)
+          fmap (\x -> (x.status, x.body)) r @?= Just (500, "cannot index module")
+          let crashed = "haskell-reviewer: indexing crashed: user error (boom)"
+          ok <- waitFor 5 (elem crashed <$> readIORef fake.console)
+          out <- readIORef fake.console
+          assertBool (show out) ok,
+      testCase "listing fails: no workers" $ do
+        asked <- newIORef False
+        let counting d = d {indexWorkers = writeIORef asked True >> pure 1}
+        withRunningWith counting (\_ -> fakeLister (pure (Left (ListCrashed "boom")))) $
+          \fake app -> do
+            r <- getFiles app
+            r.status @?= 500
+            _ <- waitFor 5 ((>= 2) . length <$> readIORef fake.console)
+            pure ()
+        readIORef asked >>= (@?= False)
+    ]
+
+-- | A list with one module, A.hs.
+oneModule :: FileList
+oneModule =
+  mkFileList FromDisk 0 [(p, EntryFile) | Just p <- [relPathFromBytes "A.hs"]]
+
+textOnly :: ModuleParse
+textOnly = TextOnly TextOnlyModule {reason = TooSlow, warnings = []}
+
 -- | Run with this lister until the action is done, then stop with a
 -- signal. The action gets the app warp would serve.
 withRunning :: (Fake -> Lister) -> (Fake -> Application -> IO a) -> IO a
@@ -629,9 +738,12 @@ newFake = do
             -- Never done: no line or span from the listing.
             probeFiles = \_ _ -> pure (Right (fakeLister neverDone)),
             readProject = Session.Project.readProject,
-            -- The tests that parse warm up on their own.
+            -- No real parse here: see Note [Shared values in tests] in
+            -- HaskellReviewer.Core.PackageGlobTest.
             warmUpParser = pure (),
-            parse = parseGuarded,
+            readEntry = \_ _ _ -> pure (Right (TextContent "module A where\n")),
+            parse = \_ _ -> pure textOnly,
+            indexWorkers = pure 1,
             openBrowser = \_ _ url -> modifyIORef' opened (<> [url]),
             installShutdown = \_ ->
               pure

@@ -3,7 +3,7 @@
 // HaskellReviewer.Server.Wire.
 import { describe, expect, it } from "vitest";
 import { DecodeError } from "./decode";
-import { decodeHello, parseEventData } from "./events";
+import { decodeHello, decodeIndexing, parseEventData } from "./events";
 import {
   decodeFileList,
   decodeFileView,
@@ -37,6 +37,8 @@ import { fixture, fixtures } from "../../test/fixtures";
 // Every fixture, with the decoder for it. One per file view kind.
 const decoders: Record<string, (value: unknown) => unknown> = {
   "events-hello": decodeHello,
+  "events-indexing": decodeIndexing,
+  indexing: decodeIndexing,
   files: decodeFileList,
   "file-text": decodeFileView,
   "file-binary": decodeFileView,
@@ -332,6 +334,23 @@ describe("decoders reject bad shapes", () => {
       parsed({ extensions: { language: "GHC2021", enabled: [] } }),
     ]) {
       expect(() => decodeModuleView(bad), JSON.stringify(bad)).toThrow(
+        DecodeError,
+      );
+    }
+  });
+
+  it("indexing", () => {
+    const good = { generation: 1, total: 3, ready: 2, failed: 1 };
+    expect(decodeIndexing(good)).toEqual(good);
+    for (const bad of [
+      null,
+      { ...good, total: undefined },
+      { ...good, ready: -1 },
+      { ...good, failed: "1" },
+      { ...good, generation: 1.5 },
+      { ...good, ready: 3 },
+    ]) {
+      expect(() => decodeIndexing(bad), JSON.stringify(bad)).toThrow(
         DecodeError,
       );
     }

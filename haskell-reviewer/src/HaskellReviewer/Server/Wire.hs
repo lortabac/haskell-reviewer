@@ -13,6 +13,7 @@ module HaskellReviewer.Server.Wire
     encodeFileView,
     encodeModuleTree,
     encodeModuleView,
+    encodeIndexing,
     helloPayload,
   )
 where
@@ -94,6 +95,7 @@ import HaskellReviewer.Core.Project
   )
 import HaskellReviewer.Core.RelPath (RelPath, relDirText, relPathText)
 import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
+import HaskellReviewer.Session.Index (Progress (..))
 import HaskellReviewer.Session.Snapshot (Generation (..))
 
 {- Note [API fixtures]
@@ -454,6 +456,20 @@ parsedFields m =
 -- | The data of the @hello@ event: @{}@.
 helloPayload :: ByteString
 helloPayload = LBS.toStrict (Encoding.encodingToLazyByteString (Aeson.pairs mempty))
+
+-- | GET api\/indexing\/\<side>, and the data of the @indexing@ event:
+--
+-- > {"generation":1,"total":358,"ready":120,"failed":2}
+--
+-- Done when @ready + failed == total@. See Note [Indexing] in
+-- "HaskellReviewer.Session.Index".
+encodeIndexing :: Generation -> Progress -> ByteString
+encodeIndexing (Generation g) p =
+  LBS.toStrict . Encoding.encodingToLazyByteString . Aeson.pairs $
+    ("generation" .= g)
+      <> ("total" .= p.total)
+      <> ("ready" .= p.ready)
+      <> ("failed" .= p.failed)
 
 -- * Internal
 

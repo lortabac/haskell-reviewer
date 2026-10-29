@@ -1,10 +1,19 @@
 -- | The event stream: in process, then with a real warp on a socket.
 module HaskellReviewer.Server.EventsTest (tests) where
 
-import Control.Concurrent (threadDelay)
+import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Async (withAsync)
+import Control.Concurrent.STM
+  ( STM,
+    TVar,
+    atomically,
+    newTVarIO,
+    readTVar,
+    retry,
+    writeTVar,
+  )
 import Control.Exception (Exception, bracket, throwIO, try)
-import Control.Monad (when)
+import Control.Monad (void, when)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Builder (Builder)
@@ -14,6 +23,7 @@ import Data.ByteString.Lazy qualified as LBS
 import Data.IORef (atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Word (Word64)
 import GHC.Clock (getMonotonicTime)
 import HaskellReviewer.Core.Address (Port (..), Token, tokenFromBytes, tokenText)
 import HaskellReviewer.Effects.Clock (Microseconds (..))
@@ -23,7 +33,10 @@ import HaskellReviewer.Server.Api (FilesApi (..))
 import HaskellReviewer.Server.Events (EventStream (..), keepAliveFrame, renderEvent)
 import HaskellReviewer.Server.Router (Routes (..), application)
 import HaskellReviewer.Server.Security (contentSecurityPolicy)
+import HaskellReviewer.Server.Wire (encodeIndexing)
 import HaskellReviewer.Session.Clients (EventId (..), newClients, openCount)
+import HaskellReviewer.Session.Index (Progress (..))
+import HaskellReviewer.Session.Snapshot (Generation (..), IndexingState (..))
 import Network.HTTP.Types (Header, Status (..))
 import Network.Socket qualified as Socket
 import Network.Socket.ByteString qualified as Socket.BS
@@ -103,6 +116,51 @@ inProcessTests =
         events <- newEvents (Microseconds 10000)
         r <- collect =<< call events (request "GET" (Just "evil.com:8080") streamPath)
         r.status @?= 403,
+      testCase "indexing: the state right after hello" $ do
+        state <- newTVarIO (Just (at 0))
+        events <- newEventsWith (Microseconds 10_000_000) (readTVar state)
+        body <- streamBody events 2 (\_ -> pure ())
+        body @?= hello <> indexingEvent 2 0,
+      testCase "indexing: a change sends the last state" $ do
+        state <- newTVarIO (Just (at 0))
+        events <- newEventsWith (Microseconds 10_000_000) (readTVar state)
+        -- Two changes before the next read: only the last one goes out.
+        body <- streamBody events 3 $ \case
+          2 -> setAt state 1 >> setAt state 2
+          _ -> pure ()
+        body @?= hello <> indexingEvent 2 0 <> indexingEvent 3 2,
+      testCase "indexing: no change, only keep-alives" $ do
+        state <- newTVarIO (Just (at 0))
+        events <- newEventsWith (Microseconds 10_000) (readTVar state)
+        body <- streamBody events 4 $ \case
+          -- The same state again is no change.
+          3 -> setAt state 0
+          _ -> pure ()
+        body @?= hello <> indexingEvent 2 0 <> keepAlives 2,
+      testCase "indexing: not listed yet, then listing failed: no event" $ do
+        listed <- newTVarIO False
+        let source = readTVar listed >>= \l -> if l then pure Nothing else retry
+        events <- newEventsWith (Microseconds 10_000) source
+        body <- streamBody events 3 $ \case
+          2 -> atomically (writeTVar listed True)
+          _ -> pure ()
+        body @?= hello <> keepAlives 2,
+      testCase "indexing: at most one event per gap, the last state gets there" $ do
+        state <- newTVarIO (Just (at 0))
+        let gap = Microseconds 200_000
+        events <- newEventsGap (Microseconds 10_000_000) gap (readTVar state)
+        -- 50 changes, 1 ms apart, once the first event is out. With no
+        -- gap that would be about 50 events; with 200 ms, a few.
+        let changes = mapM_ (\n -> setAt state n >> threadDelay 1_000) [1 .. 50]
+            lastOne = "\"ready\":50"
+        body <- streamUntil events lastOne $ \case
+          2 -> void (forkIO changes)
+          _ -> pure ()
+        let names = Char8.lines (LBS.toStrict body)
+            count = length (filter (== "event: indexing") names)
+            final = indexingEvent (fromIntegral count + 1) 50
+        assertBool ("events: " <> show count) (count <= 20)
+        assertBool (show body) (final `LBS.isSuffixOf` body),
       testCase "renderEvent: one data line per line" $ do
         render (renderEvent (EventId 7) "x" "a\nb")
           @?= "id: 7\nevent: x\ndata: a\ndata: b\n\n"
@@ -110,6 +168,46 @@ inProcessTests =
           @?= "id: 8\nevent: y\ndata: \n\n"
         render keepAliveFrame @?= ": keep-alive\n\n"
     ]
+
+hello :: LBS.ByteString
+hello = "id: 1\nevent: hello\ndata: {}\n\n"
+
+keepAlives :: Int -> LBS.ByteString
+keepAlives n = mconcat (replicate n ": keep-alive\n\n")
+
+-- | An indexing event with this id, for 'at' this many.
+indexingEvent :: Word64 -> Int -> LBS.ByteString
+indexingEvent i n =
+  render $
+    renderEvent (EventId i) "indexing" (encodeIndexing (Generation 1) (progressAt n))
+
+-- | Generation 1, 100 modules, this many ready.
+at :: Int -> IndexingState
+at n = IndexingState {generation = Generation 1, progress = progressAt n}
+
+progressAt :: Int -> Progress
+progressAt n = Progress {total = 100, ready = n, failed = 0}
+
+setAt :: TVar (Maybe IndexingState) -> Int -> IO ()
+setAt v n = atomically (writeTVar v (Just (at n)))
+
+-- | Run the stream body until the bytes hold the text (5 s at most).
+-- The hook runs at each flush, with its number.
+streamUntil :: EventStream -> ByteString -> (Int -> IO ()) -> IO LBS.ByteString
+streamUntil events needle onFlush = do
+  resp <- call events (request "GET" goodHost streamPath)
+  let (_, _, withBody) = responseToStream resp
+  chunks <- newIORef mempty
+  count <- newIORef (0 :: Int)
+  let write b = modifyIORef' chunks (<> b)
+      flush = do
+        n <- atomicModifyIORef' count (\c -> (c + 1, c + 1))
+        onFlush n
+        bytes <- LBS.toStrict . Builder.toLazyByteString <$> readIORef chunks
+        when (needle `BS.isInfixOf` bytes) (throwIO StopStream)
+  r <- timeout 5_000_000 (try @StopStream (withBody (\body -> body write flush)))
+  r @?= Just (Left StopStream)
+  Builder.toLazyByteString <$> readIORef chunks
 
 -- | Thrown by the test sink to end the stream.
 data StopStream = StopStream
@@ -314,17 +412,28 @@ routesFor events =
         FilesApi
           { snapshot = pure (Left (ListCrashed "no files here")),
             readEntry = \_ _ _ -> pure (Left ReadGone),
-            parse = \_ _ -> ioError (userError "no parsing here"),
             logger = newLogger LevelInfo (\_ -> pure ())
           }
     }
 
+-- | No indexing event ever.
 newEvents :: Microseconds -> IO EventStream
-newEvents keepAlive = do
+newEvents keepAlive = newEventsWith keepAlive (pure Nothing)
+
+-- | With this indexing state, and no gap between events.
+newEventsWith :: Microseconds -> STM (Maybe IndexingState) -> IO EventStream
+newEventsWith keepAlive = newEventsGap keepAlive (Microseconds 0)
+
+-- | With this indexing state and gap between events.
+newEventsGap ::
+  Microseconds -> Microseconds -> STM (Maybe IndexingState) -> IO EventStream
+newEventsGap keepAlive gap indexing = do
   clients <- newClients
   pure
     EventStream
       { clients = clients,
         keepAlive = keepAlive,
+        indexing = indexing,
+        minGap = gap,
         logger = newLogger LevelInfo (\_ -> pure ())
       }

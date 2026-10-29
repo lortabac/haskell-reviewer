@@ -2,10 +2,12 @@
 -- in process.
 module ApiSupport
   ( -- * The fixture projects
+    TestApi (..),
     fixtureApi,
     projectApi,
     implicitApi,
     forceFixtures,
+    indexed,
 
     -- * Calling the app
     ApiResult (..),
@@ -16,7 +18,9 @@ module ApiSupport
   )
 where
 
-import Control.Monad (forM_)
+import Control.Concurrent.Async (withAsync)
+import Control.Exception (evaluate)
+import Control.Monad (forM_, void)
 import Data.ByteString (ByteString)
 import Data.ByteString.Builder qualified as Builder
 import Data.ByteString.Lazy qualified as LBS
@@ -40,6 +44,8 @@ import HaskellReviewer.Core.FileList
     FileList (..),
     ListSource (..),
   )
+import HaskellReviewer.Core.ModuleModel (ModuleParse)
+import HaskellReviewer.Core.Parser (ParseSettings)
 import HaskellReviewer.Core.Project
   ( BrokenPackage (..),
     CabalProblem (..),
@@ -70,51 +76,100 @@ import HaskellReviewer.Core.RelPath
   )
 import HaskellReviewer.Core.Root (CanonicalRoot (..))
 import HaskellReviewer.Effects.Clock (Microseconds (..))
-import HaskellReviewer.Effects.FileSystem (ReadError (..))
-import HaskellReviewer.Effects.Log (LogLevel (..), newLogger)
+import HaskellReviewer.Effects.FileSystem (ListError, ReadError (..))
+import HaskellReviewer.Effects.Log (LogLevel (..), Logger, newLogger)
 import HaskellReviewer.Effects.Parser (parseGuarded)
-import HaskellReviewer.Server.Api (FilesApi (..), forceSnapshot, newSnapshot)
+import HaskellReviewer.Server.Api (FilesApi (..), newSnapshot)
 import HaskellReviewer.Server.Events (EventStream (..))
 import HaskellReviewer.Server.Router (Routes (..), application)
 import HaskellReviewer.Session.Clients (newClients)
-import HaskellReviewer.Session.Snapshot (Snapshot)
+import HaskellReviewer.Session.Index (IndexDeps (..), runWorkers)
+import HaskellReviewer.Session.Snapshot (Snapshot (files, index))
 import Network.HTTP.Types (Header, Status (..))
 import Network.Wai (Application, Request (..), defaultRequest, responseToStream)
 import Network.Wai.Internal (ResponseReceived (..))
+import System.Timeout (timeout)
 import Test.Tasty.HUnit (assertFailure)
 
 -- * The fixture projects
 
+-- | The snapshot routes and the parse workers, with fakes. Each request
+-- gets a fresh snapshot, so a fresh index: tests share no slot.
+data TestApi = TestApi
+  { snapshot :: IO (Either ListError Snapshot),
+    readEntry :: Snapshot -> RelPath -> EntryKind -> IO (Either ReadError FileContent),
+    parse :: ParseSettings -> Text -> IO ModuleParse,
+    -- | For read errors.
+    logger :: Logger,
+    -- | Parse workers that run while a request does. With 0 nothing is
+    -- read in the background (and a request for a module we parse
+    -- waits for ever).
+    workers :: Int
+  }
+
 -- | A fixed snapshot and file contents. The file API fixtures come
 -- from it.
-fixtureApi :: FilesApi
+fixtureApi :: TestApi
 fixtureApi = apiFor fixtureSnapshot
 
 -- | A project with every kind of module source, role and no-source
 -- reason, a broken package and warnings. For the module tree fixture.
-projectApi :: FilesApi
+projectApi :: TestApi
 projectApi = apiFor projectSnapshot
 
 -- | No project: stack.yaml and package.yaml in ROOT, loose modules.
-implicitApi :: FilesApi
+implicitApi :: TestApi
 implicitApi = apiFor implicitSnapshot
 
--- | Build the snapshots, before parallel tests share them. See
+-- | Build the shared inputs, before parallel tests use them. See
 -- Note [Shared values in tests] in HaskellReviewer.Core.PackageGlobTest.
 forceFixtures :: IO ()
-forceFixtures = forM_ [fixtureSnapshot, projectSnapshot, implicitSnapshot] forceSnapshot
+forceFixtures = do
+  forM_ [fixtureSnapshot, projectSnapshot, implicitSnapshot] void
+  forM_ contents $ \(p, c) -> evaluate p >> evaluate (forceContent c)
+  where
+    forceContent = \case
+      TextContent t -> t `seq` ()
+      Link info -> info.target `seq` maybe () (`seq` ()) info.resolved
+      c -> c `seq` ()
 
-apiFor :: Snapshot -> FilesApi
+-- | Every module indexed before the request, with no workers during
+-- it: the indexing progress is final.
+indexed :: TestApi -> TestApi
+indexed api =
+  api
+    { snapshot =
+        api.snapshot >>= \case
+          Right snap -> do
+            runWorkers (indexDeps api snap) 1 snap.index
+            pure (Right snap)
+          listed -> pure listed,
+      workers = 0
+    }
+
+apiFor :: IO Snapshot -> TestApi
 apiFor snap =
-  FilesApi
-    { snapshot = pure (Right snap),
+  TestApi
+    { snapshot = Right <$> snap,
       readEntry = \_ p _ ->
         pure (maybe (Left ReadGone) Right (lookup (relPathText p) contents)),
       parse = parseGuarded,
-      logger = newLogger LevelInfo (\_ -> pure ())
+      logger = newLogger LevelInfo (\_ -> pure ()),
+      workers = 1
     }
 
-fixtureSnapshot :: Snapshot
+-- | What the workers need, as the server wires it.
+indexDeps :: TestApi -> Snapshot -> IndexDeps
+indexDeps api snap =
+  IndexDeps
+    { readModule = \p -> case Map.lookup p snap.files.entries of
+        Just EntryFile -> api.readEntry snap p EntryFile
+        _ -> pure (Left ReadGone),
+      parse = api.parse,
+      logger = api.logger
+    }
+
+fixtureSnapshot :: IO Snapshot
 fixtureSnapshot =
   newSnapshot
     fixtureRoot
@@ -131,7 +186,7 @@ fixtureSnapshot =
     )
     noProject
 
-projectSnapshot :: Snapshot
+projectSnapshot :: IO Snapshot
 projectSnapshot =
   newSnapshot
     fixtureRoot
@@ -234,7 +289,7 @@ component name src =
       includeDirs = []
     }
 
-implicitSnapshot :: Snapshot
+implicitSnapshot :: IO Snapshot
 implicitSnapshot =
   newSnapshot
     fixtureRoot
@@ -398,23 +453,40 @@ data ApiResult = ApiResult
     body :: LBS.ByteString
   }
 
--- | GET through the real app in process, with the given file routes.
--- The path is after the token.
-getApi :: FilesApi -> [Text] -> IO ApiResult
+-- | GET through the real app in process, with the given fakes, and the
+-- parse workers running meanwhile. The path is after the token.
+getApi :: TestApi -> [Text] -> IO ApiResult
 getApi = requestApi "GET"
 
 -- | Like 'getApi', with the method given.
-requestApi :: ByteString -> FilesApi -> [Text] -> IO ApiResult
-requestApi method files path = do
+requestApi :: ByteString -> TestApi -> [Text] -> IO ApiResult
+requestApi method api path = do
+  listed <- api.snapshot
   clients <- newClients
   let events =
         EventStream
           { clients = clients,
             keepAlive = Microseconds 1_000_000,
+            indexing = pure Nothing,
+            minGap = Microseconds 0,
             logger = newLogger LevelInfo (\_ -> pure ())
           }
+      files =
+        FilesApi
+          { snapshot = pure listed,
+            readEntry = api.readEntry,
+            logger = api.logger
+          }
       app = application (Port 8080) apiToken Routes {events = events, files = files}
-  callApp app method "127.0.0.1:8080" (tokenText apiToken : path)
+      call = do
+        r <- timeout 10_000_000 (callApp app method host (tokenText apiToken : path))
+        maybe (assertFailure ("no answer within 10 s: " <> show path)) pure r
+      host = "127.0.0.1:8080"
+  case listed of
+    Right snap
+      | api.workers > 0 ->
+          withAsync (runWorkers (indexDeps api snap) api.workers snap.index) (const call)
+    _ -> call
 
 -- | Call an app with a request that ends. The path has the token.
 callApp :: Application -> ByteString -> ByteString -> [Text] -> IO ApiResult

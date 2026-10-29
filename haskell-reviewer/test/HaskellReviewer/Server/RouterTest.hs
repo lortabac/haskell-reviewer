@@ -234,6 +234,8 @@ call req = do
         EventStream
           { clients = clients,
             keepAlive = Microseconds 1000000,
+            indexing = pure Nothing,
+            minGap = Microseconds 0,
             logger = newLogger LevelInfo (\_ -> pure ())
           }
   saved <- newIORef Nothing
@@ -251,7 +253,6 @@ noFiles =
   FilesApi
     { snapshot = pure (Left (ListCrashed "no files here")),
       readEntry = \_ _ _ -> pure (Left ReadGone),
-      parse = \_ _ -> ioError (userError "no parsing here"),
       logger = newLogger LevelInfo (\_ -> pure ())
     }
 

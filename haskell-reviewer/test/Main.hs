@@ -18,9 +18,11 @@ import HaskellReviewer.Core.DocLinksTest qualified
 import HaskellReviewer.Core.FileListTest qualified
 import HaskellReviewer.Core.GitTest qualified
 import HaskellReviewer.Core.HaddockTest qualified
+import HaskellReviewer.Core.IndexQueueTest qualified
 import HaskellReviewer.Core.InstanceKeyTest qualified
 import HaskellReviewer.Core.ModulesGoldenTest qualified
 import HaskellReviewer.Core.ModulesTest qualified
+import HaskellReviewer.Core.NameTableTest qualified
 import HaskellReviewer.Core.PackageGlobTest qualified
 import HaskellReviewer.Core.ParseGoldenTest qualified
 import HaskellReviewer.Core.ParserTest qualified
@@ -48,6 +50,7 @@ import HaskellReviewer.Server.EventsTest qualified
 import HaskellReviewer.Server.ListenTest qualified
 import HaskellReviewer.Server.RouterTest qualified
 import HaskellReviewer.Session.ClientsTest qualified
+import HaskellReviewer.Session.IndexTest qualified
 import HaskellReviewer.Session.SnapshotTest qualified
 import Test.Tasty (defaultMain, testGroup, withResource)
 
@@ -74,6 +77,7 @@ main = do
         HaskellReviewer.Core.CabalFileTest.tests,
         HaskellReviewer.Core.FileListTest.tests,
         HaskellReviewer.Core.GitTest.tests,
+        HaskellReviewer.Core.IndexQueueTest.tests,
         HaskellReviewer.Core.ModulesGoldenTest.tests,
         HaskellReviewer.Core.ModulesTest.tests,
         HaskellReviewer.Core.PackageGlobTest.tests,
@@ -105,10 +109,12 @@ main = do
               HaskellReviewer.Core.HaddockTest.tests,
               HaskellReviewer.Core.HaddockTest.linearTests,
               HaskellReviewer.Core.InstanceKeyTest.tests,
+              HaskellReviewer.Core.NameTableTest.tests,
               HaskellReviewer.Core.ParseGoldenTest.tests,
               HaskellReviewer.Core.ParserTest.tests,
               HaskellReviewer.Core.RichTextGoldenTest.tests,
               HaskellReviewer.Core.SourceTextTest.tests,
+              HaskellReviewer.Session.IndexTest.parsingTests,
               -- Both share the API fixtures: built once, here.
               withResource forceFixtures (const (pure ())) $ \_ ->
                 testGroup
@@ -122,6 +128,7 @@ main = do
         HaskellReviewer.Server.ListenTest.tests,
         HaskellReviewer.Server.RouterTest.tests,
         HaskellReviewer.Session.ClientsTest.tests,
+        HaskellReviewer.Session.IndexTest.tests,
         HaskellReviewer.Session.SnapshotTest.tests,
         ExeTest.tests
       ]

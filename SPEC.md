@@ -1343,8 +1343,8 @@ incomplete index are labelled *partial*.
 
 (D-60)
 - **Snapshot generations.** Each side has a current *generation*: an
-  immutable file list, plus one slot per module (`pending`, `parsing`,
-  `ready`, `failed`). Slots are held in STM. A request reads one
+  immutable file list, plus one slot per module we parse (`pending`,
+  `parsing`, `ready`, `failed`). Slots are held in STM. A request reads one
   generation from start to end, so it never sees a mix of two.
 - **Scheduler.** A priority queue feeds a pool of parse workers (about one
   per core, `-threaded`). The priorities are: modules a request is waiting
@@ -1399,9 +1399,11 @@ a framework would cost more than it saves.
     plain HTTP gives no HTTP/2. One stream per tab would hang the UI after
     a few tabs.
   - URL: `GET /<token>/api/events`. On open the server sends a `hello`
-    event (the only event in M0).
-  - Events: indexing progress, generation changes, LLM stream updates,
-    notices.
+    event, then an `indexing` event with the current progress (once
+    the files are listed; never if the listing failed).
+  - Events: indexing progress (`indexing`, the same JSON as
+    `GET api/indexing/<side>`, at most one per 100 ms, always the latest
+    state), generation changes, LLM stream updates, notices.
   - Fallback: without SharedWorker, each tab opens its own stream, and a
     notice warns about the limit.
 - **Liveness**: a browser is connected while its SSE stream is open. The
@@ -1409,8 +1411,8 @@ a framework would cost more than it saves.
   within about 30 s, and the idle timer of §2.1 starts when no stream is open.
   The stream route has no Warp timeout and is never gzipped.
 - **Reconnect**: events carry ids. After a reconnect the worker refetches
-  the state it shows (index progress, open LLM threads), so a lost event
-  costs nothing.
+  the state it shows (open LLM threads; index progress comes again right
+  after `hello`), so a lost event costs nothing.
 - **Contract** (D-50): the types are hand-written on both sides. The
   Haskell test suite writes a **golden fixture** for every endpoint (CBOR
   fixtures have a JSON dump next to them for readable diffs). The TypeScript

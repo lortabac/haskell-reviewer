@@ -261,10 +261,13 @@ serverTests =
                   <> "api/events HTTP/1.1\r\nHost: 127.0.0.1:"
                   <> Char8.pack (show server.port)
                   <> "\r\n\r\n"
-          -- Up to the end of the first chunk.
-          bytes <- rawHttpUntil server.port req "data: {}\n\n\r\n"
+          -- Up to the end of the first chunk. The indexing event may
+          -- come in the same read: cut it off.
+          let end = "data: {}\n\n\r\n"
+          bytes <- rawHttpUntil server.port req end
+          let firstChunk = fst (BS.breakSubstring end bytes) <> end
           -- Add the last chunk, so the body parses.
-          case parseResponse (bytes <> "0\r\n\r\n") of
+          case parseResponse (firstChunk <> "0\r\n\r\n") of
             Nothing -> assertFailure ("bad HTTP answer: " <> show bytes)
             Just r -> do
               r.status @?= 200
@@ -373,7 +376,7 @@ filesTests =
                   \\"other\":[{\"kind\":\"module\",\"path\":\"Foo.hs\",\
                   \\"name\":\"Foo\",\"id\":\"Foo.hs\",\"ref\":\"Foo\"}],\
                   \\"warnings\":[]}",
-      testCase "module: parsed on demand; a symlink is never read" $
+      testCase "module: from the index; a symlink is never read" $
         withCanonicalTemp $ \dir -> do
           writeFile (dir </> "Foo.hs") "module Foo (x) where\nx = 1\n"
           writeFile (dir </> "secret.txt") "module Secret where\n"
@@ -385,7 +388,26 @@ filesTests =
             assertContains "\"occ\":\"x\"" (Char8.unpack r.body)
             -- Symlinks are only in the file tree: not a module.
             gone <- getPath server "api/module/tree/Bar"
-            gone.status @?= 404
+            gone.status @?= 404,
+      testCase "indexing: done line, progress endpoint, indexing event" $
+        withCanonicalTemp $ \dir -> do
+          writeFile (dir </> "Foo.hs") "module Foo (x) where\nx = 1\n"
+          writeFile (dir </> "Bar.hs") "module Bar where\n"
+          withServer id ["--verbose", dir] $ \server -> do
+            let doneLine = "indexing: done, 2 modules (2 ready, 0 failed, 0 text only)"
+            waitForLine server (doneLine `isPrefixOf`)
+            let done = "{\"generation\":1,\"total\":2,\"ready\":2,\"failed\":0}"
+            r <- getPath server "api/indexing/tree"
+            r.status @?= 200
+            r.body @?= done
+            let req =
+                  "GET "
+                    <> Char8.pack (tokenPath server)
+                    <> "api/events HTTP/1.1\r\nHost: 127.0.0.1:"
+                    <> Char8.pack (show server.port)
+                    <> "\r\n\r\n"
+            bytes <- rawHttpUntil server.port req ("data: " <> done)
+            assertContains "id: 2\nevent: indexing\n" (Char8.unpack bytes)
     ]
 
 -- * git
@@ -743,7 +765,7 @@ signalTests =
           getPid server.process >>= mapM_ (signalProcess sigTERM)
           (code, _) <- stopServer server sigTERM
           code @?= ExitSuccess,
-      testCase "--trace-file: startup, files, project and warm-up spans" $
+      testCase "--trace-file: startup, files, project, warm-up and indexing spans" $
         withTemp $ \dir -> do
           let file = dir </> "t.jsonl"
               root = dir </> "root"
@@ -752,17 +774,18 @@ signalTests =
             r <- getPath server "api/files/tree"
             r.status @?= 200
             -- The spans are written just after the snapshot is ready.
-            _ <- waitForFile' file ((== 4) . length . lines)
+            _ <- waitForFile' file ((== 5) . length . lines)
             (code, _) <- stopServer server sigTERM
             code @?= ExitSuccess
           contents <- readFile file
           case lines contents of
-            [startup, files, project, warmUp] -> do
+            [startup, files, project, warmUp, indexing] -> do
               assertContains "\"name\":\"startup\"" startup
               assertContains "\"name\":\"files\"" files
               assertContains "\"name\":\"project\"" project
               assertContains "\"name\":\"parser-warm-up\"" warmUp
-            ls -> assertFailure ("expected four lines, got " <> show ls),
+              assertContains "\"name\":\"indexing\"" indexing
+            ls -> assertFailure ("expected five lines, got " <> show ls),
       testCase "--trace-file /dev/full: exit 0 with a warning" $ do
         -- Linux only: elsewhere, nothing to do.
         hasDevFull <- Dir.doesPathExist "/dev/full"

@@ -67,6 +67,11 @@ module HaskellReviewer.Core.Decls
     FamInstForm (..),
     famInstConstructors,
 
+    -- * Names
+    NameLevel (..),
+    NamedDecl (..),
+    namedDecls,
+
     -- * Pragmas block
     ModulePragma (..),
     PragmaKind (..),
@@ -570,6 +575,55 @@ famInstConstructors = \case
   DataInstance b -> b.constructors
   NewtypeInstance b -> [b.constructor]
   TypeInstance -> []
+
+-- * Names
+
+-- | GHC's two namespaces: types and classes, or values.
+data NameLevel = TypeLevel | ValueLevel
+  deriving (Eq, Show)
+
+-- | A declaration that brings a name into scope: top-level or nested
+-- (constructor, field, method, associated type).
+data NamedDecl = NamedDecl
+  { level :: NameLevel,
+    info :: DeclInfo
+  }
+
+-- | The names one declaration brings, nested ones too, in source order.
+--
+-- Types, classes, synonyms, families and associated types are at the
+-- type level, and so are the constructors of a @type data@. Values,
+-- methods, foreign imports, data constructors (also of data instances,
+-- inside an instance or not), pattern synonyms and record fields are at
+-- the value level. Instances and splices have no name.
+namedDecls :: Decl -> [NamedDecl]
+namedDecls = \case
+  TypeD t -> typeDecl t
+  ClassD c ->
+    NamedDecl TypeLevel c.info
+      : concatMap typeDecl c.associated
+        <> [NamedDecl ValueLevel m.info | m <- c.methods]
+  ValueD v -> [NamedDecl ValueLevel v.info]
+  PatSynD p -> NamedDecl ValueLevel p.info : map (NamedDecl ValueLevel) p.fields
+  InstanceD i -> case i.form of
+    ExplicitInstance b -> concatMap famInst b.associated
+    _ -> []
+  FamInstD f -> famInst f
+  SpliceD _ -> []
+  where
+    typeDecl t =
+      NamedDecl TypeLevel t.info
+        : concatMap (con (conLevel t.form)) (formConstructors t.form)
+    conLevel = \case
+      TypeData _ -> TypeLevel
+      _ -> ValueLevel
+    famInst f = concatMap (con ValueLevel) (famInstConstructors f.form)
+    con level c = NamedDecl level c.info : map (NamedDecl ValueLevel) (fields c.args)
+    fields = \case
+      RecordArgs fs -> map fieldInfo fs
+      GadtRecordArgs fs -> map fieldInfo fs
+      _ -> []
+    fieldInfo (f :: FieldDecl) = f.info
 
 -- * Pragmas block
 
