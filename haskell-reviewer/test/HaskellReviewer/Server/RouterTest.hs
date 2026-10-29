@@ -1,6 +1,7 @@
 -- | The app, called in process (no socket).
 module HaskellReviewer.Server.RouterTest (tests) where
 
+import Codec.Compression.GZip qualified as GZip
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Builder qualified as Builder
@@ -16,7 +17,7 @@ import HaskellReviewer.Effects.FileSystem (ListError (..), ReadError (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), newLogger)
 import HaskellReviewer.Server.Api (FilesApi (..))
 import HaskellReviewer.Server.Events (EventStream (..))
-import HaskellReviewer.Server.Router (Routes (..), application)
+import HaskellReviewer.Server.Router (Routes (..), application, compressible)
 import HaskellReviewer.Server.Security (addSecurityHeaders, contentSecurityPolicy)
 import HaskellReviewer.Session.Clients (newClients)
 import Network.HTTP.Types (Header, Status (..), hContentType, status500)
@@ -169,6 +170,45 @@ tests =
                 _ -> assertFailure ("unexpected ref: " <> show ref)
           )
           refs,
+      testCase "gzip: JS and CSS assets, with Accept-Encoding: gzip" $ do
+        shell <- get [tokenText token, ""]
+        let segments = Text.splitOn "/" . Text.Encoding.decodeUtf8
+            names =
+              [ name
+              | ref <- shellRefs (LBS.toStrict shell.body),
+                _ : _ : "assets" : [name] <- [segments ref]
+              ]
+        assertBool "no js and css" $
+          any (".js" `Text.isSuffixOf`) names && any (".css" `Text.isSuffixOf`) names
+        mapM_
+          ( \name -> do
+              let path = [tokenText token, "assets", name]
+              plain <- get path
+              r <- call (withGzip (request "GET" goodHost path))
+              (name, lookup "Content-Encoding" r.headers) @?= (name, Just "gzip")
+              lookup hContentType r.headers @?= lookup hContentType plain.headers
+              GZip.decompress r.body @?= plain.body
+          )
+          names,
+      testCase "gzip: the types we gzip, with or without parameters" $ do
+        let yes =
+              [ "application/json",
+                "application/cbor",
+                "text/html; charset=utf-8",
+                "text/css; charset=utf-8",
+                "text/javascript; charset=utf-8",
+                "text/javascript"
+              ]
+            no =
+              [ "text/event-stream",
+                "text/plain; charset=utf-8",
+                "application/octet-stream",
+                "image/png",
+                "application/jsonx",
+                ""
+              ]
+        map compressible yes @?= map (const True) yes
+        map compressible no @?= map (const False) no,
       testCase "unknown paths: 404 with no-store" $
         mapM_
           ( \path -> do
@@ -217,6 +257,10 @@ data Result = Result
 
 get :: [Text] -> IO Result
 get = call . request "GET" goodHost
+
+-- | The request, accepting gzip.
+withGzip :: Request -> Request
+withGzip r = r {requestHeaders = ("Accept-Encoding", "gzip") : r.requestHeaders}
 
 request :: ByteString -> Maybe ByteString -> [Text] -> Request
 request method host path =

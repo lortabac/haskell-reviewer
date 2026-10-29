@@ -2,6 +2,7 @@
 // the decoders production uses. See Note [API fixtures] in
 // HaskellReviewer.Server.Wire.
 import { describe, expect, it } from "vitest";
+import { fromCbor } from "./client";
 import { DecodeError } from "./decode";
 import { decodeHello, decodeIndexing, parseEventData } from "./events";
 import {
@@ -20,6 +21,7 @@ import {
   type ModuleEntry,
 } from "./modules";
 import {
+  decodeModuleNotFound,
   decodeModuleView,
   exportKinds,
   importLevels,
@@ -32,7 +34,13 @@ import {
   type ItemName,
   type ModuleView,
 } from "./module";
-import { fixture, fixtures } from "../../test/fixtures";
+import {
+  cbor,
+  cborFixture,
+  cborFixtures,
+  fixture,
+  fixtures,
+} from "../../test/fixtures";
 
 // Every fixture, with the decoder for it. One per file view kind.
 const decoders: Record<string, (value: unknown) => unknown> = {
@@ -58,7 +66,17 @@ const decoders: Record<string, (value: unknown) => unknown> = {
   "module-no-source": decodeModuleView,
   "module-not-text": decodeModuleView,
   "module-too-large": decodeModuleView,
+  "module-not-found": decodeModuleNotFound,
 };
+
+// The fixtures that are CBOR (D-51), with a JSON dump next to them.
+const cborNames = [
+  "file-text",
+  "file-binary",
+  "file-too-large",
+  "file-symlink",
+  "file-submodule",
+];
 
 const sorted = (xs: Iterable<string>) => [...new Set(xs)].sort();
 
@@ -70,6 +88,15 @@ describe("API fixtures", () => {
   it("every fixture decodes to itself: no field is dropped", () => {
     for (const [name, decode] of Object.entries(decoders)) {
       expect(decode(fixture(name)), name).toEqual(fixture(name));
+    }
+  });
+
+  it("CBOR fixtures: cbor-x gives the dump, the decoder takes it", () => {
+    expect([...cborFixtures.keys()].sort()).toEqual([...cborNames].sort());
+    for (const name of cborNames) {
+      const value = fromCbor(cborFixture(name));
+      expect(value, name).toEqual(fixture(name));
+      expect(decoders[name]?.(value), name).toEqual(fixture(name));
     }
   });
 
@@ -124,7 +151,7 @@ describe("API fixtures", () => {
 
   it("the module fixtures cover every reason", () => {
     const views = [...fixtures.keys()]
-      .filter((n) => n.startsWith("module-"))
+      .filter((n) => n.startsWith("module-") && n !== "module-not-found")
       .map((n) => decodeModuleView(fixture(n)));
     const reasons = views.flatMap((v) =>
       v.parse.kind === "text-only" ? [v.parse.reason.kind] : [],
@@ -166,7 +193,7 @@ describe("API fixtures", () => {
   });
 
   it("text comes through as is", () => {
-    const view = decodeFileView(fixture("file-text"));
+    const view = decodeFileView(fromCbor(cborFixture("file-text")));
     expect(view.kind).toBe("text");
     if (view.kind !== "text") return;
     expect(view.text).toContain("<script>alert(1)</script>");
@@ -175,8 +202,60 @@ describe("API fixtures", () => {
   });
 });
 
+describe("fromCbor", () => {
+  it("takes what JSON has", () => {
+    const value = {
+      a: [1, -2, "x", true, null, {}],
+      b: { c: [] },
+      n: [2 ** 53 - 1, -(2 ** 53 - 1)],
+    };
+    expect(fromCbor(cbor(value))).toEqual(value);
+  });
+
+  it("rejects what JSON doesn't have", () => {
+    for (const bad of [
+      [0xf7], // undefined
+      [0xfb, 0x3f, 0xf8, 0, 0, 0, 0, 0, 0], // 1.5
+      [0xf9, 0x7e, 0x00], // NaN
+      [0x41, 0x78], // bytes
+      [0xc1, 0x00], // tag 1: a Date
+      [0xd8, 0x64, 0x00], // tag 100
+      [0x1b, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff], // a bigint
+      [0x1b, 0, 0x20, 0, 0, 0, 0, 0, 0], // 2^53
+      [0x3b, 0, 0x20, 0, 0, 0, 0, 0, 0], // -2^53 - 1
+      [0x81, 0xf7], // undefined in an array
+      [0xa1, 0x61, 0x61, 0xf7], // undefined in a map
+    ]) {
+      expect(() => fromCbor(new Uint8Array(bad)), String(bad)).toThrow(
+        DecodeError,
+      );
+    }
+  });
+
+  it("rejects cut input and bytes after the item", () => {
+    for (const bad of [[], [0x82, 0x01], [0x01, 0x01]]) {
+      expect(() => fromCbor(new Uint8Array(bad)), String(bad)).toThrow();
+    }
+  });
+});
+
 describe("decoders reject bad shapes", () => {
   const good = { generation: 1, kind: "text", text: "x" };
+
+  it("module not found", () => {
+    const good = { generation: 1, kind: "not-found", what: "module" };
+    expect(decodeModuleNotFound(good)).toEqual(good);
+    for (const bad of [
+      { ...good, kind: "text" },
+      { ...good, what: "file" },
+      { ...good, generation: -1 },
+      { kind: "not-found", what: "module" },
+    ]) {
+      expect(() => decodeModuleNotFound(bad), JSON.stringify(bad)).toThrow(
+        DecodeError,
+      );
+    }
+  });
 
   it("file view", () => {
     for (const bad of [

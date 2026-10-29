@@ -6,15 +6,21 @@ import ApiSupport
     TestApi (..),
     fixtureApi,
     getApi,
+    getApiWith,
     indexed,
     projectApi,
     requestApi,
   )
+import Codec.Compression.GZip qualified as GZip
+import Control.Exception (evaluate)
 import Control.Monad (forM)
 import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Lazy qualified as LBS
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef)
+import Data.List (nub, sort)
+import Data.Text (Text)
+import Data.Text qualified as Text
 import HaskellReviewer.Core.FileContent (FileContent (..), LinkInfo (..))
 import HaskellReviewer.Core.FileList (CommitId (..), EntryKind (..))
 import HaskellReviewer.Core.Modules (Literate (..))
@@ -23,7 +29,9 @@ import HaskellReviewer.Core.Project (Extension (..), Language (..))
 import HaskellReviewer.Core.RelPath (relPathFromBytes)
 import HaskellReviewer.Effects.FileSystem (ListError (..), ReadError (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), newLogger)
-import Test.Tasty (TestTree, testGroup)
+import HaskellReviewer.Server.Api (cborWarmUp)
+import HaskellReviewer.Server.CborJson (cborToJson)
+import Test.Tasty (TestTree, testGroup, withResource)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 
 tests :: TestTree
@@ -89,22 +97,24 @@ tests =
                 ["api", "indexing", "tree"]
               ]
           ],
-      testCase "JSON with a length, no-store" $ do
+      testCase "CBOR with a length, no-store" $ do
         r <- getApi fixtureApi ["api", "file", "tree", "app", "Main.hs"]
         r.status @?= 200
-        lookup "Content-Type" r.headers @?= Just "application/json"
+        lookup "Content-Type" r.headers @?= Just "application/cbor"
         lookup "Content-Length" r.headers
           @?= Just (Char8.pack (show (LBS.length r.body)))
         lookup "X-Content-Type-Options" r.headers @?= Just "nosniff"
         assertNoStore r,
       testCase "symlink to a file not in the list: resolved is null" $ do
         r <- getApi fixtureApi ["api", "file", "tree", "docs", "old.md"]
-        r.body
-          @?= "{\"generation\":1,\"kind\":\"symlink\",\
-              \\"target\":\"gone.md\",\"resolved\":null}",
+        cborToJson r.body
+          @?= Right
+            "{\"generation\":1,\"kind\":\"symlink\",\
+            \\"target\":\"gone.md\",\"resolved\":null}",
       testCase "nested repo: a submodule with commit null" $ do
         r <- getApi fixtureApi ["api", "file", "tree", "vendor", "nested"]
-        r.body @?= "{\"generation\":1,\"kind\":\"submodule\",\"commit\":null}",
+        cborToJson r.body
+          @?= Right "{\"generation\":1,\"kind\":\"submodule\",\"commit\":null}",
       testCase "gone from disk: 404; read error: 500, reason logged" $ do
         logged <- newIORef []
         let with e =
@@ -155,16 +165,19 @@ tests =
         r.body @?= "{\"generation\":1,\"total\":9,\"ready\":8,\"failed\":1}"
     ]
       <> moduleTests
+      <> [gzipTests, warmUpTest]
 
 -- | GET api/module/tree/<ref>. The fixtures cover the bodies.
 moduleTests :: [TestTree]
 moduleTests =
-  [ testCase "module: unknown or ambiguous ref: 404, nothing read" $ do
+  [ testCase "module: unknown or ambiguous ref: 404 with JSON, nothing read" $ do
       api <- countingReads projectApi {workers = 0}
       mapM_
         ( \path -> do
             r <- getApi api.files (["api", "module", "tree"] <> path)
             (path, r.status) @?= (path, 404)
+            lookup "Content-Type" r.headers @?= Just "application/json"
+            r.body @?= moduleNotFound
             assertNoStore r
         )
         [ [],
@@ -247,6 +260,7 @@ moduleTests =
           path = ["api", "module", "tree", "Foo"]
       gone <- getApi (with ReadGone) path
       gone.status @?= 404
+      gone.body @?= moduleNotFound
       failed <- getApi (with (ReadFailed "Permission denied")) path
       failed.status @?= 500
       failed.body @?= "cannot read file"
@@ -277,6 +291,82 @@ moduleTests =
         @?= Just (Char8.pack (show (LBS.length r.body)))
       assertNoStore r
   ]
+
+-- | gzip (Note [Compression] in "HaskellReviewer.Server.Router"). The
+-- big text is built once, before the tests share it: Note [Shared values
+-- in tests] in "HaskellReviewer.Core.PackageGlobTest".
+gzipTests :: TestTree
+gzipTests =
+  withResource (evaluate (Text.replicate 2000 "main = pure ()\n")) (const (pure ())) $
+    \getBig -> testGroup "gzip" (bigTests getBig)
+
+bigTests :: IO Text -> [TestTree]
+bigTests getBig =
+  [ testCase "gzip: a big file view with Accept-Encoding: gzip" $ do
+      bigFile <- bigFileApi
+      plain <- getApi bigFile path
+      lookup "Content-Encoding" plain.headers @?= Nothing
+      lookup "Vary" plain.headers @?= Just "Accept-Encoding"
+      r <- getApiWith [("Accept-Encoding", "gzip, deflate")] bigFile path
+      r.status @?= 200
+      lookup "Content-Type" r.headers @?= Just "application/cbor"
+      lookup "Content-Encoding" r.headers @?= Just "gzip"
+      lookup "Content-Length" r.headers @?= Nothing
+      lookup "Vary" r.headers @?= Just "Accept-Encoding"
+      assertNoStore r
+      assertBool "gzip didn't make it smaller" (LBS.length r.body < LBS.length plain.body)
+      GZip.decompress r.body @?= plain.body,
+    testCase "gzip: JSON too" $ do
+      let modulePath = ["api", "module", "tree", "Foo"]
+      plain <- getApi projectApi modulePath
+      r <- getApiWith [("Accept-Encoding", "gzip")] projectApi modulePath
+      lookup "Content-Encoding" r.headers @?= Just "gzip"
+      GZip.decompress r.body @?= plain.body,
+    testCase "gzip: small bodies, plain-text errors and q=0 are left alone" $ do
+      let check api p headers = do
+            plain <- getApi api p
+            r <- getApiWith headers api p
+            (p, lookup "Content-Encoding" r.headers) @?= (p, Nothing)
+            r.body @?= plain.body
+            lookup "Content-Length" r.headers @?= lookup "Content-Length" plain.headers
+          gzipOk = [("Accept-Encoding", "gzip")]
+      bigFile <- bigFileApi
+      check fixtureApi ["api", "file", "tree", "app", "Main.hs"] gzipOk
+      check projectApi ["api", "module", "tree", "Nope"] gzipOk
+      check bigFile ["api", "file", "tree", "nope"] gzipOk
+      check bigFile path [("Accept-Encoding", "gzip;q=0")]
+  ]
+  where
+    path = ["api", "file", "tree", "app", "Main.hs"]
+    bigFileApi = do
+      big <- getBig
+      pure
+        fixtureApi
+          { readEntry = \_ _ _ -> pure (Right (TextContent big)),
+            workers = 0
+          }
+
+-- | The CBOR warm-up must take every path of encodeFileView (Note
+-- [Forced snapshot] in "HaskellReviewer.Server.Api"). A new kind of
+-- FileContent makes the case below incomplete: add it to cborWarmUp.
+warmUpTest :: TestTree
+warmUpTest =
+  testCase "the CBOR warm-up has every kind of file view" $
+    sort (nub (map kind cborWarmUp))
+      @?= ["binary", "link", "nested-repo", "submodule", "text", "too-large"]
+  where
+    kind :: FileContent -> String
+    kind = \case
+      TextContent _ -> "text"
+      Binary _ -> "binary"
+      TooLarge _ -> "too-large"
+      Link _ -> "link"
+      Submodule _ -> "submodule"
+      NestedRepo -> "nested-repo"
+
+-- | The 404 body of the module route.
+moduleNotFound :: LBS.ByteString
+moduleNotFound = "{\"generation\":1,\"kind\":\"not-found\",\"what\":\"module\"}"
 
 -- | An API that counts its reads.
 data Counting = Counting

@@ -390,3 +390,21 @@ export function decodeModuleView(value: unknown): ModuleView {
     parse: field(o, "parse", path, decodeParse),
   };
 }
+
+// The 404 body of an unknown module: see encodeModuleNotFound in
+// HaskellReviewer.Server.Wire.
+export interface ModuleNotFound {
+  generation: number;
+  kind: "not-found";
+  what: "module";
+}
+
+export function decodeModuleNotFound(value: unknown): ModuleNotFound {
+  const path = "$";
+  const o = object(value, path);
+  return {
+    generation: field(o, "generation", path, nat),
+    kind: field(o, "kind", path, oneOf(["not-found"] as const)),
+    what: field(o, "what", path, oneOf(["module"] as const)),
+  };
+}

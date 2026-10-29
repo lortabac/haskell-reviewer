@@ -46,6 +46,7 @@ import HaskellReviewer.Effects.TraceTest qualified
 import HaskellReviewer.Server.ApiGoldenTest qualified
 import HaskellReviewer.Server.ApiTest qualified
 import HaskellReviewer.Server.AssetsTest qualified
+import HaskellReviewer.Server.CborTest qualified
 import HaskellReviewer.Server.EventsTest qualified
 import HaskellReviewer.Server.ListenTest qualified
 import HaskellReviewer.Server.RouterTest qualified
@@ -124,6 +125,7 @@ main = do
                   ]
             ],
         HaskellReviewer.Server.AssetsTest.tests,
+        HaskellReviewer.Server.CborTest.tests,
         HaskellReviewer.Server.EventsTest.tests,
         HaskellReviewer.Server.ListenTest.tests,
         HaskellReviewer.Server.RouterTest.tests,

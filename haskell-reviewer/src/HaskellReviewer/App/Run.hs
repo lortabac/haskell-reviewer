@@ -139,7 +139,7 @@ import HaskellReviewer.Server.Listen
     openListener,
     renderListenError,
   )
-import HaskellReviewer.Server.Router (Routes (..), application)
+import HaskellReviewer.Server.Router (Routes (..), application, warmUpGzip)
 import HaskellReviewer.Session.Clients (newClients, waitIdle)
 import HaskellReviewer.Session.Index
   ( IndexDeps (..),
@@ -432,6 +432,9 @@ serve deps logger opts root lister tracer shutdown t0 w0 = do
       case listenResult of
         Left e -> startupFailed deps (BadListen e)
         Right listener -> do
+          -- Before warp accepts: see Note [Compression] in
+          -- "HaskellReviewer.Server.Router".
+          warmUpGzip
           slot <- newSnapshotSlot
           -- Filled by ready: the listing starts after the URL line.
           start <- newEmptyMVar

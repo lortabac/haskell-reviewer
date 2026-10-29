@@ -1,3 +1,5 @@
 web/dist/** -text linguist-generated
 # Fixtures with CRLF and odd bytes: keep them as they are.
 fixtures/parse/** -text
+# CBOR fixtures are bytes: no line-end changes, no text diffs.
+fixtures/api/*.cbor binary

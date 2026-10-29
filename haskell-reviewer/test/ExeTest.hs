@@ -6,6 +6,7 @@
 -- control PATH.
 module ExeTest (tests) where
 
+import Codec.Compression.GZip qualified as GZip
 import Control.Concurrent (threadDelay)
 import Control.Exception
   ( IOException,
@@ -20,6 +21,8 @@ import Control.Monad (forM_, unless, void, when)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as Char8
+import Data.ByteString.Lazy qualified as LBS
+import Data.ByteString.Lazy.Char8 qualified as LChar8
 import Data.Char (isDigit, toLower)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.List (isInfixOf, isPrefixOf, isSuffixOf, sort)
@@ -28,6 +31,7 @@ import Data.Text qualified as Text
 import GHC.Clock (getMonotonicTime)
 import HaskellReviewer.App.Version (toolVersion)
 import HaskellReviewer.Effects.Browser (openerName)
+import HaskellReviewer.Server.CborJson (cborToJson, renderCborJsonError)
 import Network.Socket qualified as Socket
 import Network.Socket.ByteString qualified as Socket.BS
 import Numeric qualified
@@ -338,16 +342,47 @@ filesTests =
                 ".env",
                 ".git/config"
               ],
-      testCase "a <script> file: JSON text, nosniff" $
+      testCase "a <script> file: CBOR text, nosniff" $
         withCanonicalTemp $ \dir -> do
           writeFile (dir </> "x.html") "<script>alert(1)</script>\n"
           withServer id [dir] $ \server -> do
             r <- getPath server "api/file/tree/x.html"
             r.status @?= 200
-            lookup "content-type" r.headers @?= Just "application/json"
-            r.body
-              @?= "{\"generation\":1,\"kind\":\"text\",\"text\":\"<script>alert(1)</script>\\n\"}"
+            lookup "content-type" r.headers @?= Just "application/cbor"
+            cborToJson (LBS.fromStrict r.body)
+              @?= Right
+                "{\"generation\":1,\"kind\":\"text\",\
+                \\"text\":\"<script>alert(1)</script>\\n\"}"
             assertSecurityHeaders r,
+      testCase "gzip: a big file is gzipped, the event stream never" $
+        withCanonicalTemp $ \dir -> do
+          writeFile (dir </> "Big.hs") (concat (replicate 2000 "main = pure ()\n"))
+          withServer id [dir] $ \server -> do
+            let gzipOk = "Accept-Encoding: gzip\r\n"
+                get p =
+                  rawHttp server.port (requestBytes "GET" (goodHost server) p gzipOk)
+            r <- get (tokenPath server <> "api/file/tree/Big.hs")
+            r.status @?= 200
+            lookup "content-encoding" r.headers @?= Just "gzip"
+            lookup "transfer-encoding" r.headers @?= Just "chunked"
+            lookup "vary" r.headers @?= Just "Accept-Encoding"
+            assertSecurityHeaders r
+            case cborToJson (GZip.decompress (LBS.fromStrict r.body)) of
+              Left e -> assertFailure (Text.unpack (renderCborJsonError e))
+              Right j -> assertContains "\"kind\":\"text\"" (LChar8.unpack j)
+            -- No Connection: close: the stream never ends.
+            let events =
+                  "GET "
+                    <> Char8.pack (tokenPath server)
+                    <> "api/events HTTP/1.1\r\nHost: 127.0.0.1:"
+                    <> Char8.pack (show server.port)
+                    <> "\r\n"
+                    <> gzipOk
+                    <> "\r\n"
+            bytes <- rawHttpUntil server.port events "data: {}\n\n"
+            let (head', _) = BS.breakSubstring "\r\n\r\n" bytes
+            assertBool (show head') (not ("gzip" `BS.isInfixOf` head'))
+            assertContains "id: 1\nevent: hello\n" (Char8.unpack bytes),
       testCase "file list: ignored files are not in it" $
         withCanonicalTemp $ \dir -> do
           git dir ["init", "-q"]

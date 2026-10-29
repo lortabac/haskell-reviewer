@@ -13,59 +13,93 @@ import ApiSupport
     indexed,
     projectApi,
   )
+import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as LBS
 import Data.List (sort)
 import Data.Text (Text)
+import Data.Text qualified as Text
 import HaskellReviewer.Core.ModuleModel
   ( ModuleParse (..),
     TextOnlyModule (..),
     TextOnlyReason (..),
   )
+import HaskellReviewer.Server.CborJson (cborToJson, renderCborJsonError)
 import HaskellReviewer.Server.Wire (encodeIndexing, helloPayload)
 import HaskellReviewer.Session.Index (Progress (..))
 import HaskellReviewer.Session.Snapshot (Generation (..))
 import System.Directory qualified as Dir
-import System.FilePath (dropExtension, takeExtension)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
-import Test.Tasty.HUnit (testCase, (@?=))
+import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 tests :: TestTree
 tests =
   testGroup "API fixtures" $
     testCase "every fixture file has a test, and the other way round" noStale
-      : [goldenVsString name (fixtureDir <> name <> ".json") body | (name, body) <- cases]
+      : concatMap golden cases
 
--- | Each fixture: compact JSON and a newline.
-cases :: [(String, IO LBS.ByteString)]
+-- | One fixture: its name and how it's written.
+data Case = Case
+  { name :: String,
+    fixture :: Fixture
+  }
+
+-- | How a fixture is written.
+data Fixture
+  = -- | Compact JSON and a newline, to <name>.json.
+    Json (IO LBS.ByteString)
+  | -- | CBOR bytes to <name>.cbor, their JSON dump and a newline to
+    -- <name>.cbor.json.
+    Cbor (IO LBS.ByteString)
+
+-- | The golden tests of one case: one per file it writes.
+golden :: Case -> [TestTree]
+golden c = case c.fixture of
+  Json body -> [goldenVsString c.name (path ".json") body]
+  Cbor body ->
+    [ goldenVsString c.name (path ".cbor") body,
+      goldenVsString (c.name <> " (dump)") (path ".cbor.json") $ do
+        bytes <- body
+        either
+          (assertFailure . Text.unpack . renderCborJsonError)
+          (pure . (<> "\n"))
+          (cborToJson bytes)
+    ]
+  where
+    path ext = fixtureDir <> c.name <> ext
+
+cases :: [Case]
 cases =
-  [ ("events-hello", pure (LBS.fromStrict helloPayload <> "\n")),
-    ("events-indexing", pure (event (encodeIndexing (Generation 1) halfway))),
+  [ json "events-hello" (pure (LBS.fromStrict helloPayload <> "\n")),
+    json "events-indexing" (pure (event (encodeIndexing (Generation 1) halfway))),
     -- Done, with a failed module (a loose file readEntry doesn't have).
-    ("indexing", okBody (indexed projectApi) ["api", "indexing", "tree"]),
-    ("files", okBody fixtureApi ["api", "files", "tree"]),
-    ("file-text", okBody fixtureApi (file ["app", "Main.hs"])),
-    ("file-binary", okBody fixtureApi (file ["assets", "logo.png"])),
-    ("file-too-large", okBody fixtureApi (file ["data", "big.csv"])),
-    ("file-symlink", okBody fixtureApi (file ["docs", "guide.md"])),
-    ("file-submodule", okBody fixtureApi (file ["vendor", "dep"])),
-    ("modules", okBody projectApi ["api", "modules", "tree"]),
-    ("modules-implicit", okBody implicitApi ["api", "modules", "tree"]),
+    json "indexing" (okJson (indexed projectApi) ["api", "indexing", "tree"]),
+    json "files" (okJson fixtureApi ["api", "files", "tree"]),
+    cbor "file-text" (okCbor fixtureApi (file ["app", "Main.hs"])),
+    cbor "file-binary" (okCbor fixtureApi (file ["assets", "logo.png"])),
+    cbor "file-too-large" (okCbor fixtureApi (file ["data", "big.csv"])),
+    cbor "file-symlink" (okCbor fixtureApi (file ["docs", "guide.md"])),
+    cbor "file-submodule" (okCbor fixtureApi (file ["vendor", "dep"])),
+    json "modules" (okJson projectApi ["api", "modules", "tree"]),
+    json "modules-implicit" (okJson implicitApi ["api", "modules", "tree"]),
     -- One per reason a module is text only, a parsed one and one after
     -- CPP.
-    ("module-parsed", okBody projectApi (modulePath "Foo")),
-    ("module-parse-error", okBody projectApi (modulePath "pkg:exe:app:Main")),
-    ("module-pragma-error", okBody projectApi (modulePath "Tests")),
-    ("module-preprocessed", okBody projectApi (modulePath "pkg:test:spec:Main")),
-    ("module-cpp", okBody projectApi (modulePath "pkg:bench:slow:Main")),
-    ("module-crashed", okBody crashingApi (modulePath "Foo")),
-    ("module-too-slow", okBody slowApi (modulePath "Foo")),
-    ("module-generated", okBody projectApi (modulePath "Lexer")),
-    ("module-no-source", okBody projectApi (modulePath "Gone")),
-    ("module-not-text", okBody implicitApi (modulePath "Main")),
-    ("module-too-large", okBody implicitApi (modulePath "Data.Deep.Mod"))
+    json "module-parsed" (okJson projectApi (modulePath "Foo")),
+    json "module-parse-error" (okJson projectApi (modulePath "pkg:exe:app:Main")),
+    json "module-pragma-error" (okJson projectApi (modulePath "Tests")),
+    json "module-preprocessed" (okJson projectApi (modulePath "pkg:test:spec:Main")),
+    json "module-cpp" (okJson projectApi (modulePath "pkg:bench:slow:Main")),
+    json "module-crashed" (okJson crashingApi (modulePath "Foo")),
+    json "module-too-slow" (okJson slowApi (modulePath "Foo")),
+    json "module-generated" (okJson projectApi (modulePath "Lexer")),
+    json "module-no-source" (okJson projectApi (modulePath "Gone")),
+    json "module-not-text" (okJson implicitApi (modulePath "Main")),
+    json "module-too-large" (okJson implicitApi (modulePath "Data.Deep.Mod")),
+    json "module-not-found" (notFoundJson projectApi (modulePath "Nope"))
   ]
   where
+    json n body = Case {name = n, fixture = Json body}
+    cbor n body = Case {name = n, fixture = Cbor body}
     file p = ["api", "file", "tree"] <> p
     modulePath ref = ["api", "module", "tree", ref]
     crashingApi = answering (ParserCrashed "boom")
@@ -84,14 +118,30 @@ fixtureDir = "../fixtures/api/"
 noStale :: IO ()
 noStale = do
   files <- Dir.listDirectory fixtureDir
-  sort [dropExtension f | f <- files, takeExtension f == ".json"]
-    @?= sort (map fst cases)
-  [f | f <- files, takeExtension f /= ".json"] @?= []
+  sort files @?= sort (concatMap fileNames cases)
+  where
+    fileNames c = case c.fixture of
+      Json _ -> [c.name <> ".json"]
+      Cbor _ -> [c.name <> ".cbor", c.name <> ".cbor.json"]
 
 -- | GET through the real app; must be a 200 with JSON.
-okBody :: TestApi -> [Text] -> IO LBS.ByteString
-okBody api path = do
+okJson :: TestApi -> [Text] -> IO LBS.ByteString
+okJson api path = (<> "\n") <$> answer 200 "application/json" api path
+
+-- | GET through the real app; must be a 200 with CBOR. The bytes as
+-- they come.
+okCbor :: TestApi -> [Text] -> IO LBS.ByteString
+okCbor = answer 200 "application/cbor"
+
+-- | GET through the real app; must be a 404 with JSON.
+notFoundJson :: TestApi -> [Text] -> IO LBS.ByteString
+notFoundJson api path = (<> "\n") <$> answer 404 "application/json" api path
+
+-- | GET through the real app: check the status and the Content-Type,
+-- give back the body.
+answer :: Int -> ByteString -> TestApi -> [Text] -> IO LBS.ByteString
+answer status contentType api path = do
   r <- getApi api path
-  r.status @?= 200
-  lookup "Content-Type" r.headers @?= Just "application/json"
-  pure (r.body <> "\n")
+  r.status @?= status
+  lookup "Content-Type" r.headers @?= Just contentType
+  pure r.body

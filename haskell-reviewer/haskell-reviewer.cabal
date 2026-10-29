@@ -97,6 +97,8 @@ library
     -- Server
     HaskellReviewer.Server.Api
     HaskellReviewer.Server.Assets
+    HaskellReviewer.Server.Cbor
+    HaskellReviewer.Server.CborJson
     HaskellReviewer.Server.Events
     HaskellReviewer.Server.Listen
     HaskellReviewer.Server.Router
@@ -118,6 +120,7 @@ library
     , base                  >=4.20   && <4.23
     , bytestring            >=0.12   && <0.13
     , Cabal-syntax          >=3.12   && <3.17
+    , cborg                 >=0.2.10 && <0.3
     , containers            >=0.6.8  && <0.9
     , crypton               >=2.0    && <2.3
     , directory             >=1.3.8  && <1.4
@@ -136,6 +139,7 @@ library
     , unix                  >=2.8    && <2.9
     , vector                >=0.13   && <0.14
     , wai                   >=3.2.4  && <3.3
+    , wai-extra             >=3.1.18 && <3.2
     , warp                  >=3.4    && <3.5
 
 executable haskell-reviewer
@@ -211,6 +215,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Server.ApiGoldenTest
     HaskellReviewer.Server.ApiTest
     HaskellReviewer.Server.AssetsTest
+    HaskellReviewer.Server.CborTest
     HaskellReviewer.Server.EventsTest
     HaskellReviewer.Server.ListenTest
     HaskellReviewer.Server.RouterTest
@@ -223,13 +228,17 @@ test-suite haskell-reviewer-test
     RichDump
     TestSupport
 
-  ghc-options:        -threaded
+  -- -N: tasty >= 1.5.5 no longer turns it on by itself, and tests must
+  -- run in parallel: that's what catches the RTS livelock
+  -- (Q-RTS-BLACKHOLE) and races.
+  ghc-options:        -threaded -rtsopts "-with-rtsopts=-N"
   build-tool-depends: haskell-reviewer:haskell-reviewer
   build-depends:
     , aeson
     , async
     , base
     , bytestring
+    , cborg
     , containers
     , directory
     , filepath
@@ -250,6 +259,7 @@ test-suite haskell-reviewer-test
     , unix
     , wai
     , warp
+    , zlib              >=0.7  && <0.8
 
 -- The benchmark harness (SPEC §10, §11.9; D-76, D-85). Runs the product
 -- binary against the pinned reference projects (bench/projects.txt,

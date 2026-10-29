@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fixture, stubFetch } from "../test/fixtures";
+import { cborFixture, fixture, stubFetch } from "../test/fixtures";
 import { mountAppAt, unmountApp } from "../test/mount";
 
 beforeEach(() => {
   stubFetch({
     "/tok/api/files/tree": [200, fixture("files")],
-    "/tok/api/file/tree/a.hs": [200, fixture("file-text")],
+    "/tok/api/file/tree/a.hs": [200, cborFixture("file-text")],
   });
 });
 

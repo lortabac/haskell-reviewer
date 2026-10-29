@@ -26,9 +26,5 @@ export default defineConfig({
     environment: "happy-dom",
     // e2e/ is Playwright's, run with `make e2e`.
     exclude: [...configDefaults.exclude, "e2e/**"],
-    // The persistent module cache keeps the import.meta.glob list of
-    // test/fixtures.ts, so an added or removed fixture would go
-    // unseen. The whole run takes a few seconds anyway.
-    fsModuleCache: false,
   },
 });

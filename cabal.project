@@ -1,3 +1,8 @@
 packages: haskell-reviewer/
 tests: True
 benchmarks: True
+
+-- cborg 0.2.10.0 has upper bounds that exclude GHC 9.14's base,
+-- containers and ghc-prim. It builds fine anyway. Remove this once
+-- cborg gets a revision (or release) that allows them.
+allow-newer: cborg:base, cborg:containers, cborg:ghc-prim

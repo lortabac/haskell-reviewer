@@ -6,7 +6,7 @@ BENCH_PROJECTS ?=
 BENCH_JSON ?=
 BENCH_LABEL ?=
 
-.PHONY: build test install freeze web e2e bench bench-smoke cpp-check
+.PHONY: build test install freeze web e2e bench bench-smoke cpp-check cbor-json
 
 build:
 	$(CABAL) build all
@@ -43,6 +43,12 @@ bench-smoke: build
 cpp-check:
 	$(CABAL) build lib:haskell-reviewer
 	$(CABAL) exec -v0 -- runghc dev/CppCheck.hs fixtures/cpp bench/projects $(CPP_CHECK_DIRS)
+
+# Dev only: CBOR on stdin, JSON on stdout. For a CBOR answer of the
+# API, e.g. curl -s <url>/api/file/tree/a.hs | make -s cbor-json
+cbor-json:
+	@$(CABAL) build -v0 lib:haskell-reviewer
+	@$(CABAL) exec -v0 -- runghc dev/CborJson.hs
 
 # Rebuild the frontend bundle. Needs Node (version in web/.nvmrc).
 # web/dist is committed: commit it after this.
