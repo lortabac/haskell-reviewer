@@ -4,8 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fixture, stubFetch } from "../../test/fixtures";
 import { mountAppAt, unmountApp } from "../../test/mount";
 import { decodeModuleTree, type ModuleTree as Tree } from "../api/modules";
-import { ModuleTree } from "./ModuleTree";
-import { indexSources } from "./store";
+import { type Current, ModuleTree } from "./ModuleTree";
+import { indexRefs, indexSources } from "./store";
 
 // Mounts the app with a module tree, and waits for the tree.
 async function panel(name: string, at = "/tok"): Promise<HTMLElement> {
@@ -40,22 +40,29 @@ function link(p: HTMLElement, text: string): HTMLAnchorElement | undefined {
 }
 
 let dispose: (() => void) | undefined;
-let setCurrent: (path: string | undefined) => void = () => undefined;
+let setCurrent: (c: Current | string | undefined) => void = () => undefined;
 
-// Renders the tree alone, with a current path we can change.
-function mountTree(tree: Tree, start?: string): HTMLElement {
+const asCurrent = (c: Current | string | undefined): Current | undefined =>
+  typeof c === "string" ? { kind: "path", path: c } : c;
+
+// Renders the tree alone, with a current file (a path) or module we can
+// change.
+function mountTree(tree: Tree, start?: Current | string): HTMLElement {
   const root = document.createElement("div");
   document.body.append(root);
-  const [current, set] = createSignal(start);
-  setCurrent = set;
+  const [current, set] = createSignal(asCurrent(start));
+  setCurrent = (c) => set(asCurrent(c));
   const bySource = indexSources(tree);
+  const byRef = indexRefs(tree);
   dispose = render(
     () => (
       <ModuleTree
         tree={tree}
         bySource={bySource}
+        byRef={byRef}
         current={current()}
-        href={(p) => `/tok/src/tree/${p}`}
+        docsHref={(r) => `/tok/docs/tree/${r}`}
+        srcHref={(p) => `/tok/src/tree/${p}`}
       />
     ),
     root,
@@ -114,7 +121,7 @@ describe("ModuleTree", () => {
     );
   });
 
-  it("modules: sorted, markers, links, no source as text", async () => {
+  it("modules: sorted, markers, docs links, no source as text", async () => {
     const p = await panel("modules");
     button(p, "pkg 0.1.0").click();
     const lib = button(p, "lib");
@@ -129,14 +136,13 @@ describe("ModuleTree", () => {
       "Paths_pkg listed, no source (autogen)",
       "Sig signature",
     ]);
-    expect(link(p, "Foo")?.getAttribute("href")).toBe(
-      "/tok/src/tree/pkg/src/Foo.hs",
-    );
+    expect(link(p, "Foo")?.getAttribute("href")).toBe("/tok/docs/tree/Foo");
+    // Generated and preprocessed: docs too, the page says why.
     expect(link(p, "Lexer generated (alex)")?.getAttribute("href")).toBe(
-      "/tok/src/tree/pkg/src/Lexer.x",
+      "/tok/docs/tree/Lexer",
     );
     expect(link(p, "Sig signature")?.getAttribute("href")).toBe(
-      "/tok/src/tree/pkg/src/Sig.hsig",
+      "/tok/docs/tree/Sig",
     );
     // No source: plain text, no link.
     const entries = [...p.querySelectorAll(".tree-entry")];
@@ -150,10 +156,14 @@ describe("ModuleTree", () => {
     button(p, "test:spec").click();
     expect(
       link(p, "Main preprocessed (hspec-discover)")?.getAttribute("href"),
-    ).toBe("/tok/src/tree/pkg/test/Spec.hs");
+    ).toBe("/tok/docs/tree/pkg%3Atest%3Aspec%3AMain");
+    button(p, "exe:app").click();
+    expect(link(p, "Main")?.getAttribute("href")).toBe(
+      "/tok/docs/tree/pkg%3Aexe%3Aapp%3AMain",
+    );
   });
 
-  it("other files: paths, boot marker", async () => {
+  it("other files: paths, boot marker, boot keeps the file link", async () => {
     const p = await panel("modules");
     const other = button(p, "Other files");
     other.click();
@@ -164,7 +174,13 @@ describe("ModuleTree", () => {
       "scripts/build-docs.hs",
     ]);
     expect(link(p, "scripts/Tool.hs")?.getAttribute("href")).toBe(
-      "/tok/src/tree/scripts/Tool.hs",
+      "/tok/docs/tree/Tool",
+    );
+    expect(link(p, "scripts/build-docs.hs")?.getAttribute("href")).toBe(
+      "/tok/docs/tree/scripts/build-docs.hs",
+    );
+    expect(link(p, "pkg/src/Boot.hs-boot boot")?.getAttribute("href")).toBe(
+      "/tok/src/tree/pkg/src/Boot.hs-boot",
     );
   });
 
@@ -190,6 +206,30 @@ describe("ModuleTree", () => {
     expect(button(p, "Other files").getAttribute("aria-expanded")).toBe(
       "false",
     );
+  });
+
+  it.each(["Foo", "pkg%3Alib%3AFoo", "pkg:lib:Foo"])(
+    "docs deep link by ref or id (%s): groups open, module current",
+    async (ref) => {
+      const p = await panel("modules", `/tok/docs/tree/${ref}`);
+      await vi.waitFor(() => {
+        expect(p.querySelector('[aria-current="page"]')?.textContent).toBe(
+          "Foo",
+        );
+      });
+      expect(button(p, "lib").getAttribute("aria-expanded")).toBe("true");
+      expect(button(p, "exe:app").getAttribute("aria-expanded")).toBe("false");
+    },
+  );
+
+  it("docs deep link to a loose module by path ref", async () => {
+    const p = await panel("modules", "/tok/docs/tree/scripts/build-docs.hs");
+    await vi.waitFor(() => {
+      expect(p.querySelector('[aria-current="page"]')?.textContent).toBe(
+        "scripts/build-docs.hs",
+      );
+    });
+    expect(button(p, "Other files").getAttribute("aria-expanded")).toBe("true");
   });
 
   it("deep link to an other file opens Other files", async () => {
@@ -285,9 +325,30 @@ describe("ModuleTree alone", () => {
     button(root, "test:t").click();
     const current = [...root.querySelectorAll('[aria-current="page"]')];
     expect(current.map((a) => a.getAttribute("href"))).toEqual([
-      "/tok/src/tree/src/Foo.hs",
-      "/tok/src/tree/src/Foo.hs",
+      "/tok/docs/tree/p:lib:Foo",
+      "/tok/docs/tree/p:test:t:Foo",
     ]);
+    // On a docs page: only that module.
+    setCurrent({ kind: "ref", ref: "p:test:t:Foo" });
+    const docs = [...root.querySelectorAll('[aria-current="page"]')];
+    expect(docs.map((a) => a.getAttribute("href"))).toEqual([
+      "/tok/docs/tree/p:test:t:Foo",
+    ]);
+  });
+
+  it("current by ref scrolls to the module, by id too", () => {
+    const scroll = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => undefined);
+    const root = mountTree(modules, { kind: "ref", ref: "pkg:lib:Sig" });
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(scroll.mock.contexts[0]).toBe(link(root, "Sig signature"));
+    expect(link(root, "Sig signature")?.getAttribute("aria-current")).toBe(
+      "page",
+    );
+    setCurrent({ kind: "ref", ref: "Nope" });
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(root.querySelector('[aria-current="page"]')).toBeNull();
   });
 
   it("component keys can't clash on ':'", () => {

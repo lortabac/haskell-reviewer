@@ -8,6 +8,7 @@ import "./styles/tokens.css";
 import "./styles/frame.css";
 import "./styles/files.css";
 import "./styles/modules.css";
+import "./styles/docs.css";
 
 const root = document.getElementById("root");
 if (root === null) {

@@ -1,16 +1,24 @@
 import { useLocation, useResolvedPath } from "@solidjs/router";
 import { createMemo, type JSX, Match, Show, Switch } from "solid-js";
 import { hrefFor, pathFromPathname, withBase } from "../files/paths";
-import { ModuleTree } from "./ModuleTree";
+import { docsHref } from "../api/module";
+import { refFromPathname } from "../docs/urls";
+import { type Current, ModuleTree } from "./ModuleTree";
 import { useModules } from "./store";
 
 // The Modules view of the sidebar.
 export function ModulesPanel(): JSX.Element {
   const modules = useModules();
   const location = useLocation();
-  const current = createMemo(() => pathFromPathname(location.pathname));
+  const current = createMemo((): Current | undefined => {
+    const path = pathFromPathname(location.pathname);
+    if (path !== undefined) return { kind: "path", path };
+    const ref = refFromPathname(location.pathname);
+    return ref === undefined ? undefined : { kind: "ref", ref };
+  });
   const base = useResolvedPath(() => "/");
-  const href = (path: string): string => withBase(base(), hrefFor(path));
+  const docs = (ref: string): string => withBase(base(), docsHref(ref));
+  const src = (path: string): string => withBase(base(), hrefFor(path));
   const empty = () => {
     const t = modules.ok();
     return (
@@ -31,8 +39,10 @@ export function ModulesPanel(): JSX.Element {
             <ModuleTree
               tree={t()}
               bySource={modules.bySource()}
+              byRef={modules.byRef()}
               current={current()}
-              href={href}
+              docsHref={docs}
+              srcHref={src}
             />
           </Show>
         )}

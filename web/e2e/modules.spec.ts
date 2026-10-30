@@ -77,15 +77,16 @@ test.describe("implicit package", () => {
     // Non-Haskell files are in the file tree only.
     await expect(link(page, "README.md")).toHaveCount(0);
 
+    // Modules open the docs view.
     await link(page, "src/Main.hs").click();
-    await expect(page).toHaveURL(server.base + "src/tree/src/Main.hs");
-    await expect(page.locator("main h1")).toHaveText("src/Main.hs");
+    await expect(page).toHaveURL(server.base + "docs/tree/Main");
+    await expect(page.locator("main h1")).toHaveText("Main");
     await expect(link(page, "src/Main.hs")).toHaveAttribute(
       "aria-current",
       "page",
     );
     // A plain module: no banner.
-    await expect(page.locator(".file-banner")).toHaveCount(0);
+    await expect(page.locator(".docs-banner")).toHaveCount(0);
   });
 
   test("deep link opens the group", async ({ page, server }) => {
@@ -176,9 +177,10 @@ test.describe("cabal project", () => {
     await open(page, "lib");
     await expect(link(page, "Foo")).toBeVisible();
     await expect(link(page, "Sig signature")).toBeVisible();
+    // Generated: the docs page too, it says why it's text only.
     await expect(link(page, "Lexer generated (alex)")).toHaveAttribute(
       "href",
-      /\/src\/tree\/pkg\/src\/Lexer\.x$/,
+      /\/docs\/tree\/Lexer$/,
     );
     const paths = sidebar(page).locator(".tree-entry");
     await expect(paths).toHaveText(["Paths_pkg listed, no source (autogen)"]);

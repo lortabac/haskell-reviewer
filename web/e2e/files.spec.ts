@@ -185,7 +185,7 @@ test("back and forward", async ({ page, server }) => {
   await page.goBack();
   await expect(page).toHaveURL(server.base);
   await expect(page.locator("main")).toContainText(
-    "Pick a file in the sidebar.",
+    "Pick a module or file in the sidebar.",
   );
   await expect(current).toHaveCount(0);
 });

@@ -17,7 +17,15 @@ import { bannerText } from "../modules/notices";
 import { useModules } from "../modules/store";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
-import { apiFileUrl, hrefFor, pathFromPathname, withBase } from "./paths";
+import { bytes, limit } from "../ui/format";
+import { createDelay, focusInMain, focusLost } from "../ui/focus";
+import {
+  apiFileUrl,
+  hrefFor,
+  parseLineHash,
+  pathFromPathname,
+  withBase,
+} from "./paths";
 
 // The file view: /<token>/src/tree/<path>.
 export function FileView(): JSX.Element {
@@ -89,16 +97,6 @@ function FilePage(props: { path: string }): JSX.Element {
   );
 }
 
-function focusInMain(): boolean {
-  const el = document.activeElement;
-  return el !== null && el.id !== "main" && el.closest("#main") !== null;
-}
-
-function focusLost(): boolean {
-  const el = document.activeElement;
-  return el === null || el === document.body || !el.isConnected;
-}
-
 function body(v: View): JSX.Element {
   switch (v.kind) {
     case "text":
@@ -147,17 +145,58 @@ function Symlink(props: {
   );
 }
 
-// Line numbers and code as two text nodes, no element per line. Big
-// files are fine like this until the views are virtualised (M2).
+// Line numbers as one span per line (for #L<n> marks), code as one
+// text node. Big files are fine like this until the views are
+// virtualised (M2).
 function FileText(props: { text: string }): JSX.Element {
-  const numbers = () => {
-    const n = lineCount(props.text);
-    return Array.from({ length: n }, (_, i) => String(i + 1)).join("\n");
-  };
+  const location = useLocation();
+  const numbers = createMemo(() =>
+    Array.from({ length: lineCount(props.text) }, (_, i) => {
+      const el = document.createElement("span");
+      el.textContent = String(i + 1);
+      return el;
+    }),
+  );
+  // Spans with "\n" between them: the text is the same as one node.
+  const gutter = () =>
+    numbers().flatMap((el, i) => (i === 0 ? [el] : ["\n", el]));
+  // Mark the lines of #L<n>[-L<m>] and scroll the first one to the
+  // middle. Again on a hash change, with no refetch. Bad or out of
+  // range: nothing.
+  let marked: HTMLElement[] = [];
+  // The gutter is hidden from screen readers: say what is marked.
+  const [hint, setHint] = createSignal("");
+  createEffect(
+    on([numbers, () => location.hash], ([spans, hash]) => {
+      for (const el of marked) el.classList.remove(lineTarget);
+      marked = [];
+      setHint("");
+      const r = parseLineHash(hash);
+      if (r === undefined || r.from > spans.length) return;
+      marked = spans.slice(r.from - 1, r.to);
+      const to = Math.min(r.to, spans.length);
+      setHint(
+        to === r.from
+          ? `Line ${r.from} marked.`
+          : `Lines ${r.from}–${to} marked.`,
+      );
+      for (const el of marked) el.classList.add(lineTarget);
+      // After the router's own scroll (to the top, as no element has
+      // that id).
+      const first = marked[0];
+      const frame = requestAnimationFrame(() =>
+        first?.scrollIntoView({ block: "center" }),
+      );
+      onCleanup(() => cancelAnimationFrame(frame));
+    }),
+  );
   return (
     <div class="file-text">
+      <p class="sr-only" role="status">
+        {hint()}
+      </p>
       <pre class="file-gutter" aria-hidden="true">
-        {numbers()}
+        {gutter()}
       </pre>
       <pre class="file-code" tabindex="0" aria-label="File contents">
         {props.text}
@@ -165,6 +204,8 @@ function FileText(props: { text: string }): JSX.Element {
     </div>
   );
 }
+
+const lineTarget = "file-line-target";
 
 // Lines as the <pre> shows them: split on "\n", and a final "\n" ends
 // the last line instead of starting a new one. CRLF is one line. Other
@@ -177,26 +218,4 @@ export function lineCount(text: string): number {
     n++;
   }
   return text.endsWith("\n") ? n - 1 : n;
-}
-
-function bytes(n: number): string {
-  return n === 1 ? "1 byte" : `${n.toLocaleString("en-US")} bytes`;
-}
-
-function limit(n: number): string {
-  const mib = 1024 * 1024;
-  return n > 0 && n % mib === 0 ? `${n / mib} MiB` : bytes(n);
-}
-
-// True once loading() has been true for ms milliseconds, so fast loads
-// don't flash a loading text.
-function createDelay(loading: () => boolean, ms: number): () => boolean {
-  const [slow, setSlow] = createSignal(false);
-  createEffect(() => {
-    setSlow(false);
-    if (!loading()) return;
-    const t = setTimeout(() => setSlow(true), ms);
-    onCleanup(() => clearTimeout(t));
-  });
-  return slow;
 }

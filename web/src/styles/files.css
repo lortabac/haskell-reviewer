@@ -104,3 +104,13 @@
 .file-code {
   overflow-x: auto;
 }
+
+/* Lines of #L<n>[-L<m>]: bold, a bar and a background, not just colour. */
+.file-line-target {
+  display: inline-block;
+  min-width: 100%;
+  background: var(--color-mark);
+  color: var(--color-fg);
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--color-fg);
+}

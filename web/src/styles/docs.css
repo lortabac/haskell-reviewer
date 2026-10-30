@@ -1,0 +1,176 @@
+/* Docs view: module page. */
+
+.docs-title {
+  font-family: var(--font-mono);
+  font-size: 1.5rem;
+  overflow-wrap: anywhere;
+}
+
+.docs-meta {
+  margin: 0 0 var(--space-2);
+  color: var(--color-muted);
+  overflow-wrap: anywhere;
+}
+
+/* Notices on the page: banners, warnings, decl not found. A border on
+   the left, not just colour. */
+.docs-notice {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-fg);
+  overflow-wrap: anywhere;
+}
+
+.docs-notice p {
+  margin: 0 0 var(--space-2);
+}
+
+.docs-notice p:last-child {
+  margin-bottom: 0;
+}
+
+.docs-extensions summary {
+  cursor: pointer;
+}
+
+.docs-extensions ul {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-4);
+  columns: 14rem;
+}
+
+/* One declaration. */
+.decl {
+  margin: 0 0 var(--space-4);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+  scroll-margin-top: var(--space-3);
+}
+
+.decl:focus {
+  outline: none;
+}
+
+.decl:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.decl-head {
+  margin: 0 0 var(--space-2);
+  font-size: 1rem;
+  font-weight: normal;
+}
+
+.decl-badges {
+  display: inline-block;
+  margin-left: var(--space-2);
+  font-family: var(--font-sans);
+  font-size: 0.85em;
+}
+
+.decl-badge {
+  display: inline-block;
+  margin-right: var(--space-1);
+  padding: 0 var(--space-1);
+  border: 1px solid var(--color-muted);
+  border-radius: 4px;
+}
+
+.decl-shared,
+.decl-actions {
+  margin: 0 0 var(--space-2);
+  font-size: 0.9em;
+}
+
+/* Signatures (SPEC §5.5): each part between top-level arrows is a box
+   that stays whole when it fits; the lines after the first hang by
+   2em. A part too long for a line wraps anywhere. Never a sideways
+   scroll. */
+.sig {
+  display: block;
+  padding-left: 2em;
+  text-indent: -2em;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.sig-part {
+  display: inline-block;
+  max-width: 100%;
+  text-indent: 0;
+  white-space: pre-wrap;
+  vertical-align: top;
+}
+
+.code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Token links: underlined, as all links. No token colours yet. */
+.sig a,
+.code a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* Comments. */
+.doc pre {
+  padding: var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  overflow-x: auto;
+}
+
+.doc-numbered {
+  list-style: none;
+  padding-left: var(--space-3);
+}
+
+.doc-since {
+  color: var(--color-muted);
+  font-size: 0.9em;
+}
+
+.doc-table {
+  border-collapse: collapse;
+}
+
+.doc-table th,
+.doc-table td {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+}
+
+.doc-math-display {
+  display: block;
+}
+
+/* Links off the app open in a new tab: say so. */
+.ext-link::after {
+  content: " ↗" / "";
+}
+
+/* Search box ("not found" pages). */
+.search-box label {
+  display: block;
+  margin-bottom: var(--space-1);
+}
+
+.search-box input {
+  width: min(100%, 30rem);
+  padding: var(--space-1) var(--space-2);
+  font: inherit;
+  color: var(--color-fg);
+  background: var(--color-bg);
+  border: 1px solid var(--color-muted);
+  border-radius: 4px;
+}
+
+.search-results {
+  padding-left: var(--space-4);
+  overflow-wrap: anywhere;
+}

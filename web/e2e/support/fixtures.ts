@@ -7,7 +7,12 @@ import {
   type Page,
   test as base,
 } from "@playwright/test";
-import { makeCabalProject, makeProject, type Project } from "./project";
+import {
+  makeCabalProject,
+  makeDocsProject,
+  makeProject,
+  type Project,
+} from "./project";
 import { type Proxy, startProxy } from "./proxy";
 import { type Server, startServer } from "./server";
 
@@ -74,6 +79,7 @@ interface TestFixtures {
 interface WorkerFixtures {
   project: Project;
   cabalProject: Project;
+  docsProject: Project;
 }
 
 export const test = base.extend<TestFixtures, WorkerFixtures>({
@@ -91,6 +97,16 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     // eslint-disable-next-line no-empty-pattern
     async ({}, use) => {
       const p = await makeCabalProject();
+      await use(p);
+      await p.remove();
+    },
+    { scope: "worker" },
+  ],
+
+  docsProject: [
+    // eslint-disable-next-line no-empty-pattern
+    async ({}, use) => {
+      const p = await makeDocsProject();
       await use(p);
       await p.remove();
     },
@@ -183,6 +199,10 @@ export { expect };
 // 404 on an asset must fail.
 export const notFound404 =
   /Failed to load resource: the server responded with a status of 404.* \[\S*\/api\/file\/tree\//;
+
+// The same for the module API (an unknown module).
+export const moduleNotFound404 =
+  /Failed to load resource: the server responded with a status of 404.* \[\S*\/api\/module\/tree\//;
 
 // The sidebar: the Project nav.
 export function sidebar(page: Page): Locator {

@@ -21,29 +21,49 @@ import type {
 } from "../api/modules";
 import { compareCodePoints } from "../files/tree";
 import { moduleMarker } from "./notices";
-import { componentKey, otherKey, packageKey, type SourceInfo } from "./store";
+import {
+  componentKey,
+  otherKey,
+  packageKey,
+  type RefInfo,
+  type SourceInfo,
+} from "./store";
 
 // The module tree in the sidebar: packages, components, modules, then
 // "Other files". Nested lists with disclosure buttons, like the file
 // tree. Not an ARIA tree yet (M9).
 
+// What the main view shows: a module (by ref or id, as typed in the
+// URL) or a file.
+export type Current =
+  { kind: "ref"; ref: string } | { kind: "path"; path: string };
+
+// A sidebar link: a module's docs page, or a file.
+type Target = { kind: "ref"; ref: string } | { kind: "path"; path: string };
+
 export interface ModuleTreeProps {
   tree: Tree;
   bySource: ReadonlyMap<string, SourceInfo>;
-  // The file shown in the main view, if any.
-  current: string | undefined;
-  // The link for a file path.
-  href: (path: string) => string;
+  byRef: ReadonlyMap<string, RefInfo>;
+  current: Current | undefined;
+  // Links to a docs page and to a file.
+  docsHref: (ref: string) => string;
+  srcHref: (path: string) => string;
 }
 
+// A module is current on its docs page (by ref or id) and on its source
+// file's page (D-182).
 interface Ctx {
-  isCurrent: (path: string) => boolean;
-  href: (path: string) => string;
+  isCurrent: (t: Target, path: string | undefined) => boolean;
+  href: (t: Target) => string;
   isOpen: (key: string) => boolean;
   toggle: (key: string) => void;
-  addLink: (path: string, el: HTMLAnchorElement) => void;
-  removeLink: (path: string, el: HTMLAnchorElement) => void;
+  addLink: (keys: string[], el: HTMLAnchorElement) => void;
+  removeLink: (keys: string[], el: HTMLAnchorElement) => void;
 }
+
+const refKey = (ref: string) => "r:" + ref;
+const pathKey = (path: string) => "p:" + path;
 
 export function ModuleTree(props: ModuleTreeProps): JSX.Element {
   // Same pattern as FileTree: one signal per group, made when first
@@ -58,43 +78,73 @@ export function ModuleTree(props: ModuleTreeProps): JSX.Element {
     }
     return s;
   };
-  const isCurrent = createSelector(() => props.current);
+  // The current module's ref as the tree has it (a URL can have the
+  // id), or the current file.
+  const currentRef = createMemo(() => {
+    const c = props.current;
+    return c?.kind === "ref"
+      ? (props.byRef.get(c.ref)?.ref ?? c.ref)
+      : undefined;
+  });
+  const currentPath = createMemo(() => {
+    const c = props.current;
+    return c?.kind === "path" ? c.path : undefined;
+  });
+  const isRef = createSelector(currentRef);
+  const isPath = createSelector(currentPath);
+  // Where it shows: groups to open, link to scroll to.
+  const place = createMemo(() => {
+    const ref = currentRef();
+    if (ref !== undefined) {
+      return { key: refKey(ref), groups: props.byRef.get(ref)?.groups };
+    }
+    const path = currentPath();
+    if (path !== undefined) {
+      return { key: pathKey(path), groups: props.bySource.get(path)?.groups };
+    }
+    return undefined;
+  });
   const links = new Map<string, HTMLAnchorElement>();
   let scrollTo: string | undefined;
-  const scroll = (path: string): void => {
-    const el = links.get(path);
+  const scroll = (key: string): void => {
+    const el = links.get(key);
     if (el === undefined) return;
     el.scrollIntoView({ block: "nearest" });
     scrollTo = undefined;
   };
-  // When the current file changes: open its groups and scroll to it.
+  // When the current module or file changes: open its groups and
+  // scroll to it.
   createEffect(
     on(
-      () => props.current,
-      (current) => {
-        scrollTo = current;
-        if (current === undefined) return;
-        const info = props.bySource.get(current);
-        if (info === undefined) return;
-        for (const key of info.groups) group(key)[1](true);
-        scroll(current);
+      () => place()?.key,
+      () => {
+        const p = place();
+        scrollTo = p?.key;
+        if (p === undefined || p.groups === undefined) return;
+        for (const key of p.groups) group(key)[1](true);
+        scroll(p.key);
       },
     ),
   );
   const ctx: Ctx = {
-    isCurrent,
-    href: (path) => props.href(path),
+    isCurrent: (t, path) =>
+      (t.kind === "ref" && isRef(t.ref)) ||
+      (path !== undefined && isPath(path)),
+    href: (t) =>
+      t.kind === "ref" ? props.docsHref(t.ref) : props.srcHref(t.path),
     isOpen: (key) => group(key)[0](),
     toggle: (key) => {
       const [open, setOpen] = group(key);
       setOpen(!open());
     },
-    addLink: (path, el) => {
-      links.set(path, el);
-      if (scrollTo === path) scroll(path);
+    addLink: (keys, el) => {
+      for (const k of keys) {
+        if (!links.has(k)) links.set(k, el);
+        if (scrollTo === k) scroll(k);
+      }
     },
-    removeLink: (path, el) => {
-      if (links.get(path) === el) links.delete(path);
+    removeLink: (keys, el) => {
+      for (const k of keys) if (links.get(k) === el) links.delete(k);
     },
   };
   const implicit = () => props.tree.notices.some((n) => n.kind === "implicit");
@@ -185,6 +235,9 @@ function Component(props: {
   );
 }
 
+// A module with a source links to its docs page (generated and
+// preprocessed ones too: the page says why it's text only). No source:
+// plain text.
 function Module(props: { mod: ModuleEntry; ctx: Ctx }): JSX.Element {
   const path = () => {
     const s = props.mod.source;
@@ -202,7 +255,11 @@ function Module(props: { mod: ModuleEntry; ctx: Ctx }): JSX.Element {
         }
       >
         {(p) => (
-          <Link path={p()} ctx={props.ctx}>
+          <Link
+            target={{ kind: "ref", ref: props.mod.ref }}
+            path={p()}
+            ctx={props.ctx}
+          >
             {props.mod.name}
             <Marker text={moduleMarker(props.mod)} />
           </Link>
@@ -215,7 +272,11 @@ function Module(props: { mod: ModuleEntry; ctx: Ctx }): JSX.Element {
 function Broken(props: { pkg: BrokenPackage; ctx: Ctx }): JSX.Element {
   return (
     <li>
-      <Link path={props.pkg.cabalFile} ctx={props.ctx}>
+      <Link
+        target={{ kind: "path", path: props.pkg.cabalFile }}
+        path={props.pkg.cabalFile}
+        ctx={props.ctx}
+      >
         {props.pkg.cabalFile}
         <Marker text="broken" />
       </Link>
@@ -224,10 +285,15 @@ function Broken(props: { pkg: BrokenPackage; ctx: Ctx }): JSX.Element {
   );
 }
 
+// A loose module links to its docs page; a boot file to the file.
 function Other(props: { file: OtherFile; ctx: Ctx }): JSX.Element {
+  const target = (): Target =>
+    props.file.kind === "module"
+      ? { kind: "ref", ref: props.file.ref }
+      : { kind: "path", path: props.file.path };
   return (
     <li>
-      <Link path={props.file.path} ctx={props.ctx}>
+      <Link target={target()} path={props.file.path} ctx={props.ctx}>
         {props.file.path}
         <Marker text={props.file.kind === "boot" ? "boot" : undefined} />
       </Link>
@@ -243,24 +309,34 @@ function Marker(props: { text: string | undefined }): JSX.Element {
   );
 }
 
+// path: its file, so it is current on the file's page too.
 function Link(props: {
+  target: Target;
   path: string;
   ctx: Ctx;
   children: JSX.Element;
 }): JSX.Element {
   let link: HTMLAnchorElement | undefined;
+  const keys = () => {
+    const t = props.target;
+    return t.kind === "ref"
+      ? [refKey(t.ref), pathKey(props.path)]
+      : [pathKey(t.path)];
+  };
   onMount(() => {
-    if (link !== undefined) props.ctx.addLink(props.path, link);
+    if (link !== undefined) props.ctx.addLink(keys(), link);
   });
   onCleanup(() => {
-    if (link !== undefined) props.ctx.removeLink(props.path, link);
+    if (link !== undefined) props.ctx.removeLink(keys(), link);
   });
   return (
     <a
       ref={(el) => (link = el)}
       class="tree-file"
-      href={props.ctx.href(props.path)}
-      aria-current={props.ctx.isCurrent(props.path) ? "page" : undefined}
+      href={props.ctx.href(props.target)}
+      aria-current={
+        props.ctx.isCurrent(props.target, props.path) ? "page" : undefined
+      }
     >
       {props.children}
     </a>
