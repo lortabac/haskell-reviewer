@@ -68,6 +68,22 @@ describe("wrapParts", () => {
 });
 
 describe("ownSignature", () => {
+  it("many names on one line: linear, not quadratic", () => {
+    const count = 20000;
+    const code: Code = [];
+    for (let i = 0; i < count; i++) {
+      if (i > 0) code.push(["pun", ","], ["sp", " "]);
+      code.push(["var", `f${i}`]);
+    }
+    code.push(["sp", " "], ["pun", "::"], ["sp", " "], ["con", "Int"]);
+    const start = performance.now();
+    for (let i = 0; i < count; i++) {
+      expect(codeText(ownSignature(code, `f${i}`))).toBe(`f${i} :: Int`);
+    }
+    // Scanning the code for each name (the old way) took seconds.
+    expect(performance.now() - start).toBeLessThan(2000);
+  });
+
   it("one name out of a shared signature", () => {
     expect(
       codeText(

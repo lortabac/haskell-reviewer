@@ -15,9 +15,9 @@ import {
 } from "solid-js";
 import { getCbor } from "../api/client";
 import {
+  type AnyDecl,
   decodeModulePage,
   docsHref,
-  type Handle,
   type ModulePage as Page,
   type ParsedModule,
   type TextOnlyModule,
@@ -27,7 +27,16 @@ import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
 import { SearchBox } from "../search/SearchBox";
 import { createDelay, focusInMain, focusLost } from "../ui/focus";
-import { Decl, WarningNotice } from "./Decl";
+import { PageBody } from "./Body";
+import { body } from "./sections";
+import {
+  anchorKey,
+  Anchors,
+  openStates,
+  type PageCtx,
+  PageContext,
+} from "./context";
+import { WarningNotice } from "./Decl";
 import { type Links, LinksContext } from "./links";
 import { pageIndex } from "./pageIndex";
 import { reasonBanner, reasonLine } from "./reasons";
@@ -40,19 +49,25 @@ import {
   unescapeHaddock,
 } from "./urls";
 
-export function DocsView(): JSX.Element {
+// exportedOnly: T10 sets it from a toggle.
+export function DocsView(props: { exportedOnly?: boolean }): JSX.Element {
   const location = useLocation();
   const ref = () => refFromPathname(location.pathname);
   return (
     <Show when={ref()} keyed fallback={<NotFound />}>
-      {(r) => <DocsPage moduleRef={r} />}
+      {(r) => (
+        <DocsPage moduleRef={r} exportedOnly={props.exportedOnly ?? false} />
+      )}
     </Show>
   );
 }
 
 // One module, by its ref as typed in the URL (kept, D-182): a hash
 // change doesn't refetch.
-function DocsPage(props: { moduleRef: string }): JSX.Element {
+function DocsPage(props: {
+  moduleRef: string;
+  exportedOnly: boolean;
+}): JSX.Element {
   // Read before the old page goes away.
   const fromMain = focusInMain();
   const [res] = createResource(
@@ -100,7 +115,12 @@ function DocsPage(props: { moduleRef: string }): JSX.Element {
       <Match when={page()} keyed>
         {(p) =>
           p.parse.kind === "parsed" ? (
-            <ModulePage page={p} parsed={p.parse} typedRef={props.moduleRef} />
+            <ModulePage
+              page={p}
+              parsed={p.parse}
+              typedRef={props.moduleRef}
+              exportedOnly={props.exportedOnly}
+            />
           ) : (
             <TextOnlyPage page={p} parse={p.parse} />
           )
@@ -194,6 +214,8 @@ function ModulePage(props: {
   page: Page;
   parsed: ParsedModule;
   typedRef: string;
+  // Hide what the module doesn't export (T10 adds the toggle).
+  exportedOnly?: boolean;
 }): JSX.Element {
   const location = useLocation();
   const navigate = useNavigate();
@@ -211,11 +233,45 @@ function ModulePage(props: {
   const header = () => props.parsed.header;
   const name = () => header().name?.value ?? props.page.ref;
   const ext = () => props.parsed.extensions;
-  // Sections by handle, for anchors. The first wins (a repeated handle
-  // under CPP). No DOM ids from declaration ids.
-  const sections = new Map<Handle, HTMLElement>();
-  const register = (n: Handle, el: HTMLElement) => {
-    if (!sections.has(n)) sections.set(n, el);
+  // Elements for anchors, by scope and handle (no DOM ids from
+  // declaration ids).
+  const anchors = new Anchors();
+  const instancesOpen = openStates();
+  const sourceHref = useSourceHref(() => props.page);
+  const b = createMemo(() =>
+    body(props.parsed, ix(), props.exportedOnly ?? false),
+  );
+  const ctx: PageCtx = {
+    get ix() {
+      return ix();
+    },
+    get sourceHref() {
+      return sourceHref();
+    },
+    anchors,
+    instancesOpen,
+  };
+  // The element of a declaration. In an instance list if it or a
+  // parent is an instance with a home (opened first); else in the main
+  // flow. A nested one not drawn: the nearest parent that is.
+  const elementOf = (d: AnyDecl): HTMLElement | undefined => {
+    const i = ix();
+    let home: AnyDecl | undefined;
+    for (let x: AnyDecl | undefined = d; x !== undefined; x = i.parentOf(x)) {
+      home = b().homes.get(x.n);
+      if (home !== undefined) break;
+    }
+    if (home !== undefined) instancesOpen(home.n)[1](true);
+    const near = (scope: string, from: AnyDecl) => {
+      for (let x: AnyDecl | undefined = from; x; x = ix().parentOf(x)) {
+        const el = anchors.get(anchorKey(scope, x.n));
+        if (el !== undefined) return el;
+      }
+      return undefined;
+    };
+    return home === undefined
+      ? near("", d)
+      : (near(`${home.n}/`, d) ?? near("", home));
   };
   // An anchor this page has no declaration for.
   const [missing, setMissing] = createSignal<string>();
@@ -231,12 +287,16 @@ function ModulePage(props: {
     }
     const d = ix().byId.get(a);
     if (d !== undefined) {
+      const el = elementOf(d);
+      // Not drawn (hidden by "exported only"): the notice, as for
+      // an unknown one.
+      if (el === undefined) {
+        setMissing(a);
+        return;
+      }
       setMissing(undefined);
-      // Nested ones have no section of their own yet: their top-level
-      // one.
-      const el = sections.get(d.n) ?? sections.get(ix().topOf(d).n);
-      el?.scrollIntoView({ block: "start" });
-      el?.focus({ preventScroll: true });
+      el.scrollIntoView({ block: "start" });
+      el.focus({ preventScroll: true });
       return;
     }
     // Haddock's anchors (v:x, t:T), as in module links: our id
@@ -295,65 +355,57 @@ function ModulePage(props: {
     a.setAttribute("noscroll", "");
     if (url.hash !== "" && url.hash === window.location.hash) go(url.hash);
   };
-  const sourceHref = useSourceHref(() => props.page);
   return (
     <div class="docs-page" on:click={inPage}>
       <LinksContext.Provider value={links}>
-        <PageTitle
-          text={
-            name() === props.page.ref ? name() : `${name()} (${props.page.ref})`
-          }
-        />
-        <h1 class="docs-title" tabindex="-1">
-          {name()}
-        </h1>
-        <Show when={missing()} keyed>
-          {(a) => (
-            <div class="docs-notice decl-missing">
-              <p>
-                No declaration <code>{a}</code> in this module, in this
-                snapshot.
-              </p>
-              <SearchBox initialQuery={anchorName(a)} />
-            </div>
-          )}
-        </Show>
-        <Meta page={props.page} />
-        <Show when={header().warning}>
-          {(w) => <WarningNotice warning={w()} />}
-        </Show>
-        <CppWarnings warnings={props.parsed.warnings} />
-        <Show when={header().haddock}>
-          {(h) => <DocView doc={h().doc} level={1} />}
-        </Show>
-        <p class="docs-meta">
-          Language: {ext().language}
-          {ext().fromPragmas.length === 0
-            ? null
-            : `, with ${ext().fromPragmas.join(", ")}`}
-        </p>
-        <details class="docs-extensions">
-          <summary>All extensions in effect ({ext().enabled.length})</summary>
-          <ul>
-            <For each={ext().enabled}>{(e) => <li>{e}</li>}</For>
-          </ul>
-        </details>
-        <h2>Declarations</h2>
-        <Show
-          when={props.parsed.declarations.length > 0}
-          fallback={<p>No declarations.</p>}
-        >
-          <For each={props.parsed.declarations}>
-            {(d) => (
-              <Decl
-                decl={d}
-                ix={ix()}
-                sourceHref={sourceHref()}
-                register={register}
-              />
+        <PageContext.Provider value={ctx}>
+          <PageTitle
+            text={
+              name() === props.page.ref
+                ? name()
+                : `${name()} (${props.page.ref})`
+            }
+          />
+          <h1 class="docs-title" tabindex="-1">
+            {name()}
+          </h1>
+          <Show when={missing()} keyed>
+            {(a) => (
+              <div class="docs-notice decl-missing">
+                <p>
+                  No declaration <code>{a}</code> in this module, in this
+                  snapshot.
+                </p>
+                <SearchBox initialQuery={anchorName(a)} />
+              </div>
             )}
-          </For>
-        </Show>
+          </Show>
+          <Meta page={props.page} />
+          <Show when={header().warning}>
+            {(w) => <WarningNotice warning={w()} />}
+          </Show>
+          <CppWarnings warnings={props.parsed.warnings} />
+          <Show when={header().haddock}>
+            {(h) => <DocView doc={h().doc} level={1} />}
+          </Show>
+          <p class="docs-meta">
+            Language: {ext().language}
+            {ext().fromPragmas.length === 0
+              ? null
+              : `, with ${ext().fromPragmas.join(", ")}`}
+          </p>
+          <details class="docs-extensions">
+            <summary>All extensions in effect ({ext().enabled.length})</summary>
+            <ul>
+              <For each={ext().enabled}>{(e) => <li>{e}</li>}</For>
+            </ul>
+          </details>
+          <PageBody
+            parsed={props.parsed}
+            body={b()}
+            exportedOnly={props.exportedOnly ?? false}
+          />
+        </PageContext.Provider>
       </LinksContext.Provider>
     </div>
   );
