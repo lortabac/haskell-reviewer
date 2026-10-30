@@ -29,7 +29,7 @@ import { TypeDetails } from "./decls/Types";
 import { PatSynDetails, ValueDetails } from "./decls/Values";
 import { useLinks } from "./links";
 import type { PageIndex } from "./pageIndex";
-import { SourceToggle } from "./Source";
+import { SourceToggle } from "./SourceToggle";
 import { firstCodeLine } from "./source";
 
 export { WarningNotice } from "./decls/common";
