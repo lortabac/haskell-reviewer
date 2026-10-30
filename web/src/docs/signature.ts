@@ -74,16 +74,40 @@ export function nameTokens(name: string): Code {
 // a GADT line ("A, B :: T"). Cut at the first top-level "::": a
 // record GADT has more "::" inside its braces. No "::": just the name.
 // A leading keyword stays ("pattern A, B :: T" -> "pattern A :: T").
+// The tail is found once per code array (N names share one): else N
+// names on one line would cost N² (D-187).
 export function ownSignature(code: Code, name: string): Code {
-  const first = code[0];
-  const kw: Code =
-    first?.[0] === "kw"
-      ? [
-          [first[0], first[1]],
-          ["sp", " "],
-        ]
-      : [];
-  const at = firstColons(code);
-  if (at === -1) return [...kw, ...nameTokens(name)];
-  return [...kw, ...nameTokens(name), ["sp", " "], ...code.slice(at)];
+  const { kw, tail } = splitShared(code);
+  return tail === undefined
+    ? [...kw, ...nameTokens(name)]
+    : [...kw, ...nameTokens(name), ["sp", " "], ...tail];
+}
+
+interface Split {
+  // The leading keyword and a space, if any.
+  kw: Code;
+  // From the first top-level "::" on, if any.
+  tail: Code | undefined;
+}
+
+const splits = new WeakMap<Code, Split>();
+
+function splitShared(code: Code): Split {
+  let s = splits.get(code);
+  if (s === undefined) {
+    const first = code[0];
+    const at = firstColons(code);
+    s = {
+      kw:
+        first?.[0] === "kw"
+          ? [
+              [first[0], first[1]],
+              ["sp", " "],
+            ]
+          : [],
+      tail: at === -1 ? undefined : code.slice(at),
+    };
+    splits.set(code, s);
+  }
+  return s;
 }

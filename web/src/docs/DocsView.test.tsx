@@ -32,10 +32,40 @@ const page = () => open("Page", 200, cborFixture("module-page"));
 // The section of a declaration, by the text its heading starts with.
 function decl(main: HTMLElement, head: string): HTMLElement {
   const s = [...main.querySelectorAll<HTMLElement>("section.decl")].find((el) =>
-    el.querySelector(".decl-head .sig")?.textContent.startsWith(head),
+    el.querySelector(":scope > .decl-head .sig")?.textContent.startsWith(head),
   );
   if (s === undefined) throw new Error(`no declaration ${head}`);
   return s;
+}
+
+// The "Instances (k)" list right under a declaration (not a nested
+// one's).
+function instances(s: HTMLElement): HTMLDetailsElement {
+  const d = [
+    ...s.querySelectorAll<HTMLDetailsElement>("details.decl-instances"),
+  ].find((x) => x.parentElement === s);
+  if (d === undefined) throw new Error("no instance list");
+  return d;
+}
+
+// Opens a closed <details> as a click on its summary would.
+function openDetails(d: HTMLDetailsElement): void {
+  d.open = true;
+  d.dispatchEvent(new Event("toggle"));
+}
+
+// The texts of the items of a nested list, by its title.
+function items(s: HTMLElement, title: string): string[] {
+  const t = [...s.querySelectorAll(".decl-sub-title")].find(
+    (x) => x.textContent === title,
+  );
+  const ul = t?.nextElementSibling;
+  if (ul == null) throw new Error(`no list ${title}`);
+  return [...ul.children].map(
+    (li) =>
+      li.querySelector(":scope > .subdecl-head .sig, :scope > .sig")
+        ?.textContent ?? "",
+  );
 }
 
 const heads = (main: HTMLElement) =>
@@ -94,21 +124,25 @@ describe("module page", () => {
     const hs = heads(main);
     expect(hs.slice(0, 7)).toEqual([
       "data Shape",
-      "deriving Eq",
-      "deriving Show",
       "newtype Box a",
-      "deriving newtype Eq",
-      "area :: Shape -> Double",
+      "area, perimeter :: Shape -> Double",
       "perimeter :: Shape -> Double",
+      "(<+>) :: Shape -> Shape -> Shape",
+      "pattern Unit :: Shape",
+      "class Container f",
     ]);
-    expect(hs).toContain("(<+>) :: Shape -> Shape -> Shape");
-    expect(hs).toContain("pattern Unit :: Shape");
-    expect(hs).toContain("class Container f");
-    expect(hs).toContain("instance Num Bool");
-    expect(hs).toContain("type instance Family Shape = Double");
-    expect(hs[hs.length - 1]).toBe("$(pure [])");
-    // Every top-level declaration: one section each.
-    expect(hs).toHaveLength(30);
+    // Instances are not in the flow: under their homes (closed), or
+    // in the Instances block at the end.
+    expect(hs).not.toContain("type instance Family Shape = Double");
+    expect(hs).not.toContain("deriving Eq");
+    expect(hs.slice(-2)).toEqual(["$(pure [])", "instance Num Bool"]);
+    // Every other top-level declaration: one section each.
+    expect(hs).toHaveLength(21);
+    // No headings in the body or the export list: mode C.
+    expect([...main.querySelectorAll("h2")].map((h) => h.textContent)).toEqual([
+      "Declarations",
+      "Instances",
+    ]);
   });
 
   it("shared signature: own name, and who it's shared with", async () => {
@@ -120,14 +154,20 @@ describe("module page", () => {
     expect(p.querySelector(".decl-shared a")?.getAttribute("href")).toBe(
       "/tok/docs/tree/Page#val%3Aarea",
     );
-    // The shared doc too.
-    expect(p.querySelector(".doc")?.textContent).toBe(
+    // The shared doc: whole under area only, a link here.
+    expect(p.querySelector(".doc")).toBeNull();
+    expect(
+      [...p.querySelectorAll(".decl-shared")].map((x) => x.textContent),
+    ).toEqual(["Shares its signature with area.", "Same docs as area."]);
+    expect(decl(main, "area").querySelector(".doc")?.textContent).toBe(
       "Both share one signature.",
     );
+    // The first shows the signature as written, no link back.
     const a = decl(main, "area");
-    expect(a.querySelector(".decl-shared")?.textContent).toBe(
-      "Shares its signature with perimeter.",
+    expect(a.querySelector(".decl-head .sig")?.textContent).toBe(
+      "area, perimeter :: Shape -> Double",
     );
+    expect(a.querySelector(".decl-shared")).toBeNull();
   });
 
   it("signature parts: cut before top-level arrows", async () => {
@@ -154,37 +194,43 @@ describe("module page", () => {
     ).toEqual(["infixl 6", "exported"]);
     // Not exported: no label.
     expect(decl(main, "data P2").querySelector(".decl-badge")).toBeNull();
-    // Instances: no label (always exported).
+    // Instances: no "exported" (they always are).
     expect(
-      decl(main, "instance Num Bool").querySelector(".decl-badge"),
-    ).toBeNull();
+      [...decl(main, "instance Num Bool").querySelectorAll(".decl-badge")].map(
+        (b) => b.textContent,
+      ),
+    ).toEqual(["orphan"]);
   });
 
-  it("DEPRECATED on both helpers, shared one resolved", async () => {
+  it("DEPRECATED on both helpers: whole under the first", async () => {
     const main = await page();
-    for (const h of ["helper ::", "helper2 ::"]) {
-      expect(decl(main, h).querySelector(".decl-warning")?.textContent).toBe(
-        "Deprecated: Use area",
-      );
-    }
     expect(
-      decl(main, "helper2").querySelector(".decl-shared")?.textContent,
-    ).toBe("Shares its signature with helper.");
-  });
-
-  it("derived instance: for its type", async () => {
-    const main = await page();
-    const d = decl(main, "deriving Show");
-    expect(d.querySelector(".decl-shared")?.textContent).toBe(
-      "Derived for Shape.",
+      decl(main, "helper, helper2 ::").querySelector(".decl-warning")
+        ?.textContent,
+    ).toBe("Deprecated: Use area");
+    const h2 = decl(main, "helper2");
+    expect(h2.querySelector(".decl-warning")).toBeNull();
+    expect(
+      [...h2.querySelectorAll(".decl-shared")].map((x) => x.textContent),
+    ).toEqual(["Shares its signature with helper.", "Same warning as helper."]);
+    expect(h2.querySelectorAll(".decl-shared a")[1]?.getAttribute("href")).toBe(
+      "/tok/docs/tree/Page#val%3Ahelper",
     );
+  });
+
+  it("derived instance under its own type: no 'Derived for'", async () => {
+    const main = await page();
+    const list = instances(decl(main, "data Shape"));
+    openDetails(list);
+    const d = decl(list, "deriving Show");
+    expect(d.querySelector(".decl-shared")).toBeNull();
   });
 
   it("go to source: first code line, not the doc", async () => {
     const main = await page();
     const a = decl(main, "area").querySelector(".decl-actions a");
     expect(a?.getAttribute("href")).toBe("/tok/src/tree/Page.hs#L38");
-    expect(a?.textContent).toBe("Go to source: val:area");
+    expect(a?.textContent).toBe("Go to source of area");
     const op = decl(main, "(<+>)").querySelector(".decl-actions a");
     // The fixity line comes first.
     expect(op?.getAttribute("href")).toBe("/tok/src/tree/Page.hs#L42");
@@ -229,15 +275,21 @@ describe("module page", () => {
     expect(document.activeElement).toBe(s);
   });
 
-  it("anchor to a nested declaration: its top-level one", async () => {
+  it.each([
+    ["#field%3AShape.width", "width :: Double"],
+    ["#con%3ACircle", "Circle Double"],
+    ["#val%3Ainsert", "insert :: Elem f -> f -> f"],
+    ["#type%3AElem", "type Elem f :: Type"],
+    ["#con%3AGTrue", "GTrue :: Bool -> G Bool"],
+  ])("anchor to a nested declaration %s: its own item", async (hash, head) => {
     vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(
       () => undefined,
     );
-    const main = await open("Page", 200, cborFixture("module-page"), {
-      hash: "#field%3AShape.width",
-    });
+    await open("Page", 200, cborFixture("module-page"), { hash });
     flushFrames();
-    expect(document.activeElement).toBe(decl(main, "data Shape"));
+    const el = document.activeElement;
+    expect(el?.className).toBe("subdecl");
+    expect(el?.querySelector(".subdecl-head .sig")?.textContent).toBe(head);
   });
 
   it("Haddock anchor: replaced by our id", async () => {
@@ -407,6 +459,366 @@ describe("module page", () => {
     const main = await open("Page.hs", 200, cborFixture("module-page"));
     const a = decl(main, "area").querySelector(".decl-head a");
     expect(a?.getAttribute("href")).toBe("/tok/docs/tree/Page.hs#type%3AShape");
+  });
+});
+
+describe("declaration details", () => {
+  it("data type: constructors, record fields with marks, deriving", async () => {
+    const main = await page();
+    const shape = decl(main, "data Shape");
+    expect(items(shape, "Constructors")).toEqual(["Circle Double", "Rect"]);
+    const fields = [...shape.querySelectorAll(".subdecl .subdecl .sig")].map(
+      (f) => f.textContent,
+    );
+    expect(fields).toEqual(["width :: Double", "height :: !Double"]);
+    expect(items(shape, "Deriving")).toEqual(["deriving (Eq, Show)"]);
+    // Exported parent: nested ones say when they aren't (all are here).
+    expect(shape.querySelector(".subdecl .decl-badge")).toBeNull();
+  });
+
+  it("not exported nested items of an exported parent", async () => {
+    const value = structuredClone(fixture("module-page")) as {
+      parse: {
+        declarations: {
+          name: string;
+          constructors?: { exported: boolean }[];
+        }[];
+      };
+    };
+    const shape = value.parse.declarations.find((d) => d.name === "Shape");
+    const circle = shape?.constructors?.[0];
+    if (circle === undefined) throw new Error("no Circle");
+    circle.exported = false;
+    const main = await open("Page", 200, cbor(value));
+    const c = decl(main, "data Shape").querySelector(".subdecl");
+    expect(c?.querySelector(".decl-badge")?.textContent).toBe("not exported");
+  });
+
+  it("newtype deriving via, GADT shared line, shared field type", async () => {
+    const main = await page();
+    expect(items(decl(main, "newtype V"), "Deriving")).toEqual([
+      "deriving (Eq, Ord) via Int",
+    ]);
+    const g = decl(main, "data G a where");
+    expect(items(g, "Constructors")).toEqual([
+      "GInt :: {gval :: Int} -> G Int",
+      "GBool, GTrue :: Bool -> G Bool",
+      "GTrue :: Bool -> G Bool",
+    ]);
+    const shared = [...g.querySelectorAll(".subdecl .decl-shared")].map(
+      (p) => p.textContent,
+    );
+    expect(shared).toEqual(["Shares its signature with GBool."]);
+    const p2 = decl(main, "data P2");
+    expect(
+      [...p2.querySelectorAll(".subdecl .subdecl .sig")].map(
+        (f) => f.textContent,
+      ),
+    ).toEqual(["px :: Double", "py :: Double"]);
+    // fh's doc is ff's (sent once).
+    const fld = decl(main, "data Fld");
+    const fh = [...fld.querySelectorAll<HTMLElement>(".subdecl .subdecl")].find(
+      (f) => f.querySelector(".sig")?.textContent === "fh :: Int",
+    );
+    // fh's doc is sent by ff (of FB): a link to it.
+    expect(fh?.querySelector(".doc")).toBeNull();
+    expect(fh?.querySelector(".decl-shared")?.textContent).toBe(
+      "Same docs as ff.",
+    );
+  });
+
+  it("class: associated types, methods, MINIMAL", async () => {
+    const main = await page();
+    const c = decl(main, "class Container f");
+    expect(items(c, "Associated types")).toEqual(["type Elem f :: Type"]);
+    expect(items(c, "Methods")).toEqual([
+      "empty :: f",
+      "insert :: Elem f -> f -> f",
+    ]);
+    expect(c.textContent).toContain("{-# MINIMAL empty, insert #-}");
+  });
+
+  it("closed family equations, synonym, type data, splice", async () => {
+    const main = await page();
+    expect(
+      items(decl(main, "type family Closed a where"), "Equations"),
+    ).toEqual(["Closed Int = Bool", "Closed a = a"]);
+    expect(items(decl(main, "type data Nat"), "Constructors")).toEqual([
+      "Zero",
+      "Succ Nat",
+    ]);
+    expect(
+      decl(main, "type Area = Double").querySelector(".decl-sub-title"),
+    ).toBeNull();
+    expect(decl(main, "$(pure [])").textContent).toContain(
+      "Template Haskell splice.",
+    );
+  });
+
+  it("pattern synonym: direction", async () => {
+    const main = await page();
+    expect(
+      decl(main, "pattern Unit").querySelector(".decl-note")?.textContent,
+    ).toBe("Bidirectional: matches and builds.");
+  });
+});
+
+describe("instances", () => {
+  it("closed lists under types and classes, built when open", async () => {
+    const main = await page();
+    const counts = (head: string) => {
+      const d = instances(decl(main, head));
+      expect(d.open).toBe(false);
+      // Nothing inside until opened.
+      expect(d.querySelector("section")).toBeNull();
+      return d.querySelector("summary")?.textContent;
+    };
+    expect(counts("data Shape")).toBe("Instances (3)");
+    expect(counts("newtype Box a")).toBe("Instances (2)");
+    expect(counts("class Container f")).toBe("Instances (1)");
+    expect(counts("type family Family a")).toBe("Instances (1)");
+    const list = instances(decl(main, "data Shape"));
+    openDetails(list);
+    expect(heads(list)).toEqual([
+      "deriving Eq",
+      "deriving Show",
+      "instance Ord Shape",
+    ]);
+  });
+
+  it("an instance with an associated type, and the family's list", async () => {
+    const main = await page();
+    const list = instances(decl(main, "class Container f"));
+    openDetails(list);
+    const inst = decl(list, "instance Container [a]");
+    expect(items(inst, "Associated types")).toEqual(["type Elem [a] = a"]);
+    // The associated family lists the type instance too.
+    const elem = main.querySelector<HTMLElement>(".subdecl[data-handle='17']");
+    if (elem === null) throw new Error("no Elem");
+    const elems = instances(elem);
+    expect(elems.querySelector("summary")?.textContent).toBe("Instances (1)");
+    openDetails(elems);
+    expect(heads(elems)).toEqual(["type Elem [a] = a"]);
+  });
+
+  it("family instance under its family", async () => {
+    const main = await page();
+    const list = instances(decl(main, "type family Family a"));
+    openDetails(list);
+    expect(heads(list)).toEqual(["type instance Family Shape = Double"]);
+  });
+
+  it("unattached instance: in the Instances block, orphan", async () => {
+    const main = await page();
+    const h2 = [...main.querySelectorAll("h2")].find(
+      (h) => h.textContent === "Instances",
+    );
+    const num = decl(main, "instance Num Bool");
+    expect(
+      h2 !== undefined &&
+        h2.compareDocumentPosition(num) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(num.querySelector("h3")).not.toBeNull();
+  });
+
+  it.each([
+    ["#inst%3AOrd%3AShape", "data Shape", "instance Ord Shape"],
+    [
+      "#inst%3AFamily%3AShape",
+      "type family Family a",
+      "type instance Family Shape = Double",
+    ],
+    [
+      "#inst%3AContainer%3A%5Ba%5D",
+      "class Container f",
+      "instance Container [a]",
+    ],
+  ])("instance anchor %s opens its home's list", async (hash, home, head) => {
+    const scroll = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => undefined);
+    const main = await open("Page", 200, cborFixture("module-page"), { hash });
+    flushFrames();
+    const list = instances(decl(main, home));
+    expect(list.open).toBe(true);
+    const s = decl(list, head);
+    expect(document.activeElement).toBe(s);
+    expect(scroll.mock.contexts).toContain(s);
+  });
+
+  it("associated family instance anchor: in the family's list", async () => {
+    vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(
+      () => undefined,
+    );
+    const main = await open("Page", 200, cborFixture("module-page"), {
+      hash: "#inst%3AElem%3A%5Ba%5D",
+    });
+    flushFrames();
+    const elem = main.querySelector<HTMLElement>(".subdecl[data-handle='17']");
+    if (elem === null) throw new Error("no Elem");
+    const list = instances(elem);
+    expect(list.open).toBe(true);
+    expect(document.activeElement).toBe(decl(list, "type Elem [a] = a"));
+  });
+});
+
+describe("synopsis, pragmas, source", () => {
+  it("synopsis: closed, one line per type, class, value, patsyn", async () => {
+    const main = await page();
+    const syn = main.querySelector<HTMLDetailsElement>(".docs-synopsis");
+    if (syn === null) throw new Error("no synopsis");
+    expect(syn.open).toBe(false);
+    expect(syn.querySelector("summary")?.textContent).toBe("Synopsis (19)");
+    expect(syn.querySelector("li")).toBeNull();
+    openDetails(syn);
+    const links = [...syn.querySelectorAll("li a")];
+    expect(
+      links.slice(0, 3).map((a) => [a.textContent, a.getAttribute("href")]),
+    ).toEqual([
+      ["data Shape", "/tok/docs/tree/Page#type%3AShape"],
+      ["newtype Box a", "/tok/docs/tree/Page#type%3ABox"],
+      ["area, perimeter :: Shape -> Double", "/tok/docs/tree/Page#val%3Aarea"],
+    ]);
+    expect(links.map((a) => a.textContent)).toContain("pattern Unit :: Shape");
+    expect(links.map((a) => a.textContent)).not.toContain("$(pure [])");
+  });
+
+  it("pragmas: closed block at the end, 4 entries", async () => {
+    const main = await page();
+    const p = main.querySelector<HTMLDetailsElement>(".docs-pragmas");
+    if (p === null) throw new Error("no pragmas");
+    expect(p.open).toBe(false);
+    expect(p.querySelector("summary")?.textContent).toBe("Pragmas (4)");
+    expect(main.lastElementChild?.lastElementChild).toBe(p);
+    openDetails(p);
+    expect([...p.querySelectorAll("li")].map((l) => l.textContent)).toEqual([
+      '{-# RULES "area/id" forall s. area s = area s #-}',
+      '{-# ANN helper "note" #-}',
+      "{-# COMPLETE Unit #-}",
+      "default (Int)",
+    ]);
+  });
+
+  it("source toggle: line numbers and a gap row", async () => {
+    const main = await page();
+    const op = decl(main, "(<+>)");
+    const button = op.querySelector<HTMLButtonElement>(".decl-source-toggle");
+    if (button === null) throw new Error("no toggle");
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+    const box = main.querySelector(
+      `#${button.getAttribute("aria-controls") ?? ""}`,
+    );
+    expect(box?.textContent).toBe("");
+    button.click();
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+    expect(button.textContent).toBe("Hide source of <+>");
+    expect(box?.querySelector("pre")?.textContent).toBe(
+      [
+        "42infixl 6 <+>",
+        "⋯ line 43",
+        "44(<+>) :: Shape -> Shape -> Shape",
+        "45a <+> _ = a",
+        "",
+      ].join("\n"),
+    );
+    button.click();
+    expect(box?.textContent).toBe("");
+  });
+
+  it("source of a shared signature: the shared part resolved", async () => {
+    const main = await page();
+    const p = decl(main, "perimeter");
+    p.querySelector<HTMLButtonElement>(".decl-source-toggle")?.click();
+    expect(p.querySelector("pre")?.textContent).toContain(
+      "area, perimeter :: Shape -> Double",
+    );
+  });
+});
+
+describe("sections", () => {
+  it("mode A: body headings, chunks in place", async () => {
+    const main = await open(
+      "Sections",
+      200,
+      cborFixture("module-page-sections"),
+    );
+    const order = [
+      ...main.querySelectorAll(
+        ".docs-page h2, .docs-page section.decl, .docs-page > .doc",
+      ),
+    ].map((e) =>
+      e.matches("section")
+        ? (e.querySelector(".sig")?.textContent ?? "")
+        : e.textContent,
+    );
+    expect(order).toEqual([
+      "Sections.",
+      "Body heading",
+      "A named chunk, about x.",
+      "x :: Int",
+      "y :: Int",
+    ]);
+    expect(decl(main, "x ::").querySelector("h3")).not.toBeNull();
+  });
+
+  it("mode B: export list order, re-exports, Not exported", async () => {
+    const value = structuredClone(fixture("module-page-sections")) as {
+      parse: {
+        exports: Record<string, unknown>[];
+        docItems: { kind: string }[];
+        declarations: { name: string; exported: boolean }[];
+      };
+    };
+    const p = value.parse;
+    p.docItems = p.docItems.filter((i) => i.kind !== "heading");
+    const y = p.declarations.find((d) => d.name === "y");
+    if (y === undefined) throw new Error("no y");
+    y.exported = false;
+    const span = [1, 1, 1, 2];
+    p.exports = p.exports.filter(
+      (e) => (e.name as { occ?: string } | undefined)?.occ !== "y",
+    );
+    p.exports.push(
+      {
+        kind: "item",
+        span,
+        name: { span, qualifier: null, occ: "<|>", keyword: null },
+        subs: { kind: "none" },
+        doc: null,
+        warning: null,
+      },
+      {
+        kind: "module",
+        name: { span, value: "Data.List" },
+        warning: null,
+      },
+    );
+    const main = await open("Sections", 200, cbor(value));
+    const order = [
+      ...main.querySelectorAll(
+        ".docs-page .docs-section, .docs-page section.decl, .docs-page > .doc, .docs-reexport",
+      ),
+    ].map((e) =>
+      e.matches("section")
+        ? `decl ${e.querySelector(".sig")?.textContent ?? ""}`
+        : e.textContent,
+    );
+    expect(order).toEqual([
+      "Sections.",
+      "Values",
+      "Some values.",
+      "decl x :: Int",
+      "More",
+      "A named chunk, about x.",
+      "(<|>) (re-exported)",
+      "module Data.List (re-exported)",
+      "Not exported",
+      "decl y :: Int",
+    ]);
+    // Section levels: h2 for level 1, h3 for level 2; decls one below.
+    expect(main.querySelector("h3.docs-section")?.textContent).toBe("More");
+    expect(decl(main, "y ::").querySelector("h3")).not.toBeNull();
+    expect(decl(main, "x ::").querySelector("h3")).not.toBeNull();
   });
 });
 

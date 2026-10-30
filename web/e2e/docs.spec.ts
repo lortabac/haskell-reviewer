@@ -10,7 +10,7 @@ function decl(page: Page, head: string): Locator {
   return page
     .locator("section.decl")
     .filter({
-      has: page.locator(".decl-head .sig", {
+      has: page.locator(":scope > .decl-head .sig", {
         hasText: new RegExp("^" + escape(head)),
       }),
     })
@@ -76,8 +76,124 @@ test("sidebar link opens the docs view", async ({
   );
   await expect(decl(page, "pattern Unit")).toBeVisible();
   await expect(decl(page, "class Container f")).toBeVisible();
-  await expect(decl(page, "instance Num Bool")).toBeVisible();
-  await expect(decl(page, "type instance Family Shape = Double")).toBeVisible();
+  // Export list sections (mode B).
+  await expect(page.locator("main .docs-section")).toHaveText([
+    "Types",
+    "Functions",
+    "Instances",
+  ]);
+  // The orphan: in the Instances block at the end.
+  await expect(
+    decl(page, "instance Num Bool").locator(".decl-badge"),
+  ).toHaveText(["orphan"]);
+});
+
+test("details: constructors, fields, methods, instances, pragmas", async ({
+  page,
+  startServer,
+  docsProject,
+}) => {
+  const server = await startServer({ root: docsProject.root });
+  await page.goto(server.base + "docs/tree/Shapes");
+  const shape = decl(page, "data Shape");
+  await expect(shape.locator(".subdecl-head .sig")).toHaveText([
+    "Circle Double",
+    "Rect",
+    "width :: !Double",
+    "height :: Double",
+  ]);
+  const container = decl(page, "class Container f");
+  await expect(container.locator(".subdecl-head .sig")).toHaveText([
+    "type Elem f :: Type",
+    "empty :: f",
+    "insert :: Elem f -> f -> f",
+  ]);
+  await expect(container).toContainText("{-# MINIMAL empty, insert #-}");
+
+  // Instance lists: closed, open on click.
+  const list = shape.locator(":scope > details.decl-instances");
+  await expect(list.locator("summary")).toHaveText("Instances (2)");
+  const derived = list.locator("section.decl");
+  await expect(derived).toHaveCount(0);
+  await list.locator("summary").click();
+  await expect(derived.locator(".decl-head .sig")).toHaveText([
+    "deriving Eq",
+    "deriving Show",
+  ]);
+  const family = decl(page, "type family Family a").locator(
+    ":scope > details.decl-instances",
+  );
+  await family.locator("summary").click();
+  await expect(family.locator("section.decl .decl-head .sig")).toHaveText([
+    "type instance Family Shape = Double",
+  ]);
+
+  // Synopsis and Pragmas: closed.
+  const syn = page.locator("main details.docs-synopsis");
+  await expect(syn).not.toHaveAttribute("open");
+  await syn.locator("summary").click();
+  await expect(syn.locator("li").first()).toHaveText("data Shape");
+  const pragmas = page.locator("main details.docs-pragmas");
+  await expect(pragmas.locator("summary")).toHaveText("Pragmas (2)");
+  await expect(pragmas).not.toHaveAttribute("open");
+  await pragmas.locator("summary").click();
+  await expect(pragmas.locator("li")).toHaveText([
+    '{-# RULES "area/id" forall s. area s = area s #-}',
+    "{-# COMPLETE Unit #-}",
+  ]);
+});
+
+test("inline source: line numbers and gaps", async ({
+  page,
+  startServer,
+  docsProject,
+}) => {
+  const server = await startServer({ root: docsProject.root });
+  await page.goto(server.base + "docs/tree/Shapes");
+  const op = decl(page, "(<+>)");
+  const button = op.locator(".decl-source-toggle");
+  await expect(button).toHaveText("Show source of <+>");
+  await expect(button).toHaveAttribute("aria-expanded", "false");
+  await button.click();
+  await expect(button).toHaveAttribute("aria-expanded", "true");
+  const fixity = shapesLine("infixl 6 <+>");
+  await expect(op.locator("pre.src")).toHaveText(
+    [
+      `${fixity}infixl 6 <+>`,
+      `⋯ line ${fixity + 1}`,
+      `${fixity + 2}(<+>) :: Shape -> Shape -> Shape`,
+      `${fixity + 3}a <+> _ = a`,
+      "",
+    ].join("\n"),
+  );
+  await expect(button).toHaveText("Hide source of <+>");
+  await button.click();
+  await expect(op.locator("pre.src")).toHaveCount(0);
+});
+
+test("anchors to nested items and instances", async ({
+  page,
+  startServer,
+  docsProject,
+}) => {
+  const server = await startServer({ root: docsProject.root });
+  await page.setViewportSize({ width: 1000, height: 400 });
+  await page.goto(server.base + "docs/tree/Shapes#con%3ACircle");
+  const circle = page.locator(".subdecl", { hasText: "Circle Double" });
+  await expect(circle).toBeFocused();
+  await page.goto(server.base + "docs/tree/Shapes#val%3Ainsert");
+  await expect(
+    page.locator(".subdecl", { hasText: "insert :: Elem f" }),
+  ).toBeFocused();
+  // An instance: its home's list opens.
+  await page.goto(server.base + "docs/tree/Shapes#inst%3AShow%3AShape");
+  const list = decl(page, "data Shape").locator(
+    ":scope > details.decl-instances",
+  );
+  await expect(list).toHaveAttribute("open");
+  const show = decl(page, "deriving Show");
+  await expect(show).toBeFocused();
+  await expect.poll(() => inViewport(show)).toBe(true);
 });
 
 test("a link in a signature: anchor, focus, no reload", async ({
@@ -263,6 +379,13 @@ for (const scheme of ["light", "dark"] as const) {
     await page.goto(server.base + "docs/tree/Shapes");
     await expect(page.locator("section.decl").first()).toBeVisible();
     await page.locator(".docs-extensions summary").click();
+    // Everything that starts closed, open.
+    const closed = page.locator("main details:not([open]) > summary");
+    while ((await closed.count()) > 0) await closed.first().click();
+    await decl(page, "(<+>)")
+      .getByRole("button", { name: /Show source/ })
+      .click();
+    await expect(page.locator("pre.src")).toBeVisible();
     const result = await new AxeBuilder({ page })
       .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
       .analyze();

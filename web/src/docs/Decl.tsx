@@ -1,113 +1,217 @@
-// One top-level declaration on the module page: its head or signature,
-// badges, warning, docs and "go to source". Every kind's details come
-// in T09b.
+// One declaration on the module page: a section with its head or
+// signature, badges, warning, docs, what its kind has (constructors,
+// methods...), the inline source and "go to source". Top-level ones,
+// and instances in a list.
 import { createMemo, createUniqueId, For, type JSX, Show } from "solid-js";
+import { Dynamic } from "solid-js/web";
 import type { Code as Tokens } from "../api/code";
-import type { Declaration, DeclInfo, Handle, WarningText } from "../api/module";
-import type { DocComment } from "../api/richtext";
+import type {
+  AssociatedFamInst,
+  Declaration,
+  DeclInfo,
+  Handle,
+} from "../api/module";
 import { Signature } from "./Code";
+import { usePage, useAnchor } from "./context";
+import { ClassDetails } from "./decls/Classes";
+import {
+  Badges,
+  Docs,
+  headingTag,
+  type SharedName,
+  SharedWith,
+  sigHead,
+  Sub,
+  Title,
+  Warning,
+} from "./decls/common";
+import { TypeDetails } from "./decls/Types";
+import { PatSynDetails, ValueDetails } from "./decls/Values";
 import { useLinks } from "./links";
 import type { PageIndex } from "./pageIndex";
-import { DocView } from "./RichText";
-import { nameTokens, ownSignature } from "./signature";
+import { SourceToggle } from "./SourceToggle";
 import { firstCodeLine } from "./source";
 
-export interface DeclProps {
-  decl: Declaration;
-  ix: PageIndex;
-  // The file view URL at a line, if the module has a source.
-  sourceHref: ((line: number) => string) | undefined;
-  // Called with the section, for anchors.
-  register: (n: Handle, el: HTMLElement) => void;
-}
+export { WarningNotice } from "./decls/common";
 
-export function Decl(props: DeclProps): JSX.Element {
-  const head = createMemo(() => headOf(props.decl, props.ix));
+// What a section can show: a top-level declaration, or a family
+// instance inside an instance (in its family's list).
+export type Shown = Declaration | AssociatedFamInst;
+
+export function Decl(props: {
+  decl: Shown;
+  // Its heading level.
+  level: number;
+  // The type, class or family whose instance list it is in.
+  home?: Handle;
+}): JSX.Element {
+  const page = usePage();
+  const head = createMemo(() => headOf(props.decl, page.ix));
   const headId = createUniqueId();
-  const handle = () =>
-    props.decl.kind === "splice" ? undefined : props.decl.n;
-  const id = () => {
-    const d = props.decl;
-    return d.kind === "splice" ? undefined : props.ix.idOf(d);
-  };
+  const n = (d: Shown) => (d.kind === "splice" ? undefined : d.n);
+  // eslint-disable-next-line solid/reactivity -- a handle never changes
+  const anchor = useAnchor(n(props.decl));
+  // For screen readers: "Show source of <this>".
+  const what = () => readable(props.decl, page.ix);
+  const source = () => ("source" in props.decl ? props.decl.source : []);
   const href = () => {
-    const line = firstCodeLine(props.decl.source);
-    return line === undefined ? undefined : props.sourceHref?.(line);
+    const line = firstCodeLine(source());
+    return line === undefined ? undefined : page.sourceHref?.(line);
+  };
+  const derivedFor = () => {
+    const f = head().derivedFor;
+    return f === undefined || f.n === props.home ? undefined : f;
   };
   return (
     <section
-      ref={(el) => {
-        const n = handle();
-        if (n !== undefined) props.register(n, el);
-      }}
+      ref={anchor}
       class="decl"
       tabindex="-1"
-      data-handle={handle()}
+      data-handle={n(props.decl)}
       aria-labelledby={headId}
     >
-      <h3 id={headId} class="decl-head">
+      <Dynamic
+        component={headingTag(props.level)}
+        id={headId}
+        class="decl-head"
+      >
         <Signature code={head().code} />
-        <Badges decl={props.decl} />
-      </h3>
-      <Show when={head().shared.length > 0}>
-        <SharedWith names={head().shared} ix={props.ix} />
+        <Badges fixity={props.decl.fixity} labels={labels(props.decl)} />
+      </Dynamic>
+      <Show when={props.decl.kind === "splice"}>
+        <p class="decl-note">Template Haskell splice.</p>
       </Show>
-      <Show when={head().derivedFor}>{(d) => <DerivedFor decl={d()} />}</Show>
-      <Warning info={props.decl} ix={props.ix} />
-      <Docs info={props.decl} ix={props.ix} />
-      <Show when={href()}>
-        {(h) => (
-          <p class="decl-actions">
-            <a href={h()}>
-              Go to source
-              <Show when={id()}>
-                {(i) => <span class="sr-only">: {i()}</span>}
-              </Show>
-            </a>
-          </p>
-        )}
+      <SharedWith sender={head().shared} />
+      <Show when={derivedFor()}>{(d) => <DerivedFor decl={d()} />}</Show>
+      <Warning info={props.decl} />
+      <Docs info={props.decl} level={props.level} />
+      {details(props.decl, props.level)}
+      <Show when={source().length > 0}>
+        <SourceToggle parts={source()} label={what()}>
+          <Show when={href()}>
+            {(h) => (
+              <>
+                {" "}
+                <a href={h()}>
+                  Go to source
+                  <span class="sr-only"> of {what()}</span>
+                </a>
+              </>
+            )}
+          </Show>
+        </SourceToggle>
       </Show>
     </section>
   );
 }
 
+// A name a screen reader can say: the name, "instance Eq (Box a)",
+// "the splice at line 7".
+export function readable(d: Shown, ix: PageIndex): string {
+  if (d.kind === "splice") return `the splice at line ${d.line}`;
+  if (d.kind !== "instance" && d.kind !== "faminst") return d.name ?? "";
+  // From the id's parts, not its text: a class can be an operator
+  // with ":" in it (:<:).
+  const id = d.id;
+  let cls: string;
+  let head: string;
+  if (typeof id === "object" && "inst" in id) {
+    cls = id.inst;
+    head = id.head.map((k) => ix.page.idParts[k] ?? "").join("");
+  } else {
+    cls = d.kind === "faminst" ? d.family : ix.idOf(d);
+    head = "";
+  }
+  const arg = /\s/.test(head) && !/^[([]/.test(head) ? `(${head})` : head;
+  const kw = d.kind === "faminst" ? `${d.form} instance` : "instance";
+  return arg === "" ? `${kw} ${cls}` : `${kw} ${cls} ${arg}`;
+}
+
+// "exported" on exported top-level declarations (not on instances:
+// they always are), orphan, foreign import.
+function labels(d: Shown): string[] {
+  const out: string[] = [];
+  switch (d.kind) {
+    case "instance":
+    case "faminst":
+      if (d.orphan) out.push("orphan");
+      break;
+    case "value":
+      if (d.exported) out.push("exported");
+      if (d.definition === "foreign-import") out.push("foreign import");
+      break;
+    case "splice":
+      break;
+    default:
+      if (d.exported) out.push("exported");
+  }
+  return out;
+}
+
+// What only this kind has. A declaration never changes: a plain
+// function, not a component.
+function details(x: Shown, level: number): JSX.Element {
+  switch (x.kind) {
+    case "type":
+      return (
+        <TypeDetails t={x} home={x.n} exported={x.exported} level={level} />
+      );
+    case "class":
+      return <ClassDetails c={x} n={x.n} exported={x.exported} level={level} />;
+    case "value":
+      return <ValueDetails v={x} level={level} />;
+    case "patsyn":
+      return <PatSynDetails p={x} exported={x.exported} level={level} />;
+    case "faminst":
+      return (
+        <TypeDetails t={x} home={undefined} exported={false} level={level} />
+      );
+    case "instance":
+      return (
+        <Show when={x.associated.length > 0}>
+          <Title level={level + 1} text="Associated types" />
+          <ul class="subdecls">
+            <For each={x.associated}>
+              {(a) => (
+                <Sub
+                  d={a}
+                  head={a.head}
+                  parentExported={false}
+                  level={level + 1}
+                >
+                  <TypeDetails
+                    t={a}
+                    home={undefined}
+                    exported={false}
+                    level={level + 1}
+                  />
+                </Sub>
+              )}
+            </For>
+          </ul>
+        </Show>
+      );
+    case "splice":
+      return null;
+  }
+}
+
 interface Head {
   code: Tokens;
-  // Names it shares its signature with.
-  shared: string[];
+  // The one it shares its signature with.
+  shared: SharedName | undefined;
   // A derived instance: the type it is for.
   derivedFor?: DeclInfo | undefined;
 }
 
-function headOf(d: Declaration, ix: PageIndex): Head {
+function headOf(d: Shown, ix: PageIndex): Head {
   switch (d.kind) {
     case "value":
-    case "patsyn": {
-      const sig = d.signature;
-      const code =
-        sig === null
-          ? undefined
-          : "code" in sig
-            ? sig
-            : ix.sentSignature(sig.sharedWith);
-      if (code === undefined) {
-        const name = nameTokens(d.name ?? "");
-        return {
-          code:
-            d.kind === "patsyn"
-              ? [["kw", "pattern"], ["sp", " "], ...name]
-              : name,
-          shared: [],
-        };
-      }
-      if (code.names.length <= 1) return { code: code.code, shared: [] };
-      return {
-        code: ownSignature(code.code, d.name ?? ""),
-        shared: code.names.filter((n) => n !== d.name),
-      };
-    }
+      return sigHead(d.signature, d.name ?? "", ix, null);
+    case "patsyn":
+      return sigHead(d.signature, d.name ?? "", ix, "pattern");
     case "instance": {
-      if (d.form.kind !== "derived") return { code: d.head, shared: [] };
+      if (d.form.kind !== "derived") return { code: d.head, shared: undefined };
       const strategy: Tokens =
         d.form.strategy === "none" || d.form.strategy === "via"
           ? []
@@ -139,7 +243,7 @@ function headOf(d: Declaration, ix: PageIndex): Head {
                 ...viaCode,
               ] as Tokens)),
         ],
-        shared: [],
+        shared: undefined,
         derivedFor: on?.name === null ? undefined : on,
       };
     }
@@ -147,7 +251,7 @@ function headOf(d: Declaration, ix: PageIndex): Head {
     case "class":
     case "faminst":
     case "splice":
-      return { code: d.head, shared: [] };
+      return { code: d.head, shared: undefined };
   }
 }
 
@@ -167,106 +271,4 @@ function DerivedFor(props: { decl: DeclInfo }): JSX.Element {
       .
     </p>
   );
-}
-
-// "Shares its signature with g, h": links to the others.
-function SharedWith(props: { names: string[]; ix: PageIndex }): JSX.Element {
-  const links = useLinks();
-  return (
-    <p class="decl-shared">
-      Shares its signature with{" "}
-      <For each={props.names}>
-        {(name, i) => {
-          const d = props.ix.byName.value.get(name);
-          const href = d === undefined ? undefined : links.decl(d.n);
-          return (
-            <>
-              {i() === 0 ? null : ", "}
-              {href === undefined ? (
-                <code>{name}</code>
-              ) : (
-                <a href={href}>
-                  <code>{name}</code>
-                </a>
-              )}
-            </>
-          );
-        }}
-      </For>
-      .
-    </p>
-  );
-}
-
-// Fixity, and "exported" on exported top-level declarations (not on
-// instances: they always are).
-function Badges(props: { decl: Declaration }): JSX.Element {
-  const exported = () =>
-    props.decl.exported &&
-    props.decl.kind !== "instance" &&
-    props.decl.kind !== "faminst";
-  return (
-    <Show when={props.decl.fixity !== null || exported()}>
-      <span class="decl-badges">
-        <Show when={props.decl.fixity}>
-          {(f) => (
-            <span class="decl-badge">
-              {f().direction} {f().precedence}
-            </span>
-          )}
-        </Show>
-        <Show when={exported()}>
-          <span class="decl-badge">exported</span>
-        </Show>
-      </span>
-    </Show>
-  );
-}
-
-// A DEPRECATED or WARNING pragma, shared ones too.
-export function Warning(props: {
-  info: Pick<DeclInfo, "warning">;
-  ix: PageIndex;
-}): JSX.Element {
-  const text = () => {
-    const w = props.info.warning;
-    return w === null
-      ? undefined
-      : "sharedWith" in w
-        ? props.ix.sentWarning(w)
-        : w;
-  };
-  return <Show when={text()}>{(t) => <WarningNotice warning={t()} />}</Show>;
-}
-
-export function WarningNotice(props: { warning: WarningText }): JSX.Element {
-  const what = () => {
-    const w = props.warning;
-    return w.kind === "deprecated"
-      ? "Deprecated"
-      : w.category === null
-        ? "Warning"
-        : `Warning (${w.category})`;
-  };
-  return (
-    <div class="docs-notice decl-warning">
-      <p>
-        <strong>{what()}:</strong> {props.warning.messages.join(" ")}
-      </p>
-    </div>
-  );
-}
-
-// The docs of a declaration, shared ones resolved.
-function Docs(props: {
-  info: Pick<DeclInfo, "docs">;
-  ix: PageIndex;
-}): JSX.Element {
-  const docs = () =>
-    props.info.docs
-      .map((c): DocComment | undefined =>
-        "doc" in c ? c : props.ix.sentDoc(c),
-      )
-      .filter((c) => c !== undefined);
-  return <For each={docs()}>{(c) => <DocView doc={c.doc} level={3} />}</For>;
 }
