@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cbor, cborFixture, fixture, stubFetch } from "../../test/fixtures";
 import { mountAppAt, unmountApp } from "../../test/mount";
 import { lineCount } from "./FileView";
@@ -291,6 +291,117 @@ describe("FileView navigation", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(main.querySelector("h1")?.textContent).toBe("shared/guide.md");
     expect(main.querySelector(".file-code")?.textContent).toBe("new file\n");
+  });
+});
+
+describe("FileView #L<n>", () => {
+  let frames: FrameRequestCallback[] = [];
+
+  beforeEach(() => {
+    frames = [];
+    vi.stubGlobal("requestAnimationFrame", (f: FrameRequestCallback) => {
+      frames.push(f);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+  });
+
+  function flush(): void {
+    const fs = frames;
+    frames = [];
+    for (const f of fs) f(0);
+  }
+
+  const marked = (main: HTMLElement) =>
+    [...main.querySelectorAll(".file-gutter .file-line-target")].map(
+      (e) => e.textContent,
+    );
+
+  async function at(hash: string): Promise<HTMLElement> {
+    const fetch = stubFetch({
+      "/tok/api/files/tree": [200, fixture("files")],
+      "/tok/api/file/tree/app/Main.hs": [200, cborFixture("file-text")],
+    });
+    void fetch;
+    const main = mountAppAt(`/tok/src/tree/app/Main.hs${hash}`).querySelector(
+      "main",
+    );
+    if (main === null) throw new Error("no main");
+    await vi.waitFor(() => {
+      expect(main.querySelector(".file-code")).not.toBeNull();
+    });
+    return main;
+  }
+
+  it("marks the line and scrolls it to the middle", async () => {
+    const scroll = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => undefined);
+    const main = await at("#L3");
+    expect(marked(main)).toEqual(["3"]);
+    flush();
+    expect(scroll).toHaveBeenCalledWith({ block: "center" });
+    expect(scroll.mock.contexts).toContain(
+      main.querySelector(".file-line-target"),
+    );
+    expect(main.querySelector('.file-text [role="status"]')?.textContent).toBe(
+      "Line 3 marked.",
+    );
+    // Still one text: gutter numbers, code.
+    expect(main.querySelector(".file-gutter")?.textContent).toBe(
+      "1\n2\n3\n4\n5",
+    );
+  });
+
+  it("a range; past the end is cut", async () => {
+    const main = await at("#L2-L4");
+    expect(marked(main)).toEqual(["2", "3", "4"]);
+    expect(main.querySelector('[role="status"]')?.textContent).toBe(
+      "Lines 2–4 marked.",
+    );
+    unmountApp();
+    const cut = await at("#L4-L99");
+    expect(marked(cut)).toEqual(["4", "5"]);
+    expect(cut.querySelector('[role="status"]')?.textContent).toBe(
+      "Lines 4–5 marked.",
+    );
+  });
+
+  // #L0: no line 0; #L6 and #L9: the file has 5 lines.
+  it.each(["#L0", "#L6", "#L9", "#L6-L8", "#L4-L2", "#junk"])(
+    "%s: nothing marked",
+    async (hash) => {
+      const scroll = vi
+        .spyOn(HTMLElement.prototype, "scrollIntoView")
+        .mockImplementation(() => undefined);
+      const main = await at(hash);
+      flush();
+      expect(marked(main)).toEqual([]);
+      // Only the sidebar scrolls (to the current file), not the gutter.
+      expect(
+        scroll.mock.contexts.filter(
+          (el) => el instanceof Element && el.closest(".file-gutter") !== null,
+        ),
+      ).toEqual([]);
+      expect(main.querySelector('[role="status"]')?.textContent).toBe("");
+    },
+  );
+
+  it("a hash change moves the mark, no refetch", async () => {
+    vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(
+      () => undefined,
+    );
+    const main = await at("#L1");
+    const fetch = vi.mocked(globalThis.fetch);
+    const calls = fetch.mock.calls.length;
+    const a = document.createElement("a");
+    a.href = "/tok/src/tree/app/Main.hs#L5";
+    main.append(a);
+    a.click();
+    await vi.waitFor(() => {
+      expect(marked(main)).toEqual(["5"]);
+    });
+    expect(fetch.mock.calls.length).toBe(calls);
   });
 });
 

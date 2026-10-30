@@ -167,3 +167,113 @@ export async function makeCabalProject(): Promise<Project> {
     remove: () => rm(root, { recursive: true, force: true }),
   };
 }
+
+// A project for the docs view: an implicit package with one module of
+// many kinds, one that links to it, and one that doesn't parse.
+export const shapesHs = [
+  "{-# LANGUAGE PatternSynonyms #-}",
+  "{-# LANGUAGE TypeFamilies #-}",
+  "-- | Shapes for the docs view tests. See <https://example.com/shapes the site>.",
+  "--",
+  "-- Markup is text: \\<b\\>bold\\</b\\>.",
+  "--",
+  "-- > <script>window.__pwned=1</script>",
+  "module Shapes",
+  "  ( -- * Types",
+  "    Shape (..),",
+  "    Box (..),",
+  "    Container (..),",
+  "    -- * Functions",
+  "    area,",
+  "    perimeter,",
+  "    (<+>),",
+  "    pattern Unit,",
+  "    Family,",
+  "    longSig,",
+  "    old,",
+  "  )",
+  "where",
+  "",
+  "import Data.Kind (Type)",
+  "",
+  "-- | A shape, see 'area'.",
+  "data Shape = Circle Double | Rect {width :: !Double, height :: Double}",
+  "  deriving (Eq, Show)",
+  "",
+  "newtype Box a = Box a deriving newtype (Eq)",
+  "",
+  "-- | Things with elements.",
+  "class Container f where",
+  "  type Elem f :: Type",
+  "  empty :: f",
+  "  insert :: Elem f -> f -> f",
+  "  {-# MINIMAL empty, insert #-}",
+  "",
+  "instance Container [a] where",
+  "  type Elem [a] = a",
+  "  empty = []",
+  "  insert = (:)",
+  "",
+  "instance Num Bool where",
+  "  fromInteger = (/= 0)",
+  "",
+  "-- | Both share one signature.",
+  "area, perimeter :: Shape -> Double",
+  "area _ = 0",
+  "perimeter _ = 0",
+  "",
+  "infixl 6 <+>",
+  "",
+  "(<+>) :: Shape -> Shape -> Shape",
+  "a <+> _ = a",
+  "",
+  "pattern Unit :: Shape",
+  "pattern Unit = Circle 1",
+  "",
+  "type family Family a",
+  "",
+  "type instance Family Shape = Double",
+  "",
+  "-- | A very long signature, to test wrapping.",
+  "longSig :: (Eq aaaaaaaaaaaaaaaaaaaa, Show bbbbbbbbbbbbbbbbbbbb) => aaaaaaaaaaaaaaaaaaaa -> bbbbbbbbbbbbbbbbbbbb -> (aaaaaaaaaaaaaaaaaaaa -> bbbbbbbbbbbbbbbbbbbb) -> Either aaaaaaaaaaaaaaaaaaaa bbbbbbbbbbbbbbbbbbbb -> Maybe [(aaaaaaaaaaaaaaaaaaaa, bbbbbbbbbbbbbbbbbbbb)]",
+  "longSig = undefined",
+  "",
+  "old :: Int",
+  "old = 1",
+  '{-# DEPRECATED old "Use area" #-}',
+  "",
+  '{-# RULES "area/id" forall s. area s = area s #-}',
+  "",
+  "{-# COMPLETE Unit #-}",
+  "",
+].join("\n");
+
+// The line of a declaration in shapesHs.
+export function shapesLine(start: string): number {
+  return shapesHs.split("\n").findIndex((l) => l.startsWith(start)) + 1;
+}
+
+export const otherHs = [
+  '-- | See "Shapes#v:area" and "Shapes#t:Shape".',
+  "module Other where",
+  "",
+  "x :: Int",
+  "x = 1",
+  "",
+].join("\n");
+
+export const brokenHs = "module Broken where\n\nx = = 1\n";
+
+export async function makeDocsProject(): Promise<Project> {
+  const root = await mkdtemp(join(tmpdir(), "hr-e2e-"));
+  git(root, "init", "-q");
+  await put(root, "Shapes.hs", shapesHs);
+  await put(root, "Other.hs", otherHs);
+  await put(root, "Broken.hs", brokenHs);
+  git(root, "add", "-A");
+  git(root, "commit", "-q", "-m", "fixture");
+  return {
+    root,
+    remove: () => rm(root, { recursive: true, force: true }),
+  };
+}

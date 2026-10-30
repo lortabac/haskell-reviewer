@@ -9,6 +9,8 @@
   --color-border: #d0d7de;
   --color-link: #0550ae;
   --color-focus: #0550ae;
+  /* Marked lines (#L<n>). */
+  --color-mark: #fff8c5;
 
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -34,5 +36,6 @@
     --color-border: #3d444d;
     --color-link: #6cb6ff;
     --color-focus: #6cb6ff;
+    --color-mark: #3d3000;
   }
 }

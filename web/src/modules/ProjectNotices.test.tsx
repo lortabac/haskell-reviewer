@@ -33,7 +33,7 @@ describe("ProjectNotices", () => {
     expect(notices(main)[1]).toMatch(/^No cabal\.project or \.cabal file/);
     expect(notices(main)[2]).toContain("without a .cabal file in ROOT.");
     expect(main.firstElementChild?.className).toBe("project-notice");
-    expect(main.textContent).toContain("Pick a file in the sidebar.");
+    expect(main.textContent).toContain("Pick a module or file in the sidebar.");
     // No warnings, no details.
     expect(main.querySelector("details")).toBeNull();
   });
@@ -77,6 +77,6 @@ describe("ProjectNotices", () => {
     const fetch = mount([status, body]);
     await new Promise((r) => setTimeout(r, 20));
     expect(fetch.querySelector(".project-notice, details")).toBeNull();
-    expect(fetch.textContent).toBe("Pick a file in the sidebar.");
+    expect(fetch.textContent).toBe("Pick a module or file in the sidebar.");
   });
 });

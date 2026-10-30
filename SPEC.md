@@ -279,7 +279,9 @@ constructor `Foo`. Fields always use `field:<Parent>.<name>`, where the
 parent is the field's type (e.g. `field:Config.port`), the pattern synonym
 for pattern synonym record fields, or the instance's first constructor
 for data instance fields. So duplicate record fields never clash (D-88). Instances use `inst:<Class>:<Head>`, with the head
-printed as in §4.6 and percent-encoded. The `<decl-id>` used by `/changes`
+printed as in §4.6 and percent-encoded. Haddock's anchors (`#v:<name>`,
+`#t:<Name>`) work too: the page finds the declaration by namespace and
+name and puts its `<decl>` in the URL instead (D-182). The `<decl-id>` used by `/changes`
 is the same `<decl>` (fields and instances included) qualified by its
 module. An
 unresolvable URL shows a "not found in this snapshot" page with a search box

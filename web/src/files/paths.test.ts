@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { apiFileUrl, hrefFor, pathFromPathname, withBase } from "./paths";
+import {
+  apiFileUrl,
+  hrefFor,
+  lineHref,
+  parseLineHash,
+  pathFromPathname,
+  segmentsAfter,
+  withBase,
+} from "./paths";
 
 describe("file paths in URLs", () => {
   it.each([
@@ -54,5 +62,57 @@ describe("withBase", () => {
     [undefined, "/src/tree/a"],
   ])("%j", (base, out) => {
     expect(withBase(base, "/src/tree/a")).toBe(out);
+  });
+});
+
+describe("segmentsAfter", () => {
+  it("decodes each segment after the prefix", () => {
+    expect(
+      segmentsAfter("/tok/docs/tree/a%2Eb/C%20d", ["docs", "tree"]),
+    ).toEqual(["a.b", "C d"]);
+    expect(segmentsAfter("/tok/x/y", ["x"])).toEqual(["y"]);
+  });
+
+  it.each([
+    "/tok/docs/tree",
+    "/tok/docs/tree/",
+    "/tok/docs/head/A",
+    "/tok/src/tree/A",
+    "/tok/docs/tree/a%2Fb",
+    "/tok/docs/tree/..",
+    "/tok/docs/tree/%E0",
+  ])("rejects %s", (pathname) => {
+    expect(segmentsAfter(pathname, ["docs", "tree"])).toBeUndefined();
+  });
+});
+
+describe("line hashes", () => {
+  it.each([
+    ["#L3", { from: 3, to: 3 }],
+    ["#L3-L7", { from: 3, to: 7 }],
+    ["#L7-L7", { from: 7, to: 7 }],
+  ])("%s", (hash, out) => {
+    expect(parseLineHash(hash)).toEqual(out);
+  });
+
+  it.each([
+    "",
+    "#",
+    "#L0",
+    "#L7-L3",
+    "#L",
+    "#l3",
+    "#L3-",
+    "#L3-7",
+    "#L03",
+    "#L3x",
+    "#L1234567890",
+    "#val%3Ax",
+  ])("rejects %j", (hash) => {
+    expect(parseLineHash(hash)).toBeUndefined();
+  });
+
+  it("lineHref", () => {
+    expect(lineHref("a b/c.hs", 12)).toBe("/src/tree/a%20b/c.hs#L12");
   });
 });

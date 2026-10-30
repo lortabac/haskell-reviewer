@@ -14,6 +14,7 @@ import {
   oneOf,
   str,
 } from "./decode";
+import { pageIndex } from "../docs/pageIndex";
 import { encodePath } from "../files/paths";
 import { noSourceReasons, type NoSourceReason } from "./modules";
 import {
@@ -1073,69 +1074,24 @@ export type AnyDecl =
   | AssociatedFamInst
   | DeclInfo;
 
-// Every declaration of the page with a handle, nested ones too, in
-// page order: constructors, fields, methods, associated types and
-// instances, pattern synonym fields.
-export function allDecls(page: ParsedModule): AnyDecl[] {
-  const out: AnyDecl[] = [];
-  const inType = (t: { constructors: Constructor[] }) => {
-    for (const c of t.constructors) out.push(c, ...c.fields);
-  };
-  for (const d of page.declarations) {
-    if (d.kind === "splice") continue;
-    out.push(d);
-    switch (d.kind) {
-      case "type":
-      case "faminst":
-        inType(d);
-        break;
-      case "class":
-        out.push(...d.methods);
-        for (const a of d.associated) {
-          out.push(a);
-          inType(a);
-        }
-        break;
-      case "patsyn":
-        out.push(...d.fields);
-        break;
-      case "instance":
-        for (const a of d.associated) {
-          out.push(a);
-          inType(a);
-        }
-        break;
-      case "value":
-        break;
-    }
-  }
-  return out;
-}
+// Built once per page in docs/pageIndex.ts.
+export { allDecls, idText } from "../docs/pageIndex";
 
 // Every declaration by handle: what sharedWith, instances, onType and
-// links refer to. Build it once per page.
-export function byHandle(page: ParsedModule): Map<Handle, AnyDecl> {
-  return new Map(allDecls(page).map((d) => [d.n, d]));
-}
-
-// An id as text, like type:T, field:T.f or inst:Show:Maybe a.
-export function idText(page: ParsedModule, id: WireId): string {
-  if (typeof id === "string") return id;
-  const part = (k: number) => page.idParts[k] ?? "";
-  return "field" in id
-    ? "field:" + part(id.parent) + "." + id.field
-    : "inst:" + id.inst + ":" + id.head.map(part).join("");
+// links refer to. A repeated handle (CPP) gives the first.
+export function byHandle(page: ParsedModule): ReadonlyMap<Handle, AnyDecl> {
+  return pageIndex(page).byHandle;
 }
 
 // The declaration with this id (the #<decl> part of a docs URL), top
 // level or nested. Ids aren't unique: this is the first in page order
 // (a field in several constructors: in the first). Not found is not an
-// error: the page shows "not found in this snapshot" (SPEC §4.1).
+// error: the page shows a notice (SPEC §4.1).
 export function findDecl(
   page: ParsedModule,
   id: string,
 ): AnyDecl | "not-found" {
-  return allDecls(page).find((d) => idText(page, d.id) === id) ?? "not-found";
+  return pageIndex(page).byId.get(id) ?? "not-found";
 }
 
 // The docs view URL of a module, relative to the token, with a
