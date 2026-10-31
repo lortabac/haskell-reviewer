@@ -45,6 +45,7 @@ import GHC.Clock (getMonotonicTimeNSec)
 import System.Directory (removeFile)
 import System.Environment (getEnvironment)
 import System.Exit (ExitCode (..))
+import System.FilePath ((</>))
 import System.IO
   ( Handle,
     IOMode (ReadMode),
@@ -57,6 +58,7 @@ import System.IO
     readFile',
     stderr,
   )
+import System.IO.Temp (withSystemTempDirectory)
 import System.Posix.Signals (sigKILL, sigTERM, signalProcess)
 import System.Process
   ( CreateProcess (..),
@@ -132,7 +134,15 @@ renderRunError (RunError s) = s
 -- | Run the product binary once, measuring it. Leaves no process
 -- behind, on success or failure.
 runOnce :: RunConfig -> IO (Either RunError RunResult)
-runOnce cfg = bracket (openFile "/dev/null" ReadMode) hClose $ \devNull -> do
+runOnce cfg =
+  bracket (openFile "/dev/null" ReadMode) hClose $ \devNull ->
+    withSystemTempDirectory "haskell-reviewer-bench-xdg" $ \xdg ->
+      runIn cfg devNull xdg
+
+-- | 'runOnce' with fresh XDG dirs: the user's config.toml must not
+-- change the numbers, and a run must not touch their ui.json.
+runIn :: RunConfig -> Handle -> FilePath -> IO (Either RunError RunResult)
+runIn cfg devNull xdg = do
   t0 <- getMonotonicTimeNSec
   -- A stale file from an earlier run at the same index (the warm-up,
   -- say) must not look like this run's: if the product dies before
@@ -141,8 +151,14 @@ runOnce cfg = bracket (openFile "/dev/null" ReadMode) hClose $ \devNull -> do
   _ <- try @IOException (removeFile (rtsFile cfg)) :: IO (Either IOException ())
   -- Inherited, minus GHCRTS: -rtsopts (needed for +RTS -t) also means
   -- the product now reads GHCRTS, and a developer's own GHCRTS (-N,
-  -- -A, ...) would silently change every number.
-  childEnv <- filter ((/= "GHCRTS") . fst) <$> getEnvironment
+  -- -A, ...) would silently change every number. Our own XDG dirs
+  -- (D-202).
+  let ours =
+        [ ("XDG_CONFIG_HOME", xdg </> "config"),
+          ("XDG_STATE_HOME", xdg </> "state")
+        ]
+      dropped = "GHCRTS" : map fst ours
+  childEnv <- (ours <>) . filter ((`notElem` dropped) . fst) <$> getEnvironment
   let cp =
         (proc cfg.exe (runArgs cfg))
           { std_in = UseHandle devNull,

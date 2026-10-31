@@ -11,6 +11,7 @@ module HaskellReviewer.Server.Wire
     encodeModuleTree,
     encodeModuleNotFound,
     encodeIndexing,
+    encodePrefs,
     helloPayload,
 
     -- * Shared
@@ -25,6 +26,7 @@ import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
+import HaskellReviewer.Core.Config (sidebarName, themeName)
 import HaskellReviewer.Core.FileContent
   ( FileContent (..),
     FileSize (..),
@@ -56,6 +58,7 @@ import HaskellReviewer.Core.Modules
     renderModuleId,
     renderPreprocessor,
   )
+import HaskellReviewer.Core.Prefs (Effective (..))
 import HaskellReviewer.Core.Project
   ( BrokenPackage (..),
     ModuleName (..),
@@ -254,6 +257,18 @@ encodeIndexing (Generation g) p =
       <> ("total" .= p.total)
       <> ("ready" .= p.ready)
       <> ("failed" .= p.failed)
+
+-- | GET and POST api\/prefs: every preference, defaults filled in.
+--
+-- > {"theme":"system","exportedOnly":false,"sidebar":"auto"}
+--
+-- No generation: preferences don't belong to a snapshot (D-197).
+encodePrefs :: Effective -> LBS.ByteString
+encodePrefs e =
+  Encoding.encodingToLazyByteString . Aeson.pairs $
+    ("theme" .= themeName e.theme)
+      <> ("exportedOnly" .= e.exportedOnly)
+      <> ("sidebar" .= sidebarName e.sidebar)
 
 -- * Internal
 

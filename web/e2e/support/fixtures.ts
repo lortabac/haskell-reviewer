@@ -7,6 +7,9 @@ import {
   type Page,
   test as base,
 } from "@playwright/test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   makeCabalProject,
   makeDocsProject,
@@ -70,8 +73,15 @@ function initScript(): void {
 
 interface TestFixtures {
   server: Server;
-  // Default root: the main fixture project.
-  startServer: (opts?: { root?: string }) => Promise<Server>;
+  // Default root: the main fixture project. Default XDG dirs: the
+  // test's own, empty at start (xdg), shared by its servers, so a
+  // restart sees what the first server saved.
+  startServer: (opts?: {
+    root?: string;
+    configHome?: string;
+    stateHome?: string;
+  }) => Promise<Server>;
+  xdg: { configHome: string; stateHome: string };
   startProxy: (backend: number) => Promise<Proxy>;
   guard: Guard;
 }
@@ -113,10 +123,24 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     { scope: "worker" },
   ],
 
-  startServer: async ({ project }, use) => {
+  // eslint-disable-next-line no-empty-pattern
+  xdg: async ({}, use) => {
+    const dir = await mkdtemp(join(tmpdir(), "hr-e2e-xdg-"));
+    await use({
+      configHome: join(dir, "config"),
+      stateHome: join(dir, "state"),
+    });
+    await rm(dir, { recursive: true, force: true });
+  },
+
+  startServer: async ({ project, xdg }, use) => {
     const servers: Server[] = [];
     await use(async (opts) => {
-      const s = await startServer({ root: opts?.root ?? project.root });
+      const s = await startServer({
+        root: opts?.root ?? project.root,
+        configHome: opts?.configHome ?? xdg.configHome,
+        stateHome: opts?.stateHome ?? xdg.stateHome,
+      });
       servers.push(s);
       return s;
     });

@@ -1,0 +1,5 @@
+theme: dark
+exported-only: false
+sidebar: modules
+== warnings
+config.toml:3:18: ui.exported-only: expected a boolean, got an integer

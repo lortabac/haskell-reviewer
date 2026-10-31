@@ -30,12 +30,14 @@ import HaskellReviewer.Server.Api
   )
 import HaskellReviewer.Server.Assets (Asset (..), lookupAsset, shellFor)
 import HaskellReviewer.Server.Events (EventStream, eventsApp)
+import HaskellReviewer.Server.Prefs (prefsApp)
 import HaskellReviewer.Server.Security
   ( checkAccess,
     methodNotAllowed,
     notFound,
     withSecurityHeaders,
   )
+import HaskellReviewer.Session.Prefs (PrefsStore)
 import Network.HTTP.Types
   ( Header,
     hCacheControl,
@@ -85,6 +87,9 @@ Paths below are what the router sees, after the token.
   body. api/indexing/<side>: how far indexing is, as JSON. The only
   side is tree; another one is a plain 404. GET only (405 otherwise,
   HEAD too).
+- api/prefs: the UI preferences, as JSON. GET, and POST with an
+  application/json body (Note [Prefs route] in
+  "HaskellReviewer.Server.Prefs"); 405 otherwise, HEAD too.
 - Anything else: 404. index.html itself is not served under its name.
   So are api, api/x and api/events/x: the api/ namespace has only the
   routes listed here.
@@ -119,7 +124,8 @@ first: it runs the middleware on a fake request before warp listens.
 -- | What the API routes need.
 data Routes = Routes
   { events :: EventStream,
-    files :: FilesApi
+    files :: FilesApi,
+    prefs :: PrefsStore
   }
 
 -- | The whole app. Paths are relative to the token: the router never
@@ -193,6 +199,7 @@ router shell routes req respond = case req.pathInfo of
   ["api", "modules", side] -> modulesApp routes.files side req respond
   "api" : "module" : side : ref -> moduleApp routes.files side ref req respond
   ["api", "indexing", side] -> indexingApp routes.files side req respond
+  ["api", "prefs"] -> prefsApp routes.prefs req respond
   _ -> respond notFound
   where
     getOnly r

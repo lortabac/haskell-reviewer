@@ -1,0 +1,5 @@
+theme: system
+exported-only: false
+sidebar: auto
+== warnings
+config.toml:4:2: key "ui" is a table that is already closed; file ignored

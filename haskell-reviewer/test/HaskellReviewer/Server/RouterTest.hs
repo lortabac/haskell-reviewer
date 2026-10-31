@@ -1,6 +1,7 @@
 -- | The app, called in process (no socket).
 module HaskellReviewer.Server.RouterTest (tests) where
 
+import ApiSupport (fixedPrefs)
 import Codec.Compression.GZip qualified as GZip
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
@@ -267,7 +268,8 @@ request method host path =
   defaultRequest
     { requestMethod = method,
       requestHeaderHost = host,
-      requestHeaders = maybe [] (\h -> [("Host", h)]) host,
+      -- Origin too: methods other than GET and HEAD need it.
+      requestHeaders = maybe [] (\h -> [("Host", h), ("Origin", "http://" <> h)]) host,
       pathInfo = path
     }
 
@@ -282,9 +284,10 @@ call req = do
             minGap = Microseconds 0,
             logger = newLogger LevelInfo (\_ -> pure ())
           }
+      routes = Routes {events = events, files = noFiles, prefs = fixedPrefs}
   saved <- newIORef Nothing
   ResponseReceived <-
-    application port token Routes {events = events, files = noFiles} req $ \resp -> do
+    application port token routes req $ \resp -> do
       writeIORef saved (Just resp)
       pure ResponseReceived
   readIORef saved >>= \case

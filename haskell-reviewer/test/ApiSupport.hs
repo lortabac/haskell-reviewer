@@ -9,12 +9,17 @@ module ApiSupport
     pageApi,
     forceFixtures,
     indexed,
+    fixedPrefs,
 
     -- * Calling the app
     ApiResult (..),
     getApi,
     getApiWith,
     requestApi,
+    requestApiWith,
+    RequestBody (..),
+    sendApi,
+    goodOrigin,
     callApp,
     apiToken,
   )
@@ -24,15 +29,17 @@ import Control.Concurrent.Async (withAsync)
 import Control.Exception (evaluate)
 import Control.Monad (forM_, void)
 import Data.ByteString (ByteString)
+import Data.ByteString qualified as BS
 import Data.ByteString.Builder qualified as Builder
 import Data.ByteString.Lazy qualified as LBS
-import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
+import Data.IORef (atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
 import HaskellReviewer.Core.Address (Port (..), Token, tokenFromBytes, tokenText)
+import HaskellReviewer.Core.Config (builtinDefaults)
 import HaskellReviewer.Core.FileContent
   ( FileContent (..),
     FileSize (..),
@@ -48,6 +55,7 @@ import HaskellReviewer.Core.FileList
   )
 import HaskellReviewer.Core.ModuleModel (ModuleParse)
 import HaskellReviewer.Core.Parser (ParseSettings)
+import HaskellReviewer.Core.Prefs (effective, noPrefs)
 import HaskellReviewer.Core.Project
   ( BrokenPackage (..),
     CabalProblem (..),
@@ -77,6 +85,7 @@ import HaskellReviewer.Core.RelPath
     resolveLinkTarget,
   )
 import HaskellReviewer.Core.Root (CanonicalRoot (..))
+import HaskellReviewer.Core.Xdg (XdgProblem (..))
 import HaskellReviewer.Effects.Clock (Microseconds (..))
 import HaskellReviewer.Effects.FileSystem (ListError, ReadError (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), Logger, newLogger)
@@ -86,9 +95,17 @@ import HaskellReviewer.Server.Events (EventStream (..))
 import HaskellReviewer.Server.Router (Routes (..), application)
 import HaskellReviewer.Session.Clients (newClients)
 import HaskellReviewer.Session.Index (IndexDeps (..), runWorkers)
+import HaskellReviewer.Session.Prefs (PrefsStore (..), newPrefsStore)
 import HaskellReviewer.Session.Snapshot (Snapshot (files, index))
 import Network.HTTP.Types (Header, Status (..))
-import Network.Wai (Application, Request (..), defaultRequest, responseToStream)
+import Network.Wai
+  ( Application,
+    Request (..),
+    RequestBodyLength (..),
+    defaultRequest,
+    responseToStream,
+    setRequestBodyChunks,
+  )
 import Network.Wai.Internal (ResponseReceived (..))
 import System.Timeout (timeout)
 import Test.Tasty.HUnit (assertFailure)
@@ -106,7 +123,10 @@ data TestApi = TestApi
     -- | Parse workers that run while a request does. With 0 nothing is
     -- read in the background (and a request for a module we parse
     -- waits for ever).
-    workers :: Int
+    workers :: Int,
+    -- | The preferences store, made for each request. By default in
+    -- memory, with the built-in defaults.
+    prefs :: IO PrefsStore
   }
 
 -- | A fixed snapshot and file contents. The file API fixtures come
@@ -162,7 +182,21 @@ apiFor snap =
         pure (maybe (Left ReadGone) Right (lookup (relPathText p) contents)),
       parse = parseGuarded,
       logger = newLogger LevelInfo (\_ -> pure ()),
-      workers = 1
+      workers = 1,
+      prefs =
+        newPrefsStore silent builtinDefaults (Left HomeUnset)
+    }
+
+silent :: Logger
+silent = newLogger LevelInfo (\_ -> pure ())
+
+-- | Built-in defaults, and a save changes nothing. For tests that need
+-- routes but don't look at api/prefs.
+fixedPrefs :: PrefsStore
+fixedPrefs =
+  PrefsStore
+    { current = pure (effective builtinDefaults noPrefs),
+      update = \_ -> pure (effective builtinDefaults noPrefs)
     }
 
 -- | What the workers need, as the server wires it.
@@ -646,14 +680,32 @@ getApi = requestApi "GET"
 getApiWith :: [Header] -> TestApi -> [Text] -> IO ApiResult
 getApiWith = requestApiWith "GET"
 
--- | Like 'getApi', with the method given.
+-- | Like 'getApi', with the method given, and our own Origin (the
+-- browser sends it on POST).
 requestApi :: ByteString -> TestApi -> [Text] -> IO ApiResult
-requestApi method = requestApiWith method []
+requestApi method = requestApiWith method [goodOrigin]
 
--- | Like 'requestApi', with these request headers.
+-- | Like 'requestApi', with these request headers only.
 requestApiWith :: ByteString -> [Header] -> TestApi -> [Text] -> IO ApiResult
-requestApiWith method headers api path = do
+requestApiWith method headers = sendApi method headers NoBody
+
+-- | The Origin of the page 'getApi' talks to.
+goodOrigin :: Header
+goodOrigin = ("Origin", "http://127.0.0.1:8080")
+
+-- | A request body.
+data RequestBody
+  = NoBody
+  | -- | With a known length.
+    Sized ByteString
+  | -- | Chunked: no length.
+    Chunked [ByteString]
+
+-- | Like 'requestApiWith', with a body.
+sendApi :: ByteString -> [Header] -> RequestBody -> TestApi -> [Text] -> IO ApiResult
+sendApi method headers reqBody api path = do
   listed <- api.snapshot
+  prefsStore <- api.prefs
   clients <- newClients
   let events =
         EventStream
@@ -669,11 +721,12 @@ requestApiWith method headers api path = do
             readEntry = api.readEntry,
             logger = api.logger
           }
-      app = application (Port 8080) apiToken Routes {events = events, files = files}
+      routes = Routes {events = events, files = files, prefs = prefsStore}
+      app = application (Port 8080) apiToken routes
       call = do
         r <-
           timeout 10_000_000 $
-            callAppWith app method headers host (tokenText apiToken : path)
+            callAppBody app method headers reqBody host (tokenText apiToken : path)
         maybe (assertFailure ("no answer within 10 s: " <> show path)) pure r
       host = "127.0.0.1:8080"
   case listed of
@@ -689,14 +742,37 @@ callApp app method = callAppWith app method []
 -- | Like 'callApp', with these request headers.
 callAppWith ::
   Application -> ByteString -> [Header] -> ByteString -> [Text] -> IO ApiResult
-callAppWith app method headers host path = do
-  let req =
-        defaultRequest
-          { requestMethod = method,
-            requestHeaders = headers,
-            requestHeaderHost = Just host,
-            pathInfo = path
-          }
+callAppWith app method headers = callAppBody app method headers NoBody
+
+callAppBody ::
+  Application ->
+  ByteString ->
+  [Header] ->
+  RequestBody ->
+  ByteString ->
+  [Text] ->
+  IO ApiResult
+callAppBody app method headers reqBody host path = do
+  chunks <- newIORef $ case reqBody of
+    NoBody -> []
+    Sized b -> [b]
+    Chunked bs -> bs
+  let next = atomicModifyIORef' chunks $ \case
+        [] -> ([], BS.empty)
+        b : rest -> (rest, b)
+      bodyLength = case reqBody of
+        NoBody -> KnownLength 0
+        Sized b -> KnownLength (fromIntegral (BS.length b))
+        Chunked _ -> ChunkedBody
+      req =
+        setRequestBodyChunks next $
+          defaultRequest
+            { requestMethod = method,
+              requestHeaders = headers,
+              requestHeaderHost = Just host,
+              requestBodyLength = bodyLength,
+              pathInfo = path
+            }
   saved <- newIORef Nothing
   ResponseReceived <- app req $ \resp -> do
     writeIORef saved (Just resp)
@@ -705,9 +781,9 @@ callAppWith app method headers host path = do
     Nothing -> assertFailure "no response"
     Just resp -> do
       let (st, hs, withBody) = responseToStream resp
-      chunks <- newIORef mempty
-      withBody $ \streaming -> streaming (\b -> modifyIORef' chunks (<> b)) (pure ())
-      b <- readIORef chunks
+      out <- newIORef mempty
+      withBody $ \streaming -> streaming (\b -> modifyIORef' out (<> b)) (pure ())
+      b <- readIORef out
       pure
         ApiResult
           { status = statusCode st,

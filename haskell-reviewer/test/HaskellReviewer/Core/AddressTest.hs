@@ -37,7 +37,26 @@ tests =
         mapM_
           (\h -> assertBool (show h) (not (hostAllowed (Port 8080) (Just h))))
           badHosts
-        hostAllowed (Port 8080) Nothing @?= False
+        hostAllowed (Port 8080) Nothing @?= False,
+      testCase "originAllowed: good" $
+        mapM_
+          (\o -> assertBool (show o) (originAllowed (Port 8080) (Just o)))
+          ["http://127.0.0.1:8080", "http://localhost:8080", "HTTP://LocalHost:8080"],
+      testCase "originAllowed: bad" $ do
+        mapM_
+          (\o -> assertBool (show o) (not (originAllowed (Port 8080) (Just o))))
+          [ "null",
+            "",
+            "http://127.0.0.1:8081",
+            "http://127.0.0.1",
+            "https://127.0.0.1:8080",
+            "http://127.0.0.1:8080/",
+            "http://evil.com:8080",
+            "http://[::1]:8080",
+            "127.0.0.1:8080",
+            "http://localhost.:8080"
+          ]
+        originAllowed (Port 8080) Nothing @?= False
     ]
 
 token :: Token

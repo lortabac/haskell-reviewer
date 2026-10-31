@@ -40,6 +40,7 @@ import {
   type ItemName,
   type ModulePage,
 } from "./module";
+import { decodePrefs, sidebarViews, themes } from "./prefs";
 import { blockKinds, inlineKinds } from "./richtext";
 import {
   cbor,
@@ -76,6 +77,8 @@ const decoders: Record<string, (value: unknown) => unknown> = {
   "module-page": decodeModulePage,
   "module-page-sections": decodeModulePage,
   "module-not-found": decodeModuleNotFound,
+  prefs: decodePrefs,
+  "prefs-defaults": decodePrefs,
 };
 
 // The fixtures that are CBOR (D-51), with a JSON dump next to them.
@@ -241,6 +244,21 @@ describe("API fixtures", () => {
     expect(m.imports.some((i) => i.safe)).toBe(true);
     expect(m.imports.some((i) => i.package !== null)).toBe(true);
     expect(m.warnings.length).toBeGreaterThan(0);
+  });
+
+  it("the prefs fixtures: the defaults, and other values", () => {
+    expect(decodePrefs(fixture("prefs-defaults"))).toEqual({
+      theme: "system",
+      exportedOnly: false,
+      sidebar: "auto",
+    });
+    // Every key off its default.
+    const other = decodePrefs(fixture("prefs"));
+    expect(other.theme).not.toBe("system");
+    expect(other.exportedOnly).toBe(true);
+    expect(other.sidebar).not.toBe("auto");
+    expect(themes).toContain(other.theme);
+    expect(sidebarViews).toContain(other.sidebar);
   });
 
   it("text comes through as is", () => {
@@ -495,6 +513,22 @@ describe("decoders reject bad shapes", () => {
       expect(() => decodeIndexing(bad), JSON.stringify(bad)).toThrow(
         DecodeError,
       );
+    }
+  });
+
+  it("prefs", () => {
+    const good = { theme: "dark", exportedOnly: true, sidebar: "files" };
+    expect(decodePrefs(good)).toEqual(good);
+    for (const bad of [
+      null,
+      [],
+      {},
+      { ...good, theme: "blue" },
+      { ...good, theme: undefined },
+      { ...good, exportedOnly: "true" },
+      { ...good, sidebar: null },
+    ]) {
+      expect(() => decodePrefs(bad), JSON.stringify(bad)).toThrow(DecodeError);
     }
   });
 

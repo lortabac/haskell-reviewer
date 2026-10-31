@@ -14,6 +14,7 @@ module HaskellReviewer.Effects.Log
 
     -- * Messages
     exceptionMessage,
+    ioErrorMessage,
   )
 where
 
@@ -21,6 +22,7 @@ import Control.Exception (SomeException (..), displayException)
 import Control.Monad (when)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import GHC.IO.Exception (IOException (..))
 
 -- | How much to log. Ordered: a logger at 'LevelDebug' also prints
 -- verbose and info messages.
@@ -69,3 +71,13 @@ logDebug logger = logger.emit LevelDebug
 exceptionMessage :: SomeException -> Text
 exceptionMessage (SomeException inner) =
   Text.unwords (Text.lines (Text.pack (displayException inner)))
+
+-- | An IO error on one line, without its file name (the caller puts the
+-- path where it fits): @\<where>: \<why>@, e.g. @openFile: Permission
+-- denied@. GHC's own text says the reason twice ("permission denied
+-- (Permission denied)").
+ioErrorMessage :: IOException -> Text
+ioErrorMessage e =
+  Text.unwords . Text.lines . Text.pack $
+    (if null e.ioe_location then "" else e.ioe_location <> ": ")
+      <> (if null e.ioe_description then show e.ioe_type else e.ioe_description)

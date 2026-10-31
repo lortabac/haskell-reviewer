@@ -1,0 +1,6 @@
+theme: system
+exported-only: false
+sidebar: auto
+== warnings
+config.toml:2:9: ui.theme: unknown value "da\x1b[31mrk", expected system, light or dark
+config.toml:3:1: unknown key "ui.\x07bell"

@@ -1,0 +1,4 @@
+[ui]
+theme = 1
+exported-only = "yes"
+sidebar = ["files"]

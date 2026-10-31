@@ -877,12 +877,17 @@ as not configured (§8), with the reason.
 
 - One user config: `$XDG_CONFIG_HOME/haskell-reviewer/config.toml` (on macOS
   the same XDG path, defaulting to `~/.config`). It holds the LLM provider,
-  endpoint, model, key source, the deny-list and UI defaults.
+  endpoint, model, key source, the deny-list and UI defaults (`[ui]`:
+  `theme`, `exported-only`, `sidebar`; D-199). A bad file is never fatal:
+  each problem is a warning on stderr with line and column.
 - UI choices made in the page and "remembered across sessions" (theme
   override, diff layout, "exported only", single-key shortcuts) are stored
-  by the tool in `$XDG_STATE_HOME/haskell-reviewer/ui.json` (D-68). They
-  take precedence over the config's UI defaults. The tool never rewrites
-  `config.toml`.
+  by the tool in `$XDG_STATE_HOME/haskell-reviewer/ui.json` (D-68, D-200;
+  default `~/.local/state`), written atomically. They take precedence over
+  the config's UI defaults. The tool never rewrites `config.toml`. With no
+  usable `HOME` (D-201), they last only for the run. The tool works without
+  a writable state dir (read-only or restricted sandbox): preferences then
+  last for the session.
 - There is **no per-project configuration** of any kind (D-15): no file in
   the project, and no per-project section in the user config. The project
   under review cannot influence the tool, and there is only one place to
@@ -1374,6 +1379,11 @@ incomplete index are labelled *partial*.
 following:
 - checks the `Host` header and the session token (§2), comparing the token
   in constant time;
+- for methods other than `GET` and `HEAD`, checks that `Origin` is the
+  page's own (`http://127.0.0.1:<port>` or `http://localhost:<port>`),
+  else 403. `POST` bodies must be `application/json` (so a cross-site
+  page would need a CORS preflight, which is never answered) and are
+  size-capped (D-198);
 - sets the security headers: the CSP and `Referrer-Policy` of §9.2,
   `X-Content-Type-Options: nosniff`, and `Cache-Control: no-store` for API
   responses. Static assets also live under the token path, and their
@@ -1395,8 +1405,10 @@ a framework would cost more than it saves.
   **CBOR** (D-51), with only what JSON has (text-keyed maps, arrays, text,
   ints, bools, null). Each route has one encoding (D-165). Every response
   carries its snapshot generation id, and the client caches by
-  *(generation, resource)*. A module that doesn't exist is a 404 with a
-  small JSON body (D-166); other errors are plain text.
+  *(generation, resource)*. Preferences (`api/prefs`) are the exception:
+  they don't belong to a snapshot, so they have no generation (D-197). A
+  module that doesn't exist is a 404 with a small JSON body (D-166);
+  other errors are plain text.
 - **Actions** (ask, stop, reload, set preference, …) are `POST` requests
   with JSON bodies.
 - **Push** (D-52): **one SSE connection per browser**, held by a

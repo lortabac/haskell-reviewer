@@ -3,17 +3,20 @@ module HaskellReviewer.Server.ApiTest (tests) where
 
 import ApiSupport
   ( ApiResult (..),
+    RequestBody (..),
     TestApi (..),
     fixtureApi,
     getApi,
     getApiWith,
+    goodOrigin,
     indexed,
     projectApi,
     requestApi,
+    sendApi,
   )
 import Codec.Compression.GZip qualified as GZip
-import Control.Exception (evaluate)
-import Control.Monad (forM, forM_)
+import Control.Exception (evaluate, finally)
+import Control.Monad (forM, forM_, unless)
 import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Lazy qualified as LBS
@@ -21,16 +24,23 @@ import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef)
 import Data.List (nub, sort)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import HaskellReviewer.Core.Config (builtinDefaults)
 import HaskellReviewer.Core.FileContent (FileContent (..), LinkInfo (..))
 import HaskellReviewer.Core.FileList (CommitId (..), EntryKind (..))
 import HaskellReviewer.Core.Modules (Literate (..))
 import HaskellReviewer.Core.Parser (FileKind (..), ParseSettings (..))
 import HaskellReviewer.Core.Project (Extension (..), Language (..))
 import HaskellReviewer.Core.RelPath (relPathFromBytes)
+import HaskellReviewer.Core.Xdg (XdgProblem (..))
 import HaskellReviewer.Effects.FileSystem (ListError (..), ReadError (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), newLogger)
 import HaskellReviewer.Server.Api (cborWarmUp)
 import HaskellReviewer.Server.CborJson (cborToJson)
+import HaskellReviewer.Session.Prefs (newPrefsStore)
+import Network.HTTP.Types (Header)
+import System.Directory qualified as Dir
+import System.FilePath ((</>))
+import System.IO.Temp (withSystemTempDirectory)
 import Test.Tasty (TestTree, testGroup, withResource)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 
@@ -165,7 +175,7 @@ tests =
         r.body @?= "{\"generation\":1,\"total\":9,\"ready\":8,\"failed\":1}"
     ]
       <> moduleTests
-      <> [gzipTests, warmUpTest]
+      <> [gzipTests, warmUpTest, prefsTests]
 
 -- | GET api/module/tree/<ref>. The fixtures cover the bodies.
 moduleTests :: [TestTree]
@@ -363,6 +373,153 @@ warmUpTest =
       Link _ -> "link"
       Submodule _ -> "submodule"
       NestedRepo -> "nested-repo"
+
+-- | api/prefs (Note [Prefs route] in "HaskellReviewer.Server.Prefs").
+-- Each test gets its own in-memory store.
+prefsTests :: TestTree
+prefsTests =
+  testGroup
+    "Prefs API"
+    [ testCase "GET: the defaults, JSON with a length, no-store; no Origin needed" $ do
+        r <- getApi fixtureApi prefsPath
+        r.status @?= 200
+        lookup "Content-Type" r.headers @?= Just "application/json"
+        lookup "Content-Length" r.headers
+          @?= Just (Char8.pack (show (LBS.length r.body)))
+        assertNoStore r
+        r.body @?= defaults,
+      testCase "POST: 200 with every preference; GET sees it" $ do
+        api <- withStore
+        r <- post api dark
+        r.status @?= 200
+        lookup "Content-Type" r.headers @?= Just "application/json"
+        r.body @?= "{\"theme\":\"dark\",\"exportedOnly\":false,\"sidebar\":\"auto\"}"
+        r2 <- post api "{\"sidebar\":\"files\",\"exportedOnly\":true}"
+        r2.body @?= "{\"theme\":\"dark\",\"exportedOnly\":true,\"sidebar\":\"files\"}"
+        g <- getApi api prefsPath
+        g.body @?= r2.body,
+      testCase "POST: bad bodies are 400, with the reason" $ do
+        api <- withStore
+        mapM_
+          ( \(body, why) -> do
+              r <- post api body
+              (body, r.status, r.body) @?= (body, 400, why)
+              lookup "Content-Type" r.headers @?= Just "text/plain; charset=utf-8"
+          )
+          [ ("", "the body is not JSON"),
+            ("{\"theme\":", "the body is not JSON"),
+            ("[]", "the body is not a JSON object"),
+            ("{}", "no preference to set"),
+            ("{\"font\":1}", "unknown preference \"font\""),
+            ( "{\"theme\":\"blue\"}",
+              "theme: expected one of \"system\", \"light\", \"dark\""
+            ),
+            ("{\"exportedOnly\":\"yes\"}", "exportedOnly: expected true or false")
+          ]
+        getApi api prefsPath >>= \r -> r.body @?= defaults,
+      testCase "POST: not application/json is 415" $ do
+        api <- withStore
+        mapM_
+          ( \headers -> do
+              r <- sendApi "POST" (goodOrigin : headers) (Sized dark) api prefsPath
+              (headers, r.status) @?= (headers, 415)
+          )
+          [[], [("Content-Type", "text/plain")], [("Content-Type", "application/jsonx")]]
+        mapM_
+          ( \ct -> do
+              let headers = [goodOrigin, ("Content-Type", ct)]
+              r <- sendApi "POST" headers (Sized dark) api prefsPath
+              (ct, r.status) @?= (ct, 200)
+          )
+          ["application/json; charset=utf-8", "Application/JSON"],
+      testCase "POST: a body over 4 KiB is 413, with a length or chunked" $ do
+        api <- withStore
+        let padded n = dark <> BS.replicate (n - BS.length dark) 32
+            chunked cs = sendApi "POST" jsonHeaders (Chunked cs) api prefsPath
+        BS.length (padded 4096) @?= 4096
+        ok <- post api (padded 4096)
+        ok.status @?= 200
+        big <- post api (padded 4097)
+        big.status @?= 413
+        big.body @?= "the body is over 4 KiB"
+        r1 <- chunked (replicate 5 (BS.replicate 1000 32))
+        r1.status @?= 413
+        r2 <- chunked ["{\"theme\":", "\"light\"}"]
+        r2.status @?= 200,
+      testCase "POST: a bad Origin is 403, before anything else" $ do
+        api <- withStore
+        let withOrigin o =
+              ("Content-Type", "application/json") : [("Origin", x) | Just x <- [o]]
+        mapM_
+          ( \origin -> do
+              let headers = withOrigin origin
+              r <- sendApi "POST" headers (Sized dark) api prefsPath
+              (origin, r.status, r.body) @?= (origin, 403, "forbidden: bad Origin header")
+              -- An unknown path too: 403 before 404.
+              r2 <- sendApi "POST" headers (Sized "{}") api ["nope"]
+              (origin, r2.status) @?= (origin, 403)
+          )
+          [ Nothing,
+            Just "null",
+            Just "http://evil.com",
+            Just "http://127.0.0.1:9999",
+            Just "https://127.0.0.1:8080",
+            Just "http://127.0.0.1:8080/",
+            Just "http://[::1]:8080"
+          ]
+        -- Two Origin headers, even good ones: 403.
+        let twice = goodOrigin : withOrigin (Just "http://127.0.0.1:8080")
+        two <- sendApi "POST" twice (Sized dark) api prefsPath
+        two.status @?= 403
+        getApi api prefsPath >>= \r -> r.body @?= defaults
+        mapM_
+          ( \origin -> do
+              r <- sendApi "POST" (withOrigin (Just origin)) (Sized dark) api prefsPath
+              (origin, r.status) @?= (origin, 200)
+          )
+          ["http://localhost:8080", "HTTP://LocalHost:8080", "http://127.0.0.1:8080"],
+      testCase "other methods: 405, Allow: GET, POST" $
+        mapM_
+          ( \method -> do
+              r <- requestApi method fixtureApi prefsPath
+              (method, r.status) @?= (method, 405)
+              lookup "Allow" r.headers @?= Just "GET, POST"
+          )
+          ["HEAD", "PUT", "DELETE", "PATCH", "OPTIONS"],
+      testCase "POST: a state dir we can't write is still 200, kept for the session" $
+        withSystemTempDirectory "haskell-reviewer-api" $ \dir -> do
+          let silent = newLogger LevelInfo (\_ -> pure ())
+              perms w =
+                Dir.setOwnerWritable w $
+                  Dir.setOwnerSearchable True $
+                    Dir.setOwnerReadable True Dir.emptyPermissions
+          let path = dir </> "s" </> "ui.json"
+          store <- newPrefsStore silent builtinDefaults (Right path)
+          let api = fixtureApi {prefs = pure store, workers = 0}
+          flip finally (Dir.setPermissions dir (perms True)) $ do
+            Dir.setPermissions dir (perms False)
+            now <- Dir.getPermissions dir
+            -- Root can write anyway: nothing to test then.
+            unless (Dir.writable now) $ do
+              r <- post api dark
+              r.status @?= 200
+              r.body
+                @?= "{\"theme\":\"dark\",\"exportedOnly\":false,\"sidebar\":\"auto\"}"
+              g <- getApi api prefsPath
+              g.body @?= r.body
+    ]
+  where
+    prefsPath = ["api", "prefs"]
+    dark = "{\"theme\":\"dark\"}"
+    jsonHeaders :: [Header]
+    jsonHeaders = [goodOrigin, ("Content-Type", "application/json")]
+    post api body = sendApi "POST" jsonHeaders (Sized body) api prefsPath
+    defaults = "{\"theme\":\"system\",\"exportedOnly\":false,\"sidebar\":\"auto\"}"
+    -- One store for all the requests of a test.
+    withStore = do
+      let silent = newLogger LevelInfo (\_ -> pure ())
+      store <- newPrefsStore silent builtinDefaults (Left HomeUnset)
+      pure fixtureApi {prefs = pure store, workers = 0}
 
 -- | The 404 body of the module route.
 moduleNotFound :: LBS.ByteString

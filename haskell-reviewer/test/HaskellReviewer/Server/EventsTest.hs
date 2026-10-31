@@ -1,6 +1,7 @@
 -- | The event stream: in process, then with a real warp on a socket.
 module HaskellReviewer.Server.EventsTest (tests) where
 
+import ApiSupport (fixedPrefs)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Async (withAsync)
 import Control.Concurrent.STM
@@ -264,7 +265,8 @@ request method host path =
   defaultRequest
     { requestMethod = method,
       requestHeaderHost = host,
-      requestHeaders = maybe [] (\h -> [("Host", h)]) host,
+      -- Origin too: methods other than GET and HEAD need it.
+      requestHeaders = maybe [] (\h -> [("Host", h), ("Origin", "http://" <> h)]) host,
       pathInfo = path
     }
 
@@ -413,7 +415,8 @@ routesFor events =
           { snapshot = pure (Left (ListCrashed "no files here")),
             readEntry = \_ _ _ -> pure (Left ReadGone),
             logger = newLogger LevelInfo (\_ -> pure ())
-          }
+          },
+      prefs = fixedPrefs
     }
 
 -- | No indexing event ever.
