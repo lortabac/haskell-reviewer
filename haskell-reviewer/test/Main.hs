@@ -66,6 +66,7 @@ import HaskellReviewer.Session.IndexTest qualified
 import HaskellReviewer.Session.PrefsTest qualified
 import HaskellReviewer.Session.SnapshotTest qualified
 import Test.Tasty (defaultMain, testGroup, withResource)
+import TestSupport (warmUpTempDirs)
 
 main :: IO ()
 main = do
@@ -76,6 +77,11 @@ main = do
   -- The binary writes UTF-8 on stderr. Read it as UTF-8 even when the
   -- test runs under LC_ALL=C.
   setLocaleEncoding utf8
+  -- Many tests make temp dirs, and the first ones run at the same time:
+  -- build the shared values behind temp dir names once
+  -- (Q-RTS-BLACKHOLE). Without this the 9.10 binary hung about 1 run in
+  -- 100 in "Config load".
+  warmUpTempDirs
   -- Tests run in parallel: share expensive values through withResource.
   -- See Note [Shared values in tests] in HaskellReviewer.Core.PackageGlobTest.
   defaultMain $

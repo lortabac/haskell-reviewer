@@ -3,6 +3,7 @@
 module TestSupport
   ( -- * Temp dirs
     withCanonicalTemp,
+    warmUpTempDirs,
     isRootUser,
 
     -- * git
@@ -66,6 +67,13 @@ withCanonicalTemp :: (FilePath -> IO a) -> IO a
 withCanonicalTemp action =
   withSystemTempDirectory "haskell-reviewer-test" $ \tmp ->
     Dir.canonicalizePath tmp >>= action
+
+-- | Make and remove one temp dir. Temp dir names go through
+-- 'Text.Printf.printf' (in temporary), and printf has shared values:
+-- build them once, before tests make temp dirs in parallel. See Note
+-- [Shared values in tests] in "HaskellReviewer.Core.PackageGlobTest".
+warmUpTempDirs :: IO ()
+warmUpTempDirs = withCanonicalTemp (\_ -> pure ())
 
 -- | Root can read anything: tests of unreadable files make no sense.
 isRootUser :: IO Bool

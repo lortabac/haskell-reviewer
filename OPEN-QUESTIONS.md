@@ -15,7 +15,7 @@ is updated if needed (§10.3).
   bug, not ours; a draft report exists (not filed yet). Not fixed (human,
   2026-10-26: no extra complexity). Stop tests that signal during
   start-up are skipped on macOS.
-- **Q-RTS-BLACKHOLE**: On GHC 9.12 and 9.14 (not 9.10) the threaded test
+- **Q-RTS-BLACKHOLE**: On GHC 9.12 and 9.14 the threaded test
   binary sometimes hung (about 5% of runs of the PackageGlob tests): several
   capabilities spin on a `CAF_BLACKHOLE` whose blocking queue was already
   woken, so GC sync never ends and SIGTERM is ignored. Not our code (pure,
@@ -24,6 +24,21 @@ is updated if needed (§10.3).
   Open: root cause, GHC issue, and whether the server can hit it. Until
   then, the server builds shared values fully before request threads use
   them.
+  9.10 hung too (idle, not spinning: see T10h below).
+  T10h (9.10, "Config load", 3 hangs in 300 runs): not a spin this time.
+  All capabilities idle, and a debug RTS (`printAllThreads` from gdb)
+  showed 1–6 test threads blocked on one black hole that had already
+  been evaluated and moved by the GC; their block info still pointed at
+  the old address. So a lost wake-up in the RTS. The threads were all in
+  temporary's `createTempDirectory`, in `Text.Printf`'s `parseIntFormat`
+  (it formats the dir name with `printf "-%.*x"`): the black hole was
+  one of printf's shared modifier strings (e.g. "l", "L"). The server
+  reaches printf only through GHC's error codes, which warmUpParser
+  already builds (D-126), and through config errors at startup.
+  Workaround: the test `main` makes one temp dir first
+  (`warmUpTempDirs`). Small repros
+  (many threads doing their first printf, or stat on a missing file,
+  under GC load) still didn't hang.
 - **Q-OLD-SYNTAX**: How real is "the newest parser rejects old code"? The
   known cases (e.g. changes to `forall`/`!`/`~` lexing, `NoStarIsType`) need
   to be checked against the 3 supported GHCs, which may require a lexing-mode
