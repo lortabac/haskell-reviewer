@@ -25,10 +25,11 @@ import {
 import { hrefFor, lineHref, withBase } from "../files/paths";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
+import { usePrefs } from "../prefs/store";
 import { SearchBox } from "../search/SearchBox";
 import { createDelay, focusInMain, focusLost } from "../ui/focus";
 import { PageBody } from "./Body";
-import { body } from "./sections";
+import { body, hiddenCount } from "./sections";
 import {
   anchorKey,
   Anchors,
@@ -36,9 +37,9 @@ import {
   type PageCtx,
   PageContext,
 } from "./context";
-import { WarningNotice } from "./Decl";
+import { readable, WarningNotice } from "./Decl";
 import { type Links, LinksContext } from "./links";
-import { pageIndex } from "./pageIndex";
+import { pageIndex, type PageIndex } from "./pageIndex";
 import { reasonBanner, reasonLine } from "./reasons";
 import { DocView } from "./RichText";
 import {
@@ -49,25 +50,19 @@ import {
   unescapeHaddock,
 } from "./urls";
 
-// exportedOnly: T10 sets it from a toggle.
-export function DocsView(props: { exportedOnly?: boolean }): JSX.Element {
+export function DocsView(): JSX.Element {
   const location = useLocation();
   const ref = () => refFromPathname(location.pathname);
   return (
     <Show when={ref()} keyed fallback={<NotFound />}>
-      {(r) => (
-        <DocsPage moduleRef={r} exportedOnly={props.exportedOnly ?? false} />
-      )}
+      {(r) => <DocsPage moduleRef={r} />}
     </Show>
   );
 }
 
 // One module, by its ref as typed in the URL (kept, D-182): a hash
 // change doesn't refetch.
-function DocsPage(props: {
-  moduleRef: string;
-  exportedOnly: boolean;
-}): JSX.Element {
+function DocsPage(props: { moduleRef: string }): JSX.Element {
   // Read before the old page goes away.
   const fromMain = focusInMain();
   const [res] = createResource(
@@ -115,12 +110,7 @@ function DocsPage(props: {
       <Match when={page()} keyed>
         {(p) =>
           p.parse.kind === "parsed" ? (
-            <ModulePage
-              page={p}
-              parsed={p.parse}
-              typedRef={props.moduleRef}
-              exportedOnly={props.exportedOnly}
-            />
+            <ModulePage page={p} parsed={p.parse} typedRef={props.moduleRef} />
           ) : (
             <TextOnlyPage page={p} parse={p.parse} />
           )
@@ -182,6 +172,49 @@ function CppWarnings(props: { warnings: string[] }): JSX.Element {
   );
 }
 
+// A name for the "hidden by Exported only" notice (D-204): an
+// instance or family instance reads like "instance Eq (Box a)"
+// (readable, Decl.tsx); anything else just has a name.
+function anchorLabel(
+  d: AnyDecl | undefined,
+  fallback: string,
+  ix: PageIndex,
+): string {
+  if (d === undefined) return fallback;
+  if ("kind" in d && (d.kind === "instance" || d.kind === "faminst")) {
+    return readable(d, ix);
+  }
+  return d.name ?? fallback;
+}
+
+// "Exported only" (D-204): a checkbox, and how many top-level
+// declarations it hides, while it's on (instances the rule also hides
+// aren't counted here, D-204). The status is mounted (and in the
+// accessibility tree) at all times; only its text changes (C4), so a
+// screen reader never misses it.
+function Toolbar(props: { hidden: number }): JSX.Element {
+  const prefs = usePrefs();
+  const text = () =>
+    prefs.exportedOnly() && props.hidden > 0
+      ? `${props.hidden} declaration${props.hidden === 1 ? "" : "s"} hidden`
+      : "";
+  return (
+    <div class="docs-toolbar">
+      <label class="docs-toolbar-checkbox">
+        <input
+          type="checkbox"
+          checked={prefs.exportedOnly()}
+          onChange={(e) => prefs.setExportedOnly(e.currentTarget.checked)}
+        />{" "}
+        Exported only
+      </label>
+      <span class="docs-toolbar-status" aria-live="polite">
+        {text()}
+      </span>
+    </div>
+  );
+}
+
 function TextOnlyPage(props: {
   page: Page;
   parse: TextOnlyModule;
@@ -214,11 +247,10 @@ function ModulePage(props: {
   page: Page;
   parsed: ParsedModule;
   typedRef: string;
-  // Hide what the module doesn't export (T10 adds the toggle).
-  exportedOnly?: boolean;
 }): JSX.Element {
   const location = useLocation();
   const navigate = useNavigate();
+  const prefs = usePrefs();
   const base = useResolvedPath(() => "/");
   const ix = createMemo(() => pageIndex(props.parsed));
   const links: Links = {
@@ -238,9 +270,8 @@ function ModulePage(props: {
   const anchors = new Anchors();
   const instancesOpen = openStates();
   const sourceHref = useSourceHref(() => props.page);
-  const b = createMemo(() =>
-    body(props.parsed, ix(), props.exportedOnly ?? false),
-  );
+  const b = createMemo(() => body(props.parsed, ix(), prefs.exportedOnly()));
+  const hidden = createMemo(() => hiddenCount(props.parsed));
   const ctx: PageCtx = {
     get ix() {
       return ix();
@@ -250,6 +281,12 @@ function ModulePage(props: {
     },
     anchors,
     instancesOpen,
+    get exportedOnly() {
+      return prefs.exportedOnly();
+    },
+    get marks() {
+      return b().mode !== "B";
+    },
   };
   // The element of a declaration. In an instance list if it or a
   // parent is an instance with a home (opened first); else in the main
@@ -273,30 +310,47 @@ function ModulePage(props: {
       ? near("", d)
       : (near(`${home.n}/`, d) ?? near("", home));
   };
-  // An anchor this page has no declaration for.
+  // An anchor this page has no declaration for, and one it has but
+  // "exported only" hides (a different notice, D-204): kept apart so
+  // toggling can clear one without the other.
   const [missing, setMissing] = createSignal<string>();
-  const go = (hash: string) => {
+  const [hiddenAnchor, setHiddenAnchor] = createSignal<string>();
+  // moveFocus: false on a toggle (recompute only, D-204): scrolling or
+  // moving focus away from what the user was doing would be rude.
+  const go = (hash: string, moveFocus: boolean) => {
     const a = anchorFromHash(hash);
     if (a === null) {
       setMissing(undefined);
+      setHiddenAnchor(undefined);
       return;
     }
     if (typeof a !== "string") {
+      setHiddenAnchor(undefined);
       setMissing(hash.slice(1));
       return;
     }
     const d = ix().byId.get(a);
     if (d !== undefined) {
       const el = elementOf(d);
-      // Not drawn (hidden by "exported only"): the notice, as for
-      // an unknown one.
       if (el === undefined) {
-        setMissing(a);
+        // Known, but not drawn. Only call it "hidden by Exported
+        // only" when that's on (C9): off, it's not why, so the
+        // generic notice (D-183) is the honest one.
+        if (prefs.exportedOnly()) {
+          setMissing(undefined);
+          setHiddenAnchor(a);
+        } else {
+          setHiddenAnchor(undefined);
+          setMissing(a);
+        }
         return;
       }
       setMissing(undefined);
-      el.scrollIntoView({ block: "start" });
-      el.focus({ preventScroll: true });
+      setHiddenAnchor(undefined);
+      if (moveFocus) {
+        el.scrollIntoView({ block: "start" });
+        el.focus({ preventScroll: true });
+      }
       return;
     }
     // Haddock's anchors (v:x, t:T), as in module links: our id
@@ -318,6 +372,7 @@ function ModulePage(props: {
         return;
       }
     }
+    setHiddenAnchor(undefined);
     setMissing(a);
   };
   // After the router: it scrolls to the top on a hash it has no
@@ -326,11 +381,30 @@ function ModulePage(props: {
     on(
       () => location.hash,
       (hash) => {
-        const frame = requestAnimationFrame(() => go(hash));
+        const frame = requestAnimationFrame(() => go(hash, true));
         onCleanup(() => cancelAnimationFrame(frame));
       },
     ),
   );
+  // Toggling "exported only" can show or hide the current anchor's
+  // element: re-resolve, but never move focus or scroll (D-204).
+  createEffect(
+    on(
+      () => prefs.exportedOnly(),
+      () => {
+        const frame = requestAnimationFrame(() => go(location.hash, false));
+        onCleanup(() => cancelAnimationFrame(frame));
+      },
+      { defer: true },
+    ),
+  );
+  // "Show all": turn the toggle off, then go to the anchor properly.
+  // Not a reactive computation (it runs from a click), so no cleanup
+  // to register; the frame outlives at most one render.
+  const showAll = (hash: string) => {
+    prefs.setExportedOnly(false);
+    requestAnimationFrame(() => go(hash, true));
+  };
   // Links to this page. Two router quirks: it scrolls to the top on a
   // hash it has no element for (one frame, before go), and it ignores
   // a link to the URL it is at, so a second click on a link to the
@@ -353,7 +427,9 @@ function ModulePage(props: {
       return;
     }
     a.setAttribute("noscroll", "");
-    if (url.hash !== "" && url.hash === window.location.hash) go(url.hash);
+    if (url.hash !== "" && url.hash === window.location.hash) {
+      go(url.hash, true);
+    }
   };
   return (
     <div class="docs-page" on:click={inPage}>
@@ -380,6 +456,25 @@ function ModulePage(props: {
               </div>
             )}
           </Show>
+          <Show when={hiddenAnchor()} keyed>
+            {(a) => {
+              const label = anchorLabel(ix().byId.get(a), a, ix());
+              return (
+                <div class="docs-notice decl-missing">
+                  <p>
+                    <code>{label}</code> is hidden by Exported only.
+                  </p>
+                  <button
+                    type="button"
+                    class="decl-source-toggle"
+                    onClick={() => showAll(location.hash)}
+                  >
+                    Show all
+                  </button>
+                </div>
+              );
+            }}
+          </Show>
           <Meta page={props.page} />
           <Show when={header().warning}>
             {(w) => <WarningNotice warning={w()} />}
@@ -400,10 +495,11 @@ function ModulePage(props: {
               <For each={ext().enabled}>{(e) => <li>{e}</li>}</For>
             </ul>
           </details>
+          <Toolbar hidden={hidden()} />
           <PageBody
             parsed={props.parsed}
             body={b()}
-            exportedOnly={props.exportedOnly ?? false}
+            exportedOnly={prefs.exportedOnly()}
           />
         </PageContext.Provider>
       </LinksContext.Provider>

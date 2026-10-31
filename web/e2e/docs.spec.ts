@@ -67,21 +67,26 @@ test("sidebar link opens the docs view", async ({
   await expect(decl(page, "perimeter")).toContainText(
     "Shares its signature with area.",
   );
+  // Exported top-level: no mark at all (D-203); only the fixity badge.
   await expect(decl(page, "(<+>)").locator(".decl-badge")).toHaveText([
     "infixl 6",
-    "exported",
   ]);
+  await expect(decl(page, "(<+>)").locator(".decl-mark")).toHaveCount(0);
   await expect(decl(page, "old").locator(".decl-warning")).toHaveText(
     "Deprecated: Use area",
   );
   await expect(decl(page, "pattern Unit")).toBeVisible();
   await expect(decl(page, "class Container f")).toBeVisible();
-  // Export list sections (mode B).
+  // Export list sections (mode B), plus "Private" for the unexported
+  // helper (D-203: its own heading says so; no per-item mark).
   await expect(page.locator("main .docs-section")).toHaveText([
     "Types",
     "Functions",
+    "Private",
     "Instances",
   ]);
+  await expect(decl(page, "helper")).toBeVisible();
+  await expect(decl(page, "helper").locator(".decl-mark")).toHaveCount(0);
   // The orphan: in the Instances block at the end.
   await expect(
     decl(page, "instance Num Bool").locator(".decl-badge"),

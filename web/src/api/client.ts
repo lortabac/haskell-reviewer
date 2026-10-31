@@ -16,6 +16,27 @@ export async function getJson<T>(
   return get(path, "application/json", async (res) => decode(await res.json()));
 }
 
+// POST a JSON body to a route and decode the answer, like getJson.
+// Default (cors) mode, so the browser sends our Origin (D-198): never
+// "same-origin" or "no-cors", never a <form>.
+export async function postJson<T>(
+  path: string,
+  body: unknown,
+  decode: (value: unknown) => T,
+): Promise<Result<T>> {
+  try {
+    const res = await fetch(basePath(window.location.pathname) + path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return { kind: "error", message: `HTTP ${res.status}` };
+    return { kind: "ok", value: decode(await res.json()) };
+  } catch (e) {
+    return { kind: "error", message: String(e) };
+  }
+}
+
 // GET a CBOR API route (D-51) and decode it, like getJson.
 export async function getCbor<T>(
   path: string,

@@ -186,20 +186,24 @@ describe("module page", () => {
     expect(a?.className).toBe("tok-con");
   });
 
-  it("fixity and exported badges", async () => {
+  it("fixity badges; the export mark is separate (D-203)", async () => {
     const main = await page();
     const op = decl(main, "(<+>)");
+    // Exported top-level: no mark at all.
     expect(
       [...op.querySelectorAll(".decl-badge")].map((b) => b.textContent),
-    ).toEqual(["infixl 6", "exported"]);
-    // Not exported: no label.
-    expect(decl(main, "data P2").querySelector(".decl-badge")).toBeNull();
-    // Instances: no "exported" (they always are).
+    ).toEqual(["infixl 6"]);
+    expect(op.querySelector(".decl-mark")).toBeNull();
+    // Not exported: a muted "private" mark, not a pill.
+    const p2 = decl(main, "data P2");
+    expect(p2.querySelector(".decl-badge")).toBeNull();
+    expect(p2.querySelector(".decl-mark")?.textContent).toBe("private");
+    // Instances: never marked (they always are, D-186).
+    const num = decl(main, "instance Num Bool");
     expect(
-      [...decl(main, "instance Num Bool").querySelectorAll(".decl-badge")].map(
-        (b) => b.textContent,
-      ),
+      [...num.querySelectorAll(".decl-badge")].map((b) => b.textContent),
     ).toEqual(["orphan"]);
+    expect(num.querySelector(".decl-mark")).toBeNull();
   });
 
   it("DEPRECATED on both helpers: whole under the first", async () => {
@@ -476,7 +480,7 @@ describe("declaration details", () => {
     expect(shape.querySelector(".subdecl .decl-badge")).toBeNull();
   });
 
-  it("not exported nested items of an exported parent", async () => {
+  it("private nested item of an exported parent (D-203)", async () => {
     const value = structuredClone(fixture("module-page")) as {
       parse: {
         declarations: {
@@ -491,7 +495,31 @@ describe("declaration details", () => {
     circle.exported = false;
     const main = await open("Page", 200, cbor(value));
     const c = decl(main, "data Shape").querySelector(".subdecl");
-    expect(c?.querySelector(".decl-badge")?.textContent).toBe("not exported");
+    expect(c?.querySelector(".decl-mark")?.textContent).toBe("private");
+    expect(c?.querySelector(".decl-badge")).toBeNull();
+  });
+
+  it("exported nested item under a kept private parent (D-203)", async () => {
+    const value = structuredClone(fixture("module-page")) as {
+      parse: {
+        declarations: { name: string; exported?: boolean }[];
+      };
+    };
+    const container = value.parse.declarations.find(
+      (d) => d.name === "Container",
+    );
+    if (container === undefined) throw new Error("no Container");
+    // Unexported itself, but its methods stay exported: the class is
+    // kept (exportsNested), and marked "private"; its methods differ
+    // from it, so they're marked "exported" (D-203).
+    container.exported = false;
+    const main = await open("Page", 200, cbor(value));
+    const c = decl(main, "class Container f");
+    expect(c.querySelector(".decl-head .decl-mark")?.textContent).toBe(
+      "private",
+    );
+    const m = c.querySelector(".subdecl .decl-mark");
+    expect(m?.textContent).toBe("exported");
   });
 
   it("newtype deriving via, GADT shared line, shared field type", async () => {
@@ -761,7 +789,7 @@ describe("sections", () => {
     expect(decl(main, "x ::").querySelector("h3")).not.toBeNull();
   });
 
-  it("mode B: export list order, re-exports, Not exported", async () => {
+  it("mode B: export list order, re-exports, Private", async () => {
     const value = structuredClone(fixture("module-page-sections")) as {
       parse: {
         exports: Record<string, unknown>[];
@@ -812,7 +840,7 @@ describe("sections", () => {
       "A named chunk, about x.",
       "(<|>) (re-exported)",
       "module Data.List (re-exported)",
-      "Not exported",
+      "Private",
       "decl y :: Int",
     ]);
     // Section levels: h2 for level 1, h3 for level 2; decls one below.
@@ -881,6 +909,74 @@ describe("text-only pages", () => {
       expect(a?.getAttribute("href")).toBe(href);
     }
     expect(main.querySelector("section.decl")).toBeNull();
+  });
+});
+
+describe("exported only toggle (D-204)", () => {
+  it("checkbox hides unexported top-level declarations, status counts them", async () => {
+    const main = await page();
+    const box = main.querySelector<HTMLInputElement>(
+      ".docs-toolbar input[type=checkbox]",
+    );
+    if (box === null) throw new Error("no checkbox");
+    expect(box.checked).toBe(false);
+    expect(heads(main)).toContain("data P2");
+    box.click();
+    expect(box.checked).toBe(true);
+    expect(heads(main)).not.toContain("data P2");
+    const status = main.querySelector(".docs-toolbar-status");
+    expect(status?.getAttribute("aria-live")).toBe("polite");
+    expect(status?.textContent).toMatch(/^\d+ declarations? hidden$/);
+  });
+
+  it("toggling recomputes the current anchor: still shown, no scroll", async () => {
+    const scroll = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => undefined);
+    const main = await open("Page", 200, cborFixture("module-page"), {
+      hash: "#type%3AShape",
+    });
+    flushFrames();
+    expect(document.activeElement).toBe(decl(main, "data Shape"));
+    scroll.mockClear();
+    main
+      .querySelector<HTMLInputElement>(".docs-toolbar input[type=checkbox]")
+      ?.click();
+    flushFrames();
+    // Shape stays exported and shown: no "hidden by Exported only"
+    // notice, and the toggle itself never scrolls (D-204).
+    expect(main.querySelector(".decl-missing")).toBeNull();
+    expect(scroll).not.toHaveBeenCalled();
+    expect(decl(main, "data Shape")).not.toBeNull();
+  });
+
+  it("a hidden anchor: notice with its name, Show all reveals and focuses it", async () => {
+    const scroll = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => undefined);
+    const main = await open("Page", 200, cborFixture("module-page"), {
+      hash: "#type%3AP2",
+    });
+    flushFrames();
+    main
+      .querySelector<HTMLInputElement>(".docs-toolbar input[type=checkbox]")
+      ?.click();
+    flushFrames();
+    const notice = main.querySelector(".decl-missing");
+    expect(notice?.textContent).toContain("P2");
+    expect(notice?.textContent).toContain("is hidden by Exported only.");
+    expect(main.querySelector("section.decl[data-handle]")).not.toBeNull();
+    scroll.mockClear();
+    notice?.querySelector<HTMLButtonElement>("button")?.click();
+    flushFrames();
+    expect(
+      main.querySelector<HTMLInputElement>(".docs-toolbar input[type=checkbox]")
+        ?.checked,
+    ).toBe(false);
+    expect(main.querySelector(".decl-missing")).toBeNull();
+    const p2 = decl(main, "data P2");
+    expect(document.activeElement).toBe(p2);
+    expect(scroll.mock.contexts).toContain(p2);
   });
 });
 

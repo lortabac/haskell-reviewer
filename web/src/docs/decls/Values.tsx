@@ -1,6 +1,7 @@
 // Values (foreign exports) and pattern synonyms (direction, fields).
 import { For, type JSX, Show } from "solid-js";
 import type { PatSynFields, ValueFields } from "../../api/module";
+import { usePage } from "../context";
 import { nameTokens } from "../signature";
 import { Sub, Title } from "./common";
 import { CodeList } from "./Types";
@@ -29,13 +30,19 @@ export function PatSynDetails(props: {
   exported: boolean;
   level: number;
 }): JSX.Element {
+  const page = usePage();
+  // D-204: exported only hides unexported fields, quietly.
+  const fields = () =>
+    page.exportedOnly
+      ? props.p.fields.filter((f) => f.exported)
+      : props.p.fields;
   return (
     <>
       <p class="decl-note">{directions[props.p.direction]}</p>
-      <Show when={props.p.fields.length > 0}>
+      <Show when={fields().length > 0}>
         <Title level={props.level + 1} text="Fields" />
         <ul class="subdecls">
-          <For each={props.p.fields}>
+          <For each={fields()}>
             {(f) => (
               <Sub
                 d={f}

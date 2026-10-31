@@ -33,13 +33,22 @@ export function Title(props: { level: number; text: string }): JSX.Element {
   );
 }
 
-// Fixity and labels (exported, not exported, orphan...).
+// Fixity, labels (orphan, foreign import...) and the export mark
+// (D-203): a plain, muted word, not a pill like the others (no
+// border): it's a status, not a tag.
 export function Badges(props: {
   fixity: Fixity | null;
   labels: string[];
+  mark?: string | undefined;
 }): JSX.Element {
   return (
-    <Show when={props.fixity !== null || props.labels.length > 0}>
+    <Show
+      when={
+        props.fixity !== null ||
+        props.labels.length > 0 ||
+        props.mark !== undefined
+      }
+    >
       <span class="decl-badges">
         <Show when={props.fixity}>
           {(f) => (
@@ -51,9 +60,29 @@ export function Badges(props: {
         <For each={props.labels}>
           {(l) => <span class="decl-badge">{l}</span>}
         </For>
+        <Show when={props.mark}>
+          {(m) => <span class="decl-mark">{m()}</span>}
+        </Show>
       </span>
     </Show>
   );
+}
+
+// The export mark (D-203, plan choice 1a): nothing when a declaration
+// matches its context (an exported top-level one, or a nested item
+// that's exported same as its parent); "private" when it's unexported
+// under a context that is; "exported" when it's exported under a
+// context we keep private. At the top level, context is always true
+// (there's no real parent). Never on an instance or a splice (D-186:
+// instances are always exported; a splice has no name to mark), and
+// never in mode B (its own headings already say so): callers check
+// that first.
+export function exportMark(
+  exported: boolean,
+  context: boolean,
+): string | undefined {
+  if (exported === context) return undefined;
+  return exported ? "exported" : "private";
 }
 
 // The declaration that sends a shared signature (the first name): its
@@ -232,8 +261,9 @@ export function Docs(props: {
 }
 
 // A nested declaration (constructor, field, method, associated type),
-// as a list item with its own anchor. "not exported" only when its
-// parent is (D-186).
+// as a list item with its own anchor. Marked only when it differs
+// from its parent (D-203): "private" under an exported parent,
+// "exported" under a kept private one.
 export function Sub(props: {
   d: DeclInfo;
   head: Tokens;
@@ -246,15 +276,18 @@ export function Sub(props: {
 }): JSX.Element {
   // eslint-disable-next-line solid/reactivity -- a handle never changes
   const anchor = useAnchor(props.d.n);
-  const labels = () => [
-    ...(props.parentExported && !props.d.exported ? ["not exported"] : []),
-    ...(props.labels ?? []),
-  ];
+  const page = usePage();
+  const mark = () =>
+    page.marks ? exportMark(props.d.exported, props.parentExported) : undefined;
   return (
     <li class="subdecl" ref={anchor} tabindex="-1" data-handle={props.d.n}>
       <div class="subdecl-head">
         <Signature code={props.head} />
-        <Badges fixity={props.d.fixity} labels={labels()} />
+        <Badges
+          fixity={props.d.fixity}
+          labels={props.labels ?? []}
+          mark={mark()}
+        />
       </div>
       <SharedWith sender={props.shared} />
       <Warning info={props.d} />

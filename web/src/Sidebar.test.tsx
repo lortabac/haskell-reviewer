@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cborFixture, fixture, stubFetch } from "../test/fixtures";
 import { mountAppAt, unmountApp } from "../test/mount";
+import { defaultPrefs, type Prefs } from "./api/prefs";
 
 interface Parts {
   nav: HTMLElement;
@@ -14,13 +15,14 @@ function mount(
   modules: [number, unknown],
   at = "/tok",
   files: unknown = fixture("files"),
+  initialPrefs?: Prefs,
 ): Parts {
   stubFetch({
     "/tok/api/files/tree": [200, files],
     "/tok/api/modules/tree": modules,
     "/tok/api/file/tree/app/Main.hs": [200, cborFixture("file-text")],
   });
-  const nav = mountAppAt(at).querySelector("nav");
+  const nav = mountAppAt(at, initialPrefs).querySelector("nav");
   const group = nav?.querySelector('[role="group"]');
   const [m, f] = [...(group?.querySelectorAll("button") ?? [])];
   const modulesPanel = nav?.querySelector<HTMLElement>(".modules-panel");
@@ -155,5 +157,30 @@ describe("Sidebar", () => {
     s.modules.click();
     expect(scroll).toHaveBeenCalledTimes(2);
     expect(scroll.mock.contexts[1]).toBe(current(s.modulesPanel));
+  });
+
+  it("a remembered pick (D-205) wins over the auto rule", () => {
+    // Would be "modules" under the auto rule (there are modules).
+    const s = mount([200, fixture("modules")], "/tok", fixture("files"), {
+      ...defaultPrefs,
+      sidebar: "files",
+    });
+    expectView(s, "files");
+  });
+
+  it("clicking saves the pick (D-205)", () => {
+    const fetch = stubFetch({
+      "/tok/api/files/tree": [200, fixture("files")],
+      "/tok/api/modules/tree": [200, fixture("modules")],
+    });
+    mountAppAt("/tok");
+    const nav = document.querySelector("nav");
+    const files = [...(nav?.querySelectorAll("button") ?? [])][1];
+    files?.click();
+    const calls = fetch.mock.calls as unknown as [string, RequestInit][];
+    const call = calls.find(([url]) => url === "/tok/api/prefs");
+    expect(call).toBeDefined();
+    expect(call?.[1].method).toBe("POST");
+    expect(JSON.parse(call?.[1].body as string)).toEqual({ sidebar: "files" });
   });
 });

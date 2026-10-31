@@ -14,6 +14,14 @@ export type Prefs = {
   sidebar: SidebarView;
 };
 
+// Before the first GET answers (or if it's slow or fails): same as the
+// config file's built-in defaults (D-199).
+export const defaultPrefs: Prefs = {
+  theme: "system",
+  exportedOnly: false,
+  sidebar: "auto",
+};
+
 export function decodePrefs(value: unknown, path = "$"): Prefs {
   const o = object(value, path);
   return {

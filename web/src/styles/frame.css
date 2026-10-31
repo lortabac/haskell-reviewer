@@ -68,6 +68,48 @@ a {
   font-weight: 600;
 }
 
+/* The theme switch: like the sidebar's toggle, bold + border + inset
+   for the pressed one, not colour alone. */
+.theme-switch {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.theme-switch-button {
+  padding: var(--space-1) var(--space-2);
+  font: inherit;
+  color: var(--color-fg);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.theme-switch-button[aria-pressed="true"] {
+  font-weight: 600;
+  border-color: var(--color-fg);
+  box-shadow: inset 0 0 0 1px var(--color-fg);
+}
+
+/* A save failure: mounted (and in the accessibility tree) at all
+   times, so the first announcement is never missed; empty and
+   wordless the rest of the time (C4: no display:none on :empty, or a
+   repeated failure's text change wouldn't be seen as a change). */
+.prefs-status {
+  margin: 0;
+  color: var(--color-muted);
+}
+
+/* Empty: out of the header's flex gap (round 2 review), but still in
+   the accessibility tree (unlike display:none) and still the same
+   element aria-live watches. */
+.prefs-status:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
 /* Connection notices, at the right of the header. */
 .connection-notices {
   margin-left: auto;

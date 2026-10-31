@@ -1,16 +1,19 @@
-/* Design tokens. Every colour pair here has >= 4.5:1 contrast (SPEC §5.4). */
+/* Design tokens. Every colour pair here has >= 4.5:1 contrast (SPEC §5.4).
+   light-dark() picks a value from the element's own color-scheme
+   (D-203): the root follows the OS (color-scheme: light dark) unless
+   <html data-theme> fixes it one way. */
 :root {
   color-scheme: light dark;
 
-  --color-bg: #ffffff;
-  --color-fg: #1f2328;
-  --color-muted: #57606a;
-  --color-surface: #f6f8fa;
-  --color-border: #d0d7de;
-  --color-link: #0550ae;
-  --color-focus: #0550ae;
+  --color-bg: light-dark(#ffffff, #0d1117);
+  --color-fg: light-dark(#1f2328, #e6edf3);
+  --color-muted: light-dark(#57606a, #9198a1);
+  --color-surface: light-dark(#f6f8fa, #161b22);
+  --color-border: light-dark(#d0d7de, #3d444d);
+  --color-link: light-dark(#0550ae, #6cb6ff);
+  --color-focus: light-dark(#0550ae, #6cb6ff);
   /* Marked lines (#L<n>). */
-  --color-mark: #fff8c5;
+  --color-mark: light-dark(#fff8c5, #3d3000);
 
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -27,15 +30,12 @@
   --focus-ring: 2px solid var(--color-focus);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-bg: #0d1117;
-    --color-fg: #e6edf3;
-    --color-muted: #9198a1;
-    --color-surface: #161b22;
-    --color-border: #3d444d;
-    --color-link: #6cb6ff;
-    --color-focus: #6cb6ff;
-    --color-mark: #3d3000;
-  }
+/* An override (prefs/theme.ts sets data-theme; "system" removes it, so
+   the plain color-scheme above wins). */
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }

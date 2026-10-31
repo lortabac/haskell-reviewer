@@ -27,6 +27,13 @@ export function TypeDetails(props: {
   exported: boolean;
   level: number;
 }): JSX.Element {
+  const page = usePage();
+  // D-204: exported only hides unexported constructors; an abstract
+  // type (none left) gets a muted count instead of an empty list.
+  const cons = () =>
+    page.exportedOnly
+      ? props.t.constructors.filter((c) => c.exported)
+      : props.t.constructors;
   return (
     <>
       <Show when={props.t.kindSig}>
@@ -44,7 +51,8 @@ export function TypeDetails(props: {
         )}
       </Show>
       <Constructors
-        cons={props.t.constructors}
+        cons={cons()}
+        total={props.t.constructors.length}
         exported={props.exported}
         level={props.level}
       />
@@ -95,11 +103,20 @@ export function CodeList(props: {
 
 function Constructors(props: {
   cons: Constructor[];
+  // Before filtering: 0 if the declaration truly has none.
+  total: number;
   exported: boolean;
   level: number;
 }): JSX.Element {
   return (
-    <Show when={props.cons.length > 0}>
+    <Show
+      when={props.cons.length > 0}
+      fallback={
+        <Show when={props.total > 0}>
+          <p class="decl-note">Private constructors ({props.total}).</p>
+        </Show>
+      }
+    >
       <Title level={props.level + 1} text="Constructors" />
       <ul class="subdecls">
         <For each={props.cons}>
@@ -145,6 +162,12 @@ function ConstructorItem(props: {
   // A constructor sharing its line has no args or fields of its own:
   // they show under the first one (no copies).
   const hasArgDocs = () => props.c.args.some((a) => a.doc !== null);
+  // D-204: exported only hides unexported fields, quietly (no abstract
+  // notice: a record missing a few fields isn't an "abstract type").
+  const fields = () =>
+    page.exportedOnly
+      ? props.c.fields.filter((f) => f.exported)
+      : props.c.fields;
   return (
     <Sub
       d={props.c}
@@ -160,9 +183,9 @@ function ConstructorItem(props: {
           </For>
         </ul>
       </Show>
-      <Show when={props.c.fields.length > 0}>
+      <Show when={fields().length > 0}>
         <ul class="subdecls">
-          <For each={props.c.fields}>
+          <For each={fields()}>
             {(f) => (
               <FieldItem
                 f={f}

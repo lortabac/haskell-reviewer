@@ -110,8 +110,11 @@ test.describe("implicit package", () => {
     const back = tab.replace("Tab", "Shift+Tab");
     await page.goto(server.base);
     await expect(group(page, "Implicit package")).toBeVisible();
-    // Skip link, then the toggle.
-    await page.keyboard.press(tab);
+    // The theme switch (System/Light/Dark) comes right before the
+    // sidebar in tab order: focus its last button, then one more Tab
+    // reaches the toggle, with no header-content Tab count to keep in
+    // sync (C7).
+    await page.getByRole("button", { name: "Dark", exact: true }).focus();
     await page.keyboard.press(tab);
     await expect(toggle(page, "Modules")).toBeFocused();
     await page.keyboard.press(tab);

@@ -79,6 +79,28 @@
   border-radius: 4px;
 }
 
+/* The export mark (D-203): a plain muted word, no border, no pill
+   (it's a status, not a tag). */
+.decl-mark {
+  display: inline-block;
+  margin-right: var(--space-1);
+  color: var(--color-muted);
+  font-style: italic;
+}
+
+/* "Exported only" toolbar (D-204). */
+.docs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+}
+
+.docs-toolbar-status {
+  color: var(--color-muted);
+}
+
 .decl-shared,
 .decl-actions {
   margin: 0 0 var(--space-2);

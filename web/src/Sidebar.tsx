@@ -1,24 +1,24 @@
-import { createEffect, createMemo, createSignal, type JSX, on } from "solid-js";
+import { createEffect, createMemo, type JSX, on } from "solid-js";
 import { FilesPanel } from "./files/FilesPanel";
 import { ModulesPanel } from "./modules/ModulesPanel";
 import { useModules } from "./modules/store";
+import { usePrefs } from "./prefs/store";
 
 type View = "modules" | "files";
 
 // The sidebar: a Modules / Files toggle and both views. Both stay
-// mounted, so open groups and folders survive a switch.
+// mounted, so open groups and folders survive a switch. The pick is
+// remembered via api/prefs (D-205); "auto" (the default) is D-111's
+// rule.
 export function Sidebar(): JSX.Element {
   const modules = useModules();
-  // The user's pick. Kept while the app runs, lost on reload (server
-  // preferences come in T10).
-  const [choice, setChoice] = createSignal<View>();
-  // No pick yet: Modules while loading or if there are any, else Files.
+  const prefs = usePrefs();
   // A memo, so the scroll below runs only when the view really changes.
-  const view = createMemo<View>(
-    () =>
-      choice() ??
-      (modules.tree.loading || modules.hasModules() ? "modules" : "files"),
-  );
+  const view = createMemo<View>(() => {
+    const choice = prefs.sidebar();
+    if (choice !== "auto") return choice;
+    return modules.tree.loading || modules.hasModules() ? "modules" : "files";
+  });
   let modulesPanel: HTMLDivElement | undefined;
   let filesPanel: HTMLDivElement | undefined;
   // A hidden view can't scroll: scroll to the current item when shown.
@@ -39,7 +39,7 @@ export function Sidebar(): JSX.Element {
       type="button"
       class="sidebar-toggle-button"
       aria-pressed={view() === v}
-      onClick={() => setChoice(v)}
+      onClick={() => prefs.setSidebar(v)}
     >
       {label}
     </button>
