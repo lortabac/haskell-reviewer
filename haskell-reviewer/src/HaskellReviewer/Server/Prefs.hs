@@ -49,7 +49,6 @@ import Network.HTTP.Types
     status400,
     status413,
     status415,
-    status500,
   )
 import Network.Wai
   ( Application,
@@ -77,8 +76,8 @@ POST answers, in this order:
   charset are fine);
 - 413 if the body is over 4 KiB after all (chunked, no length);
 - 400 if it isn't a good patch (decodePatch): the reason, as text;
-- 500 if saving failed (logged by the store);
-- else 200.
+- else 200, even if the change couldn't be saved: the store keeps it
+  in memory (Note [Saving preferences] in "HaskellReviewer.Session.Prefs").
 
 Other methods, HEAD too: 405 with Allow: GET, POST. The Origin check
 comes before all this (Note [Request checks] in
@@ -103,10 +102,7 @@ prefsApp store req respond
             Nothing -> respond tooLarge
             Just body -> case decodePatch body of
               Left why -> respond (plain status400 (textBytes (renderPatchError why)))
-              Right patch ->
-                store.update patch >>= \case
-                  Left _ -> respond (plain status500 "cannot save preferences")
-                  Right e -> respond (json e)
+              Right patch -> respond . json =<< store.update patch
     tooLarge = plain status413 "the body is over 4 KiB"
     json e = withLength status200 "application/json" (encodePrefs e)
 

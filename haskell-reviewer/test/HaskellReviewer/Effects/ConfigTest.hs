@@ -83,11 +83,13 @@ tests =
             now <- Dir.getPermissions path
             -- Root can read anyway: nothing to test then.
             unless (Dir.readable now) $ do
-              (d, logged) <- load LevelInfo env
+              (d, logged) <- load LevelVerbose env
               d @?= builtinDefaults
+              -- Not "found": we couldn't even look.
+              take 1 logged @?= ["config: " <> Text.pack path <> " (cannot read)"]
               let start = "haskell-reviewer: " <> Text.pack path <> ": cannot read: "
-              map (Text.isPrefixOf start) logged @?= [True]
-              map (Text.count (Text.pack path)) logged @?= [1],
+              map (Text.isPrefixOf start) (drop 1 logged) @?= [True]
+              map (Text.count (Text.pack path)) (drop 1 logged) @?= [1],
       testCase "no HOME: built-in defaults, a verbose line" $ do
         (d, logged) <- load LevelVerbose (const Nothing)
         d @?= builtinDefaults

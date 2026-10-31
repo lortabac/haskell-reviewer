@@ -95,7 +95,7 @@ import HaskellReviewer.Server.Events (EventStream (..))
 import HaskellReviewer.Server.Router (Routes (..), application)
 import HaskellReviewer.Session.Clients (newClients)
 import HaskellReviewer.Session.Index (IndexDeps (..), runWorkers)
-import HaskellReviewer.Session.Prefs (PrefsError (..), PrefsStore (..), newPrefsStore)
+import HaskellReviewer.Session.Prefs (PrefsStore (..), newPrefsStore)
 import HaskellReviewer.Session.Snapshot (Snapshot (files, index))
 import Network.HTTP.Types (Header, Status (..))
 import Network.Wai
@@ -190,13 +190,13 @@ apiFor snap =
 silent :: Logger
 silent = newLogger LevelInfo (\_ -> pure ())
 
--- | Built-in defaults, and saving always fails. For tests that need
+-- | Built-in defaults, and a save changes nothing. For tests that need
 -- routes but don't look at api/prefs.
 fixedPrefs :: PrefsStore
 fixedPrefs =
   PrefsStore
     { current = pure (effective builtinDefaults noPrefs),
-      update = \_ -> pure (Left (CannotRead "ui.json" "not in this test"))
+      update = \_ -> pure (effective builtinDefaults noPrefs)
     }
 
 -- | What the workers need, as the server wires it.

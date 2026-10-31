@@ -2,13 +2,9 @@
 module HaskellReviewer.Session.Prefs
   ( -- * Types
     PrefsStore (..),
-    PrefsError (..),
 
     -- * Handles
     newPrefsStore,
-
-    -- * Messages
-    renderPrefsError,
 
     -- * Limits
     prefsSizeLimit,
@@ -47,14 +43,14 @@ import HaskellReviewer.Core.Prefs
   )
 import HaskellReviewer.Core.Xdg (XdgProblem, renderXdgProblem)
 import HaskellReviewer.Effects.AtomicFile
-  ( AtomicWriteError,
+  ( AtomicWriteError (..),
     renderAtomicWriteError,
     resolveLink,
     writeFileAtomic,
   )
+import HaskellReviewer.Effects.Config (readRegularFile)
 import HaskellReviewer.Effects.Log (Logger, ioErrorMessage, logInfo)
 import System.Directory qualified as Dir
-import System.IO (IOMode (ReadMode), withBinaryFile)
 import System.IO.Error (isDoesNotExistError)
 
 {- Note [Saving preferences]
@@ -82,11 +78,21 @@ What ui.json can be (Note [ui.json] in "HaskellReviewer.Core.Prefs"):
 - from a newer version: never written or moved. We log once that we
   won't save, and keep this session's changes in memory, over the keys
   of the file we understand;
-- unreadable (permissions, ...): reads use the defaults, saves fail.
-  Overwriting it could lose what's in it.
+- unreadable (permissions, ...), or not a regular file (a FIFO or a
+  device is never opened): reads use the defaults (logged once).
+  A save doesn't overwrite it (that could lose what's in it): see
+  below.
 
-With no state dir (no HOME), preferences live in memory: the first
-save logs that they won't be remembered. See
+A save never fails (D-200). The tool must work in a read-only or
+restricted sandbox. If a save can't read ui.json, can't make the dir,
+can't move a bad file aside, or can't write or rename (EACCES, EROFS,
+ENOSPC, ...), the store switches to memory for the rest of the
+session: it starts from the preferences it knew plus the change, logs
+one line ("preferences won't be remembered: <path>: <why>"), and never
+touches the file again. The POST still answers 200.
+
+With no state dir (no HOME), preferences live in memory from the
+start: the first save logs that they won't be remembered. See
 Note [XDG dirs] in "HaskellReviewer.Core.Xdg".
 -}
 
@@ -94,18 +100,10 @@ Note [XDG dirs] in "HaskellReviewer.Core.Xdg".
 data PrefsStore = PrefsStore
   { -- | The preferences now, defaults filled in.
     current :: IO Effective,
-    -- | Apply a change and save it. Gives back the new preferences.
-    update :: PrefsPatch -> IO (Either PrefsError Effective)
+    -- | Apply a change and save it, if we can. Gives back the new
+    -- preferences. Never fails: see Note [Saving preferences].
+    update :: PrefsPatch -> IO Effective
   }
-
--- | A change that could not be saved. It is logged.
-data PrefsError
-  = -- | The old file, with its message.
-    CannotRead FilePath Text
-  | -- | Moving a bad file aside: the file, the message.
-    CannotMoveAside FilePath Text
-  | CannotWrite AtomicWriteError
-  deriving (Eq, Show)
 
 -- | A store on ui.json, or in memory when there is no state dir. See
 -- Note [Saving preferences].
@@ -113,13 +111,6 @@ newPrefsStore :: Logger -> UiDefaults -> Either XdgProblem FilePath -> IO PrefsS
 newPrefsStore logger defaults = \case
   Left problem -> memoryStore logger defaults problem
   Right path -> fileStore logger defaults path
-
--- | For the user.
-renderPrefsError :: PrefsError -> Text
-renderPrefsError = \case
-  CannotRead path e -> "cannot read " <> Text.pack path <> ": " <> e
-  CannotMoveAside path e -> "cannot move " <> Text.pack path <> " aside: " <> e
-  CannotWrite e -> renderAtomicWriteError e
 
 -- | The biggest ui.json we read, in bytes: 64 KiB. A bigger one is bad.
 prefsSizeLimit :: Int
@@ -143,8 +134,28 @@ memoryStore logger defaults problem = do
           already <- atomicModifyIORef' warned (True,)
           unless already (logInfo logger message)
           new <- atomicModifyIORef' ref (\p -> dup (applyPatch patch p))
-          pure (Right (effective defaults new))
+          pure (effective defaults new)
       }
+
+-- | Why a store stopped saving.
+data SaveProblem
+  = -- | The old file, with its message.
+    CannotRead Text
+  | -- | Moving a bad file aside: the file, the message.
+    CannotMoveAside FilePath Text
+  | CannotWrite AtomicWriteError
+
+-- | For the user, after "<path>: ". The other file is named only when
+-- it isn't the path (a symlink's target).
+renderSaveProblem :: FilePath -> SaveProblem -> Text
+renderSaveProblem path = \case
+  CannotRead e -> "cannot read it: " <> e
+  CannotMoveAside target e
+    | target == path -> "cannot move it aside: " <> e
+    | otherwise -> "cannot move " <> Text.pack target <> " aside: " <> e
+  CannotWrite e
+    | e.target == path -> e.reason
+    | otherwise -> renderAtomicWriteError e
 
 -- | What reading ui.json gave.
 data Loaded
@@ -165,6 +176,9 @@ fileStore logger defaults path = do
   saidOdd <- newIORef Set.empty
   -- This session's changes, when ui.json is from a newer version.
   inMemory <- newIORef noPrefs
+  -- 'Just' once a save failed: the preferences from then on, in memory
+  -- only.
+  fallback <- newIORef Nothing
   -- Built here, not first on a request thread (Q-RTS-BLACKHOLE). Text
   -- is strict: this forces the path too.
   pathText <- evaluate (Text.pack path)
@@ -173,23 +187,35 @@ fileStore logger defaults path = do
         already <- atomicModifyIORef' ref (\s -> (Set.insert msg s, Set.member msg s))
         unless already (logInfo logger ("haskell-reviewer: " <> msg))
       sayOnce = onceIn said
-      current = do
+      current =
+        readIORef fallback >>= \case
+          Just p -> pure (effective defaults p)
+          Nothing -> readFromFile
+      readFromFile = do
         loaded <- load
         effective defaults <$> case loaded of
           Loaded d -> pure d.file.prefs
           Missing -> pure noPrefs
-          Newer fromFile -> do
+          Newer filePrefs -> do
             sayOnce newer
-            (`overridePrefs` fromFile) <$> readIORef inMemory
+            (`overridePrefs` filePrefs) <$> readIORef inMemory
           Bad bad -> noPrefs <$ sayOnce (badLine bad "using the defaults")
           Unreadable e -> noPrefs <$ sayOnce ("cannot read " <> pathText <> ": " <> e)
-      update patch = withMVar lock $ \() -> do
+      update patch = withMVar lock $ \() ->
+        readIORef fallback >>= \case
+          Just p -> do
+            -- Forced: GETs read it without the lock (Q-RTS-BLACKHOLE).
+            new <- evaluate (applyPatch patch p)
+            writeIORef fallback (Just new)
+            pure (effective defaults new)
+          Nothing -> toFile patch
+      toFile patch = do
         loaded <- load
         case loaded of
-          Newer fromFile -> do
+          Newer filePrefs -> do
             sayOnce newer
             mine <- atomicModifyIORef' inMemory (\p -> dup (applyPatch patch p))
-            pure (Right (effective defaults (overridePrefs mine fromFile)))
+            pure (effective defaults (overridePrefs mine filePrefs))
           Loaded d -> do
             -- Not those the patch replaces.
             let kept = [b | b <- d.oddValues, b.key `notElem` patchKeys patch]
@@ -199,48 +225,65 @@ fileStore logger defaults path = do
           Missing -> save patch emptyPrefsFile
           Bad bad ->
             moveAside >>= \case
-              Left err -> failed err
+              Left err -> toMemory patch noPrefs err
               Right moved -> do
-                logInfo logger $
-                  "haskell-reviewer: "
-                    <> badLine bad ("moved to " <> Text.pack moved)
+                -- Nothing: another instance moved it first.
+                mapM_
+                  ( \m ->
+                      logInfo logger $
+                        "haskell-reviewer: " <> badLine bad ("moved to " <> Text.pack m)
+                  )
+                  moved
                 save patch emptyPrefsFile
-          Unreadable e -> failed (CannotRead path e)
+          -- What GET showed: the defaults.
+          Unreadable e -> toMemory patch noPrefs (CannotRead e)
       save patch file = do
         let new = applyPatchFile patch file
         writeFileAtomic path (encodePrefsFile new) >>= \case
-          Left e -> failed (CannotWrite e)
+          Left e -> toMemory patch file.prefs (CannotWrite e)
           Right () -> do
             writeIORef said Set.empty
-            pure (Right (effective defaults new.prefs))
-      failed err = do
+            pure (effective defaults new.prefs)
+      -- From now on, memory only. See Note [Saving preferences].
+      -- Starts from what we knew, with this session's changes kept for a
+      -- newer file (if any) on top.
+      toMemory patch known why = do
+        mine <- readIORef inMemory
+        new <- evaluate (applyPatch patch (overridePrefs mine known))
+        writeIORef fallback (Just new)
         logInfo logger $
-          "haskell-reviewer: cannot save preferences: " <> renderPrefsError err
-        pure (Left err)
+          "haskell-reviewer: preferences won't be remembered: "
+            <> pathText
+            <> ": "
+            <> renderSaveProblem path why
+        pure (effective defaults new)
       badLine bad what = pathText <> ": " <> renderBadPrefsFile bad <> "; " <> what
       -- Next to the file a symlink points to, like the write. Gives the
-      -- new name.
+      -- new name, or 'Nothing' if the file is gone (another instance
+      -- moved it first).
       moveAside = do
         target <- resolveLink path
         let moved = target <> ".bad"
         try @IOException (Dir.renameFile target moved) >>= \case
-          Left e -> pure (Left (CannotMoveAside target (ioErrorMessage e)))
-          Right () -> pure (Right moved)
+          Left e
+            | isDoesNotExistError e -> pure (Right Nothing)
+            | otherwise -> pure (Left (CannotMoveAside target (ioErrorMessage e)))
+          Right () -> pure (Right (Just moved))
+      -- Only a regular file, like config.toml: a FIFO would block.
       load = do
-        result <- try @IOException (withBinaryFile path ReadMode readCapped)
+        result <- try @IOException (readRegularFile prefsSizeLimit path)
         pure $ case result of
           Left e
             | isDoesNotExistError e -> Missing
             | otherwise -> Unreadable (ioErrorMessage e)
-          Right bytes
+          Right Nothing -> Unreadable "not a regular file"
+          Right (Just bytes)
             | BS.length bytes > prefsSizeLimit -> Bad PrefsTooLarge
             | otherwise -> case decodePrefsFile bytes of
                 Left bad -> Bad bad
                 Right (PrefsCurrent d) -> Loaded d
                 Right (PrefsNewer p) -> Newer p
   pure PrefsStore {current = current, update = update}
-  where
-    readCapped h = BS.hGet h (prefsSizeLimit + 1)
 
 dup :: a -> (a, a)
 dup x = (x, x)

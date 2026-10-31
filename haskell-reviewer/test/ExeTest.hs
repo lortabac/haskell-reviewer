@@ -148,6 +148,44 @@ prefsTests =
           withServerXdg xdg id [dir] $ \server -> do
             r <- getPath server "api/prefs"
             r.body @?= "{\"theme\":\"dark\",\"exportedOnly\":false,\"sidebar\":\"auto\"}",
+      testCase "read-only state dir, unreadable config dir: works, one line each" $
+        withTemp $ \dir -> withFreshXdg $ \xdg -> do
+          Dir.createDirectory xdg.configHome
+          Dir.createDirectory xdg.stateHome
+          let perms w =
+                Dir.setOwnerWritable w $
+                  Dir.setOwnerSearchable w $
+                    Dir.setOwnerReadable True Dir.emptyPermissions
+              unreadable = Dir.setOwnerSearchable False Dir.emptyPermissions
+              restore = do
+                Dir.setPermissions xdg.configHome (perms True)
+                Dir.setPermissions xdg.stateHome (perms True)
+          flip finally restore $ do
+            Dir.setPermissions xdg.configHome unreadable
+            Dir.setPermissions xdg.stateHome (Dir.setOwnerSearchable True (perms False))
+            now <- Dir.getPermissions xdg.stateHome
+            -- Root can write anyway: nothing to test then.
+            unless (Dir.writable now) $
+              withServerXdg xdg id [dir] $ \server -> do
+                r1 <- postPrefs server "{\"theme\":\"dark\"}"
+                r1.status @?= 200
+                r2 <- postPrefs server "{\"exportedOnly\":true}"
+                r2.status @?= 200
+                r2.body
+                  @?= "{\"theme\":\"dark\",\"exportedOnly\":true,\"sidebar\":\"auto\"}"
+                g <- getPath server "api/prefs"
+                g.body @?= r2.body
+                -- Logged before the first answer: on stderr by now.
+                waitForLine server ("preferences won't be remembered" `isInfixOf`)
+                rest <- readReady server.stderr
+                seen <- readIORef server.seen
+                let ls = seen <> rest
+                    count p = length (filter p ls)
+                let prefsLines = count ("won't be remembered" `isInfixOf`)
+                    configLines = count ("config.toml" `isInfixOf`)
+                (prefsLines, configLines)
+                  @?= (1, 1)
+                Dir.listDirectory xdg.stateHome >>= (@?= []),
       testCase "POST from another origin: 403, nothing written" $
         withTemp $ \dir -> withFreshXdg $ \xdg ->
           withServerXdg xdg id [dir] $ \server -> do

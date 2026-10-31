@@ -15,8 +15,8 @@ import ApiSupport
     sendApi,
   )
 import Codec.Compression.GZip qualified as GZip
-import Control.Exception (evaluate)
-import Control.Monad (forM, forM_)
+import Control.Exception (evaluate, finally)
+import Control.Monad (forM, forM_, unless)
 import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Lazy qualified as LBS
@@ -32,13 +32,15 @@ import HaskellReviewer.Core.Parser (FileKind (..), ParseSettings (..))
 import HaskellReviewer.Core.Project (Extension (..), Language (..))
 import HaskellReviewer.Core.RelPath (relPathFromBytes)
 import HaskellReviewer.Core.Xdg (XdgProblem (..))
-import HaskellReviewer.Effects.AtomicFile (AtomicWriteError (..))
 import HaskellReviewer.Effects.FileSystem (ListError (..), ReadError (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), newLogger)
 import HaskellReviewer.Server.Api (cborWarmUp)
 import HaskellReviewer.Server.CborJson (cborToJson)
-import HaskellReviewer.Session.Prefs (PrefsError (..), PrefsStore (..), newPrefsStore)
+import HaskellReviewer.Session.Prefs (newPrefsStore)
 import Network.HTTP.Types (Header)
+import System.Directory qualified as Dir
+import System.FilePath ((</>))
+import System.IO.Temp (withSystemTempDirectory)
 import Test.Tasty (TestTree, testGroup, withResource)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 
@@ -484,19 +486,30 @@ prefsTests =
               lookup "Allow" r.headers @?= Just "GET, POST"
           )
           ["HEAD", "PUT", "DELETE", "PATCH", "OPTIONS"],
-      testCase "POST: a failed save is 500" $ do
-        let failing =
-              PrefsStore
-                { current = error "not called",
-                  update = \_ -> pure (Left (CannotWrite full))
-                }
-        r <- post fixtureApi {prefs = pure failing} dark
-        r.status @?= 500
-        r.body @?= "cannot save preferences"
+      testCase "POST: a state dir we can't write is still 200, kept for the session" $
+        withSystemTempDirectory "haskell-reviewer-api" $ \dir -> do
+          let silent = newLogger LevelInfo (\_ -> pure ())
+              perms w =
+                Dir.setOwnerWritable w $
+                  Dir.setOwnerSearchable True $
+                    Dir.setOwnerReadable True Dir.emptyPermissions
+          let path = dir </> "s" </> "ui.json"
+          store <- newPrefsStore silent builtinDefaults (Right path)
+          let api = fixtureApi {prefs = pure store, workers = 0}
+          flip finally (Dir.setPermissions dir (perms True)) $ do
+            Dir.setPermissions dir (perms False)
+            now <- Dir.getPermissions dir
+            -- Root can write anyway: nothing to test then.
+            unless (Dir.writable now) $ do
+              r <- post api dark
+              r.status @?= 200
+              r.body
+                @?= "{\"theme\":\"dark\",\"exportedOnly\":false,\"sidebar\":\"auto\"}"
+              g <- getApi api prefsPath
+              g.body @?= r.body
     ]
   where
     prefsPath = ["api", "prefs"]
-    full = AtomicWriteError {target = "ui.json", reason = "disk full"}
     dark = "{\"theme\":\"dark\"}"
     jsonHeaders :: [Header]
     jsonHeaders = [goodOrigin, ("Content-Type", "application/json")]

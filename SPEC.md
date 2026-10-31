@@ -885,7 +885,9 @@ as not configured (§8), with the reason.
   by the tool in `$XDG_STATE_HOME/haskell-reviewer/ui.json` (D-68, D-200;
   default `~/.local/state`), written atomically. They take precedence over
   the config's UI defaults. The tool never rewrites `config.toml`. With no
-  usable `HOME` (D-201), they last only for the run.
+  usable `HOME` (D-201), they last only for the run. The tool works without
+  a writable state dir (read-only or restricted sandbox): preferences then
+  last for the session.
 - There is **no per-project configuration** of any kind (D-15): no file in
   the project, and no per-project section in the user config. The project
   under review cannot influence the tool, and there is only one place to

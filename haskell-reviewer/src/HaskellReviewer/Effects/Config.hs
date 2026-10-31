@@ -7,6 +7,9 @@ module HaskellReviewer.Effects.Config
 
     -- * Warm-up
     warmUpConfig,
+
+    -- * Reading small files
+    readRegularFile,
   )
 where
 
@@ -54,27 +57,28 @@ loadConfig logger env = case configFile env of
     logVerbose logger ("config: none (" <> renderXdgProblem problem <> ")")
     pure builtinDefaults
   Right path -> do
-    result <- try @IOException (readRegular path)
+    result <- try @IOException (readRegularFile configSizeLimit path)
     case result of
       Left e
         | isDoesNotExistError e -> do
             logVerbose logger ("config: " <> Text.pack path <> " (not found)")
             pure builtinDefaults
-        | otherwise -> badFile path ("cannot read: " <> ioErrorMessage e)
-      Right Nothing -> badFile path "not a regular file; ignored"
+        | otherwise -> badFile path "cannot read" ("cannot read: " <> ioErrorMessage e)
+      Right Nothing -> badFile path "not a regular file" "not a regular file; ignored"
       Right (Just bytes)
         | BS.length bytes > configSizeLimit ->
-            badFile path "over 64 KiB; ignored"
+            badFile path "found" "over 64 KiB; ignored"
         | otherwise -> case Text.Encoding.decodeUtf8' bytes of
-            Left _ -> badFile path "not UTF-8; ignored"
+            Left _ -> badFile path "found" "not UTF-8; ignored"
             Right text -> do
               logVerbose logger ("config: " <> Text.pack path <> " (found)")
               let parsed = parseConfig text
               mapM_ (logInfo logger . prefixed . renderConfigWarning path) parsed.warnings
               pure parsed.defaults
   where
-    badFile path msg = do
-      logVerbose logger ("config: " <> Text.pack path <> " (found)")
+    -- The verbose word, then the warning.
+    badFile path state msg = do
+      logVerbose logger ("config: " <> Text.pack path <> " (" <> state <> ")")
       logInfo logger (prefixed (Text.pack path <> ": " <> msg))
       pure builtinDefaults
 
@@ -100,12 +104,13 @@ warmUpConfig =
   where
     size w = Text.length w.message
 
--- * Internal
-
--- | The first bytes of the file (one past the limit), or 'Nothing' if
--- it isn't a regular file.
-readRegular :: FilePath -> IO (Maybe BS.ByteString)
-readRegular path = do
+-- | The first bytes of the file, one past the limit (so a caller can
+-- tell it's too big), or 'Nothing' if it isn't a regular file. A FIFO
+-- or a device is never opened, so it can't block us; the open is
+-- non-blocking anyway, in case the file changes in between. Throws IO
+-- errors (missing, permissions).
+readRegularFile :: Int -> FilePath -> IO (Maybe BS.ByteString)
+readRegularFile limit path = do
   status <- getFileStatus path
   if not (isRegularFile status)
     then pure Nothing
@@ -117,7 +122,9 @@ readRegular path = do
         then Nothing <$ closeFd fd
         else do
           h <- fdToHandle fd `onException` closeFd fd
-          (Just <$> BS.hGet h (configSizeLimit + 1)) `finally` hClose h
+          (Just <$> BS.hGet h (limit + 1)) `finally` hClose h
+
+-- * Internal
 
 prefixed :: Text -> Text
 prefixed = ("haskell-reviewer: " <>)
