@@ -32,6 +32,7 @@ import Data.Time.Calendar (fromGregorian)
 import Data.Time.Clock (UTCTime (..))
 import HaskellReviewer.App.Run (Deps (..), run)
 import HaskellReviewer.Core.Address (Port (..), Token, tokenFromBytes, tokenText)
+import HaskellReviewer.Core.Config (builtinDefaults)
 import HaskellReviewer.Core.FileContent (FileContent (..))
 import HaskellReviewer.Core.FileList
   ( EntryKind (..),
@@ -48,6 +49,7 @@ import HaskellReviewer.Core.ModuleModel
 import HaskellReviewer.Core.Project (GhcVersion (..))
 import HaskellReviewer.Core.RelPath (relPathFromBytes)
 import HaskellReviewer.Core.Root (CanonicalRoot (..), Root (..))
+import HaskellReviewer.Core.Xdg (XdgProblem (..))
 import HaskellReviewer.Effects.Clock
   ( Clock (..),
     Microseconds (..),
@@ -60,6 +62,7 @@ import HaskellReviewer.Effects.FileSystem
     RootError (..),
   )
 import HaskellReviewer.Effects.Git (GitError (..), TooOld (..))
+import HaskellReviewer.Effects.Log (logInfo)
 import HaskellReviewer.Effects.Shutdown (Shutdown (..))
 import HaskellReviewer.Effects.Spawn (SoftLimit (..), SpawnSetup (..))
 import HaskellReviewer.Effects.Trace (Span (..), TraceFileError (..), Tracer (..))
@@ -148,6 +151,33 @@ tests =
                 \need 2.44 or newer"
               ]
         readIORef fake.closed >>= (@?= True),
+      testCase "config warnings: on the console before the URL, exit 0" $ do
+        fake <- newFake
+        let deps =
+              (fake.deps)
+                { loadConfig = \logger -> do
+                    logInfo logger "haskell-reviewer: /c/config.toml:2:9: bad"
+                    pure builtinDefaults
+                }
+        code <- run deps []
+        code @?= ExitSuccess
+        out <- readIORef fake.console
+        out
+          @?= [ "haskell-reviewer: /c/config.toml:2:9: bad",
+                "haskell-reviewer: serving at " <> fakeUrl
+              ],
+      testCase "config is read after ROOT, before git" $ do
+        fake <- newFake
+        steps <- newIORef []
+        let step s = modifyIORef' steps (<> [s :: Text])
+            deps =
+              (fake.deps)
+                { checkRoot = \p -> step "root" >> fake.deps.checkRoot p,
+                  loadConfig = \l -> step "config" >> fake.deps.loadConfig l,
+                  probeFiles = \l r -> step "git" >> fake.deps.probeFiles l r
+                }
+        _ <- run deps []
+        readIORef steps >>= (@?= ["root", "config", "git"]),
       listingTests,
       indexingTests,
       testCase "--port is passed to listen" $ do
@@ -735,6 +765,9 @@ newFake = do
             openTracer = \_ _ -> pure (Right tracer),
             newToken = pure fakeToken,
             listen = \_ _ -> pure (Right listener),
+            loadConfig = \_ -> pure builtinDefaults,
+            -- In memory: never the real ui.json.
+            prefsPath = pure (Left HomeUnset),
             -- Never done: no line or span from the listing.
             probeFiles = \_ _ -> pure (Right (fakeLister neverDone)),
             readProject = Session.Project.readProject,

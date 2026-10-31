@@ -1,0 +1,5 @@
+# Every key of [ui], not the default.
+[ui]
+theme = "dark"
+exported-only = true
+sidebar = "files"

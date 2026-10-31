@@ -19,14 +19,18 @@ import Data.ByteString.Lazy qualified as LBS
 import Data.List (sort)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import HaskellReviewer.Core.Config (SidebarView (..), Theme (..), UiDefaults (..))
 import HaskellReviewer.Core.ModuleModel
   ( ModuleParse (..),
     TextOnlyModule (..),
     TextOnlyReason (..),
   )
+import HaskellReviewer.Core.Xdg (XdgProblem (..))
+import HaskellReviewer.Effects.Log (LogLevel (..), newLogger)
 import HaskellReviewer.Server.CborJson (cborToJson, renderCborJsonError)
 import HaskellReviewer.Server.Wire (encodeIndexing, helloPayload)
 import HaskellReviewer.Session.Index (Progress (..))
+import HaskellReviewer.Session.Prefs (newPrefsStore)
 import HaskellReviewer.Session.Snapshot (Generation (..))
 import System.Directory qualified as Dir
 import Test.Tasty (TestTree, testGroup)
@@ -99,7 +103,10 @@ cases =
     -- The page: every kind of declaration and doc markup; sections.
     cbor "module-page" (okCbor pageApi (modulePath "Page")),
     cbor "module-page-sections" (okCbor pageApi (modulePath "Sections")),
-    json "module-not-found" (notFoundJson projectApi (modulePath "Nope"))
+    json "module-not-found" (notFoundJson projectApi (modulePath "Nope")),
+    json "prefs-defaults" (okJson fixtureApi ["api", "prefs"]),
+    -- Every value other than the built-in one.
+    json "prefs" (okJson fixtureApi {prefs = configured} ["api", "prefs"])
   ]
   where
     json n body = Case {name = n, fixture = Json body}
@@ -110,6 +117,11 @@ cases =
     slowApi = answering TooSlow
     halfway = Progress {total = 358, ready = 120, failed = 2}
     event e = LBS.fromStrict e <> "\n"
+    configured =
+      newPrefsStore
+        (newLogger LevelInfo (\_ -> pure ()))
+        UiDefaults {theme = ThemeDark, exportedOnly = True, sidebar = SidebarModules}
+        (Left HomeUnset)
     answering r =
       projectApi
         { parse = \_ _ -> pure (TextOnly TextOnlyModule {reason = r, warnings = []})

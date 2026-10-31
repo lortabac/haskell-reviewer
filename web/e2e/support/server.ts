@@ -40,10 +40,23 @@ process.on("exit", () => {
 const urlLine =
   /haskell-reviewer: serving at (http:\/\/127\.0\.0\.1:(\d+)\/([^/\s]+)\/)/;
 
-export async function startServer(opts: { root: string }): Promise<Server> {
+// The XDG dirs of a run: config.toml and ui.json go there, never in
+// the user's own (D-202). Required, so no run can forget them.
+export interface ServerOpts {
+  root: string;
+  configHome: string;
+  stateHome: string;
+}
+
+export async function startServer(opts: ServerOpts): Promise<Server> {
   const args = ["--no-open", "--verbose", "--idle-exit", "1", opts.root];
   const child = spawn(exePath(), args, {
     stdio: ["ignore", "ignore", "pipe"],
+    env: {
+      ...process.env,
+      XDG_CONFIG_HOME: opts.configHome,
+      XDG_STATE_HOME: opts.stateHome,
+    },
   });
   children.add(child);
 

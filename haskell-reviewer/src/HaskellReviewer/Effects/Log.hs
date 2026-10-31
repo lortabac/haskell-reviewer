@@ -14,6 +14,7 @@ module HaskellReviewer.Effects.Log
 
     -- * Messages
     exceptionMessage,
+    ioErrorMessage,
   )
 where
 
@@ -21,6 +22,7 @@ import Control.Exception (SomeException (..), displayException)
 import Control.Monad (when)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import GHC.IO.Exception (IOException (..))
 
 -- | How much to log. Ordered: a logger at 'LevelDebug' also prints
 -- verbose and info messages.
@@ -69,3 +71,8 @@ logDebug logger = logger.emit LevelDebug
 exceptionMessage :: SomeException -> Text
 exceptionMessage (SomeException inner) =
   Text.unwords (Text.lines (Text.pack (displayException inner)))
+
+-- | An IO error on one line, without its file name: the caller puts
+-- the path where it fits, so it isn't said twice.
+ioErrorMessage :: IOException -> Text
+ioErrorMessage e = exceptionMessage (SomeException e {ioe_filename = Nothing})

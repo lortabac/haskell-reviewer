@@ -14,6 +14,7 @@ module HaskellReviewer.Core.Address
     -- * URL and Host
     sessionUrl,
     hostAllowed,
+    originAllowed,
   )
 where
 
@@ -82,3 +83,15 @@ hostAllowed (Port p) = \case
      in h == "127.0.0.1:" <> portBytes || h == "localhost:" <> portBytes
   where
     portBytes = Char8.pack (show p)
+
+-- | Is this @Origin@ header OK, for a request that changes something?
+-- Only our own page's origins are: @http:\/\/127.0.0.1:\<port\>@ and
+-- @http:\/\/localhost:\<port\>@, the hosts 'hostAllowed' takes. Case
+-- doesn't matter. No header, @null@, another port or host: rejected.
+-- See Note [Request checks] in "HaskellReviewer.Server.Security".
+originAllowed :: Port -> Maybe ByteString -> Bool
+originAllowed port = \case
+  Just origin
+    | Just host <- Char8.stripPrefix "http://" (Char8.map toLower origin) ->
+        hostAllowed port (Just host)
+  _ -> False

@@ -11,6 +11,7 @@ import HaskellReviewer.App.RunTest qualified
 import HaskellReviewer.Core.AddressTest qualified
 import HaskellReviewer.Core.CabalFileTest qualified
 import HaskellReviewer.Core.CodeTest qualified
+import HaskellReviewer.Core.ConfigGoldenTest qualified
 import HaskellReviewer.Core.CppGoldenTest qualified
 import HaskellReviewer.Core.CppTest qualified
 import HaskellReviewer.Core.DeclsGoldenTest qualified
@@ -27,6 +28,7 @@ import HaskellReviewer.Core.NameTableTest qualified
 import HaskellReviewer.Core.PackageGlobTest qualified
 import HaskellReviewer.Core.ParseGoldenTest qualified
 import HaskellReviewer.Core.ParserTest qualified
+import HaskellReviewer.Core.PrefsTest qualified
 import HaskellReviewer.Core.ProjectFileTest qualified
 import HaskellReviewer.Core.ProjectGoldenTest qualified
 import HaskellReviewer.Core.ProjectLoadTest qualified
@@ -36,6 +38,10 @@ import HaskellReviewer.Core.RichTextGoldenTest qualified
 import HaskellReviewer.Core.RootTest qualified
 import HaskellReviewer.Core.SourceTextTest qualified
 import HaskellReviewer.Core.TokensTest qualified
+import HaskellReviewer.Core.XdgTest qualified
+import HaskellReviewer.Effects.AtomicFileTest qualified
+import HaskellReviewer.Effects.Config (warmUpConfig)
+import HaskellReviewer.Effects.ConfigTest qualified
 import HaskellReviewer.Effects.FileSystemTest qualified
 import HaskellReviewer.Effects.GitTest qualified
 import HaskellReviewer.Effects.HelperTest qualified
@@ -51,10 +57,13 @@ import HaskellReviewer.Server.CborTest qualified
 import HaskellReviewer.Server.EventsTest qualified
 import HaskellReviewer.Server.ListenTest qualified
 import HaskellReviewer.Server.PageTest qualified
+import HaskellReviewer.Server.Prefs (warmUpPrefs)
+import HaskellReviewer.Server.Router (warmUpGzip)
 import HaskellReviewer.Server.RouterTest qualified
 import HaskellReviewer.Server.Wire.Page (warmUpPages)
 import HaskellReviewer.Session.ClientsTest qualified
 import HaskellReviewer.Session.IndexTest qualified
+import HaskellReviewer.Session.PrefsTest qualified
 import HaskellReviewer.Session.SnapshotTest qualified
 import Test.Tasty (defaultMain, testGroup, withResource)
 
@@ -76,9 +85,23 @@ main = do
         Bench.RtsStatsTest.tests,
         Bench.StatsTest.tests,
         HaskellReviewer.App.CliTest.tests,
-        HaskellReviewer.App.RunTest.tests,
+        -- Each test runs serve, which runs warmUpGzip and warmUpPrefs:
+        -- tests in parallel would build their shared values at once
+        -- (Q-RTS-BLACKHOLE). Built once here first.
+        withResource (warmUpGzip >> warmUpPrefs) (const (pure ())) $ \_ ->
+          HaskellReviewer.App.RunTest.tests,
         HaskellReviewer.Core.AddressTest.tests,
         HaskellReviewer.Core.CabalFileTest.tests,
+        -- toml-parser's and aeson's shared values, built before the
+        -- tests use them in parallel (Q-RTS-BLACKHOLE).
+        withResource (warmUpConfig >> warmUpPrefs) (const (pure ())) $ \_ ->
+          testGroup
+            "Settings"
+            [ HaskellReviewer.Core.ConfigGoldenTest.tests,
+              HaskellReviewer.Core.PrefsTest.tests,
+              HaskellReviewer.Effects.ConfigTest.tests,
+              HaskellReviewer.Session.PrefsTest.tests
+            ],
         HaskellReviewer.Core.FileListTest.tests,
         HaskellReviewer.Core.GitTest.tests,
         HaskellReviewer.Core.IndexQueueTest.tests,
@@ -92,6 +115,8 @@ main = do
         HaskellReviewer.Core.RelPathTest.tests,
         HaskellReviewer.Core.RootTest.tests,
         HaskellReviewer.Core.TokensTest.tests,
+        HaskellReviewer.Core.XdgTest.tests,
+        HaskellReviewer.Effects.AtomicFileTest.tests,
         HaskellReviewer.Effects.FileSystemTest.tests,
         HaskellReviewer.Effects.GitTest.tests,
         HaskellReviewer.Effects.HelperTest.tests,
@@ -122,8 +147,9 @@ main = do
               HaskellReviewer.Core.RichTextGoldenTest.tests,
               HaskellReviewer.Core.SourceTextTest.tests,
               HaskellReviewer.Session.IndexTest.parsingTests,
-              -- Both share the API fixtures: built once, here.
-              withResource forceFixtures (const (pure ())) $ \_ ->
+              -- Both share the API fixtures: built once, here. And the
+              -- prefs route runs in parallel: warmed up like the server.
+              withResource (forceFixtures >> warmUpPrefs) (const (pure ())) $ \_ ->
                 testGroup
                   "API"
                   [ HaskellReviewer.Server.ApiGoldenTest.tests,

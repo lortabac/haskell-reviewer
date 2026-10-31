@@ -1,0 +1,5 @@
+theme: light
+exported-only: false
+sidebar: auto
+== warnings
+config.toml:3:1: unknown key "ui.font-size"

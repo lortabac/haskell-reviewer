@@ -26,6 +26,7 @@ import Control.Exception
   ( SomeAsyncException,
     SomeException,
     catch,
+    evaluate,
     finally,
     fromException,
     throwIO,
@@ -56,6 +57,7 @@ import HaskellReviewer.Core.Address
     tokenByteCount,
     tokenFromBytes,
   )
+import HaskellReviewer.Core.Config (UiDefaults)
 import HaskellReviewer.Core.FileContent (FileContent)
 import HaskellReviewer.Core.FileList
   ( EntryKind (..),
@@ -84,6 +86,7 @@ import HaskellReviewer.Core.Project
   )
 import HaskellReviewer.Core.RelPath (RelPath)
 import HaskellReviewer.Core.Root (CanonicalRoot, Root (..))
+import HaskellReviewer.Core.Xdg (XdgProblem, prefsFile, renderXdgProblem)
 import HaskellReviewer.Effects.Browser qualified as Browser
 import HaskellReviewer.Effects.Clock
   ( Clock (..),
@@ -93,6 +96,7 @@ import HaskellReviewer.Effects.Clock
     elapsed,
     systemClock,
   )
+import HaskellReviewer.Effects.Config qualified as Config
 import HaskellReviewer.Effects.FileSystem
   ( ListError (..),
     Lister (..),
@@ -139,6 +143,7 @@ import HaskellReviewer.Server.Listen
     openListener,
     renderListenError,
   )
+import HaskellReviewer.Server.Prefs (warmUpPrefs)
 import HaskellReviewer.Server.Router (Routes (..), application, warmUpGzip)
 import HaskellReviewer.Server.Wire.Page (warmUpPages)
 import HaskellReviewer.Session.Clients (newClients, waitIdle)
@@ -153,6 +158,7 @@ import HaskellReviewer.Session.Index
     readStates,
     runWorkers,
   )
+import HaskellReviewer.Session.Prefs (newPrefsStore)
 import HaskellReviewer.Session.Project qualified as Session.Project
 import HaskellReviewer.Session.Snapshot
   ( Snapshot (..),
@@ -163,7 +169,7 @@ import HaskellReviewer.Session.Snapshot
     newSnapshotSlot,
     snapshotSTM,
   )
-import System.Environment (getArgs)
+import System.Environment (getArgs, getEnvironment)
 import System.Exit (ExitCode (..), exitWith)
 import System.IO (hSetEncoding, stderr, utf8)
 
@@ -236,6 +242,19 @@ hang shows where it is. The signal handler writes its own line straight
 to fd 2, past the logger.
 -}
 
+{- Note [Startup work]
+
+Before the URL line we only do quick things (SPEC §10.1): check ROOT,
+open the trace file, read config.toml (one small file), check git,
+listen, warm up the gzip and prefs code. ui.json is not read: the first
+GET api/prefs does that. The rest comes after: Note [Listing after the
+URL].
+
+The warm-ups and the config run on the main thread, before warp
+accepts: request threads then find their shared values built
+(Q-RTS-BLACKHOLE).
+-}
+
 {- Note [Listing after the URL]
 
 The URL must come fast (SPEC §10.1), and listing a big tree takes a
@@ -275,6 +294,12 @@ data Deps = Deps
     newToken :: IO Token,
     -- | Open the listening socket, on the given port or a free one.
     listen :: Logger -> Maybe Port -> IO (Either ListenError Listener),
+    -- | Read config.toml, log its problems, give back the UI defaults.
+    -- Never fails. See Note [Config file] in "HaskellReviewer.Core.Config".
+    loadConfig :: Logger -> IO UiDefaults,
+    -- | Where ui.json is. See Note [Saving preferences] in
+    -- "HaskellReviewer.Session.Prefs".
+    prefsPath :: IO (Either XdgProblem FilePath),
     -- | Check git and get ready to list the files of ROOT. See
     -- Note [Listing after the URL].
     probeFiles :: Logger -> Root -> IO (Either GitError Lister),
@@ -321,6 +346,10 @@ newRealDeps spawnSetup = do
         openTracer = openFileTracer,
         newToken = tokenFromBytes <$> getRandomBytes tokenByteCount,
         listen = openListener,
+        loadConfig = \logger -> do
+          env <- getEnvironment
+          Config.loadConfig logger (`lookup` env),
+        prefsPath = (\env -> prefsFile (`lookup` env)) <$> getEnvironment,
         probeFiles = FileSystem.probeFiles,
         readProject = Session.Project.readProject,
         warmUp = Parser.warmUpParser >> warmUpPages,
@@ -404,11 +433,14 @@ startUp deps args = do
               logVerbose logger ("root: " <> Text.pack root.path)
               logDebug logger ("options: " <> Text.pack (show opts))
               logDebug logger (renderSpawnSetup deps.spawnSetup)
+              -- On this thread, before warp: see Note [Startup work]. A
+              -- bad config is never an exit.
+              defaults <- evaluate =<< deps.loadConfig logger
               probed <- deps.probeFiles logger root
               case probed of
                 Left e -> startupFailed deps (BadGit e) `finally` tracer.close
                 Right lister ->
-                  serve deps logger opts root lister tracer shutdown t0 w0
+                  serve deps logger opts root defaults lister tracer shutdown t0 w0
                     `finally` tracer.close
 
 -- | Listen, print the URL, serve until a signal. See Note [Shutdown].
@@ -417,13 +449,14 @@ serve ::
   Logger ->
   Options ->
   Root ->
+  UiDefaults ->
   Lister ->
   Tracer ->
   Shutdown ->
   MonotonicTime ->
   UTCTime ->
   IO ExitCode
-serve deps logger opts root lister tracer shutdown t0 w0 = do
+serve deps logger opts root defaults lister tracer shutdown t0 w0 = do
   stoppedEarly <- shutdown.stopped
   if stoppedEarly
     then pure ExitSuccess
@@ -436,6 +469,14 @@ serve deps logger opts root lister tracer shutdown t0 w0 = do
           -- Before warp accepts: see Note [Compression] in
           -- "HaskellReviewer.Server.Router".
           warmUpGzip
+          -- The store doesn't read ui.json yet: the first GET does.
+          location <- deps.prefsPath
+          logVerbose logger $
+            "prefs: " <> case location of
+              Right path -> Text.pack path
+              Left problem -> "in memory (" <> renderXdgProblem problem <> ")"
+          prefs <- newPrefsStore logger defaults location
+          warmUpPrefs
           slot <- newSnapshotSlot
           -- Filled by ready: the listing starts after the URL line.
           start <- newEmptyMVar
@@ -467,7 +508,7 @@ serve deps logger opts root lister tracer shutdown t0 w0 = do
                     readEntry = \snap -> deps.readEntry snap.root,
                     logger = logger
                   }
-              routes = Routes {events = events, files = files}
+              routes = Routes {events = events, files = files, prefs = prefs}
               app = application listener.port token routes
               waitStop = do
                 why <- case opts.idleExit of

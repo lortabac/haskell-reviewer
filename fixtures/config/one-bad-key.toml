@@ -1,0 +1,4 @@
+[ui]
+theme = "dark"
+	exported-only = 1
+sidebar = "modules"

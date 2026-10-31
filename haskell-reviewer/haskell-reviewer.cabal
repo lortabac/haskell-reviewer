@@ -40,6 +40,7 @@ library
     HaskellReviewer.Core.CabalCompat
     HaskellReviewer.Core.CabalFile
     HaskellReviewer.Core.Code
+    HaskellReviewer.Core.Config
     HaskellReviewer.Core.Cpp
     HaskellReviewer.Core.Cpp.Expand
     HaskellReviewer.Core.Cpp.Expr
@@ -66,6 +67,7 @@ library
     HaskellReviewer.Core.Parser.Helpers
     HaskellReviewer.Core.Parser.InstanceKey
     HaskellReviewer.Core.Parser.Lex
+    HaskellReviewer.Core.Prefs
     HaskellReviewer.Core.Project
     HaskellReviewer.Core.ProjectFile
     HaskellReviewer.Core.ProjectLoad
@@ -75,10 +77,13 @@ library
     HaskellReviewer.Core.SourceText
     HaskellReviewer.Core.Span
     HaskellReviewer.Core.Tokens
+    HaskellReviewer.Core.Xdg
 
     -- Effects
+    HaskellReviewer.Effects.AtomicFile
     HaskellReviewer.Effects.Browser
     HaskellReviewer.Effects.Clock
+    HaskellReviewer.Effects.Config
     HaskellReviewer.Effects.FileSystem
     HaskellReviewer.Effects.Git
     HaskellReviewer.Effects.Helper
@@ -92,6 +97,7 @@ library
     -- Session
     HaskellReviewer.Session.Clients
     HaskellReviewer.Session.Index
+    HaskellReviewer.Session.Prefs
     HaskellReviewer.Session.Project
     HaskellReviewer.Session.Snapshot
 
@@ -102,6 +108,7 @@ library
     HaskellReviewer.Server.CborJson
     HaskellReviewer.Server.Events
     HaskellReviewer.Server.Listen
+    HaskellReviewer.Server.Prefs
     HaskellReviewer.Server.Router
     HaskellReviewer.Server.Security
     HaskellReviewer.Server.Wire
@@ -138,6 +145,7 @@ library
     , stm                   >=2.5.1  && <2.6
     , text                  >=2.1    && <2.2
     , time                  >=1.12   && <1.16
+    , toml-parser           >=2.0.2  && <2.1
     , unix                  >=2.8    && <2.9
     , vector                >=0.13   && <0.14
     , wai                   >=3.2.4  && <3.3
@@ -183,6 +191,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.AddressTest
     HaskellReviewer.Core.CabalFileTest
     HaskellReviewer.Core.CodeTest
+    HaskellReviewer.Core.ConfigGoldenTest
     HaskellReviewer.Core.CppGoldenTest
     HaskellReviewer.Core.CppPropertyTest
     HaskellReviewer.Core.CppTest
@@ -200,6 +209,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.PackageGlobTest
     HaskellReviewer.Core.ParseGoldenTest
     HaskellReviewer.Core.ParserTest
+    HaskellReviewer.Core.PrefsTest
     HaskellReviewer.Core.ProjectFileTest
     HaskellReviewer.Core.ProjectGoldenTest
     HaskellReviewer.Core.ProjectLoadTest
@@ -209,6 +219,9 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.RootTest
     HaskellReviewer.Core.SourceTextTest
     HaskellReviewer.Core.TokensTest
+    HaskellReviewer.Core.XdgTest
+    HaskellReviewer.Effects.AtomicFileTest
+    HaskellReviewer.Effects.ConfigTest
     HaskellReviewer.Effects.FileSystemTest
     HaskellReviewer.Effects.GitTest
     HaskellReviewer.Effects.HelperTest
@@ -225,6 +238,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Server.RouterTest
     HaskellReviewer.Session.ClientsTest
     HaskellReviewer.Session.IndexTest
+    HaskellReviewer.Session.PrefsTest
     HaskellReviewer.Session.SnapshotTest
     ModulesDump
     ParseDump

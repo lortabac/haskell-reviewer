@@ -3,7 +3,7 @@
 -- A normal run serves until a signal, so those tests start the binary,
 -- wait for the URL line on stderr, poke it, and stop it with a signal.
 -- Every run passes --no-open, except the tests of the opener, which
--- control PATH.
+-- control PATH. Every run gets its own XDG dirs: Note [Isolated runs].
 module ExeTest (tests) where
 
 import Codec.Compression.GZip qualified as GZip
@@ -93,8 +93,89 @@ tests =
       filesTests,
       gitTests,
       signalTests,
-      openerTests
+      openerTests,
+      prefsTests
     ]
+
+{- Note [Isolated runs]
+
+D-202. The binary reads $XDG_CONFIG_HOME/haskell-reviewer/config.toml
+and writes $XDG_STATE_HOME/haskell-reviewer/ui.json. A test must never
+touch the user's own. So every run gets fresh, empty XDG dirs (temp,
+removed after), set last, over whatever env the test passed. Tests of
+the config and of ui.json pick their own dirs ('runExeXdg',
+'withServerXdg').
+-}
+
+-- * Config and preferences
+
+prefsTests :: TestTree
+prefsTests =
+  testGroup
+    "Prefs (exe)"
+    [ testCase "bad config: a warning with line:col before the URL" $
+        withTemp $ \dir -> withFreshXdg $ \xdg -> do
+          let config = xdg.configHome </> "haskell-reviewer" </> "config.toml"
+          Dir.createDirectoryIfMissing True (takeDirectory config)
+          writeFile config "[ui]\ntheme = 1\nsidebar = \"files\"\n"
+          withServerXdg xdg id [dir] $ \server -> do
+            seen <- readIORef server.seen
+            seen
+              @?= [ "haskell-reviewer: "
+                      <> config
+                      <> ":2:9: ui.theme: expected a string, got an integer",
+                    "haskell-reviewer: serving at " <> server.url
+                  ]
+            r <- getPath server "api/prefs"
+            r.body
+              @?= "{\"theme\":\"system\",\"exportedOnly\":false,\"sidebar\":\"files\"}",
+      testCase "--verbose: which config and ui.json" $
+        withTemp $ \dir -> withFreshXdg $ \xdg ->
+          withServerXdg xdg id ["--verbose", dir] $ \server -> do
+            seen <- readIORef server.seen
+            let config = xdg.configHome </> "haskell-reviewer" </> "config.toml"
+                state = xdg.stateHome </> "haskell-reviewer" </> "ui.json"
+            assertBool (show seen) (("config: " <> config <> " (not found)") `elem` seen)
+            assertBool (show seen) (("prefs: " <> state) `elem` seen),
+      testCase "POST writes ui.json; a restart reads it" $
+        withTemp $ \dir -> withFreshXdg $ \xdg -> do
+          let state = xdg.stateHome </> "haskell-reviewer" </> "ui.json"
+          withServerXdg xdg id [dir] $ \server -> do
+            r <- postPrefs server "{\"theme\":\"dark\"}"
+            r.status @?= 200
+            r.body @?= "{\"theme\":\"dark\",\"exportedOnly\":false,\"sidebar\":\"auto\"}"
+            readFile' state >>= (@?= "{\"version\":1,\"theme\":\"dark\"}\n")
+          withServerXdg xdg id [dir] $ \server -> do
+            r <- getPath server "api/prefs"
+            r.body @?= "{\"theme\":\"dark\",\"exportedOnly\":false,\"sidebar\":\"auto\"}",
+      testCase "POST from another origin: 403, nothing written" $
+        withTemp $ \dir -> withFreshXdg $ \xdg ->
+          withServerXdg xdg id [dir] $ \server -> do
+            let path = tokenPath server <> "api/prefs"
+                body = "{\"theme\":\"dark\"}"
+                extra =
+                  "Origin: http://evil.com\r\nContent-Type: application/json\r\n\
+                  \Content-Length: "
+                    <> Char8.pack (show (BS.length body))
+                    <> "\r\n"
+            let req = requestBytes "POST" (goodHost server) path extra <> body
+            r <- rawHttp server.port req
+            r.status @?= 403
+            Dir.doesDirectoryExist xdg.stateHome >>= (@?= False)
+    ]
+
+-- | POST a JSON body to api/prefs, from our own page's origin.
+postPrefs :: Server -> ByteString -> IO HttpResponse
+postPrefs server body =
+  rawHttp server.port (requestBytes "POST" (goodHost server) path extra <> body)
+  where
+    path = tokenPath server <> "api/prefs"
+    extra =
+      "Origin: http://127.0.0.1:"
+        <> Char8.pack (show server.port)
+        <> "\r\nContent-Type: application/json\r\nContent-Length: "
+        <> Char8.pack (show (BS.length body))
+        <> "\r\n"
 
 -- * Runs that exit at once
 
@@ -952,15 +1033,26 @@ withServer :: (CreateProcess -> CreateProcess) -> [String] -> (Server -> IO a) -
 withServer tweak args = withServerRaw tweak ("--no-open" : args)
 
 withServerRaw :: (CreateProcess -> CreateProcess) -> [String] -> (Server -> IO a) -> IO a
-withServerRaw tweak args action = do
+withServerRaw tweak args action =
+  withFreshXdg $ \xdg -> withServerRawXdg xdg tweak args action
+
+-- | 'withServer' with these XDG dirs. See Note [Isolated runs].
+withServerXdg ::
+  Xdg -> (CreateProcess -> CreateProcess) -> [String] -> (Server -> IO a) -> IO a
+withServerXdg xdg tweak args = withServerRawXdg xdg tweak ("--no-open" : args)
+
+withServerRawXdg ::
+  Xdg -> (CreateProcess -> CreateProcess) -> [String] -> (Server -> IO a) -> IO a
+withServerRawXdg xdg tweak args action = do
   exe <- findExe
-  let cp =
-        tweak
-          (proc exe args)
-            { std_out = CreatePipe,
-              std_err = CreatePipe,
-              close_fds = True
-            }
+  cp <-
+    withXdg xdg $
+      tweak
+        (proc exe args)
+          { std_out = CreatePipe,
+            std_err = CreatePipe,
+            close_fds = True
+          }
   startedAt <- getMonotonicTime
   bracket (createProcess cp) kill $ \case
     (_, Just out, Just err, ph) -> do
@@ -1380,15 +1472,39 @@ assertSecurityHeaders r = do
 withTemp :: (FilePath -> IO a) -> IO a
 withTemp = withSystemTempDirectory "haskell-reviewer-test"
 
+-- | The XDG dirs of one run. See Note [Isolated runs].
+data Xdg = Xdg
+  { configHome :: FilePath,
+    stateHome :: FilePath
+  }
+
+-- | Fresh XDG dirs, removed after. They don't exist yet: the binary
+-- makes the state one when it saves.
+withFreshXdg :: (Xdg -> IO a) -> IO a
+withFreshXdg k =
+  withSystemTempDirectory "haskell-reviewer-xdg" $ \d ->
+    k Xdg {configHome = d </> "config", stateHome = d </> "state"}
+
+-- | Set the XDG dirs, over the env the process would get.
+withXdg :: Xdg -> CreateProcess -> IO CreateProcess
+withXdg xdg cp = do
+  base <- maybe getEnvironment pure cp.env
+  let ours = [("XDG_CONFIG_HOME", xdg.configHome), ("XDG_STATE_HOME", xdg.stateHome)]
+  pure cp {env = Just (ours <> filter ((`notElem` map fst ours) . fst) base)}
+
 runExe :: [String] -> IO (ExitCode, String)
 runExe = runExeWith id
 
 -- | Run the binary, check that stdout is empty, give back the exit code
--- and stderr. Fails (and kills it) after 10 s.
+-- and stderr. Fails (and kills it) after 10 s. Fresh XDG dirs.
 runExeWith :: (CreateProcess -> CreateProcess) -> [String] -> IO (ExitCode, String)
-runExeWith tweak args = do
+runExeWith tweak args = withFreshXdg $ \xdg -> runExeXdg xdg tweak args
+
+-- | 'runExeWith' with these XDG dirs.
+runExeXdg :: Xdg -> (CreateProcess -> CreateProcess) -> [String] -> IO (ExitCode, String)
+runExeXdg xdg tweak args = do
   exe <- findExe
-  let cp = (tweak (proc exe args)) {close_fds = True}
+  cp <- withXdg xdg ((tweak (proc exe args)) {close_fds = True})
   result <- timeout 10000000 (readCreateProcessWithExitCode cp "")
   case result of
     Nothing -> assertFailure ("no exit within 10 s: " <> show args)
