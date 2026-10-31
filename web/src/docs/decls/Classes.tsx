@@ -19,6 +19,17 @@ export function ClassDetails(props: {
   exported: boolean;
   level: number;
 }): JSX.Element {
+  const page = usePage();
+  // D-204: exported only hides unexported associated types and
+  // methods, quietly (no abstract-type-style notice for classes).
+  const associated = () =>
+    page.exportedOnly
+      ? props.c.associated.filter((a) => a.exported)
+      : props.c.associated;
+  const methods = () =>
+    page.exportedOnly
+      ? props.c.methods.filter((m) => m.exported)
+      : props.c.methods;
   return (
     <>
       <Show when={props.c.kindSig}>
@@ -35,10 +46,10 @@ export function ClassDetails(props: {
           </p>
         )}
       </Show>
-      <Show when={props.c.associated.length > 0}>
+      <Show when={associated().length > 0}>
         <Title level={props.level + 1} text="Associated types" />
         <ul class="subdecls">
-          <For each={props.c.associated}>
+          <For each={associated()}>
             {(a) => (
               <AssociatedItem
                 a={a}
@@ -49,10 +60,10 @@ export function ClassDetails(props: {
           </For>
         </ul>
       </Show>
-      <Show when={props.c.methods.length > 0}>
+      <Show when={methods().length > 0}>
         <Title level={props.level + 1} text="Methods" />
         <ul class="subdecls">
-          <For each={props.c.methods}>
+          <For each={methods()}>
             {(m) => (
               <MethodItem
                 m={m}

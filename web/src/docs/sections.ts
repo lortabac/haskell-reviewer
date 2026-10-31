@@ -6,7 +6,7 @@
 //    isn't a pragma (a fixity or DEPRECATED block can be far away).
 // B. No body headings, but the export list has sections: export list
 //    order, each declaration once; names not defined here are
-//    "x (re-exported)"; then "Not exported" in source order.
+//    "x (re-exported)"; then "Private" in source order (D-203).
 // C. Neither: one "Declarations" heading, source order.
 //
 // Instances and family instances are never in the flow: under their
@@ -78,8 +78,16 @@ function exportsNested(d: Declaration): boolean {
 
 // Shown at all. With exportedOnly: exported, or with something
 // exported in it (a method exported alone needs its class).
-const shown = (d: Declaration, exportedOnly: boolean) =>
+export const shown = (d: Declaration, exportedOnly: boolean): boolean =>
   !exportedOnly || d.exported || exportsNested(d);
+
+// How many top-level declarations "exported only" would drop, for the
+// toolbar's status (D-204). Independent of the current setting.
+// Declarations only: an instance or family instance the toggle also
+// hides (its listers all hidden, D-204) isn't counted here.
+export function hiddenCount(page: ParsedModule): number {
+  return page.declarations.filter((d) => inFlow(d) && !shown(d, true)).length;
+}
 
 // Heading levels as written, made so none is skipped: a level is at
 // most one more than the last one.
@@ -112,10 +120,15 @@ export function body(
       for (const a of d.associated) list(a, a.instances);
     }
   }
-  // No shown home: the block.
-  const instances = page.declarations.filter(
-    (d) => !inFlow(d) && d.kind !== "splice" && !homes.has(d.n),
-  );
+  // No shown home: the block. With exportedOnly, one attached (some
+  // local type or class lists it) whose listers are all hidden is
+  // dropped instead (D-204): it isn't an orphan, just invisible along
+  // with its home. A true orphan (unattached, D-191) always stays.
+  const instances = page.declarations.filter((d) => {
+    if (d.kind !== "instance" && d.kind !== "faminst") return false;
+    if (homes.has(d.n)) return false;
+    return !(exportedOnly && d.attached);
+  });
   const hasHeading = page.docItems.some((i) => i.kind === "heading");
   if (hasHeading) {
     return {
@@ -372,7 +385,7 @@ function byExports(
   // in them (a method exported alone).
   const hidden = flow.filter((d) => !d.exported && !done.has(d));
   if (hidden.length > 0) {
-    blocks.push({ kind: "heading", level: 1, inlines: text("Not exported") });
+    blocks.push({ kind: "heading", level: 1, inlines: text("Private") });
     for (const d of hidden) blocks.push({ kind: "decl", depth: 1, decl: d });
   }
   return blocks;
@@ -395,6 +408,6 @@ export function synopsis(
         d.kind === "class" ||
         d.kind === "value" ||
         d.kind === "patsyn") &&
-      (!exportedOnly || d.exported),
+      shown(d, exportedOnly),
   );
 }

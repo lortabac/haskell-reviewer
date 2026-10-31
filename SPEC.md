@@ -320,11 +320,22 @@ A module page in the style of Haddock:
 
 Differences from Hackage, made on purpose for reviewers:
 - **All top-level declarations** are shown by default, not just exported
-  ones (D-10). Exported ones carry a marker. An "exported only" toggle,
-  remembered across sessions, gives the Hackage-like presentation. A module
-  with a header but no export list exports everything. A module with no
-  `module` header at all is `module Main (main) where`, as the Haskell
-  Report says.
+  ones (D-10). An exported top-level declaration carries no marker; an
+  unexported one gets a muted "private" (D-203). A nested declaration
+  (constructor, field, method, associated type, pattern synonym field)
+  is marked only when it differs from the one it's under. When the page
+  is grouped by the export list instead (mode B, D-192), there are no
+  per-item marks: its own headings ("Private" for what the list doesn't
+  name) say so. An "exported only" toggle, remembered across
+  sessions (D-204), gives the Hackage-like presentation: nested
+  unexported items are dropped too (an abstract type gets a muted
+  "Private constructors (_k_)" line instead of an empty one), and an
+  instance whose local listers are all hidden this way is dropped with
+  them (an orphan, or one with no local lister, still shows). An anchor
+  to something the toggle hides gets its own notice, with a "Show all"
+  action. A module with a header but no export list exports everything.
+  A module with no `module` header at all is `module Main (main) where`,
+  as the Haskell Report says.
 - Each declaration has a **"source" toggle** that shows its source inline,
   with the same identifier links (§4.3).
 - Each declaration has a **"go to source"** action that opens the full-source
@@ -574,7 +585,9 @@ also has a UI control, so nothing is lost with shortcuts off.
   instances) in the tool's own clean style. It is not a copy of Haddock's
   CSS (D-22).
 - **Light and dark** themes, following the OS by default, with a manual
-  override. No custom theming.
+  override: a System/Light/Dark control in the header, remembered across
+  sessions (D-203). No custom theming. Tokens use CSS `light-dark()`:
+  Chromium 123, Firefox 120 or Safari 17.5 at minimum.
 - A monospace font for all code. Signatures wrap at `->` and `=>` the way
   Haddock does, and never scroll horizontally in the docs view.
 - Change colours carry meaning (added, removed, modified) and are always

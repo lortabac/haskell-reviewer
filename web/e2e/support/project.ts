@@ -246,6 +246,10 @@ export const shapesHs = [
   "",
   "{-# COMPLETE Unit #-}",
   "",
+  '-- Not exported: for the "exported only" and marker tests (D-203, D-204).',
+  "helper :: Int",
+  "helper = 1",
+  "",
 ].join("\n");
 
 // The line of a declaration in shapesHs.

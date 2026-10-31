@@ -17,6 +17,7 @@ import { ClassDetails } from "./decls/Classes";
 import {
   Badges,
   Docs,
+  exportMark,
   headingTag,
   type SharedName,
   SharedWith,
@@ -76,7 +77,11 @@ export function Decl(props: {
         class="decl-head"
       >
         <Signature code={head().code} />
-        <Badges fixity={props.decl.fixity} labels={labels(props.decl)} />
+        <Badges
+          fixity={props.decl.fixity}
+          labels={labels(props.decl)}
+          mark={mark(props.decl, page.marks)}
+        />
       </Dynamic>
       <Show when={props.decl.kind === "splice"}>
         <p class="decl-note">Template Haskell splice.</p>
@@ -127,8 +132,7 @@ export function readable(d: Shown, ix: PageIndex): string {
   return arg === "" ? `${kw} ${cls}` : `${kw} ${cls} ${arg}`;
 }
 
-// "exported" on exported top-level declarations (not on instances:
-// they always are), orphan, foreign import.
+// orphan, foreign import. The export mark (D-203) is separate: mark().
 function labels(d: Shown): string[] {
   const out: string[] = [];
   switch (d.kind) {
@@ -137,15 +141,29 @@ function labels(d: Shown): string[] {
       if (d.orphan) out.push("orphan");
       break;
     case "value":
-      if (d.exported) out.push("exported");
       if (d.definition === "foreign-import") out.push("foreign import");
       break;
-    case "splice":
-      break;
     default:
-      if (d.exported) out.push("exported");
+      break;
   }
   return out;
+}
+
+// D-203, plan choice 1a: nothing on an exported top-level declaration;
+// a muted "private" on an unexported one. Never on instances or
+// family instances (D-186: they're always exported) or splices (no
+// name to mark); never in mode B, where the export-list grouping
+// already says so in its own headings.
+function mark(d: Shown, marks: boolean): string | undefined {
+  if (!marks) return undefined;
+  switch (d.kind) {
+    case "instance":
+    case "faminst":
+    case "splice":
+      return undefined;
+    default:
+      return exportMark(d.exported, true);
+  }
 }
 
 // What only this kind has. A declaration never changes: a plain
@@ -163,8 +181,14 @@ function details(x: Shown, level: number): JSX.Element {
     case "patsyn":
       return <PatSynDetails p={x} exported={x.exported} level={level} />;
     case "faminst":
+      // Own context (never a mark: labels()/mark() skip "faminst").
       return (
-        <TypeDetails t={x} home={undefined} exported={false} level={level} />
+        <TypeDetails
+          t={x}
+          home={undefined}
+          exported={x.exported}
+          level={level}
+        />
       );
     case "instance":
       return (
@@ -173,16 +197,18 @@ function details(x: Shown, level: number): JSX.Element {
           <ul class="subdecls">
             <For each={x.associated}>
               {(a) => (
+                // Own context: an instance's insides are always
+                // exported (D-186), so this never marks.
                 <Sub
                   d={a}
                   head={a.head}
-                  parentExported={false}
+                  parentExported={a.exported}
                   level={level + 1}
                 >
                   <TypeDetails
                     t={a}
                     home={undefined}
-                    exported={false}
+                    exported={a.exported}
                     level={level + 1}
                   />
                 </Sub>

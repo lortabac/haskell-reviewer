@@ -1,9 +1,12 @@
 import { createSignal } from "solid-js";
 import { render } from "solid-js/web";
+import { getJson } from "./api/client";
+import { decodePrefs, defaultPrefs, type Prefs } from "./api/prefs";
 import { App } from "./App";
 import { connectEvents } from "./events/connect";
 import { ConnectionContext } from "./events/ConnectionNotice";
 import type { Status } from "./events/protocol";
+import { applyTheme } from "./prefs/theme";
 import "./styles/tokens.css";
 import "./styles/frame.css";
 import "./styles/files.css";
@@ -15,6 +18,20 @@ if (root === null) {
   throw new Error("no #root element");
 }
 
+// GET api/prefs before the first render, so the theme is right from
+// the first paint (no flash): built-in defaults if it's slow (500 ms)
+// or fails. fetched (not raced): if the race's loser is the real GET,
+// PrefsProvider applies it, for whichever keys the user hasn't
+// touched by then (C3) — it's never dropped.
+const fetched: Promise<Prefs> = getJson("/api/prefs", decodePrefs).then((r) =>
+  r.kind === "ok" ? r.value : defaultPrefs,
+);
+const timeout = new Promise<Prefs>((resolve) => {
+  setTimeout(() => resolve(defaultPrefs), 500);
+});
+const initialPrefs = await Promise.race([fetched, timeout]);
+applyTheme(document.documentElement, initialPrefs.theme);
+
 // The event stream starts here, not in App, so App tests need no
 // EventSource.
 const [status, setStatus] = createSignal<Status>("connecting");
@@ -23,7 +40,7 @@ const [fallback, setFallback] = createSignal(false);
 render(
   () => (
     <ConnectionContext.Provider value={{ status, fallback }}>
-      <App />
+      <App initialPrefs={initialPrefs} pendingPrefs={fetched} />
     </ConnectionContext.Provider>
   ),
   root,

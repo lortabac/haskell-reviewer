@@ -98,7 +98,7 @@ describe("sections", () => {
     ]);
     // module Page: the rest it exports, then what it doesn't.
     expect(shown[5]).toBe("Shape @1");
-    const not = shown.indexOf("# 1 Not exported");
+    const not = shown.indexOf("# 1 Private");
     expect(not).toBeGreaterThan(5);
     expect(shown.slice(not + 1)).toContain("P2 @1");
     expect(shown.filter((s) => s === "area @1")).toHaveLength(1);
@@ -182,9 +182,7 @@ describe("sections", () => {
     expect(shown.slice(1, 4)).toEqual(["area @1", "doc @1", "Box @1"]);
     expect(shown.filter((s) => s === "doc @1")).toHaveLength(2);
     // Shape is named later: it stays there, last.
-    expect(shown.indexOf("Shape @1")).toBe(
-      shown.indexOf("# 1 Not exported") - 1,
-    );
+    expect(shown.indexOf("Shape @1")).toBe(shown.indexOf("# 1 Private") - 1);
   });
 
   it("mode C with nothing: no blocks (the page says No declarations.)", () => {
@@ -207,7 +205,7 @@ describe("sections", () => {
     expect(run(p, true).blocks.map(show)).toContain("Container @1");
   });
 
-  it("exportedOnly: instances of a hidden type go in the block", () => {
+  it("exportedOnly: instances attached to a hidden type are hidden too (D-204)", () => {
     const p = load("module-page", (p) => {
       const box = (p.declarations as Record<string, unknown>[]).find(
         (d) => d.name === "Box",
@@ -219,8 +217,9 @@ describe("sections", () => {
     expect(b.blocks.map(show)).not.toContain("Box @1");
     const ns = (ds: typeof b.instances) =>
       ds.map((d) => (d.kind === "splice" ? -1 : d.n));
-    // Box's (9, 51), and V's (42, 43): V isn't exported either.
-    expect(ns(b.instances)).toEqual([9, 21, 42, 43, 51]);
+    // Box's (9, 51) and V's (42, 43) are attached, all their listers
+    // hidden: gone. 21 is a true orphan (attached: false): stays.
+    expect(ns(b.instances)).toEqual([21]);
     expect(ns(run(p).instances)).toEqual([21]);
   });
 
@@ -240,11 +239,12 @@ describe("sections", () => {
     expect(b.homes.get(20)?.name).toBe("Box");
     const ns = b.instances.map((d) => (d.kind === "splice" ? -1 : d.n));
     expect(ns).not.toContain(20);
-    // Shape's derived ones: no shown home.
-    expect(ns).toContain(5);
+    // Shape's derived ones: Shape is hidden and is their only lister,
+    // so they're hidden too (D-204), not in the block.
+    expect(ns).not.toContain(5);
   });
 
-  it("exportedOnly: no Not exported, no hidden ones", () => {
+  it("exportedOnly: no Private heading, no hidden ones", () => {
     const b = run(load("module-page"), true);
     const shown = b.blocks.map(show);
     expect(shown).not.toContain("P2 @1");
@@ -260,5 +260,20 @@ describe("sections", () => {
     );
     expect(s).toHaveLength(19);
     expect(synopsis(p, true).map((d) => d.name)).not.toContain("P2");
+  });
+
+  it("synopsis uses the same filter as the body (C1): a kept private class", () => {
+    const p = load("module-page", (p) => {
+      const c = (p.declarations as Record<string, unknown>[]).find(
+        (d) => d.name === "Container",
+      ) as { exported: boolean; methods: { exported: boolean }[] };
+      c.exported = false;
+      for (const m of c.methods) m.exported = false;
+      c.methods[0]!.exported = true;
+    });
+    // Container is kept in the body (a method is exported alone): the
+    // synopsis must agree, not just check d.exported.
+    expect(run(p, true).blocks.map(show)).toContain("Container @1");
+    expect(synopsis(p, true).map((d) => d.name)).toContain("Container");
   });
 });

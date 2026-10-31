@@ -1,15 +1,12 @@
 // A hand-made module page: the module-page fixture with edits, for
 // what the fixture doesn't have (UNPACK, foreign imports, pattern
 // synonym directions, data instances, export list cases...).
-import { Route, Router } from "@solidjs/router";
-import { render } from "solid-js/web";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cbor, fixture, stubFetch } from "../../test/fixtures";
 import { mountAppAt, unmountApp } from "../../test/mount";
-import { ModulesProvider } from "../modules/store";
 import { decodeModulePage } from "../api/module";
+import { defaultPrefs } from "../api/prefs";
 import { readable } from "./Decl";
-import { DocsView } from "./DocsView";
 import { pageIndex } from "./pageIndex";
 
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return -- wire JSON edited by hand */
@@ -124,7 +121,6 @@ function handmade(): Json {
 }
 
 let frames: FrameRequestCallback[] = [];
-let dispose: (() => void) | undefined;
 
 beforeEach(() => {
   frames = [];
@@ -139,8 +135,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  dispose?.();
-  dispose = undefined;
   unmountApp();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -174,30 +168,13 @@ async function open(value: Json, hash = ""): Promise<HTMLElement> {
   return ready(main);
 }
 
-// The docs view alone, with exportedOnly (T10 has no toggle yet).
+// The whole app, with "exported only" on from the start.
 async function openExportedOnly(value: Json, hash = ""): Promise<HTMLElement> {
   stub(value);
-  window.history.replaceState(null, "", `/tok/docs/tree/Page${hash}`);
-  const root = document.createElement("div");
-  document.body.append(root);
-  dispose = render(
-    () => (
-      <Router base="/tok">
-        <Route
-          path="/docs/tree/*ref"
-          component={() => (
-            <ModulesProvider>
-              <main>
-                <DocsView exportedOnly />
-              </main>
-            </ModulesProvider>
-          )}
-        />
-      </Router>
-    ),
-    root,
-  );
-  const main = root.querySelector("main");
+  const main = mountAppAt(`/tok/docs/tree/Page${hash}`, {
+    ...defaultPrefs,
+    exportedOnly: true,
+  }).querySelector("main");
   if (main === null) throw new Error("no main");
   return ready(main);
 }
@@ -393,30 +370,38 @@ describe("hand-made page: details", () => {
 });
 
 describe("hand-made page: exported only", () => {
-  it("hidden declaration: anchor gives the notice", async () => {
+  it("hidden declaration: anchor gives the notice, with its name", async () => {
     const main = await openExportedOnly(handmade(), "#type%3AP2");
     flushFrames();
     await vi.waitFor(() => {
-      expect(main.querySelector(".decl-missing")?.textContent).toContain(
-        "type:P2",
-      );
+      const notice = main.querySelector(".decl-missing")?.textContent;
+      expect(notice).toContain("P2");
+      expect(notice).toContain("is hidden by Exported only.");
     });
     expect(main.querySelector("section.decl[data-handle='30']")).toBeNull();
   });
 
-  it("instances of a hidden type: in the Instances block, anchor works", async () => {
+  it("instances of a hidden type: hidden too; Show all reveals it", async () => {
     const v = handmade();
     const box = v.parse.declarations.find((d: Json) => d.name === "Box");
     box.exported = false;
     box.constructors[0].exported = false;
     const main = await openExportedOnly(v, "#inst%3AEq%3ABox%20a");
     flushFrames();
+    // Box is hidden; its only lister, so the instance is too (D-204),
+    // not even in the Instances block.
+    expect(
+      [...main.querySelectorAll(".decl-head .sig")].map((s) => s.textContent),
+    ).not.toContain("deriving newtype Eq");
+    const notice = main.querySelector(".decl-missing");
+    expect(notice?.textContent).toContain("is hidden by Exported only.");
+    notice?.querySelector<HTMLButtonElement>("button")?.click();
+    flushFrames();
     const focused = document.activeElement as HTMLElement | null;
     expect(focused?.querySelector(".decl-head .sig")?.textContent).toBe(
       "deriving newtype Eq",
     );
     expect(main.querySelector(".decl-missing")).toBeNull();
-    expect(focused?.closest("details")).toBeNull();
   });
 
   it("a method exported alone keeps its class", async () => {
@@ -536,7 +521,7 @@ describe("hand-made page: export list (mode B)", () => {
       "Deep",
       "Later",
       "Also exported",
-      "Not exported",
+      "Private",
       "Instances",
     ]);
     const also = [...main.querySelectorAll(".docs-section")].find(

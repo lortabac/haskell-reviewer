@@ -2,10 +2,15 @@ import type { JSX, ParentProps } from "solid-js";
 import { ConnectionNotice } from "./events/ConnectionNotice";
 
 // The page frame (SPEC §4.1): header, sidebar, main view.
-// No router hooks here, so tests can render it alone. The sidebar
-// and the project notices come in as props.
+// No router hooks here, so tests can render it alone. The sidebar,
+// header controls (the theme switch) and the project notices come in
+// as props.
 export function Frame(
-  props: ParentProps<{ sidebar?: JSX.Element; notices?: JSX.Element }>,
+  props: ParentProps<{
+    sidebar?: JSX.Element;
+    controls?: JSX.Element;
+    notices?: JSX.Element;
+  }>,
 ): JSX.Element {
   // Move focus by hand: following "#main" only scrolls, and the router
   // would also put the hash in the URL. A native listener runs before
@@ -21,6 +26,7 @@ export function Frame(
       </a>
       <header class="frame-header">
         <span class="app-name">haskell-reviewer</span>
+        {props.controls}
         <ConnectionNotice />
       </header>
       <nav class="frame-sidebar" aria-label="Project">

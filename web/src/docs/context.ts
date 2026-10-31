@@ -19,6 +19,14 @@ export interface PageCtx {
   anchors: Anchors;
   // Open state of the instance list of a type, class or family.
   instancesOpen: (home: Handle) => [Accessor<boolean>, Setter<boolean>];
+  // "Exported only" (D-204): nested unexported items (constructors,
+  // fields, methods, associated types, pattern synonym fields) are
+  // dropped.
+  exportedOnly: boolean;
+  // The body's mode (sections.ts). Mode B (grouped by the export list)
+  // already says what's private in its own headings, so per-item
+  // marks (D-203) are off.
+  marks: boolean;
 }
 
 export const PageContext = createContext<PageCtx>();
