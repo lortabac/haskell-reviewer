@@ -157,6 +157,13 @@ CAF_BLACKHOLE, so the GC never got all capabilities). We didn't find
 the cause in our code. Building the shared value once with
 'withResource' stopped it: 0 hangs in 300 runs on each of 9.12 and
 9.14, against about 1 in 12 before.
+
+The shared value isn't always ours. On 9.10 "Config load" hung about
+1 run in 100: its tests make temp dirs at the same time, and
+temporary names them with printf, whose format tables are shared.
+Seen with a debug RTS: the test threads were blocked on a black hole
+that was already evaluated, and nobody woke them. 'main' now makes one
+temp dir before the tests ('warmUpTempDirs' in "TestSupport").
 -}
 
 -- | The value, within a second.
