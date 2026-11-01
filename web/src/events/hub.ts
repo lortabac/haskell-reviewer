@@ -1,4 +1,4 @@
-import { decodeHello, parseEventData } from "../api/events";
+import { decodeHello, decodeIndexing, parseEventData } from "../api/events";
 import type { Status, WorkerMessage } from "./protocol";
 
 // What we use of an event: the data, for named events.
@@ -42,6 +42,9 @@ export const giveUpAfterMs = 30_000;
 export function createHub(url: string, Source: SourceCtor): Hub {
   const listeners = new Set<Listener>();
   let status: Status = "connecting";
+  // The latest indexing event (D-210), replayed to a listener that
+  // joins late (a new tab, or a SearchBox mounting after it).
+  let indexing: WorkerMessage | undefined;
 
   const broadcast = (msg: WorkerMessage): void => {
     for (const l of listeners) l.post(msg);
@@ -79,6 +82,17 @@ export function createHub(url: string, Source: SourceCtor): Hub {
     }
     broadcast({ type: "hello" });
   });
+  source.addEventListener("indexing", (event) => {
+    let decoded;
+    try {
+      decoded = decodeIndexing(parseEventData(event.data));
+    } catch (err) {
+      console.error(err);
+      return;
+    }
+    indexing = { type: "indexing", indexing: decoded };
+    broadcast(indexing);
+  });
   source.addEventListener("error", () => {
     if (status === "ended") return;
     if (source.readyState === CLOSED) {
@@ -94,6 +108,7 @@ export function createHub(url: string, Source: SourceCtor): Hub {
     add(listener) {
       listeners.add(listener);
       listener.post({ type: "status", status });
+      if (indexing !== undefined) listener.post(indexing);
     },
   };
 }

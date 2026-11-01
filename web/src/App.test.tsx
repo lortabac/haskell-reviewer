@@ -55,6 +55,15 @@ describe("App routing under the token", () => {
     expect(main?.querySelector('[role="search"] input')).not.toBeNull();
   });
 
+  it.each(["/tok", "/tok/src/tree/a.hs", "/tok/changes"])(
+    "%s: the header search combobox is there",
+    (path) => {
+      const root = mountAppAt(path);
+      const box = root.querySelector(".frame-header input[role=combobox]");
+      expect(box).not.toBeNull();
+    },
+  );
+
   it("the sidebar is in the Project nav", async () => {
     const nav = mountAppAt("/tok").querySelector("nav");
     expect(nav?.getAttribute("aria-label")).toBe("Project");

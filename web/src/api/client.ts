@@ -8,12 +8,22 @@ export type Result<T> =
   | { kind: "error"; message: string };
 
 // GET a JSON API route and decode it. path is relative to the token,
-// like "/api/files/tree". Never throws.
+// like "/api/files/tree". Never throws. signal: abort the fetch (e.g. a
+// newer search makes an older one moot); an aborted fetch just comes
+// back as an "error" result, so callers that pass a signal must also
+// drop stale answers themselves (a sequence number, or the echoed
+// query).
 export async function getJson<T>(
   path: string,
   decode: (value: unknown) => T,
+  opts?: { signal?: AbortSignal },
 ): Promise<Result<T>> {
-  return get(path, "application/json", async (res) => decode(await res.json()));
+  return get(
+    path,
+    "application/json",
+    async (res) => decode(await res.json()),
+    opts?.signal,
+  );
 }
 
 // POST a JSON body to a route and decode the answer, like getJson.
@@ -91,10 +101,12 @@ async function get<T>(
   path: string,
   accept: string,
   read: (res: Response) => Promise<T>,
+  signal?: AbortSignal,
 ): Promise<Result<T>> {
   try {
     const res = await fetch(basePath(window.location.pathname) + path, {
       headers: { Accept: accept },
+      signal,
     });
     if (res.status === 404) return { kind: "not-found" };
     if (!res.ok) return { kind: "error", message: `HTTP ${res.status}` };
