@@ -41,6 +41,12 @@ import {
   type ModulePage,
 } from "./module";
 import { decodePrefs, sidebarViews, themes } from "./prefs";
+import {
+  decodeSearch,
+  searchKinds,
+  searchNamespaces,
+  searchUrl,
+} from "./search";
 import { blockKinds, inlineKinds } from "./richtext";
 import {
   cbor,
@@ -79,6 +85,9 @@ const decoders: Record<string, (value: unknown) => unknown> = {
   "module-not-found": decodeModuleNotFound,
   prefs: decodePrefs,
   "prefs-defaults": decodePrefs,
+  search: decodeSearch,
+  "search-qualified": decodeSearch,
+  "search-partial": decodeSearch,
 };
 
 // The fixtures that are CBOR (D-51), with a JSON dump next to them.
@@ -259,6 +268,31 @@ describe("API fixtures", () => {
     expect(other.sidebar).not.toBe("auto");
     expect(themes).toContain(other.theme);
     expect(sidebarViews).toContain(other.sidebar);
+  });
+
+  it("the search fixtures cover every kind and namespace", () => {
+    const answers = ["search", "search-qualified", "search-partial"].map((n) =>
+      decodeSearch(fixture(n)),
+    );
+    const results = answers.flatMap((a) => a.results);
+    expect(sorted(results.map((r) => r.kind))).toEqual(sorted(searchKinds));
+    expect(
+      sorted(results.flatMap((r) => (r.kind === "decl" ? [r.ns] : []))),
+    ).toEqual(sorted(searchNamespaces));
+    const decls = results.flatMap((r) => (r.kind === "decl" ? [r] : []));
+    expect(decls.some((d) => !d.exported)).toBe(true);
+    expect(decls.some((d) => d.parent !== null)).toBe(true);
+    expect(sorted(answers.map((a) => String(a.partial)))).toEqual([
+      "false",
+      "true",
+    ]);
+    // A qualified query: insert from two modules.
+    const qualified = decodeSearch(fixture("search-qualified"));
+    expect(qualified.query).toBe("Data.Map.insert");
+    expect(qualified.results.map((r) => r.ref)).toEqual([
+      "Data.Map",
+      "Data.IntMap",
+    ]);
   });
 
   it("text comes through as is", () => {
@@ -530,6 +564,54 @@ describe("decoders reject bad shapes", () => {
     ]) {
       expect(() => decodePrefs(bad), JSON.stringify(bad)).toThrow(DecodeError);
     }
+  });
+
+  it("search", () => {
+    const decl = {
+      kind: "decl",
+      ns: "field",
+      name: "port",
+      parent: "Config",
+      anchor: "field:Config.port",
+      module: "Util",
+      ref: "Util",
+      exported: true,
+    };
+    const good = {
+      generation: 1,
+      query: "port",
+      partial: false,
+      matches: 2,
+      results: [decl, { kind: "module", name: "Port", ref: "Port" }],
+    };
+    expect(decodeSearch(good)).toEqual(good);
+    const withResult = (r: object) => ({ ...good, results: [r] });
+    for (const bad of [
+      null,
+      { ...good, generation: -1 },
+      { ...good, query: undefined },
+      { ...good, partial: "no" },
+      { ...good, matches: 1 },
+      { ...good, results: {} },
+      withResult({ kind: "file", name: "x", ref: "x" }),
+      withResult({ kind: "module", name: "x" }),
+      withResult({ ...decl, ns: "inst" }),
+      withResult({ ...decl, parent: null }),
+      withResult({ ...decl, ns: "val" }),
+      withResult({ ...decl, anchor: undefined }),
+      withResult({ ...decl, exported: "yes" }),
+    ]) {
+      expect(() => decodeSearch(bad), JSON.stringify(bad)).toThrow(DecodeError);
+    }
+  });
+
+  it("search URL: everything encoded, + and spaces too", () => {
+    expect(searchUrl("<+> a&b=c#")).toBe(
+      "/api/search/tree?q=%3C%2B%3E%20a%26b%3Dc%23",
+    );
+    expect(searchUrl("Data.Map.insert")).toBe(
+      "/api/search/tree?q=Data.Map.insert",
+    );
   });
 
   it("hello", () => {

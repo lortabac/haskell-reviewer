@@ -504,7 +504,10 @@ side, or on the base side if the declaration was removed.
 ### 4.7 Global search ("jump to")
 
 One search box, fuzzy-matching module names and declaration names (including
-constructors, fields and class methods). There is no search by type
+constructors, fields and class methods). A query like `Data.Map.insert` or
+`M.insert` also matches the name in modules that match the qualifier. Lower
+case matches either case; an upper case letter makes it case-sensitive.
+Exact names come first (D-206). There is no search by type
 (D-14). Selecting a result opens it in the docs view. In diff mode, results are taken from the head side by default.
 
 ---
@@ -1356,8 +1359,10 @@ into links. While an answer streams, the server re-parses at most every
 
 (D-69) Global search (§4.7) runs on the server, against a per-side name
 table that grows while indexing. It uses an fzf-like scorer and returns a
-capped list. The client debounces keystrokes. Results that come from an
-incomplete index are labelled *partial*.
+capped list (the best 50, and the total count; D-206). The client debounces
+keystrokes. Results that come from an incomplete index are labelled
+*partial*; a search never waits for indexing. Route and limits: D-207.
+Target: ≤ 30 ms median server time on a large indexed project (D-208).
 
 ### 11.5 State and concurrency
 
@@ -1416,7 +1421,8 @@ a framework would cost more than it saves.
   search results, threads, prefs) are JSON. **Token-heavy** payloads (docs
   pages with their inline source, full source, diff, expanded diff) are
   **CBOR** (D-51), with only what JSON has (text-keyed maps, arrays, text,
-  ints, bools, null). Each route has one encoding (D-165). Every response
+  ints, bools, null). Each route has one encoding (D-165). Search is
+  `GET api/search/<side>?q=` (D-207). Every response
   carries its snapshot generation id, and the client caches by
   *(generation, resource)*. Preferences (`api/prefs`) are the exception:
   they don't belong to a snapshot, so they have no generation (D-197). A

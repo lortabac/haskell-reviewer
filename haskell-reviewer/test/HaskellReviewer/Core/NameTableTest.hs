@@ -42,6 +42,15 @@ tests =
             ("K", "type:K"),
             ("K1", "con:K1")
           ],
+      testCase "the same id once: a field in two constructors" $
+        names
+          "module M where\ndata F = A {ff :: Int} | B {ff, fh :: Int}\n"
+          [ ("F", "type:F"),
+            ("A", "con:A"),
+            ("ff", "field:F.ff"),
+            ("B", "con:B"),
+            ("fh", "field:F.fh")
+          ],
       testCase "the exported flag" $ do
         m <- parsed "module M (T (A), f) where\ndata T = A | B\nf = 1\ng = 2\n"
         [(e.name, e.exported) | e <- moduleNames m.declarations]

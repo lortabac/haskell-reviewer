@@ -7,14 +7,17 @@ module ApiSupport
     projectApi,
     implicitApi,
     pageApi,
+    searchApi,
     forceFixtures,
     indexed,
+    indexAll,
     fixedPrefs,
 
     -- * Calling the app
     ApiResult (..),
     getApi,
     getApiWith,
+    getApiQuery,
     requestApi,
     requestApiWith,
     RequestBody (..),
@@ -148,11 +151,18 @@ implicitApi = apiFor implicitSnapshot
 pageApi :: TestApi
 pageApi = apiFor pageSnapshot
 
+-- | Loose modules for search: names of every kind, an operator with a
+-- +, a private name, and insert in two modules.
+searchApi :: TestApi
+searchApi = apiFor searchSnapshot
+
 -- | Build the shared inputs, before parallel tests use them. See
 -- Note [Shared values in tests] in HaskellReviewer.Core.PackageGlobTest.
 forceFixtures :: IO ()
 forceFixtures = do
-  forM_ [fixtureSnapshot, projectSnapshot, implicitSnapshot, pageSnapshot] void
+  forM_
+    [fixtureSnapshot, projectSnapshot, implicitSnapshot, pageSnapshot, searchSnapshot]
+    void
   forM_ contents $ \(p, c) -> evaluate p >> evaluate (forceContent c)
   where
     forceContent = \case
@@ -168,11 +178,15 @@ indexed api =
     { snapshot =
         api.snapshot >>= \case
           Right snap -> do
-            runWorkers (indexDeps api snap) 1 snap.index
+            indexAll api snap
             pure (Right snap)
           listed -> pure listed,
       workers = 0
     }
+
+-- | Index every module of the snapshot, with one worker.
+indexAll :: TestApi -> Snapshot -> IO ()
+indexAll api snap = runWorkers (indexDeps api snap) 1 snap.index
 
 apiFor :: IO Snapshot -> TestApi
 apiFor snap =
@@ -353,6 +367,18 @@ pageSnapshot =
     (fileList [("Page.hs", EntryFile), ("Sections.hs", EntryFile)])
     noProject
 
+searchSnapshot :: IO Snapshot
+searchSnapshot =
+  newSnapshot
+    fixtureRoot
+    ( fileList
+        [ ("Data/IntMap.hs", EntryFile),
+          ("Data/Map.hs", EntryFile),
+          ("Util.hs", EntryFile)
+        ]
+    )
+    noProject
+
 -- | No cabal.project, no packages.
 noProject :: Project
 noProject =
@@ -434,6 +460,32 @@ contents =
     -- Modules of the page fixture.
     ("Page.hs", TextContent pageModule),
     ("Sections.hs", TextContent sectionsModule),
+    -- Modules of the search fixture.
+    ( "Data/Map.hs",
+      TextContent
+        "module Data.Map (Map, insert, map, (!)) where\n\
+        \data Map k v = Tip\n\
+        \insert k v m = m\n\
+        \map f m = m\n\
+        \m ! k = undefined\n"
+    ),
+    ( "Data/IntMap.hs",
+      TextContent
+        "module Data.IntMap (IntMap, insert) where\n\
+        \data IntMap v = Nil\n\
+        \insert k v m = m\n"
+    ),
+    ( "Util.hs",
+      TextContent
+        "{-# LANGUAGE PatternSynonyms #-}\n\
+        \module Util (Config (..), Mappable (..), pattern MapNone, (<+>)) where\n\
+        \data Config = Mapping {mapSize :: Int}\n\
+        \class Mappable f where\n\
+        \  fmapIt :: (a -> b) -> f a -> f b\n\
+        \pattern MapNone = Nothing\n\
+        \a <+> b = a\n\
+        \mapHelper = 1\n"
+    ),
     -- Modules of the implicit fixture.
     ("Main.hs", Binary (FileSize 10)),
     ( "src/Data/Deep/Mod.hs",
@@ -676,6 +728,10 @@ data ApiResult = ApiResult
 getApi :: TestApi -> [Text] -> IO ApiResult
 getApi = requestApi "GET"
 
+-- | Like 'getApi', with this raw query string (@?q=...@).
+getApiQuery :: TestApi -> [Text] -> ByteString -> IO ApiResult
+getApiQuery api path query = sendApiQuery "GET" [goodOrigin] NoBody query api path
+
 -- | Like 'getApi', with these request headers.
 getApiWith :: [Header] -> TestApi -> [Text] -> IO ApiResult
 getApiWith = requestApiWith "GET"
@@ -703,7 +759,12 @@ data RequestBody
 
 -- | Like 'requestApiWith', with a body.
 sendApi :: ByteString -> [Header] -> RequestBody -> TestApi -> [Text] -> IO ApiResult
-sendApi method headers reqBody api path = do
+sendApi method headers reqBody = sendApiQuery method headers reqBody ""
+
+-- | Like 'sendApi', with a raw query string.
+sendApiQuery ::
+  ByteString -> [Header] -> RequestBody -> ByteString -> TestApi -> [Text] -> IO ApiResult
+sendApiQuery method headers reqBody query api path = do
   listed <- api.snapshot
   prefsStore <- api.prefs
   clients <- newClients
@@ -726,7 +787,7 @@ sendApi method headers reqBody api path = do
       call = do
         r <-
           timeout 10_000_000 $
-            callAppBody app method headers reqBody host (tokenText apiToken : path)
+            callAppBody app method headers reqBody query host (tokenText apiToken : path)
         maybe (assertFailure ("no answer within 10 s: " <> show path)) pure r
       host = "127.0.0.1:8080"
   case listed of
@@ -742,17 +803,19 @@ callApp app method = callAppWith app method []
 -- | Like 'callApp', with these request headers.
 callAppWith ::
   Application -> ByteString -> [Header] -> ByteString -> [Text] -> IO ApiResult
-callAppWith app method headers = callAppBody app method headers NoBody
+callAppWith app method headers = callAppBody app method headers NoBody ""
 
 callAppBody ::
   Application ->
   ByteString ->
   [Header] ->
   RequestBody ->
+  -- | The raw query string.
+  ByteString ->
   ByteString ->
   [Text] ->
   IO ApiResult
-callAppBody app method headers reqBody host path = do
+callAppBody app method headers reqBody query host path = do
   chunks <- newIORef $ case reqBody of
     NoBody -> []
     Sized b -> [b]
@@ -771,7 +834,8 @@ callAppBody app method headers reqBody host path = do
               requestHeaders = headers,
               requestHeaderHost = Just host,
               requestBodyLength = bodyLength,
-              pathInfo = path
+              pathInfo = path,
+              rawQueryString = query
             }
   saved <- newIORef Nothing
   ResponseReceived <- app req $ \resp -> do

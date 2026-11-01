@@ -36,6 +36,7 @@ import HaskellReviewer.Core.ProjectTest qualified
 import HaskellReviewer.Core.RelPathTest qualified
 import HaskellReviewer.Core.RichTextGoldenTest qualified
 import HaskellReviewer.Core.RootTest qualified
+import HaskellReviewer.Core.SearchTest qualified
 import HaskellReviewer.Core.SourceTextTest qualified
 import HaskellReviewer.Core.TokensTest qualified
 import HaskellReviewer.Core.XdgTest qualified
@@ -60,6 +61,7 @@ import HaskellReviewer.Server.PageTest qualified
 import HaskellReviewer.Server.Prefs (warmUpPrefs)
 import HaskellReviewer.Server.Router (warmUpGzip)
 import HaskellReviewer.Server.RouterTest qualified
+import HaskellReviewer.Server.Search (warmUpSearch)
 import HaskellReviewer.Server.Wire.Page (warmUpPages)
 import HaskellReviewer.Session.ClientsTest qualified
 import HaskellReviewer.Session.IndexTest qualified
@@ -82,6 +84,10 @@ main = do
   -- (Q-RTS-BLACKHOLE). Without this the 9.10 binary hung about 1 run in
   -- 100 in "Config load".
   warmUpTempDirs
+  -- The search route's shared values: the API and Run tests search, and
+  -- each serve warms it up again. Once here, before any test runs
+  -- (Q-RTS-BLACKHOLE).
+  warmUpSearch
   -- Tests run in parallel: share expensive values through withResource.
   -- See Note [Shared values in tests] in HaskellReviewer.Core.PackageGlobTest.
   defaultMain $
@@ -120,6 +126,7 @@ main = do
         HaskellReviewer.Core.ProjectTest.tests,
         HaskellReviewer.Core.RelPathTest.tests,
         HaskellReviewer.Core.RootTest.tests,
+        HaskellReviewer.Core.SearchTest.tests,
         HaskellReviewer.Core.TokensTest.tests,
         HaskellReviewer.Core.XdgTest.tests,
         HaskellReviewer.Effects.AtomicFileTest.tests,

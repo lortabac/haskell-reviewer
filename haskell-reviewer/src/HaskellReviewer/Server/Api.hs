@@ -53,6 +53,7 @@ import HaskellReviewer.Core.Modules
 import HaskellReviewer.Core.Project (GhcVersion (..), Project)
 import HaskellReviewer.Core.RelPath (RelPath, relPathFromSegments, relPathText)
 import HaskellReviewer.Core.Root (CanonicalRoot)
+import HaskellReviewer.Core.Search (forceCandidates, moduleCandidates)
 import HaskellReviewer.Effects.FileSystem (ListError, ReadError (..))
 import HaskellReviewer.Effects.Log (Logger, logInfo)
 import HaskellReviewer.Server.Security (methodNotAllowed, notFound)
@@ -104,8 +105,9 @@ data FilesApi = FilesApi
 On GHC 9.12 and 9.14, threads that force the same thunk at once can
 livelock the RTS (Q-RTS-BLACKHOLE). Request threads and parse workers
 all read the same snapshot. So 'newSnapshot' builds it fully
-('forceSnapshot', 'newIndex') before the listing thread fills the slot:
-the other threads then find no thunk to force.
+('forceSnapshot', 'newIndex', the search's module list) before the
+listing thread fills the slot: the other threads then find no thunk to
+force.
 
 The listing thread also warms up before the fill: it runs the parser
 (warmUpParser), so the workers find the parser's shared values built,
@@ -114,7 +116,8 @@ and encodes some pages (Note [Page warm-up] in
 of each kind ('cborWarmUp'), so the shared values of cborg and of our
 CBOR code are built before request threads race on them. The gzip
 path gets the same before warp listens (Note [Compression] in
-"HaskellReviewer.Server.Router").
+"HaskellReviewer.Server.Router"), and so does the search route
+(warmUpSearch in "HaskellReviewer.Server.Search").
 
 What the workers put in the slots is forced before it gets there (Note
 [Indexing] in "HaskellReviewer.Session.Index").
@@ -129,6 +132,8 @@ newSnapshot root fl project = do
       fileListJson = encodeFileList firstGeneration fl
       moduleTreeJson = encodeModuleTree firstGeneration modules
   forceSnapshot modules fileListJson moduleTreeJson
+  searchModules <- evaluate (moduleCandidates modules)
+  _ <- evaluate (forceCandidates searchModules)
   mapM_ (evaluate . LBS.length . encodeFileView firstGeneration) cborWarmUp
   index <- newIndex modules
   pure
@@ -139,6 +144,7 @@ newSnapshot root fl project = do
         modules = modules,
         fileListJson = fileListJson,
         moduleTreeJson = moduleTreeJson,
+        searchModules = searchModules,
         index = index
       }
 

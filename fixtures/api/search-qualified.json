@@ -1,0 +1,1 @@
+{"generation":1,"query":"Data.Map.insert","partial":false,"matches":2,"results":[{"kind":"decl","ns":"val","name":"insert","parent":null,"anchor":"val:insert","module":"Data.Map","ref":"Data.Map","exported":true},{"kind":"decl","ns":"val","name":"insert","parent":null,"anchor":"val:insert","module":"Data.IntMap","ref":"Data.IntMap","exported":true}]}

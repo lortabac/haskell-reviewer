@@ -7,21 +7,32 @@ import ApiSupport
     TestApi (..),
     fixtureApi,
     getApi,
+    getApiQuery,
     getApiWith,
     goodOrigin,
+    indexAll,
     indexed,
+    pageApi,
     projectApi,
     requestApi,
+    searchApi,
     sendApi,
   )
 import Codec.Compression.GZip qualified as GZip
+import Control.Concurrent.Async (mapConcurrently, wait, withAsync)
 import Control.Exception (evaluate, finally)
-import Control.Monad (forM, forM_, unless)
+import Control.Monad (forM, forM_, unless, (>=>))
+import Data.Aeson qualified as Aeson
+import Data.Aeson.Key qualified as Key
+import Data.Aeson.KeyMap qualified as KeyMap
+import Data.Aeson.Types (Parser, parseMaybe, withObject, (.:), (.:?))
 import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Lazy qualified as LBS
+import Data.Foldable (toList)
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef)
 import Data.List (nub, sort)
+import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as Text
 import HaskellReviewer.Core.Config (builtinDefaults)
@@ -89,7 +100,9 @@ tests =
         r4 <- getApi projectApi ["api", "module", "head", "Foo"]
         r4.status @?= 404
         r5 <- getApi projectApi ["api", "indexing", "head"]
-        r5.status @?= 404,
+        r5.status @?= 404
+        r6 <- getApiQuery searchApi ["api", "search", "base"] "?q=map"
+        r6.status @?= 404,
       testCase "not GET: 405, Allow: GET" $
         mapM_
           ( \(method, path) -> do
@@ -104,7 +117,8 @@ tests =
                 ["api", "file", "tree", "app", "Main.hs"],
                 ["api", "modules", "tree"],
                 ["api", "module", "tree", "Foo"],
-                ["api", "indexing", "tree"]
+                ["api", "indexing", "tree"],
+                ["api", "search", "tree"]
               ]
           ],
       testCase "CBOR with a length, no-store" $ do
@@ -162,7 +176,8 @@ tests =
             ["api", "file", "tree", "app", "Main.hs"],
             ["api", "modules", "tree"],
             ["api", "module", "tree", "Foo"],
-            ["api", "indexing", "tree"]
+            ["api", "indexing", "tree"],
+            ["api", "search", "tree"]
           ],
       testCase "indexing: JSON with a length, no-store; done once indexed" $ do
         r <- getApi (indexed projectApi) ["api", "indexing", "tree"]
@@ -175,7 +190,7 @@ tests =
         r.body @?= "{\"generation\":1,\"total\":9,\"ready\":8,\"failed\":1}"
     ]
       <> moduleTests
-      <> [gzipTests, warmUpTest, prefsTests]
+      <> [searchTests, gzipTests, warmUpTest, prefsTests]
 
 -- | GET api/module/tree/<ref>. The fixtures cover the bodies.
 moduleTests :: [TestTree]
@@ -301,6 +316,152 @@ moduleTests =
         @?= Just (Char8.pack (show (LBS.length r.body)))
       assertNoStore r
   ]
+
+-- | api/search (Note [Search route] in "HaskellReviewer.Server.Search").
+-- The fixtures cover the bodies.
+searchTests :: TestTree
+searchTests =
+  testGroup
+    "search"
+    [ testCase "nothing indexed: partial, modules only" $ do
+        a <- searchOk searchApi {workers = 0} "?q=map"
+        a.partial @?= True
+        map (.kind) a.results @?= ["module", "module"],
+      testCase "indexed: not partial, with names; JSON with a length, no-store" $ do
+        r <- getApiQuery (indexed searchApi) searchPath "?q=map"
+        r.status @?= 200
+        lookup "Content-Type" r.headers @?= Just "application/json"
+        lookup "Content-Length" r.headers
+          @?= Just (Char8.pack (show (LBS.length r.body)))
+        assertNoStore r
+        a <- decodeOr r
+        a.partial @?= False
+        assertBool "no names" (any (\x -> x.kind == "decl") a.results)
+        a.matches @?= length a.results,
+      testCase "a + stays a +, encoded or not" $
+        forM_ ["?q=%3C%2B%3E", "?q=<+>"] $ \q -> do
+          a <- searchOk (indexed searchApi) q
+          (q, a.query) @?= (q, "<+>")
+          (q, map (.anchor) (take 1 a.results)) @?= (q, [Just "val:<+>"]),
+      testCase "%20 is a space, and spaces don't count" $ do
+        a <- searchOk (indexed searchApi) "?q=Data.Map.%20insert"
+        a.query @?= "Data.Map. insert"
+        map (.ref) a.results @?= ["Data.Map", "Data.IntMap"],
+      testCase "the first q counts" $ do
+        a <- searchOk (indexed searchApi) "?x=1&q=fmapIt&q=map"
+        a.query @?= "fmapIt"
+        map (.name) a.results @?= ["fmapIt"],
+      testCase "no q, or a blank one: 200, no results" $
+        forM_ ["", "?", "?q", "?q=", "?q=%20%09", "?x=map"] $ \q -> do
+          a <- searchOk (indexed searchApi) q
+          (q, a.matches, length a.results) @?= (q, 0, 0),
+      testCase "128 code points is fine, 129 is a 400" $ do
+        let encoded n = "?q=" <> mconcat (replicate n "%C3%A9")
+        ok <- getApiQuery searchApi {workers = 0} searchPath (encoded 128)
+        ok.status @?= 200
+        r <- getApiQuery searchApi {workers = 0} searchPath (encoded 129)
+        r.status @?= 400
+        r.body @?= "query too long",
+      testCase "not UTF-8: 400" $ do
+        r <- getApiQuery searchApi {workers = 0} searchPath "?q=%FF"
+        r.status @?= 400
+        r.body @?= "bad query",
+      testCase "every name hit is a declaration on its page" $ do
+        let api = indexed pageApi
+            queries = ["a", "e", "i", "o", "r", "t", "x", "y", "f", "S", "%3C"]
+        hits <- concat <$> forM queries (\q -> (.results) <$> searchOk api ("?q=" <> q))
+        let decls = [(h.ref, a) | h <- hits, Just a <- [h.anchor]]
+        assertBool "a field" (any (("field:" `Text.isPrefixOf`) . snd) decls)
+        ids <- forM (nub (map fst decls)) $ \ref -> do
+          r <- getApi pageApi ["api", "module", "tree", ref]
+          json <- either (assertFailure . show) pure (cborToJson r.body)
+          v <- maybe (assertFailure "bad page JSON") pure (Aeson.decode json)
+          pure (ref, pageIds v)
+        forM_ decls $ \(ref, a) ->
+          assertBool (show (ref, a)) (a `elem` concat (lookup ref ids)),
+      testCase "searches while workers run" $ do
+        snap <- either (assertFailure . show) pure =<< searchApi.snapshot
+        let api = searchApi {snapshot = pure (Right snap), workers = 0}
+            queries =
+              concat . replicate 10 $
+                ["?q=map", "?q=a", "?q=Data.Map.insert", "?q=%3C%2B%3E"]
+        answers <-
+          -- Wait for the workers: cancelled, they would fail the rest.
+          withAsync (indexAll searchApi snap) $ \workers -> do
+            rs <- mapConcurrently (searchOk api) queries
+            wait workers
+            pure rs
+        forM_ answers $ \a ->
+          unless a.partial $
+            assertBool (show a.query) (not (null a.results))
+        done <- searchOk api "?q=map"
+        done.partial @?= False
+        assertBool "no names" (any (\x -> x.kind == "decl") done.results)
+    ]
+  where
+    searchOk api q = do
+      r <- getApiQuery api searchPath q
+      (q, r.status) @?= (q, 200)
+      decodeOr r
+    decodeOr r = maybe (assertFailure (show r.body)) pure (decodeAnswer r.body)
+
+searchPath :: [Text]
+searchPath = ["api", "search", "tree"]
+
+-- | The parts of a search answer the tests look at.
+data Answer = Answer
+  { query :: Text,
+    partial :: Bool,
+    matches :: Int,
+    results :: [Found]
+  }
+
+-- | One result.
+data Found = Found
+  { kind :: Text,
+    name :: Text,
+    ref :: Text,
+    -- | Names only.
+    anchor :: Maybe Text
+  }
+
+decodeAnswer :: LBS.ByteString -> Maybe Answer
+decodeAnswer = Aeson.decode >=> parseMaybe answer
+  where
+    answer = withObject "search" $ \o ->
+      Answer
+        <$> o .: "query"
+        <*> o .: "partial"
+        <*> o .: "matches"
+        <*> (mapM found =<< (o .: "results" :: Parser [Aeson.Value]))
+    found = withObject "result" $ \o ->
+      Found <$> o .: "kind" <*> o .: "name" <*> o .: "ref" <*> o .:? "anchor"
+
+-- | Every declaration id on a page (its JSON dump), as text: a field's
+-- is rebuilt from the idParts table (Note [Handles] in
+-- "HaskellReviewer.Server.Wire.Page").
+pageIds :: Aeson.Value -> [Text]
+pageIds page = go page
+  where
+    parts = case page of
+      Aeson.Object o
+        | Just (Aeson.Object p) <- KeyMap.lookup "parse" o,
+          Just (Aeson.Array a) <- KeyMap.lookup "idParts" p ->
+            Map.fromList (zip [0 :: Int ..] [t | Aeson.String t <- toList a])
+      _ -> Map.empty
+    go = \case
+      Aeson.Object o ->
+        maybe [] idText (KeyMap.lookup "id" o) <> concatMap go (KeyMap.elems o)
+      Aeson.Array a -> concatMap go (toList a)
+      _ -> []
+    idText = \case
+      Aeson.String t -> [t]
+      Aeson.Object o
+        | Just (Aeson.String n) <- KeyMap.lookup (Key.fromText "field") o,
+          Just (Aeson.Number i) <- KeyMap.lookup "parent" o,
+          Just p <- Map.lookup (round i) parts ->
+            ["field:" <> p <> "." <> n]
+      _ -> []
 
 -- | gzip (Note [Compression] in "HaskellReviewer.Server.Router"). The
 -- big text is built once, before the tests share it: Note [Shared values

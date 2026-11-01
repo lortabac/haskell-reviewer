@@ -74,6 +74,7 @@ library
     HaskellReviewer.Core.RelPath
     HaskellReviewer.Core.RichText
     HaskellReviewer.Core.Root
+    HaskellReviewer.Core.Search
     HaskellReviewer.Core.SourceText
     HaskellReviewer.Core.Span
     HaskellReviewer.Core.Tokens
@@ -110,6 +111,7 @@ library
     HaskellReviewer.Server.Listen
     HaskellReviewer.Server.Prefs
     HaskellReviewer.Server.Router
+    HaskellReviewer.Server.Search
     HaskellReviewer.Server.Security
     HaskellReviewer.Server.Wire
     HaskellReviewer.Server.Wire.Page
@@ -217,6 +219,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.RelPathTest
     HaskellReviewer.Core.RichTextGoldenTest
     HaskellReviewer.Core.RootTest
+    HaskellReviewer.Core.SearchTest
     HaskellReviewer.Core.SourceTextTest
     HaskellReviewer.Core.TokensTest
     HaskellReviewer.Core.XdgTest
