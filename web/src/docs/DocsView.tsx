@@ -26,6 +26,7 @@ import { hrefFor, lineHref, withBase } from "../files/paths";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
 import { usePrefs } from "../prefs/store";
+import { onReselectAnchor } from "../reselectAnchor";
 import { SearchBox } from "../search/SearchBox";
 import { createDelay, focusInMain, focusLost } from "../ui/focus";
 import { PageBody } from "./Body";
@@ -386,6 +387,12 @@ function ModulePage(props: {
       },
     ),
   );
+  // A search result (any SearchBox, header included) can be the
+  // declaration already at the top of the URL: the router ignores a
+  // link to its own URL, so nothing above would re-run `go`. Same
+  // fix as `inPage` below, for a picker outside this page (C7).
+  // eslint-disable-next-line solid/reactivity -- a window event, go() is always current
+  onCleanup(onReselectAnchor((hash) => go(hash, true)));
   // Toggling "exported only" can show or hide the current anchor's
   // element: re-resolve, but never move focus or scroll (D-204).
   createEffect(
@@ -452,7 +459,7 @@ function ModulePage(props: {
                   No declaration <code>{a}</code> in this module, in this
                   snapshot.
                 </p>
-                <SearchBox initialQuery={anchorName(a)} />
+                <SearchBox initialQuery={anchorName(a)} placement="page" />
               </div>
             )}
           </Show>

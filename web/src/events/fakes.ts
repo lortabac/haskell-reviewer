@@ -31,4 +31,9 @@ export class FakeSource implements SourceLike {
   hello(data = "{}"): void {
     this.fire("hello", undefined, data);
   }
+
+  // The server's indexing event, with its real payload.
+  indexing(data: string): void {
+    this.fire("indexing", undefined, data);
+  }
 }

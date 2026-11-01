@@ -11,6 +11,7 @@ import { ModulesProvider } from "./modules/store";
 import { NotFound } from "./NotFound";
 import { PrefsProvider, PrefsStatus } from "./prefs/store";
 import { ThemeSwitch } from "./prefs/ThemeSwitch";
+import { SearchBox } from "./search/SearchBox";
 import { Sidebar } from "./Sidebar";
 
 // initialPrefs: main.tsx's GET api/prefs, resolved before render (so
@@ -55,6 +56,7 @@ function Root(
         <Frame
           sidebar={<Sidebar />}
           notices={<ProjectNotices />}
+          search={<SearchBox placement="header" />}
           controls={
             <>
               <ThemeSwitch />
