@@ -27,10 +27,12 @@ import Control.Concurrent.STM
     tryReadTMVar,
   )
 import Data.ByteString.Lazy qualified as LBS
+import Data.Map.Strict (Map)
 import Data.Word (Word64)
 import HaskellReviewer.Core.FileList (FileList)
-import HaskellReviewer.Core.Modules (ModuleIndex)
+import HaskellReviewer.Core.Modules (ModuleId, ModuleIndex)
 import HaskellReviewer.Core.Root (CanonicalRoot)
+import HaskellReviewer.Core.Search (ModuleCandidate)
 import HaskellReviewer.Effects.FileSystem (ListError)
 import HaskellReviewer.Session.Index (Index, Progress, readProgress)
 
@@ -56,6 +58,9 @@ data Snapshot = Snapshot
     fileListJson :: LBS.ByteString,
     -- | The body of GET api/modules/tree, made once.
     moduleTreeJson :: LBS.ByteString,
+    -- | Every module, for search. See Note [Search] in
+    -- "HaskellReviewer.Core.Search".
+    searchModules :: Map ModuleId ModuleCandidate,
     -- | The modules' slots. See Note [Indexing] in
     -- "HaskellReviewer.Session.Index".
     index :: Index

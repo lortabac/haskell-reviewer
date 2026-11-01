@@ -1,0 +1,1 @@
+{"generation":1,"query":"map","partial":true,"matches":2,"results":[{"kind":"module","name":"Data.Map","ref":"Data.Map"},{"kind":"module","name":"Data.IntMap","ref":"Data.IntMap"}]}

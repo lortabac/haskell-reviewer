@@ -145,6 +145,7 @@ import HaskellReviewer.Server.Listen
   )
 import HaskellReviewer.Server.Prefs (warmUpPrefs)
 import HaskellReviewer.Server.Router (Routes (..), application, warmUpGzip)
+import HaskellReviewer.Server.Search (warmUpSearch)
 import HaskellReviewer.Server.Wire.Page (warmUpPages)
 import HaskellReviewer.Session.Clients (newClients, waitIdle)
 import HaskellReviewer.Session.Index
@@ -246,7 +247,7 @@ to fd 2, past the logger.
 
 Before the URL line we only do quick things (SPEC §10.1): check ROOT,
 open the trace file, read config.toml (one small file), check git,
-listen, warm up the gzip and prefs code. ui.json is not read: the first
+listen, warm up the gzip, prefs and search code. ui.json is not read: the first
 GET api/prefs does that. The rest comes after: Note [Listing after the
 URL].
 
@@ -477,6 +478,7 @@ serve deps logger opts root defaults lister tracer shutdown t0 w0 = do
               Left problem -> "in memory (" <> renderXdgProblem problem <> ")"
           prefs <- newPrefsStore logger defaults location
           warmUpPrefs
+          warmUpSearch
           slot <- newSnapshotSlot
           -- Filled by ready: the listing starts after the URL line.
           start <- newEmptyMVar

@@ -12,6 +12,7 @@ module HaskellReviewer.Server.Wire
     encodeModuleNotFound,
     encodeIndexing,
     encodePrefs,
+    encodeSearch,
     helloPayload,
 
     -- * Shared
@@ -58,6 +59,8 @@ import HaskellReviewer.Core.Modules
     renderModuleId,
     renderPreprocessor,
   )
+import HaskellReviewer.Core.NameTable (NameEntry (..))
+import HaskellReviewer.Core.Names (DeclId (..), DeclNs (..), renderDeclId)
 import HaskellReviewer.Core.Prefs (Effective (..))
 import HaskellReviewer.Core.Project
   ( BrokenPackage (..),
@@ -68,6 +71,12 @@ import HaskellReviewer.Core.Project
     renderProjectWarning,
   )
 import HaskellReviewer.Core.RelPath (relDirText, relPathText)
+import HaskellReviewer.Core.Search
+  ( Hit (..),
+    Indexing (..),
+    ModuleCandidate (..),
+    SearchResult (..),
+  )
 import HaskellReviewer.Server.Cbor qualified as Cbor
 import HaskellReviewer.Session.Index (Progress (..))
 import HaskellReviewer.Session.Snapshot (Generation (..))
@@ -269,6 +278,55 @@ encodePrefs e =
     ("theme" .= themeName e.theme)
       <> ("exportedOnly" .= e.exportedOnly)
       <> ("sidebar" .= sidebarName e.sidebar)
+
+-- | GET api\/search\/\<side>?q=…:
+--
+-- > {"generation":1,"query":"Map.ins","partial":false,"matches":2,
+-- >  "results":[{"kind":"decl","ns":"val","name":"insert","parent":null,
+-- >    "anchor":"val:insert","module":"Data.Map","ref":"Data.Map","exported":true},
+-- >   {"kind":"module","name":"Data.Map","ref":"Data.Map"}]}
+--
+-- @query@ is q as sent. @matches@ counts every hit, before the cap
+-- ('searchLimit' in "HaskellReviewer.Core.Search").
+-- @ns@: type, class, con, field, val, pat. @parent@ is the type of a
+-- field, else null. @anchor@ is the declaration id ('renderDeclId').
+-- @partial@: indexing isn't done, names may be missing. See Note
+-- [Search] in "HaskellReviewer.Core.Search".
+encodeSearch :: Generation -> Text -> Indexing -> SearchResult -> LBS.ByteString
+encodeSearch (Generation g) query indexing r =
+  Encoding.encodingToLazyByteString . Aeson.pairs $
+    ("generation" .= g)
+      <> ("query" .= query)
+      <> ("partial" .= (indexing == Partial))
+      <> ("matches" .= r.matches)
+      <> Encoding.pair "results" (Encoding.list hit r.hits)
+  where
+    hit = \case
+      ModuleHit m ->
+        Aeson.pairs (kindIs "module" <> ("name" .= m.name) <> ("ref" .= m.ref))
+      DeclHit m e ->
+        Aeson.pairs $
+          kindIs "decl"
+            <> ("ns" .= ns e.decl)
+            <> ("name" .= e.name)
+            <> ("parent" .= parent e.decl)
+            <> ("anchor" .= renderDeclId e.decl)
+            <> ("module" .= m.name)
+            <> ("ref" .= m.ref)
+            <> ("exported" .= e.exported)
+    ns :: DeclId -> Text
+    ns = \case
+      Named DType _ -> "type"
+      Named DClass _ -> "class"
+      Named DCon _ -> "con"
+      Named DVal _ -> "val"
+      Named DPat _ -> "pat"
+      Field _ _ -> "field"
+      -- Search never gives one: instances have no name.
+      Inst _ -> "inst"
+    parent = \case
+      Field p _ -> Just p
+      _ -> Nothing
 
 -- * Internal
 

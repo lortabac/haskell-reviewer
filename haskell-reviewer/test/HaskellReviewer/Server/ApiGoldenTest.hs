@@ -9,10 +9,12 @@ import ApiSupport
     TestApi (..),
     fixtureApi,
     getApi,
+    getApiQuery,
     implicitApi,
     indexed,
     pageApi,
     projectApi,
+    searchApi,
   )
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as LBS
@@ -105,6 +107,11 @@ cases =
     cbor "module-page-sections" (okCbor pageApi (modulePath "Sections")),
     json "module-not-found" (notFoundJson projectApi (modulePath "Nope")),
     json "prefs-defaults" (okJson fixtureApi ["api", "prefs"]),
+    -- Every kind of name, a private one and a field.
+    json "search" (okSearch (indexed searchApi) "?q=map"),
+    json "search-qualified" (okSearch (indexed searchApi) "?q=Data.Map.insert"),
+    -- Nothing indexed yet: modules only.
+    json "search-partial" (okSearch searchApi {workers = 0} "?q=map"),
     -- Every value other than the built-in one.
     json "prefs" (okJson fixtureApi {prefs = configured} ["api", "prefs"])
   ]
@@ -143,6 +150,15 @@ noStale = do
 -- | GET through the real app; must be a 200 with JSON.
 okJson :: TestApi -> [Text] -> IO LBS.ByteString
 okJson api path = (<> "\n") <$> answer 200 "application/json" api path
+
+-- | GET api/search/tree with this query string; must be a 200 with
+-- JSON.
+okSearch :: TestApi -> ByteString -> IO LBS.ByteString
+okSearch api query = do
+  r <- getApiQuery api ["api", "search", "tree"] query
+  r.status @?= 200
+  lookup "Content-Type" r.headers @?= Just "application/json"
+  pure (r.body <> "\n")
 
 -- | GET through the real app; must be a 200 with CBOR. The bytes as
 -- they come.
