@@ -1,0 +1,95 @@
+/* The search box (D-209): the header's combobox and the "not found" /
+   missing-declaration page boxes share this. */
+.search-box label {
+  display: block;
+  margin-bottom: var(--space-1);
+}
+
+.search-box input {
+  width: min(100%, 30rem);
+  padding: var(--space-1) var(--space-2);
+  font: inherit;
+  color: var(--color-fg);
+  background: var(--color-bg);
+  border: 1px solid var(--color-muted);
+  border-radius: 4px;
+}
+
+.search-status {
+  margin: var(--space-1) 0 0;
+  color: var(--color-muted);
+}
+
+.search-partial {
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-muted);
+  border-top: 1px solid var(--color-border);
+}
+
+.search-results {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+
+.search-results a {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-fg);
+  text-decoration: none;
+}
+
+.search-results a:hover,
+.search-results a.search-result-active {
+  background: var(--color-surface);
+}
+
+.search-result-name {
+  font-family: var(--font-mono);
+}
+
+.search-result-kind,
+.search-result-module,
+.search-result-private {
+  color: var(--color-muted);
+}
+
+/* The header box: a popup under the input, not pushing the header's
+   own layout around while it's open. A flex item that can shrink (a
+   narrow window never gets sideways scroll from it) rather than a
+   fixed width; the popup matches its width exactly, rather than a
+   wider minimum, so it can never run past the window either. */
+.search-box-header {
+  position: relative;
+  flex: 1 1 12rem;
+  min-width: 0;
+  max-width: 20rem;
+}
+
+.search-box-header input {
+  width: 100%;
+  min-width: 0;
+}
+
+.search-box-header .search-popup {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10;
+  width: 100%;
+  margin-top: var(--space-1);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px light-dark(rgb(0 0 0 / 15%), rgb(0 0 0 / 50%));
+}
+
+.search-box-header .search-results {
+  max-height: 60vh;
+  overflow: auto;
+}

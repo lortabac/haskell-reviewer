@@ -1,10 +1,12 @@
 import { createSignal } from "solid-js";
 import { render } from "solid-js/web";
 import { getJson } from "./api/client";
+import type { Indexing } from "./api/events";
 import { decodePrefs, defaultPrefs, type Prefs } from "./api/prefs";
 import { App } from "./App";
 import { connectEvents } from "./events/connect";
 import { ConnectionContext } from "./events/ConnectionNotice";
+import { IndexingContext } from "./events/indexing";
 import type { Status } from "./events/protocol";
 import { applyTheme } from "./prefs/theme";
 import "./styles/tokens.css";
@@ -12,6 +14,7 @@ import "./styles/frame.css";
 import "./styles/files.css";
 import "./styles/modules.css";
 import "./styles/docs.css";
+import "./styles/search.css";
 
 const root = document.getElementById("root");
 if (root === null) {
@@ -36,11 +39,14 @@ applyTheme(document.documentElement, initialPrefs.theme);
 // EventSource.
 const [status, setStatus] = createSignal<Status>("connecting");
 const [fallback, setFallback] = createSignal(false);
+const [indexing, setIndexing] = createSignal<Indexing>();
 
 render(
   () => (
     <ConnectionContext.Provider value={{ status, fallback }}>
-      <App initialPrefs={initialPrefs} pendingPrefs={fetched} />
+      <IndexingContext.Provider value={{ indexing }}>
+        <App initialPrefs={initialPrefs} pendingPrefs={fetched} />
+      </IndexingContext.Provider>
     </ConnectionContext.Provider>
   ),
   root,
@@ -59,6 +65,7 @@ setTimeout(() => {
     (msg) => {
       if (msg.type === "status") setStatus(msg.status);
       else if (msg.type === "unsupported") setFallback(true);
+      else if (msg.type === "indexing") setIndexing(msg.indexing);
     },
   );
 }, 0);

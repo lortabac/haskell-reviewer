@@ -8,6 +8,7 @@ import { ConnectionNotice } from "./events/ConnectionNotice";
 export function Frame(
   props: ParentProps<{
     sidebar?: JSX.Element;
+    search?: JSX.Element;
     controls?: JSX.Element;
     notices?: JSX.Element;
   }>,
@@ -26,6 +27,7 @@ export function Frame(
       </a>
       <header class="frame-header">
         <span class="app-name">haskell-reviewer</span>
+        {props.search}
         {props.controls}
         <ConnectionNotice />
       </header>

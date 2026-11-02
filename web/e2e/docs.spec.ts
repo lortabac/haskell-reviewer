@@ -348,12 +348,15 @@ test("unknown module: not found, search box prefilled", async ({
   await expect(page.locator("main h1")).toHaveText(
     "Not found in this snapshot",
   );
-  const box = page.getByRole("searchbox", { name: "Search modules by name" });
+  const box = page
+    .locator("main")
+    .getByRole("combobox", { name: "Search modules and names" });
   await expect(box).toHaveValue("No.Such");
-  await expect(page.locator(".search-count")).toHaveText("No modules match.");
-  await box.fill("shap");
-  const hit = page.locator(".search-results a");
-  await expect(hit).toHaveText(["Shapes"]);
+  await expect(page.locator("main .search-status")).toHaveText("No results.");
+  await box.fill("Shapes");
+  const hit = page.locator("main .search-results a");
+  await expect(hit).toHaveCount(1);
+  await expect(hit).toContainText("Shapes");
   await hit.click();
   await expect(page.locator("main h1")).toHaveText("Shapes");
 });
@@ -369,7 +372,7 @@ test("unknown declaration: notice and box on the page", async ({
   await expect(notice).toContainText(
     "No declaration type:Nope in this module, in this snapshot.",
   );
-  await expect(notice.getByRole("searchbox")).toHaveValue("Nope");
+  await expect(notice.getByRole("combobox")).toHaveValue("Nope");
   await expect(page.locator("section.decl").first()).toBeVisible();
 });
 

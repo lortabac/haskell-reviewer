@@ -510,6 +510,14 @@ case matches either case; an upper case letter makes it case-sensitive.
 Exact names come first (D-206). There is no search by type
 (D-14). Selecting a result opens it in the docs view. In diff mode, results are taken from the head side by default.
 
+The box is in the header on every page, and the same box (prefilled) is what
+the "not found" and missing-declaration notices offer. It is a keyboard-usable
+combobox: arrow keys move the active result, `Enter` opens it (the first, if
+none is active), `Escape` closes the header's popup or clears the box
+(D-209). Keystrokes are debounced. While the index is still filling in,
+results are labelled *partial* and refresh as indexing continues, instead of
+the box waiting for it to finish (D-210).
+
 ---
 
 ## 5. Cross-cutting behaviour

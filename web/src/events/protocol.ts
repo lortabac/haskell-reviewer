@@ -1,11 +1,15 @@
 // Messages from the events worker (or the per-tab hub) to a tab.
 // See SPEC §11.6.2.
+import { decodeIndexing, type Indexing } from "../api/events";
 
 export type Status = "connecting" | "open" | "reconnecting" | "ended";
 
 export type WorkerMessage =
   | { type: "status"; status: Status }
   | { type: "hello" }
+  // Indexing progress (D-210): forwarded from the server's own
+  // "indexing" SSE event, so a tab can refresh a partial search.
+  | { type: "indexing"; indexing: Indexing }
   // The worker has no EventSource (some browsers). The tab falls back
   // to its own stream.
   | { type: "unsupported" };
@@ -33,6 +37,12 @@ export function decodeWorkerMessage(data: unknown): WorkerMessage | undefined {
         : undefined;
     case "hello":
       return { type: "hello" };
+    case "indexing":
+      try {
+        return { type: "indexing", indexing: decodeIndexing(msg.indexing) };
+      } catch {
+        return undefined;
+      }
     case "unsupported":
       return { type: "unsupported" };
     default:

@@ -19,7 +19,7 @@ export function NotFound(props: { query?: string }): JSX.Element {
         when={{ text: props.query ?? queryFromUrl(location.pathname) }}
         keyed
       >
-        {(q) => <SearchBox initialQuery={q.text} />}
+        {(q) => <SearchBox initialQuery={q.text} placement="page" />}
       </Show>
     </>
   );
