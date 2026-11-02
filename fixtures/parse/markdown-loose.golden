@@ -1,0 +1,10 @@
+parsed
+module: MarkdownLoose @10:8-10:21
+exports:
+  greet@10:23-10:28 @10:23-10:28
+imports:
+language: GHC2021
+from pragmas: 
+enabled: BangPatterns, BinaryLiterals, ConstrainedClassMethods, ConstraintKinds, DeriveDataTypeable, DeriveFoldable, DeriveFunctor, DeriveGeneric, DeriveLift, DeriveTraversable, DoAndIfThenElse, EmptyCase, EmptyDataDecls, EmptyDataDeriving, ExistentialQuantification, ExplicitForAll, FieldSelectors, FlexibleContexts, FlexibleInstances, ForeignFunctionInterface, GADTSyntax, GeneralizedNewtypeDeriving, HexFloatLiterals, ImplicitPrelude, ImplicitStagePersistence, ImportQualifiedPost, InstanceSigs, KindSignatures, ListTuplePuns, MonomorphismRestriction, MultiParamTypeClasses, NamedFieldPuns, NamedWildCards, NumericUnderscores, PatternGuards, PolyKinds, PostfixOperators, RankNTypes, RelaxedPolyRec, ScopedTypeVariables, StandaloneDeriving, StandaloneKindSignatures, StarIsType, TraditionalRecordSyntax, TupleSections, TypeApplications, TypeOperators, TypeSynonymInstances
+warnings:
+  markdown-unlit assumed: no Bird or LaTeX code; read from haskell code blocks only

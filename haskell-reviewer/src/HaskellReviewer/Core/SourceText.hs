@@ -8,6 +8,8 @@ module HaskellReviewer.Core.SourceText
     stripBom,
     unlitBirdLatex,
     unlitMarkdown,
+    unlitLoose,
+    LooseUnlit (..),
 
     -- * Columns
     ColumnMap,
@@ -46,9 +48,25 @@ columns don't move either.
   does the same, so cpp sees those lines.
 - markdown-unlit (D-84): lines inside a fenced block whose info string
   has "haskell" and not "ignore". Approximate: that's all we read.
+- a loose @.lhs@\/@.lhsig@, outside any component (D-218): no @-pgmL@
+  is known, so we guess. markdown-unlit if the file has no Bird or
+  LaTeX code outside fences and at least one Haskell block; GHC's
+  unlit otherwise. A fence (a @```@ line, open or close, whatever its
+  info string) hides what's inside it from the Bird\/LaTeX check, so
+  a @>@ line inside an unrelated fenced block (a shell session, say)
+  doesn't count.
 
 GHC's unlit also rejects a bird line right next to a text line. We
 don't: the code still parses.
+
+Heuristic limit: we track fences by toggling on every @```@ line, same
+as markdown-unlit (D-221). So an odd number of @```@ in running prose
+before the real Bird code (a typo, or a backtick run in shown output,
+not meant as a fence) leaves us thinking we're still inside one: a
+later @>@ line is then hidden from the Bird\/LaTeX check, and a loose
+file with a Haskell block could be read as markdown-unlit instead of
+GHC's unlit. Rare, and markdown-unlit itself would be fooled the same
+way.
 -}
 
 -- * Preparing
@@ -77,19 +95,62 @@ unlitBirdLatex = overLines (go False)
 -- Note [Unlit].
 unlitMarkdown :: Text -> Maybe Text
 unlitMarkdown t
-  | any isOpen ls = Just (overLines (go False) t)
+  | any isOpen (Text.splitOn "\n" t) = Just (overLines (go False) t)
   | otherwise = Nothing
   where
-    ls = Text.splitOn "\n" t
-    fence l = Text.stripPrefix "```" (Text.stripStart l)
-    isOpen l = case fence l of
-      Just info -> "haskell" `Text.isInfixOf` info && not ("ignore" `Text.isInfixOf` info)
-      Nothing -> False
     go _ [] = []
     go inCode (l : rest)
       | Just _ <- fence l = "" : go (not inCode && isOpen l) rest
       | inCode = l : go inCode rest
       | otherwise = "" : go inCode rest
+
+-- | A @```@ line's info string (after stripping indent), open or
+-- close, whatever the string says.
+fence :: Text -> Maybe Text
+fence l = Text.stripPrefix "```" (Text.stripStart l)
+
+-- | Does this fence line open a Haskell block, roughly as
+-- markdown-unlit's default selector does. markdown-unlit splits the
+-- info string into words (a @.@ counts as a space, and @{...}@ is
+-- unwrapped first) and needs "haskell" as one of them, "ignore" as
+-- none; we just look for the two as substrings, which is close
+-- enough for how projects write fences (D-221 follow-up).
+isOpen :: Text -> Bool
+isOpen l = case fence l of
+  Just info -> "haskell" `Text.isInfixOf` info && not ("ignore" `Text.isInfixOf` info)
+  Nothing -> False
+
+-- | Is there a Bird (@>@ in column 1) or LaTeX (@\\begin{code}@) line
+-- outside any fence? Used to pick GHC's unlit over markdown-unlit for
+-- a loose file (D-218): a fence hides what's inside it, so a @>@ line
+-- in an unrelated fenced block doesn't count.
+birdOrLatexOutsideFences :: Text -> Bool
+birdOrLatexOutsideFences = go False . Text.splitOn "\n"
+  where
+    go _ [] = False
+    go inFence (l : ls)
+      | Just _ <- fence l = go (not inFence) ls
+      | inFence = go inFence ls
+      | "\\begin{code}" `Text.isPrefixOf` Text.stripStart l = True
+      | ">" `Text.isPrefixOf` l = True
+      | otherwise = go inFence ls
+
+-- | Which unlit 'unlitLoose' used.
+data LooseUnlit
+  = -- | Bird or LaTeX code outside fences won, or there's no block.
+    UsedGhcUnlit
+  | -- | No Bird or LaTeX code outside fences, and a Haskell block.
+    UsedMarkdownUnlit
+  deriving (Eq, Show)
+
+-- | A loose @.lhs@\/@.lhsig@ file, outside any component: no
+-- @-pgmL@ is known, so we guess (D-218). See Note [Unlit].
+unlitLoose :: Text -> (Text, LooseUnlit)
+unlitLoose t
+  | not (birdOrLatexOutsideFences t),
+    Just m <- unlitMarkdown t =
+      (m, UsedMarkdownUnlit)
+  | otherwise = (unlitBirdLatex t, UsedGhcUnlit)
 
 -- * Columns
 

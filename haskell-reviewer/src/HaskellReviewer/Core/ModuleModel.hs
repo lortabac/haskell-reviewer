@@ -122,6 +122,9 @@ data ParseWarning
     FromCpp CppWarning
   | -- | markdown-unlit found no Haskell block (D-84).
     NoMarkdownCode
+  | -- | A loose .lhs/.lhsig read as markdown-unlit, our guess: no
+    -- Bird or LaTeX code outside fences, and a Haskell block (D-218).
+    ReadAsMarkdown
   | -- | Off under Safe Haskell, like GHC does (with a warning too).
     SafeTurnsOff Text
   | -- | Two Safe Haskell modes (first, then second). GHC fails; we keep
@@ -140,6 +143,8 @@ renderParseWarning = \case
   IgnoredCppOption t -> "ignored cpp-options flag: " <> t
   FromCpp w -> renderCppWarning w
   NoMarkdownCode -> "no Haskell code block"
+  ReadAsMarkdown ->
+    "markdown-unlit assumed: no Bird or LaTeX code; read from haskell code blocks only"
   SafeTurnsOff t -> "turned off by Safe: " <> t
   SafeModesClash a b -> "Safe Haskell modes clash: " <> a <> ", " <> b <> " ignored"
   CouldNotLex -> "could not lex"

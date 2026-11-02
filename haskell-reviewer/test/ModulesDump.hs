@@ -85,6 +85,7 @@ dumpModules idx =
       NotLiterate -> ""
       BirdOrLatex -> " (literate)"
       MarkdownUnlit -> " (markdown-unlit)"
+      LooseLiterate -> " (loose literate)"
     reason = \case
       Autogen -> "autogen"
       Missing -> "missing"

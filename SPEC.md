@@ -140,7 +140,10 @@ In browse mode there is exactly one side.
   preprocessors (§9.1). The one exception is `-pgmL markdown-unlit`,
   supported approximately: the `.lhs` file is read from its
   ```` ```haskell ```` code blocks only. If no code blocks are found, it
-  gets the same banner.
+  gets the same banner. A loose `.lhs`/`.lhsig` (no component, so no known
+  `-pgmL`) is read the same way when it has no Bird or LaTeX code outside
+  fences and at least one code block, with a warning; otherwise it's read
+  as plain `.lhs`, GHC's unlit style (D-218, D-221).
 - **Module identity** (D-44): a module is identified by
   `<package>:<component>:<Module.Name>`, because the same module name can
   appear in several components (every executable's `Main`, or the same
