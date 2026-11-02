@@ -1,0 +1,14 @@
+# Expected fallback counts per reference project, at its pinned sha
+# (bench/projects.txt). Checked by `make bench` against a census of every
+# module page (D-215). Format: name sha category=count ...
+# A category not on the line is expected to be 0. Categories:
+#   parse-error pragma-error parser-crashed too-slow preprocessed
+#   preprocessed-by-flags generated no-source/autogen no-source/missing
+#   no-source/outside no-source/symlink not-text too-large failed
+# A new pin needs a new line: run `make bench BENCH_ARGS=--census-only`.
+# Baseline: D-83 (M0 parser spike) plus wire-server's 11 hspec-discover
+# modules (OPTIONS_GHC -F pragma), which M0 didn't count.
+
+optparse-applicative a6ca1a25bfad06f660cd67df75349cfcda567a8f
+pandoc               e51c9c6054c8f4ec5c3209d5abe10939dfe2963e no-source/autogen=1
+wire-server          7568f595e42ece6f0791682336014853a9dfcac4 preprocessed=11 generated=1 no-source/autogen=85 no-source/missing=3

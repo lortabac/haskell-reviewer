@@ -180,12 +180,28 @@ test-suite haskell-reviewer-test
   main-is:            Main.hs
   other-modules:
     ApiSupport
+    Bench.Fallbacks
+    Bench.FallbacksTest
+    Bench.GcLog
+    Bench.GcLogTest
+    Bench.IndexLog
+    Bench.IndexLogTest
+    Bench.ModuleList
+    Bench.ModuleListTest
     Bench.Projects
     Bench.ProjectsTest
+    Bench.Queries
+    Bench.QueriesTest
     Bench.RtsStats
     Bench.RtsStatsTest
+    Bench.Shell
+    Bench.ShellTest
     Bench.Stats
     Bench.StatsTest
+    Bench.Targets
+    Bench.TargetsTest
+    Bench.Url
+    Bench.UrlTest
     DeclsDump
     ExeTest
     HaskellReviewer.App.CliTest
@@ -293,21 +309,36 @@ benchmark haskell-reviewer-bench
   hs-source-dirs: ../bench/app ../bench/src
   main-is:        Main.hs
   other-modules:
+    Bench.Fallbacks
+    Bench.GcLog
     Bench.Http
+    Bench.IndexLog
     Bench.Machine
+    Bench.ModuleList
     Bench.Projects
+    Bench.Queries
     Bench.Report
     Bench.RtsStats
     Bench.Run
+    Bench.SearchDuring
+    Bench.Shell
+    Bench.Startup
     Bench.Stats
+    Bench.Steady
+    Bench.Targets
+    Bench.Url
 
   ghc-options:    -threaded
+  -- haskell-reviewer: only for its CBOR to JSON code (module pages).
   build-depends:
     , aeson
+    , async
     , base
     , bytestring
+    , containers
     , directory
     , filepath
+    , haskell-reviewer
     , network
     , optparse-applicative
     , process
@@ -315,3 +346,4 @@ benchmark haskell-reviewer-bench
     , text
     , time
     , unix
+    , zlib

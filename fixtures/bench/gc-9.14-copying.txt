@@ -1,0 +1,37 @@
+'./alloc' +RTS '-N2' '-A1m' '-Sgc-9.14-copying.txt' 
+    Alloc    Copied     Live     GC     GC      TOT      TOT  Page Flts
+    bytes     bytes     bytes   user   elap     user     elap
+  1109608    640896    665488  0.000  0.000    0.002    0.001    0    0  (Gen:  0)
+  1039672   1275016   1300832  0.001  0.001    0.003    0.002    0    0  (Gen:  0)
+  1039832   1912120   1936208  0.001  0.001    0.004    0.003    0    0  (Gen:  1)
+  1039920   1271840   2571672  0.000  0.000    0.005    0.003    0    0  (Gen:  0)
+  1040008   1271960   3207288  0.001  0.001    0.005    0.004    0    0  (Gen:  0)
+  1039688   1271744   3842616  0.001  0.001    0.006    0.005    0    0  (Gen:  0)
+     1072                      0.000  0.000
+
+     163,884,200 bytes allocated in the heap
+     184,525,752 bytes copied during GC
+      20,740,984 bytes maximum residency (12 sample(s))
+          91,272 bytes maximum slop
+              58 MiB total memory in use (0 MiB lost due to fragmentation)
+
+                                     Tot time (elapsed)  Avg pause  Max pause
+  Gen  0       146 colls,   146 par    0.046s   0.046s     0.0003s    0.0009s
+  Gen  1        12 colls,    11 par    0.051s   0.028s     0.0023s    0.0081s
+
+  Parallel GC work balance: 41.43% (serial 0%, perfect 100%)
+
+  TASKS: 6 (1 bound, 5 peak workers (5 total), using -N2)
+
+  SPARKS: 0 (0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
+
+  INIT    time    0.001s  (  0.001s elapsed)
+  MUT     time    0.019s  (  0.019s elapsed)
+  GC      time    0.096s  (  0.074s elapsed)
+  EXIT    time    0.001s  (  0.000s elapsed)
+  Total   time    0.117s  (  0.093s elapsed)
+
+  Alloc rate    8,519,873,207 bytes per MUT second
+
+  Productivity  16.4% of total user, 20.3% of total elapsed
+

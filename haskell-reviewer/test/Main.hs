@@ -1,9 +1,17 @@
 module Main (main) where
 
 import ApiSupport (forceFixtures)
+import Bench.FallbacksTest qualified
+import Bench.GcLogTest qualified
+import Bench.IndexLogTest qualified
+import Bench.ModuleListTest qualified
 import Bench.ProjectsTest qualified
+import Bench.QueriesTest qualified
 import Bench.RtsStatsTest qualified
+import Bench.ShellTest qualified
 import Bench.StatsTest qualified
+import Bench.TargetsTest qualified
+import Bench.UrlTest qualified
 import ExeTest qualified
 import GHC.IO.Encoding (setLocaleEncoding, utf8)
 import HaskellReviewer.App.CliTest qualified
@@ -93,9 +101,17 @@ main = do
   defaultMain $
     testGroup
       "haskell-reviewer"
-      [ Bench.ProjectsTest.tests,
+      [ Bench.FallbacksTest.tests,
+        Bench.GcLogTest.tests,
+        Bench.IndexLogTest.tests,
+        Bench.ModuleListTest.tests,
+        Bench.ProjectsTest.tests,
+        Bench.QueriesTest.tests,
         Bench.RtsStatsTest.tests,
+        Bench.ShellTest.tests,
         Bench.StatsTest.tests,
+        Bench.TargetsTest.tests,
+        Bench.UrlTest.tests,
         HaskellReviewer.App.CliTest.tests,
         -- Each test runs serve, which runs warmUpGzip and warmUpPrefs:
         -- tests in parallel would build their shared values at once

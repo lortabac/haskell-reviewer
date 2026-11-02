@@ -5,6 +5,10 @@ BENCH_RUNS ?= 10
 BENCH_PROJECTS ?=
 BENCH_JSON ?=
 BENCH_LABEL ?=
+# Extra +RTS options for the product, e.g. BENCH_RTS="--nonmoving-gc".
+BENCH_RTS ?=
+# Any other bench flags, e.g. BENCH_ARGS="--steady-runs 1 --nav-idle 10".
+BENCH_ARGS ?=
 
 .PHONY: build test install freeze web e2e bench bench-smoke cpp-check cbor-json
 
@@ -14,10 +18,12 @@ build:
 test:
 	$(CABAL) test all --test-show-details=direct
 
-# Runs the three reference projects (SPEC §10, §11.9; D-76, D-82, D-85).
-# By hand, before a release: shared CI runners are too noisy for timings.
-# Needs network the first time, to fetch the projects into bench/projects/
-# (git-ignored).
+# Runs the three reference projects (SPEC §10, §11.9; D-76, D-82, D-215):
+# the §10.1 targets, memory, GC pauses and the fallback census. A few
+# minutes. By hand, before a release: shared CI runners are too noisy for
+# timings. Needs network the first time, to fetch the projects into
+# bench/projects/ (git-ignored). Exit 1 for a broken run or wrong fallback
+# counts, never for a missed target.
 bench: build
 	bench/fetch-projects.sh $(BENCH_PROJECTS)
 	"$$($(CABAL) list-bin bench:haskell-reviewer-bench)" \
@@ -25,15 +31,18 @@ bench: build
 	    --runs $(BENCH_RUNS) \
 	    $(if $(BENCH_JSON),--json $(BENCH_JSON)) \
 	    $(if $(BENCH_LABEL),--label "$(BENCH_LABEL)") \
+	    $(if $(BENCH_RTS),--rts "$(BENCH_RTS)") \
+	    $(BENCH_ARGS) \
 	    $(BENCH_PROJECTS)
 
 # CI smoke test (D-76): checks the harness itself works, on one small
-# project, with no timing checks. Needs network the first time.
+# project, with no timing checks; the fallback census is checked. Needs
+# network the first time.
 bench-smoke: build
 	bench/fetch-projects.sh optparse-applicative
 	"$$($(CABAL) list-bin bench:haskell-reviewer-bench)" \
 	    --exe "$$($(CABAL) list-bin exe:haskell-reviewer)" \
-	    --runs 1 --warmup 0 \
+	    --runs 1 --warmup 0 --steady-runs 1 --search-runs 1 --nav-idle 2 \
 	    optparse-applicative
 
 # Dev only, not in CI: compare our CPP with gcc -traditional, run as GHC

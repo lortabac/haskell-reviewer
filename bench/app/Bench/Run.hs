@@ -1,22 +1,45 @@
--- | Runs the product binary once against one project and measures the
--- SPEC §10 numbers.
+-- | One run of the product binary against one project: a session. Spawns
+-- it, waits for the URL line, hands the running server to the caller,
+-- then stops it and reads its RTS stats. "Bench.Startup",
+-- "Bench.Steady" and "Bench.SearchDuring" say what to do in between.
 module Bench.Run
   ( -- * Types
-    RunConfig (..),
-    RunResult (..),
-    FileSource (..),
+    SessionConfig (..),
+    StatsFile (..),
+    Session (..),
+    DoneAt (..),
+    Ended (..),
     RunError (..),
     renderRunError,
+    Timed (..),
+    ProcMemory (..),
 
-    -- * Running
-    runOnce,
+    -- * Sessions
+    withSession,
+
+    -- * Inside a session
+    failWith,
+    elapsedUs,
+    awaitDone,
+    getApi,
+    getPath,
+    procMemory,
+    traceSpans,
   )
 where
 
-import Bench.Http (HttpResponse (..), rawHttp, requestBytes)
-import Bench.RtsStats (RtsStats (..), parseRtsStats, renderRtsStatsError)
+import Bench.GcLog (GcLog, GcLogError, parseGcLog)
+import Bench.Http (Gzip, HttpResponse (..), rawHttp, requestBytes)
+import Bench.IndexLog (IndexDone, parseDoneLine)
+import Bench.RtsStats (RtsStats, parseRtsStats, parseRtsSummary, renderRtsStatsError)
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Concurrent.MVar (MVar, newEmptyMVar, takeMVar, tryPutMVar)
+import Control.Concurrent.MVar
+  ( MVar,
+    newEmptyMVar,
+    readMVar,
+    takeMVar,
+    tryPutMVar,
+  )
 import Control.Exception
   ( Exception,
     IOException,
@@ -33,13 +56,11 @@ import Control.Monad (unless, void, when)
 import Data.Aeson ((.:))
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Types qualified as Aeson.Types
-import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as Char8
 import Data.Char (isDigit)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.List (isPrefixOf)
 import Data.Text (Text)
-import Data.Text qualified as Text
 import Data.Word (Word64)
 import GHC.Clock (getMonotonicTimeNSec)
 import System.Directory (removeFile)
@@ -60,6 +81,7 @@ import System.IO
   )
 import System.IO.Temp (withSystemTempDirectory)
 import System.Posix.Signals (sigKILL, sigTERM, signalProcess)
+import System.Posix.Types (ProcessID)
 import System.Process
   ( CreateProcess (..),
     ProcessHandle,
@@ -70,55 +92,63 @@ import System.Process
     proc,
   )
 import System.Timeout (timeout)
+import Text.Read (readMaybe)
 
 -- * Types
 
--- | What one run needs.
-data RunConfig = RunConfig
+-- | What one session needs.
+data SessionConfig = SessionConfig
   { -- | Path to the product binary (linked with @-rtsopts@).
     exe :: FilePath,
     projectDir :: FilePath,
-    -- | Where to write this run's trace file and RTS stats file.
+    -- | Where to write this session's trace, @-t@ and @-S@ files.
     tmpDir :: FilePath,
-    -- | Index inside its project (used only for file names).
-    index :: Int
+    -- | Unique per session in 'tmpDir' (used only for file names).
+    tag :: String,
+    -- | Extra @+RTS@ options (@--rts@), after ours.
+    rtsOpts :: [String],
+    stats :: StatsFile
   }
 
--- | Everything one run measures.
---
--- Most timings are microseconds since right before 'createProcess', so
--- they include exec and RTS init (D-85). 'stopUs' is its own interval:
--- from the stop signal to exit.
-data RunResult = RunResult
-  { urlUs :: Integer,
-    serveUs :: Integer,
-    filesUs :: Integer,
-    -- | From the trace file's @startup@\/@files@ spans. 'Nothing' if the
-    -- span didn't show up within the poll window.
-    startupSpanUs :: Maybe Integer,
-    filesSpanUs :: Maybe Integer,
+-- | Which RTS stats file to ask for. Only one: see "Bench.RtsStats".
+data StatsFile
+  = -- | @-t --machine-readable@: memory and GC totals.
+    TStats
+  | -- | @-S@: every GC pause, then the same totals as text.
+    GcStats
+
+-- | A running server.
+data Session = Session
+  { -- | Right before the spawn: every @...Us@ "since start" is from here.
+    t0 :: Word64,
+    pid :: ProcessID,
+    port :: Int,
+    token :: String,
+    -- | When the URL line came.
+    urlUs :: Integer,
+    -- | The done line and when it came; 'Left' if stderr ended first.
+    done :: MVar (Either String DoneAt),
+    -- | The last stderr lines, for error messages.
+    seen :: IORef [String],
+    traceFile :: FilePath
+  }
+
+-- | What we learn once the server stopped.
+data Ended = Ended
+  { -- | From the stop signal to exit.
     stopUs :: Integer,
-    -- | Always 0: a non-zero code fails the run below, before a
-    -- 'RunResult' is built. Kept as a field anyway: the JSON schema
-    -- wants it, and a reader shouldn't have to know that.
-    exitCode :: Int,
-    peakMemBytes :: Integer,
-    maxLiveBytes :: Maybe Integer,
-    allocatedBytes :: Maybe Integer,
-    gcCpuUs :: Maybe Integer,
-    mutatorCpuUs :: Maybe Integer,
-    -- | Entries in the project's file tree, and where it came from.
-    -- Same for every run of a project (the project doesn't change),
-    -- read once from the @api\/files\/tree@ check.
-    filesCount :: Int,
-    source :: FileSource
+    rts :: RtsStats,
+    -- | 'Nothing' without 'GcStats'. A file with no GC line is kept as
+    -- its error: a warning in the report, not a broken run.
+    gc :: Maybe (Either GcLogError GcLog)
   }
-  deriving (Eq, Show)
 
--- | Where the product read the file list from (@api\/files\/tree@'s
--- @source@ field).
-data FileSource = FromGit | FromDisk
-  deriving (Eq, Show)
+-- | The done line, and when it came.
+data DoneAt = DoneAt
+  { -- | Since start.
+    atUs :: Integer,
+    line :: IndexDone
+  }
 
 -- | Why a run didn't produce a result. Unlike missing a §10 target,
 -- this always fails the harness (SPEC §10.3: timings never do).
@@ -129,26 +159,45 @@ newtype RunError = RunError String
 renderRunError :: RunError -> String
 renderRunError (RunError s) = s
 
--- * Running
+-- | One timed request.
+data Timed = Timed
+  { response :: HttpResponse,
+    -- | From just before the connect to the last byte read.
+    us :: Integer,
+    -- | When it ended, since start.
+    endUs :: Integer
+  }
 
--- | Run the product binary once, measuring it. Leaves no process
--- behind, on success or failure.
-runOnce :: RunConfig -> IO (Either RunError RunResult)
-runOnce cfg =
+-- | From @\/proc\/\<pid\>\/status@: Linux only, 'Nothing' elsewhere.
+-- Unlike the RTS numbers (Note [What this memory excludes] in
+-- "Bench.RtsStats"), this is the whole process.
+data ProcMemory = ProcMemory
+  { rssBytes :: Maybe Integer,
+    -- | Peak RSS so far.
+    hwmBytes :: Maybe Integer
+  }
+
+-- * Sessions
+
+-- | Run the product, give the session to the action, stop the product.
+-- Leaves no process behind, on success or failure. Any failure inside
+-- (ours, from 'failWith', or an 'IOException') becomes a 'RunError'.
+withSession :: SessionConfig -> (Session -> IO a) -> IO (Either RunError (a, Ended))
+withSession cfg action =
   bracket (openFile "/dev/null" ReadMode) hClose $ \devNull ->
     withSystemTempDirectory "haskell-reviewer-bench-xdg" $ \xdg ->
-      runIn cfg devNull xdg
+      runIn cfg action devNull xdg
 
--- | 'runOnce' with fresh XDG dirs: the user's config.toml must not
+-- | 'withSession' with fresh XDG dirs: the user's config.toml must not
 -- change the numbers, and a run must not touch their ui.json.
-runIn :: RunConfig -> Handle -> FilePath -> IO (Either RunError RunResult)
-runIn cfg devNull xdg = do
-  t0 <- getMonotonicTimeNSec
-  -- A stale file from an earlier run at the same index (the warm-up,
-  -- say) must not look like this run's: if the product dies before
-  -- writing a fresh one, we want that to fail the run, not silently
-  -- read someone else's memory numbers.
-  _ <- try @IOException (removeFile (rtsFile cfg)) :: IO (Either IOException ())
+runIn ::
+  SessionConfig -> (Session -> IO a) -> Handle -> FilePath -> IO (Either RunError (a, Ended))
+runIn cfg action devNull xdg = do
+  -- A stale file from an earlier session with the same tag must not
+  -- look like this one's: if the product dies before writing a fresh
+  -- one, we want that to fail the run, not silently read someone
+  -- else's numbers.
+  mapM_ (\f -> try @IOException (removeFile f)) [rtsFile cfg, gcFile cfg, traceFileOf cfg]
   -- Inherited, minus GHCRTS: -rtsopts (needed for +RTS -t) also means
   -- the product now reads GHCRTS, and a developer's own GHCRTS (-N,
   -- -A, ...) would silently change every number. Our own XDG dirs
@@ -170,42 +219,47 @@ runIn cfg devNull xdg = do
             close_fds = False,
             env = Just childEnv
           }
+  t0 <- getMonotonicTimeNSec
   bracket (createProcess cp) killAndReap $ \(_, mout, merr, ph) ->
     case (mout, merr) of
       (Just out, Just err) -> do
-        result <- try @SomeException (steps t0 cfg out err ph)
+        result <- try @SomeException (steps t0 cfg action out err ph)
         either toRunError (pure . Right) result
       _ -> pure (Left (RunError "no stdout/stderr pipes"))
   where
-    -- Any failure in 'steps' becomes a 'RunError': not just our own
-    -- 'RunFailure', but also a stray 'IOException' (a closed pipe, a
-    -- missing RTS stats file, ...). An async exception (Ctrl-C, the
-    -- harness's own timeout) is not a run failure, so it's rethrown:
-    -- 'bracket' still cleans up the process either way.
+    -- An async exception (Ctrl-C, the harness's own timeout) is not a
+    -- run failure, so it's rethrown: 'bracket' still cleans up the
+    -- process either way.
     toRunError e
       | Just (_ :: SomeAsyncException) <- fromException e = throwIO e
       | Just (RunFailure msg) <- fromException e = pure (Left (RunError msg))
       | otherwise = pure (Left (RunError (displayException e)))
 
-runArgs :: RunConfig -> [String]
+-- | @--verbose@ for the done line (D-164); @-t@, or @-S@ if asked.
+runArgs :: SessionConfig -> [String]
 runArgs cfg =
   [ "--no-open",
+    "--verbose",
     "--idle-exit",
     "0",
     "--trace-file",
-    traceFile cfg,
-    "+RTS",
-    "-t" <> rtsFile cfg,
-    "--machine-readable",
-    "-RTS",
-    cfg.projectDir
+    traceFileOf cfg,
+    "+RTS"
   ]
+    <> statsArgs
+    <> cfg.rtsOpts
+    <> ["-RTS", cfg.projectDir]
+  where
+    -- One stats file per RTS: see "Bench.RtsStats".
+    statsArgs =
+      case cfg.stats of
+        GcStats -> ["-S" <> gcFile cfg]
+        TStats -> ["-t" <> rtsFile cfg, "--machine-readable"]
 
-rtsFile :: RunConfig -> FilePath
-rtsFile cfg = cfg.tmpDir <> "/rts-" <> show cfg.index <> ".txt"
-
-traceFile :: RunConfig -> FilePath
-traceFile cfg = cfg.tmpDir <> "/run-" <> show cfg.index <> ".jsonl"
+rtsFile, gcFile, traceFileOf :: SessionConfig -> FilePath
+rtsFile cfg = cfg.tmpDir </> ("rts-" <> cfg.tag <> ".txt")
+gcFile cfg = cfg.tmpDir </> ("gc-" <> cfg.tag <> ".txt")
+traceFileOf cfg = cfg.tmpDir </> ("trace-" <> cfg.tag <> ".jsonl")
 
 -- | Same process cleanup as "ExeTest"'s @kill@ (works whether the
 -- process is still running or was already reaped by a normal stop),
@@ -247,54 +301,143 @@ killAndReap (_, mout, merr, ph) = uninterruptibleMask_ $ do
         Just _ -> pure True
         Nothing -> threadDelay 5000 >> reapPolling (n - 1)
 
--- * Internal
+-- * Inside a session
 
--- | Used only inside 'steps', to short-circuit on the first failure.
--- Caught once, in 'runOnce', and turned into a 'RunError'. Simpler than
--- threading @Either RunError@ through every step by hand, and it never
--- escapes this module.
+-- | Used only inside a session, to short-circuit on the first failure.
+-- Caught once, in 'withSession', and turned into a 'RunError'. Simpler
+-- than threading @Either RunError@ through every step by hand.
 newtype RunFailure = RunFailure String
   deriving (Show)
 
 instance Exception RunFailure
 
+-- | Fail the session (and so the run) with this message.
 failWith :: String -> IO a
 failWith = throwIO . RunFailure
 
-steps :: Word64 -> RunConfig -> Handle -> Handle -> ProcessHandle -> IO RunResult
-steps t0 cfg out err ph = do
+-- | Microseconds since start.
+elapsedUs :: Session -> IO Integer
+elapsedUs s = microsSince s.t0 <$> getMonotonicTimeNSec
+
+-- | Wait for the done line, up to 300 s: when it came (since start) and
+-- what it says.
+awaitDone :: Session -> IO DoneAt
+awaitDone s = do
+  r <- timeout 300_000_000 (readMVar s.done)
+  case r of
+    Just (Right d) -> pure d
+    Just (Left why) -> lastLines s >>= failWith . ((why <> "; stderr: ") <>)
+    Nothing -> lastLines s >>= failWith . ("no 'indexing: done' within 300 s; stderr: " <>)
+
+-- | GET a path under the token (no leading slash, already encoded).
+getApi :: Session -> Gzip -> String -> IO Timed
+getApi s gzip path = getPath s gzip ("/" <> s.token <> "/" <> path)
+
+-- | GET a full path. Fails the run if there's no HTTP answer; any
+-- status is fine here, callers check it.
+getPath :: Session -> Gzip -> String -> IO Timed
+getPath s gzip path = do
+  let req = requestBytes "GET" (Just ("127.0.0.1:" <> show s.port)) gzip path
+  a <- getMonotonicTimeNSec
+  res <- try @IOException (rawHttp s.port req)
+  b <- getMonotonicTimeNSec
+  case res of
+    Left e -> failWith (path <> ": " <> displayException e)
+    Right (Left e) -> failWith (path <> ": HTTP: " <> e)
+    Right (Right r) ->
+      pure Timed {response = r, us = microsSince a b, endUs = microsSince s.t0 b}
+
+-- | RSS now and its peak so far.
+procMemory :: Session -> IO ProcMemory
+procMemory s = do
+  r <- try @IOException (readFile' ("/proc/" <> show s.pid <> "/status"))
+  pure $ case r of
+    Left _ -> ProcMemory Nothing Nothing
+    Right txt -> ProcMemory (field "VmRSS:" txt) (field "VmHWM:" txt)
+  where
+    -- "VmRSS:	  123456 kB"
+    field name txt = case [ws | l <- lines txt, ws@(n : _) <- [words l], n == name] of
+      ((_ : kb : "kB" : _) : _) -> (* 1024) <$> readMaybe kb
+      _ -> Nothing
+
+-- | The durations of these trace spans, by name. Polls the trace file
+-- every 10 ms, up to 5 s, until all are there: a span is written when
+-- it ends, which can be a bit after the log line.
+traceSpans :: Session -> [Text] -> IO [Maybe Integer]
+traceSpans s names = go (500 :: Int)
+  where
+    go n = do
+      ls <- tryReadLines
+      let found = map (\nm -> firstJust (map (spanDuration nm) ls)) names
+      if n <= 0 || all (/= Nothing) found
+        then pure found
+        else threadDelay 10000 >> go (n - 1)
+    tryReadLines = do
+      result <- try @IOException (lines <$> readFile' s.traceFile)
+      pure (either (const []) id result)
+    firstJust = foldr (\x acc -> maybe acc Just x) Nothing
+
+-- * Internal
+
+spanDuration :: Text -> String -> Maybe Integer
+spanDuration wantName line = do
+  v <- Aeson.decodeStrict (Char8.pack line)
+  Aeson.Types.parseMaybe parser v
+  where
+    parser = Aeson.withObject "span" $ \o -> do
+      n <- o .: "name" :: Aeson.Types.Parser Text
+      if n == wantName
+        then o .: "duration_us"
+        else fail "a different span"
+
+steps ::
+  Word64 ->
+  SessionConfig ->
+  (Session -> IO a) ->
+  Handle ->
+  Handle ->
+  ProcessHandle ->
+  IO (a, Ended)
+steps t0 cfg action out err ph = do
   seen <- newIORef []
   urlVar <- newEmptyMVar
+  doneVar <- newEmptyMVar
   stdoutVar <- newEmptyMVar
   -- Both pipes are drained for the whole run, not just up to the URL
   -- line: a chatty product could otherwise fill the OS pipe buffer and
   -- block on a later write, long after we've stopped reading. These
   -- threads are plain 'forkIO', never joined: if we give up on them
   -- (the process never exits, say), they're simply abandoned, and die
-  -- on their own once 'killAndReap' (in 'runOnce') kills the process
-  -- and closes the handles. A structured-concurrency join here (e.g.
+  -- on their own once 'killAndReap' kills the process and closes the
+  -- handles. A structured-concurrency join here (e.g.
   -- 'Control.Concurrent.Async.withAsync') would be wrong: it would
   -- block *us* waiting for a reader that's stuck on a pipe whose
   -- writer is still alive, which is exactly the deadlock this is
   -- avoiding.
-  _ <- forkIO (drainStderr err seen urlVar)
+  _ <- forkIO (drainStderr t0 err seen urlVar doneVar)
   _ <- forkIO (drainStdout out stdoutVar)
 
   urlLine <- readUrlLine seen urlVar
-  t1 <- getMonotonicTimeNSec
-  (port, token) <- maybe (failWith ("bad URL line: " <> urlLine)) pure (parseUrl urlLine)
+  (port, token) <-
+    maybe (failWith ("bad URL line: " <> urlLine.text)) pure (parseUrl urlLine.text)
+  pid <- maybe (failWith "process gone right after the URL line") pure =<< getPid ph
 
-  checkRoot port token
-  t2 <- getMonotonicTimeNSec
-
-  (filesN, src) <- checkFilesResponse port token
-  t3 <- getMonotonicTimeNSec
-
-  (startupSpan, filesSpan) <- pollSpans (traceFile cfg)
+  let session =
+        Session
+          { t0 = t0,
+            pid = pid,
+            port = port,
+            token = token,
+            urlUs = microsSince t0 urlLine.at,
+            done = doneVar,
+            seen = seen,
+            traceFile = traceFileOf cfg
+          }
+  result <- action session
 
   tSignal <- getMonotonicTimeNSec
-  pid <- maybe (failWith "process already gone before stop") pure =<< getPid ph
-  signalProcess sigTERM pid
+  stillThere <- getPid ph
+  maybe (failWith "process already gone before stop") (signalProcess sigTERM) stillThere
   exitC <- waitForExit ph
   tExit <- getMonotonicTimeNSec
 
@@ -308,91 +451,55 @@ steps t0 cfg out err ph = do
       =<< timeout 5000000 (takeMVar stdoutVar)
   unless (null leftoverOut) $ failWith ("stdout not empty: " <> show leftoverOut)
 
-  rtsRaw <- readFile' (rtsFile cfg)
-  rts <- either (failWith . renderRtsStatsError) pure (parseRtsStats rtsRaw)
+  (rts, gc) <- case cfg.stats of
+    GcStats -> do
+      raw <- readFile' (gcFile cfg)
+      r <- either (failWith . renderRtsStatsError) pure (parseRtsSummary raw)
+      pure (r, Just (parseGcLog raw))
+    TStats -> do
+      raw <- readFile' (rtsFile cfg)
+      r <- either (failWith . renderRtsStatsError) pure (parseRtsStats raw)
+      pure (r, Nothing)
 
   pure
-    RunResult
-      { urlUs = microsSince t0 t1,
-        serveUs = microsSince t0 t2,
-        filesUs = microsSince t0 t3,
-        startupSpanUs = startupSpan,
-        filesSpanUs = filesSpan,
-        stopUs = microsSince tSignal tExit,
-        exitCode = exitC,
-        peakMemBytes = rts.peakMemBytes,
-        maxLiveBytes = rts.maxLiveBytes,
-        allocatedBytes = rts.allocatedBytes,
-        gcCpuUs = rts.gcCpuUs,
-        mutatorCpuUs = rts.mutatorCpuUs,
-        filesCount = filesN,
-        source = src
-      }
-  where
-    checkRoot port token = do
-      r <- httpGetOrFail port token "" "/"
-      unless (r.status == 200) $ failWith ("/: expected 200, got " <> show r.status)
-
-    checkFilesResponse port token = do
-      r <- httpGetOrFail port token "api/files/tree" "files"
-      unless (r.status == 200) $ failWith ("files: expected 200, got " <> show r.status)
-      checkFilesBody r.body
-
-    -- @path@ is the URL path under the token (no leading slash);
-    -- @what@ names the check, for the error message only.
-    httpGetOrFail port token path what = do
-      let host = "127.0.0.1:" <> show port
-          req = requestBytes "GET" (Just host) ("/" <> token <> "/" <> path)
-      res <- rawHttp port req
-      either (failWith . ((what <> ": HTTP: ") <>)) pure res
-
-checkFilesBody :: BS.ByteString -> IO (Int, FileSource)
-checkFilesBody body = case Aeson.eitherDecodeStrict body of
-  Left e -> failWith ("files: cannot decode JSON: " <> e)
-  Right v -> case Aeson.Types.parseEither parser v of
-    Left e -> failWith ("files: " <> e)
-    Right r -> pure r
-  where
-    parser = Aeson.withObject "files" $ \o -> do
-      entries <- o .: "entries" :: Aeson.Types.Parser [Aeson.Value]
-      srcText <- o .: "source" :: Aeson.Types.Parser Text
-      truncated <- o .: "truncated"
-      src <- case srcText of
-        "git" -> pure FromGit
-        "disk" -> pure FromDisk
-        other -> fail ("unknown source: " <> Text.unpack other)
-      if null entries
-        then fail "entries is empty"
-        else
-          if truncated
-            then fail "truncated is true"
-            else pure (length entries, src)
+    ( result,
+      Ended {stopUs = microsSince tSignal tExit, rts = rts, gc = gc}
+    )
 
 -- | Reads stderr, line by line, for as long as the handle stays open.
 -- Never joined (see the comment in 'steps'): on an 'IOException' (the
 -- handle was closed under it, by 'killAndReap') it just stops, quietly.
 --
--- Every line goes into @seen@, for error messages. The first line
--- that starts with 'urlPrefix' also goes into @urlVar@ (once: a
--- 'tryPutMVar' that a later EOF can't overwrite); at EOF with no such
--- line, @urlVar@ gets 'Nothing'. Reading on, past the URL line, keeps
--- the pipe from filling up and blocking the product later in the run.
-drainStderr :: Handle -> IORef [String] -> MVar (Maybe String) -> IO ()
-drainStderr h seen urlVar = do
-  result <- try @IOException go
-  case result of
-    Right () -> pure ()
-    Left _ -> void (tryPutMVar urlVar Nothing)
+-- The last lines go into @seen@, for error messages. The first line
+-- that starts with 'urlPrefix' also goes into @urlVar@, and the done
+-- line into @doneVar@ with the time it came (once each: a
+-- 'tryPutMVar' that a later EOF can't overwrite). At EOF both get
+-- their "no such line" value.
+drainStderr ::
+  Word64 ->
+  Handle ->
+  IORef [String] ->
+  MVar (Maybe UrlLine) ->
+  MVar (Either String DoneAt) ->
+  IO ()
+drainStderr t0 h seen urlVar doneVar = do
+  _ <- try @IOException go
+  void (tryPutMVar urlVar Nothing)
+  void (tryPutMVar doneVar (Left "stderr ended before 'indexing: done'"))
   where
     go = do
       eof <- hIsEOF h
-      if eof
-        then void (tryPutMVar urlVar Nothing)
-        else do
-          l <- hGetLine h
-          atomicModifyIORef' seen (\ls -> (ls <> [l], ()))
-          when (urlPrefix `isPrefixOf` l) $ void (tryPutMVar urlVar (Just l))
-          go
+      unless eof $ do
+        l <- hGetLine h
+        now <- getMonotonicTimeNSec
+        atomicModifyIORef' seen (\ls -> (take 40 (l : ls), ()))
+        when (urlPrefix `isPrefixOf` l) $
+          void (tryPutMVar urlVar (Just UrlLine {text = l, at = now}))
+        case parseDoneLine l of
+          Just d ->
+            void (tryPutMVar doneVar (Right DoneAt {atUs = microsSince t0 now, line = d}))
+          Nothing -> pure ()
+        go
 
 -- | Reads all of stdout in the background (it's supposed to stay
 -- empty the whole run), putting the result in @doneVar@ at EOF. Same
@@ -404,17 +511,27 @@ drainStdout h doneVar = do
   result <- try @IOException (hGetContents' h)
   void (tryPutMVar doneVar (either (const "") id result))
 
+-- | The URL line, and when we read it (monotonic ns): the URL time is
+-- that, not when the waiting thread woke up.
+data UrlLine = UrlLine
+  { text :: String,
+    at :: Word64
+  }
+
 -- | Wait for 'drainStderr' to find the URL line, up to 30 s.
-readUrlLine :: IORef [String] -> MVar (Maybe String) -> IO String
+readUrlLine :: IORef [String] -> MVar (Maybe UrlLine) -> IO UrlLine
 readUrlLine seen urlVar = do
-  result <- timeout 30000000 (takeMVar urlVar)
+  result <- timeout 30000000 (readMVar urlVar)
   case result of
     Just (Just l) -> pure l
     Just Nothing ->
       seenSoFar >>= failWith . ("process exited before the URL line; stderr: " <>)
     Nothing -> seenSoFar >>= failWith . ("no URL line within 30 s; stderr so far: " <>)
   where
-    seenSoFar = show <$> readIORef seen
+    seenSoFar = show . reverse <$> readIORef seen
+
+lastLines :: Session -> IO String
+lastLines s = show . reverse <$> readIORef s.seen
 
 urlPrefix :: String
 urlPrefix = "haskell-reviewer: serving at "
@@ -502,35 +619,5 @@ stripPrefix' prefix s
   | prefix `isPrefixOf` s = Just (drop (length prefix) s)
   | otherwise = Nothing
 
--- | Poll the trace file every 10 ms, up to 5 s, for the @startup@ and
--- @files@ span durations.
-pollSpans :: FilePath -> IO (Maybe Integer, Maybe Integer)
-pollSpans file = go (500 :: Int)
-  where
-    go n = do
-      ls <- tryReadLines
-      let spans' = (durationOf "startup" ls, durationOf "files" ls)
-      if (n <= 0) || bothFound spans'
-        then pure spans'
-        else threadDelay 10000 >> go (n - 1)
-    bothFound (Just _, Just _) = True
-    bothFound _ = False
-    tryReadLines = do
-      result <- try @IOException (lines <$> readFile' file)
-      pure (either (const []) id result)
-    durationOf name ls = firstJust (map (spanDuration name) ls)
-    firstJust = foldr (\x acc -> maybe acc Just x) Nothing
-
-spanDuration :: String -> String -> Maybe Integer
-spanDuration wantName line = do
-  v <- Aeson.decodeStrict (Char8.pack line)
-  Aeson.Types.parseMaybe parser v
-  where
-    parser = Aeson.withObject "span" $ \o -> do
-      n <- o .: "name" :: Aeson.Types.Parser Text
-      if n == Text.pack wantName
-        then o .: "duration_us"
-        else fail "a different span"
-
 microsSince :: Word64 -> Word64 -> Integer
-microsSince t0 t1 = toInteger (t1 - t0) `div` 1000
+microsSince a b = toInteger (b - a) `div` 1000
