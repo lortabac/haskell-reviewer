@@ -1,0 +1,42 @@
+'./alloc' +RTS '-N2' '-A1m' '--nonmoving-gc' '-Sgc-9.10-nonmoving.txt' 
+    Alloc    Copied     Live     GC     GC      TOT      TOT  Page Flts
+    bytes     bytes     bytes   user   elap     user     elap
+  1122624    782864    786920  0.001  0.001    0.003    0.002    0    0  (Gen:  1)
+  1036880   1089272   1517104  0.001  0.001    0.004    0.003    0    0  (Gen:  0)
+  1037392   1033072   2224504  0.001  0.001    0.005    0.004    0    0  (Gen:  0)
+  1036240   1212632   3151568  0.001  0.001    0.007    0.005    0    0  (Gen:  0)
+  1035680   1192040   4003880  0.001  0.001    0.008    0.007    0    0  (Gen:  0)
+  1038816   1024112   4707200  0.001  0.001    0.009    0.008    0    0  (Gen:  0)
+# sync  0.000
+# sync  0.000
+      808                      0.000  0.000
+
+     171,882,072 bytes allocated in the heap
+     121,988,016 bytes copied during GC
+      12,247,680 bytes maximum residency (3 sample(s))
+      51,834,240 bytes maximum slop
+             108 MiB total memory in use (2 MiB lost due to fragmentation)
+
+                                     Tot time (elapsed)  Avg pause  Max pause
+  Gen  0       162 colls,   161 par    0.103s   0.104s     0.0006s    0.0014s
+  Gen  1         3 colls,     3 par    0.003s   0.003s     0.0009s    0.0012s
+  Gen  1         3 syncs,                       0.000s     0.0001s    0.0001s
+  Gen  1      concurrent,              0.035s   0.126s     0.0418s    0.0642s
+
+  Parallel GC work balance: 0.38% (serial 0%, perfect 100%)
+
+  TASKS: 7 (2 bound, 5 peak workers (5 total), using -N2)
+
+  SPARKS: 0 (0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
+
+  INIT    time    0.001s  (  0.001s elapsed)
+  MUT     time    0.023s  (  0.025s elapsed)
+  GC      time    0.106s  (  0.106s elapsed)
+  CONC GC time    0.035s  (  0.126s elapsed)
+  EXIT    time    0.001s  (  0.000s elapsed)
+  Total   time    0.169s  (  0.136s elapsed)
+
+  Alloc rate    7,600,474,223 bytes per MUT second
+
+  Productivity  36.0% of total user, 21.0% of total elapsed
+

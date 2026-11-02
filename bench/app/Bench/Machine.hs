@@ -3,6 +3,8 @@
 module Bench.Machine
   ( MachineInfo (..),
     getMachineInfo,
+    LoadAvg (..),
+    getLoadAvg,
   )
 where
 
@@ -11,6 +13,7 @@ import Data.Char (isDigit)
 import Data.List (isPrefixOf)
 import Data.Maybe (listToMaybe)
 import GHC.Conc (getNumProcessors)
+import System.IO (readFile')
 import System.Info qualified as Info
 import System.Posix.Resource
   ( Resource (ResourceOpenFiles),
@@ -61,6 +64,30 @@ getMachineInfo = do
         nofileSoft = softV,
         nofileHard = hardV
       }
+
+-- | The 1, 5 and 15 minute load averages. Recorded with every run:
+-- numbers taken under load mean little (WORKFLOW § 6).
+data LoadAvg = LoadAvg
+  { one :: Double,
+    five :: Double,
+    fifteen :: Double
+  }
+  deriving (Eq, Show)
+
+-- | 'Nothing' if we can't read it.
+getLoadAvg :: IO (Maybe LoadAvg)
+getLoadAvg
+  -- "{ 1.23 1.45 1.67 }"
+  | Info.os == "darwin" = do
+      out <- tryRun "sysctl" ["-n", "vm.loadavg"]
+      pure (out >>= fromWords . filter (`notElem` ["{", "}"]) . words)
+  -- "0.71 0.70 0.70 1/3172 2301788"
+  | otherwise = do
+      out <- tryIO (readFile' "/proc/loadavg")
+      pure (out >>= fromWords . words)
+  where
+    fromWords (a : b : c : _) = LoadAvg <$> readMaybe a <*> readMaybe b <*> readMaybe c
+    fromWords _ = Nothing
 
 -- * Internal
 

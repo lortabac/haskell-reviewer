@@ -3,6 +3,11 @@
 --
 -- That file is a Haskell @[(String, String)]@ 'show', plus one extra line
 -- in front (the echoed command line) that we skip.
+--
+-- The RTS has one stats file: @-t@, @-s@ and @-S@ all write to it, and
+-- the last one given wins. So a run with @-S@ (GC pauses, see
+-- "Bench.GcLog") has no @-t@ file; 'parseRtsSummary' reads the same
+-- numbers from the human summary at the end of the @-S@ file instead.
 module Bench.RtsStats
   ( -- * Types
     RtsStats (..),
@@ -10,11 +15,16 @@ module Bench.RtsStats
 
     -- * Parsing
     parseRtsStats,
+    parseRtsSummary,
     renderRtsStatsError,
+
+    -- * User options
+    checkUserRtsOpts,
   )
 where
 
 import Data.Char (isSpace)
+import Data.List (isInfixOf, isPrefixOf)
 import Text.Read (readMaybe)
 
 {- Note [What this memory excludes]
@@ -75,9 +85,68 @@ parseRtsStats raw = do
             gcCpuUs = optionalSeconds pairs "GC_cpu_seconds",
             mutatorCpuUs = optionalSeconds pairs "mut_cpu_seconds"
           }
+
+-- | Parse the @-s@ style summary at the end of a @-S@ file:
+--
+-- >      163,884,200 bytes allocated in the heap
+-- >       20,740,984 bytes maximum residency (12 sample(s))
+-- >               58 MiB total memory in use (0 MiB lost due to fragmentation)
+-- >   MUT     time    0.019s  (  0.019s elapsed)
+-- >   GC      time    0.096s  (  0.074s elapsed)
+--
+-- The peak is in whole MiB here, not bytes.
+parseRtsSummary :: String -> Either RtsStatsError RtsStats
+parseRtsSummary raw = do
+  let peakKey = "MiB total memory in use"
+  peakMiB <- maybe (Left (MissingKey peakKey)) Right (bytesBefore peakKey)
+  let peak = peakMiB * 1024 * 1024
+  if peak < oneMiB || peak > sixteenGiB
+    then Left (PeakOutOfRange peak)
+    else
+      Right
+        RtsStats
+          { peakMemBytes = peak,
+            maxLiveBytes = bytesBefore "bytes maximum residency",
+            allocatedBytes = bytesBefore "bytes allocated in the heap",
+            gcCpuUs = timeOf "GC",
+            mutatorCpuUs = timeOf "MUT"
+          }
   where
-    oneMiB = 1024 * 1024
-    sixteenGiB = 16 * 1024 * 1024 * 1024
+    ls = lines raw
+    -- The number in front of the text, commas dropped.
+    bytesBefore text =
+      case [w | l <- ls, text `isInfixOf` l, w : _ <- [words l]] of
+        w : _ -> readMaybe (filter (/= ',') w)
+        [] -> Nothing
+    -- "MUT     time    0.019s  (  0.019s elapsed)": the first time.
+    timeOf name =
+      case [t | l <- ls, name' : "time" : t : _ <- [words l], name' == name] of
+        t : _ -> do
+          d <- readMaybe (takeWhile (/= 's') t) :: Maybe Double
+          Just (round (d * 1_000_000))
+        [] -> Nothing
+
+oneMiB, sixteenGiB :: Integer
+oneMiB = 1024 * 1024
+sixteenGiB = 16 * 1024 * 1024 * 1024
+
+-- | Refuse user @+RTS@ options that would move or change the stats
+-- file we read (@-s@, @-S@, @-t@, @--machine-readable@): the run would
+-- then fail with a confusing parse error, or read the wrong numbers.
+-- Also @+RTS@\/@-RTS@, which would end our own block.
+checkUserRtsOpts :: [String] -> Either String ()
+checkUserRtsOpts opts = case filter bad opts of
+  [] -> Right ()
+  o : _ ->
+    Left
+      ( "--rts: "
+          <> o
+          <> " is not allowed: the bench sets the RTS stats file itself (-t or -S)"
+      )
+  where
+    bad o =
+      any (`isPrefixOf` o) ["-s", "-S", "-t", "--machine-readable"]
+        || o `elem` ["+RTS", "-RTS"]
 
 -- * Internal
 
