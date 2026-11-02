@@ -48,7 +48,7 @@ a {
   grid-template-areas:
     "header header"
     "sidebar main";
-  grid-template-columns: minmax(12rem, 18rem) 1fr;
+  grid-template-columns: minmax(12rem, 18rem) minmax(0, 1fr);
   grid-template-rows: auto 1fr;
   min-height: 100vh;
 }
@@ -57,8 +57,10 @@ a {
   grid-area: header;
   min-height: var(--header-height);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
+  row-gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
@@ -80,7 +82,9 @@ a {
   font: inherit;
   color: var(--color-fg);
   background: var(--color-bg);
-  border: 1px solid var(--color-border);
+  /* Muted, not the border token: the edge needs 3:1 to be seen (same
+     fix as the sidebar toggle, modules.css). */
+  border: 1px solid var(--color-muted);
   border-radius: 4px;
   cursor: pointer;
 }
@@ -104,6 +108,25 @@ a {
    the accessibility tree (unlike display:none) and still the same
    element aria-live watches. */
 .prefs-status:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+/* Indexing progress (SPEC §10.2): plain text, shown only once it's
+   been slow for a while (createDelay) and hidden again when done
+   unless something failed. tabular-nums: the counts change without
+   the line's width jiggling. */
+.indexing-status {
+  margin: 0;
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Empty most of the time: out of the header's flex gap (same trick as
+   prefs-status above), but still in the accessibility tree. */
+.indexing-status:empty {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -165,6 +188,37 @@ a {
 
 .skip-link:focus {
   top: var(--space-2);
+}
+
+/* Narrow windows (SPEC §5.4 reflow): header, then sidebar, then main,
+   stacked. The sidebar stops floating next to the content and just
+   sits above it, capped so it doesn't push main off screen. */
+@media (max-width: 40em) {
+  .frame {
+    grid-template-areas:
+      "header"
+      "sidebar"
+      "main";
+    grid-template-columns: 1fr;
+    /* Sidebar sized to its content (capped at 40vh below), not 1fr:
+       the base rule's "auto 1fr" would hand that extra row to the
+       sidebar instead of main on a short page. */
+    grid-template-rows: auto auto 1fr;
+  }
+
+  .frame-sidebar {
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .frame-sidebar-content {
+    position: static;
+    max-height: 40vh;
+  }
+
+  .frame-main {
+    padding: var(--space-3);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

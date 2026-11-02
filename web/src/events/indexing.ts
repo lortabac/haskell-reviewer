@@ -1,6 +1,6 @@
 // The indexing progress, as the tab sees it from the event stream
-// (D-210). SearchBox uses it to refresh a partial search; T12 will
-// render it as a progress notice.
+// (D-210). SearchBox uses it to refresh a partial search; IndexingStatus
+// renders it as the header's progress line (SPEC §10.2, D-211).
 import { type Accessor, createContext } from "solid-js";
 import type { Indexing } from "../api/events";
 

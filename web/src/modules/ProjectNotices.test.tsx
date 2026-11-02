@@ -77,6 +77,8 @@ describe("ProjectNotices", () => {
     const fetch = mount([status, body]);
     await new Promise((r) => setTimeout(r, 20));
     expect(fetch.querySelector(".project-notice, details")).toBeNull();
-    expect(fetch.textContent).toBe("Pick a module or file in the sidebar.");
+    expect(fetch.textContent).toContain(
+      "Pick a module or file in the sidebar.",
+    );
   });
 });

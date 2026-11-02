@@ -55,6 +55,27 @@ describe("Frame", () => {
     expect(classes.indexOf("s")).toBeLessThan(classes.indexOf("c"));
   });
 
+  it("indexing status sits between search and controls", () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    dispose = render(
+      () => (
+        <Frame
+          search={<span class="s">search</span>}
+          controls={<span class="c">controls</span>}
+        >
+          hello
+        </Frame>
+      ),
+      root,
+    );
+    const children = [...(root.querySelector("header")?.children ?? [])];
+    const classes = children.map((c) => c.className);
+    const i = classes.findIndex((c) => c.includes("indexing-status"));
+    expect(i).toBeGreaterThan(classes.indexOf("s"));
+    expect(i).toBeLessThan(classes.indexOf("c"));
+  });
+
   it("skip link comes first and focuses main", () => {
     const root = mount();
     const first = root.querySelector("a, button, input");

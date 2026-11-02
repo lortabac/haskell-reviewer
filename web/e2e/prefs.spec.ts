@@ -1,12 +1,10 @@
 // Preferences (D-197…D-205): themes, "exported only", sidebar memory,
 // saved via api/prefs and read back on restart.
-import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, test } from "./support/fixtures";
-
-const wcag = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
+import { expectNoAxeViolations as axe } from "./support/a11y";
 
 async function writeConfig(configHome: string, toml: string): Promise<void> {
   const dir = join(configHome, "haskell-reviewer");
@@ -208,10 +206,6 @@ for (const [button, bg] of [
     await page.getByRole("button", { name: button, exact: true }).click();
     await expect(page.locator("body")).toHaveCSS("background-color", bg);
     await expect(page.locator("section.decl").first()).toBeVisible();
-    const result = await new AxeBuilder({ page }).withTags(wcag).analyze();
-    const summary = result.violations.map(
-      (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`,
-    );
-    expect(summary).toEqual([]);
+    await axe(page, `theme forced to ${button}`);
   });
 }

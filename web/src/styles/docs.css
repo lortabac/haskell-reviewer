@@ -268,7 +268,8 @@
   text-decoration: underline;
 }
 
-/* Comments. */
+/* Comments. Tab stop and ring only while it scrolls (RichText.tsx):
+   the global :focus-visible rule (frame.css) already covers the ring. */
 .doc pre {
   padding: var(--space-2);
   background: var(--color-surface);

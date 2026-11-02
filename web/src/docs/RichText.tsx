@@ -1,17 +1,43 @@
 // Haddock comments, from the AST the server sends: JSX only, no raw
 // HTML, so text in a comment is always text.
-import type { JSX } from "solid-js";
+import { onCleanup, type JSX } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import type { Block, Cell, Doc, Inline } from "../api/richtext";
 import { type Links, useLinks } from "./links";
 
+// A code/example/property block (docs.css) only gets a Tab stop while
+// it actually scrolls sideways: not every block at every width, only
+// the ones with something to scroll to (C4, axe's
+// scrollable-region-focusable). ResizeObserver, not just a one-time
+// check: a window resize can turn scrolling on or off after the first
+// render.
+function scrollableRef(el: HTMLElement): void {
+  const update = (): void => {
+    if (el.scrollWidth > el.clientWidth) el.setAttribute("tabindex", "0");
+    else el.removeAttribute("tabindex");
+  };
+  update();
+  const ro = new ResizeObserver(update);
+  ro.observe(el);
+  onCleanup(() => ro.disconnect());
+}
+
 // A comment. level: the heading level it sits under, so a "= Usage"
-// heading in it is one below (h6 at most).
+// heading in it is one below, h6 at most (D-190). stack: tracks the
+// comment's own headings so a later one never skips a level even if
+// the Haddock markup jumps straight to "===", matching D-192's rule
+// for the page's own headings; built inside the expression below, not
+// outside it, so a re-run (this sits in a JSX child position, which
+// Solid may re-invoke) always starts from an empty stack rather than
+// one still holding entries from the run before (C5).
 export function DocView(props: { doc: Doc; level: number }): JSX.Element {
   const links = useLinks();
   return (
     <div class="doc">
-      {blocks(props.doc.blocks, props.level, links)}
+      {(() => {
+        const stack: HeadingStack = [];
+        return blocks(props.doc.blocks, props.level, links, stack);
+      })()}
       {props.doc.since === null ? null : (
         <p class="doc-since">
           Since:{" "}
@@ -30,18 +56,51 @@ export function InlineText(props: { inlines: Inline[] }): JSX.Element {
   return <>{inlines(props.inlines, links)}</>;
 }
 
-function blocks(bs: Block[], level: number, links: Links): JSX.Element[] {
-  return bs.map((b) => block(b, level, links));
+// One comment's open headings, shallowest first: the Haddock level it
+// was written at, and the HTML level it actually got.
+type HeadingStack = { haddock: number; rendered: number }[];
+
+// The HTML level for a heading written at Haddock level hLevel: one
+// below the last heading still open at this depth or shallower, so it
+// never skips one, however far hLevel jumps. The first heading in a
+// comment is one below `base` (the level the whole comment sits
+// under), whatever its own hLevel says.
+function headingLevel(
+  hLevel: number,
+  base: number,
+  stack: HeadingStack,
+): number {
+  while (stack.length > 0 && stack[stack.length - 1]!.haddock >= hLevel) {
+    stack.pop();
+  }
+  const top = stack[stack.length - 1];
+  const rendered = Math.min(6, (top?.rendered ?? base) + 1);
+  stack.push({ haddock: hLevel, rendered });
+  return rendered;
 }
 
-function block(b: Block, level: number, links: Links): JSX.Element {
+function blocks(
+  bs: Block[],
+  level: number,
+  links: Links,
+  stack: HeadingStack,
+): JSX.Element[] {
+  return bs.map((b) => block(b, level, links, stack));
+}
+
+function block(
+  b: Block,
+  level: number,
+  links: Links,
+  stack: HeadingStack,
+): JSX.Element {
   switch (b.kind) {
     case "paragraph":
       return <p>{inlines(b.inlines, links)}</p>;
     case "heading":
       return (
         <Dynamic
-          component={`h${Math.min(6, level + Math.max(1, b.level))}`}
+          component={`h${headingLevel(b.level, level, stack)}`}
           class="doc-heading"
         >
           {inlines(b.inlines, links)}
@@ -49,13 +108,13 @@ function block(b: Block, level: number, links: Links): JSX.Element {
       );
     case "code":
       return (
-        <pre class="doc-code">
+        <pre class="doc-code" ref={scrollableRef}>
           <code>{inlines(b.inlines, links)}</code>
         </pre>
       );
     case "bullets": {
       const items = b.items.map((item) => (
-        <li>{blocks(item, level, links)}</li>
+        <li>{blocks(item, level, links, stack)}</li>
       ));
       return <ul>{items}</ul>;
     }
@@ -64,7 +123,7 @@ function block(b: Block, level: number, links: Links): JSX.Element {
       const items = b.items.map((item, k) => (
         <li>
           <span class="doc-number">{labels[k]}.</span>{" "}
-          {blocks(item.blocks, level, links)}
+          {blocks(item.blocks, level, links, stack)}
         </li>
       ));
       return <ol class="doc-numbered">{items}</ol>;
@@ -72,20 +131,24 @@ function block(b: Block, level: number, links: Links): JSX.Element {
     case "definitions": {
       const items = b.items.map((item) => [
         <dt>{inlines(item.term, links)}</dt>,
-        <dd>{blocks(item.blocks, level, links)}</dd>,
+        <dd>{blocks(item.blocks, level, links, stack)}</dd>,
       ]);
       return <dl>{items}</dl>;
     }
     case "examples":
       return (
-        <pre class="doc-examples">
+        <pre class="doc-examples" ref={scrollableRef}>
           {b.items
             .map((e) => [">>> " + e.expression, ...e.results].join("\n"))
             .join("\n")}
         </pre>
       );
     case "property":
-      return <pre class="doc-property">{"prop> " + b.text}</pre>;
+      return (
+        <pre class="doc-property" ref={scrollableRef}>
+          {"prop> " + b.text}
+        </pre>
+      );
     case "table":
       return (
         <table class="doc-table">
