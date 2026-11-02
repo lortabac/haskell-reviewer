@@ -1,0 +1,398 @@
+cabal build all
+Resolving dependencies...
+Build profile: -w ghc-9.14.1 -O1
+In order, the following will be built (use -v for more details):
+ - toml-parser-2.0.2.0 (lib) (requires build)
+ - haskell-reviewer-0.1.0.0 (lib) (configuration changed)
+ - haskell-reviewer-0.1.0.0 (bench:haskell-reviewer-bench) (configuration changed)
+ - haskell-reviewer-0.1.0.0 (exe:haskell-reviewer) (configuration changed)
+ - haskell-reviewer-0.1.0.0 (test:haskell-reviewer-test) (configuration changed)
+Starting     toml-parser-2.0.2.0 (lib)
+Building     toml-parser-2.0.2.0 (lib)
+Installing   toml-parser-2.0.2.0 (lib)
+Completed    toml-parser-2.0.2.0 (lib)
+Configuring library for haskell-reviewer-0.1.0.0...
+Warning: [relative-path-outside] 'extra-source-files:
+../web/dist/assets/*.css' is a relative path outside of the source tree. This
+will not work when generating a tarball with 'sdist'.
+Warning: [relative-path-outside] 'extra-source-files: ../web/dist/assets/*.js'
+is a relative path outside of the source tree. This will not work when
+generating a tarball with 'sdist'.
+Warning: [relative-path-outside] 'extra-source-files: ../web/dist/index.html'
+is a relative path outside of the source tree. This will not work when
+generating a tarball with 'sdist'.
+Warning: [relative-path-outside] 'hs-source-dirs: ../bench/app' is a relative
+path outside of the source tree. This will not work when generating a tarball
+with 'sdist'.
+Warning: [relative-path-outside] 'hs-source-dirs: ../bench/src' is a relative
+path outside of the source tree. This will not work when generating a tarball
+with 'sdist'.
+Preprocessing library for haskell-reviewer-0.1.0.0...
+Building library for haskell-reviewer-0.1.0.0...
+[ 1 of 77] Compiling HaskellReviewer.Core.Address ( src/HaskellReviewer/Core/Address.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Address.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Address.dyn_o ) [Source file changed]
+[ 2 of 77] Compiling HaskellReviewer.Core.CabalCompat ( src/HaskellReviewer/Core/CabalCompat.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/CabalCompat.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/CabalCompat.dyn_o ) [/home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/autogen/cabal_macros.h changed]
+[ 3 of 77] Compiling HaskellReviewer.Core.Cpp.Warning ( src/HaskellReviewer/Core/Cpp/Warning.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Cpp/Warning.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Cpp/Warning.dyn_o )
+[10 of 77] Compiling HaskellReviewer.Core.Modules ( src/HaskellReviewer/Core/Modules.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Modules.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Modules.dyn_o ) [Source file changed]
+[11 of 77] Compiling HaskellReviewer.Core.Names ( src/HaskellReviewer/Core/Names.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Names.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Names.dyn_o ) [Source file changed]
+[12 of 77] Compiling HaskellReviewer.Core.IndexQueue ( src/HaskellReviewer/Core/IndexQueue.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/IndexQueue.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/IndexQueue.dyn_o )
+[16 of 77] Compiling HaskellReviewer.Core.RichText ( src/HaskellReviewer/Core/RichText.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/RichText.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/RichText.dyn_o )
+[17 of 77] Compiling HaskellReviewer.Core.Parser.Haddock ( src/HaskellReviewer/Core/Parser/Haddock.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Parser/Haddock.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Parser/Haddock.dyn_o )
+[19 of 77] Compiling HaskellReviewer.Core.Span ( src/HaskellReviewer/Core/Span.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Span.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Span.dyn_o ) [Source file changed]
+[20 of 77] Compiling HaskellReviewer.Core.SourceText ( src/HaskellReviewer/Core/SourceText.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/SourceText.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/SourceText.dyn_o ) [Source file changed]
+[21 of 77] Compiling HaskellReviewer.Core.Cpp.Positions ( src/HaskellReviewer/Core/Cpp/Positions.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Cpp/Positions.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Cpp/Positions.dyn_o )
+[22 of 77] Compiling HaskellReviewer.Core.Cpp.Lines ( src/HaskellReviewer/Core/Cpp/Lines.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Cpp/Lines.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Cpp/Lines.dyn_o )
+[23 of 77] Compiling HaskellReviewer.Core.Cpp.Macros ( src/HaskellReviewer/Core/Cpp/Macros.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Cpp/Macros.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Cpp/Macros.dyn_o )
+[24 of 77] Compiling HaskellReviewer.Core.Cpp.Expr ( src/HaskellReviewer/Core/Cpp/Expr.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Cpp/Expr.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Cpp/Expr.dyn_o )
+[25 of 77] Compiling HaskellReviewer.Core.Cpp.Expand ( src/HaskellReviewer/Core/Cpp/Expand.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Cpp/Expand.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Cpp/Expand.dyn_o )
+[26 of 77] Compiling HaskellReviewer.Core.Cpp ( src/HaskellReviewer/Core/Cpp.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Cpp.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Cpp.dyn_o ) [Source file changed]
+[27 of 77] Compiling HaskellReviewer.Core.Config ( src/HaskellReviewer/Core/Config.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Config.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Config.dyn_o )
+[28 of 77] Compiling HaskellReviewer.Core.Prefs ( src/HaskellReviewer/Core/Prefs.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Prefs.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Prefs.dyn_o )
+[29 of 77] Compiling HaskellReviewer.Core.Tokens ( src/HaskellReviewer/Core/Tokens.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Tokens.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Tokens.dyn_o )
+[30 of 77] Compiling HaskellReviewer.Core.Decls ( src/HaskellReviewer/Core/Decls.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Decls.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Decls.dyn_o )
+[31 of 77] Compiling HaskellReviewer.Core.Parser.Helpers ( src/HaskellReviewer/Core/Parser/Helpers.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Parser/Helpers.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Parser/Helpers.dyn_o )
+[32 of 77] Compiling HaskellReviewer.Core.Parser.Lex ( src/HaskellReviewer/Core/Parser/Lex.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Parser/Lex.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Parser/Lex.dyn_o )
+[33 of 77] Compiling HaskellReviewer.Core.Parser.InstanceKey ( src/HaskellReviewer/Core/Parser/InstanceKey.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Parser/InstanceKey.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Parser/InstanceKey.dyn_o )
+[34 of 77] Compiling HaskellReviewer.Core.NameTable ( src/HaskellReviewer/Core/NameTable.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/NameTable.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/NameTable.dyn_o )
+[35 of 77] Compiling HaskellReviewer.Core.Search ( src/HaskellReviewer/Core/Search.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Search.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Search.dyn_o )
+[36 of 77] Compiling HaskellReviewer.Core.ModuleModel ( src/HaskellReviewer/Core/ModuleModel.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/ModuleModel.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/ModuleModel.dyn_o ) [Source file changed]
+[37 of 77] Compiling HaskellReviewer.Core.Parser.ConvertDecls ( src/HaskellReviewer/Core/Parser/ConvertDecls.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Parser/ConvertDecls.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Parser/ConvertDecls.dyn_o )
+[38 of 77] Compiling HaskellReviewer.Core.Exported ( src/HaskellReviewer/Core/Exported.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Exported.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Exported.dyn_o )
+[39 of 77] Compiling HaskellReviewer.Core.Parser.Convert ( src/HaskellReviewer/Core/Parser/Convert.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Parser/Convert.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Parser/Convert.dyn_o ) [Source file changed]
+[40 of 77] Compiling HaskellReviewer.Core.Parser ( src/HaskellReviewer/Core/Parser.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Parser.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Parser.dyn_o ) [Source file changed]
+[41 of 77] Compiling HaskellReviewer.Core.DocLinks ( src/HaskellReviewer/Core/DocLinks.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/DocLinks.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/DocLinks.dyn_o )
+[42 of 77] Compiling HaskellReviewer.Core.Code ( src/HaskellReviewer/Core/Code.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Code.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Code.dyn_o )
+[43 of 77] Compiling HaskellReviewer.Core.Xdg ( src/HaskellReviewer/Core/Xdg.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Xdg.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Core/Xdg.dyn_o )
+[46 of 77] Compiling HaskellReviewer.Effects.Log ( src/HaskellReviewer/Effects/Log.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Effects/Log.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Effects/Log.dyn_o ) [Source file changed]
+[47 of 77] Compiling HaskellReviewer.Effects.Git ( src/HaskellReviewer/Effects/Git.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Effects/Git.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Effects/Git.dyn_o ) [Source file changed]
+[48 of 77] Compiling HaskellReviewer.Effects.Config ( src/HaskellReviewer/Effects/Config.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Effects/Config.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Effects/Config.dyn_o )
+[50 of 77] Compiling HaskellReviewer.Effects.AtomicFile ( src/HaskellReviewer/Effects/AtomicFile.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Effects/AtomicFile.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Effects/AtomicFile.dyn_o )
+[52 of 77] Compiling HaskellReviewer.Effects.Parser ( src/HaskellReviewer/Effects/Parser.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Effects/Parser.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Effects/Parser.dyn_o ) [Source file changed]
+[55 of 77] Compiling HaskellReviewer.Effects.Shutdown ( src/HaskellReviewer/Effects/Shutdown.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Effects/Shutdown.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Effects/Shutdown.dyn_o ) [Source file changed]
+[57 of 77] Compiling HaskellReviewer.Effects.Trace ( src/HaskellReviewer/Effects/Trace.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Effects/Trace.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Effects/Trace.dyn_o ) [Data.Aeson.Encoding package changed]
+[58 of 77] Compiling HaskellReviewer.Server.Assets ( src/HaskellReviewer/Server/Assets.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Server/Assets.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Server/Assets.dyn_o ) [/home/lorenzo/Development/haskell-reviewer/haskell-reviewer/../web/dist/index.html changed]
+[59 of 77] Compiling HaskellReviewer.Server.Cbor ( src/HaskellReviewer/Server/Cbor.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Server/Cbor.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Server/Cbor.dyn_o )
+[60 of 77] Compiling HaskellReviewer.Server.CborJson ( src/HaskellReviewer/Server/CborJson.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Server/CborJson.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Server/CborJson.dyn_o )
+[61 of 77] Compiling HaskellReviewer.Server.Security ( src/HaskellReviewer/Server/Security.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Server/Security.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Server/Security.dyn_o ) [Source file changed]
+[62 of 77] Compiling HaskellReviewer.Server.Listen ( src/HaskellReviewer/Server/Listen.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Server/Listen.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Server/Listen.dyn_o ) [Network.Socket package changed]
+[64 of 77] Compiling HaskellReviewer.Session.Index ( src/HaskellReviewer/Session/Index.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Session/Index.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Session/Index.dyn_o )
+[65 of 77] Compiling HaskellReviewer.Session.Prefs ( src/HaskellReviewer/Session/Prefs.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Session/Prefs.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Session/Prefs.dyn_o )
+[67 of 77] Compiling HaskellReviewer.Session.Snapshot ( src/HaskellReviewer/Session/Snapshot.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Session/Snapshot.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Session/Snapshot.dyn_o ) [Source file changed]
+[68 of 77] Compiling HaskellReviewer.Server.Wire ( src/HaskellReviewer/Server/Wire.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Server/Wire.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Server/Wire.dyn_o ) [Source file changed]
+[69 of 77] Compiling HaskellReviewer.Server.Wire.Page ( src/HaskellReviewer/Server/Wire/Page.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Server/Wire/Page.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Server/Wire/Page.dyn_o )
+[70 of 77] Compiling HaskellReviewer.Server.Prefs ( src/HaskellReviewer/Server/Prefs.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Server/Prefs.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Server/Prefs.dyn_o )
+[71 of 77] Compiling HaskellReviewer.Server.Events ( src/HaskellReviewer/Server/Events.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Server/Events.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Server/Events.dyn_o ) [Source file changed]
+[72 of 77] Compiling HaskellReviewer.Server.Api ( src/HaskellReviewer/Server/Api.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Server/Api.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Server/Api.dyn_o ) [Source file changed]
+[73 of 77] Compiling HaskellReviewer.Server.Search ( src/HaskellReviewer/Server/Search.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Server/Search.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Server/Search.dyn_o )
+[74 of 77] Compiling HaskellReviewer.Server.Router ( src/HaskellReviewer/Server/Router.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Server/Router.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/Server/Router.dyn_o ) [Source file changed]
+[77 of 77] Compiling HaskellReviewer.App.Run ( src/HaskellReviewer/App/Run.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/App/Run.o, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/build/HaskellReviewer/App/Run.dyn_o ) [Source file changed]
+Configuring benchmark 'haskell-reviewer-bench' for haskell-reviewer-0.1.0.0...
+Configuring executable 'haskell-reviewer' for haskell-reviewer-0.1.0.0...
+Warning: [relative-path-outside] 'extra-source-files:
+../web/dist/assets/*.css' is a relative path outside of the source tree. This
+will not work when generating a tarball with 'sdist'.
+Warning: [relative-path-outside] 'extra-source-files: ../web/dist/assets/*.js'
+is a relative path outside of the source tree. This will not work when
+generating a tarball with 'sdist'.
+Warning: [relative-path-outside] 'extra-source-files: ../web/dist/index.html'
+is a relative path outside of the source tree. This will not work when
+generating a tarball with 'sdist'.
+Warning: [relative-path-outside] 'hs-source-dirs: ../bench/app' is a relative
+path outside of the source tree. This will not work when generating a tarball
+with 'sdist'.
+Warning: [relative-path-outside] 'hs-source-dirs: ../bench/src' is a relative
+path outside of the source tree. This will not work when generating a tarball
+with 'sdist'.
+Preprocessing benchmark 'haskell-reviewer-bench' for haskell-reviewer-0.1.0.0...
+Building benchmark 'haskell-reviewer-bench' for haskell-reviewer-0.1.0.0...
+Warning: [relative-path-outside] 'extra-source-files:
+../web/dist/assets/*.css' is a relative path outside of the source tree. This
+will not work when generating a tarball with 'sdist'.
+Warning: [relative-path-outside] 'extra-source-files: ../web/dist/assets/*.js'
+is a relative path outside of the source tree. This will not work when
+generating a tarball with 'sdist'.
+Warning: [relative-path-outside] 'extra-source-files: ../web/dist/index.html'
+is a relative path outside of the source tree. This will not work when
+generating a tarball with 'sdist'.
+Warning: [relative-path-outside] 'hs-source-dirs: ../bench/app' is a relative
+path outside of the source tree. This will not work when generating a tarball
+with 'sdist'.
+Warning: [relative-path-outside] 'hs-source-dirs: ../bench/src' is a relative
+path outside of the source tree. This will not work when generating a tarball
+with 'sdist'.
+[ 1 of 19] Compiling Bench.Fallbacks  ( ../bench/src/Bench/Fallbacks.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/b/haskell-reviewer-bench/build/haskell-reviewer-bench/haskell-reviewer-bench-tmp/Bench/Fallbacks.o )
+Preprocessing executable 'haskell-reviewer' for haskell-reviewer-0.1.0.0...
+Building executable 'haskell-reviewer' for haskell-reviewer-0.1.0.0...
+[1 of 1] Compiling Main             ( app/Main.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/x/haskell-reviewer/build/haskell-reviewer/haskell-reviewer-tmp/Main.o ) [HaskellReviewer.App.Run changed]
+[2 of 2] Linking /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/x/haskell-reviewer/build/haskell-reviewer/haskell-reviewer [Objects changed]
+[ 2 of 19] Compiling Bench.Http       ( ../bench/app/Bench/Http.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/b/haskell-reviewer-bench/build/haskell-reviewer-bench/haskell-reviewer-bench-tmp/Bench/Http.o ) [Source file changed]
+[ 3 of 19] Compiling Bench.IndexLog   ( ../bench/src/Bench/IndexLog.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/b/haskell-reviewer-bench/build/haskell-reviewer-bench/haskell-reviewer-bench-tmp/Bench/IndexLog.o )
+[ 4 of 19] Compiling Bench.Machine    ( ../bench/app/Bench/Machine.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/b/haskell-reviewer-bench/build/haskell-reviewer-bench/haskell-reviewer-bench-tmp/Bench/Machine.o ) [Source file changed]
+[ 5 of 19] Compiling Bench.ModuleList ( ../bench/src/Bench/ModuleList.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/b/haskell-reviewer-bench/build/haskell-reviewer-bench/haskell-reviewer-bench-tmp/Bench/ModuleList.o )
+[ 7 of 19] Compiling Bench.Queries    ( ../bench/src/Bench/Queries.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/b/haskell-reviewer-bench/build/haskell-reviewer-bench/haskell-reviewer-bench-tmp/Bench/Queries.o )
+[ 8 of 19] Compiling Bench.RtsStats   ( ../bench/src/Bench/RtsStats.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/b/haskell-reviewer-bench/build/haskell-reviewer-bench/haskell-reviewer-bench-tmp/Bench/RtsStats.o ) [Source file changed]
+[ 9 of 19] Compiling Bench.Shell      ( ../bench/src/Bench/Shell.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/b/haskell-reviewer-bench/build/haskell-reviewer-bench/haskell-reviewer-bench-tmp/Bench/Shell.o )
+[10 of 19] Compiling Bench.Stats      ( ../bench/src/Bench/Stats.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/b/haskell-reviewer-bench/build/haskell-reviewer-bench/haskell-reviewer-bench-tmp/Bench/Stats.o ) [Source file changed]
+[11 of 19] Compiling Bench.GcLog      ( ../bench/src/Bench/GcLog.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/b/haskell-reviewer-bench/build/haskell-reviewer-bench/haskell-reviewer-bench-tmp/Bench/GcLog.o )
+[12 of 19] Compiling Bench.Run        ( ../bench/app/Bench/Run.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/b/haskell-reviewer-bench/build/haskell-reviewer-bench/haskell-reviewer-bench-tmp/Bench/Run.o ) [Source file changed]
+[13 of 19] Compiling Bench.Targets    ( ../bench/src/Bench/Targets.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/b/haskell-reviewer-bench/build/haskell-reviewer-bench/haskell-reviewer-bench-tmp/Bench/Targets.o )
+[14 of 19] Compiling Bench.Url        ( ../bench/src/Bench/Url.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/b/haskell-reviewer-bench/build/haskell-reviewer-bench/haskell-reviewer-bench-tmp/Bench/Url.o )
+[15 of 19] Compiling Bench.Startup    ( ../bench/app/Bench/Startup.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/b/haskell-reviewer-bench/build/haskell-reviewer-bench/haskell-reviewer-bench-tmp/Bench/Startup.o )
+[16 of 19] Compiling Bench.SearchDuring ( ../bench/app/Bench/SearchDuring.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/b/haskell-reviewer-bench/build/haskell-reviewer-bench/haskell-reviewer-bench-tmp/Bench/SearchDuring.o )
+[17 of 19] Compiling Bench.Steady     ( ../bench/app/Bench/Steady.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/b/haskell-reviewer-bench/build/haskell-reviewer-bench/haskell-reviewer-bench-tmp/Bench/Steady.o )
+[18 of 19] Compiling Bench.Report     ( ../bench/app/Bench/Report.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/b/haskell-reviewer-bench/build/haskell-reviewer-bench/haskell-reviewer-bench-tmp/Bench/Report.o ) [Source file changed]
+Configuring test suite 'haskell-reviewer-test' for haskell-reviewer-0.1.0.0...
+Warning: [relative-path-outside] 'extra-source-files:
+../web/dist/assets/*.css' is a relative path outside of the source tree. This
+will not work when generating a tarball with 'sdist'.
+Warning: [relative-path-outside] 'extra-source-files: ../web/dist/assets/*.js'
+is a relative path outside of the source tree. This will not work when
+generating a tarball with 'sdist'.
+Warning: [relative-path-outside] 'extra-source-files: ../web/dist/index.html'
+is a relative path outside of the source tree. This will not work when
+generating a tarball with 'sdist'.
+Warning: [relative-path-outside] 'hs-source-dirs: ../bench/app' is a relative
+path outside of the source tree. This will not work when generating a tarball
+with 'sdist'.
+Warning: [relative-path-outside] 'hs-source-dirs: ../bench/src' is a relative
+path outside of the source tree. This will not work when generating a tarball
+with 'sdist'.
+Preprocessing test suite 'haskell-reviewer-test' for haskell-reviewer-0.1.0.0...
+Building test suite 'haskell-reviewer-test' for haskell-reviewer-0.1.0.0...
+[ 1 of 86] Compiling ApiSupport       ( test/ApiSupport.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/ApiSupport.o ) [Source file changed]
+[19 of 19] Compiling Main             ( ../bench/app/Main.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/b/haskell-reviewer-bench/build/haskell-reviewer-bench/haskell-reviewer-bench-tmp/Main.o ) [Source file changed]
+[20 of 20] Linking /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/b/haskell-reviewer-bench/build/haskell-reviewer-bench/haskell-reviewer-bench [Objects changed]
+[ 2 of 86] Compiling Bench.Fallbacks  ( ../bench/src/Bench/Fallbacks.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/Bench/Fallbacks.o )
+[ 3 of 86] Compiling Bench.FallbacksTest ( ../bench/src/Bench/FallbacksTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/Bench/FallbacksTest.o )
+[ 4 of 86] Compiling Bench.IndexLog   ( ../bench/src/Bench/IndexLog.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/Bench/IndexLog.o )
+[ 5 of 86] Compiling Bench.IndexLogTest ( ../bench/src/Bench/IndexLogTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/Bench/IndexLogTest.o )
+[ 6 of 86] Compiling Bench.ModuleList ( ../bench/src/Bench/ModuleList.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/Bench/ModuleList.o )
+[ 7 of 86] Compiling Bench.ModuleListTest ( ../bench/src/Bench/ModuleListTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/Bench/ModuleListTest.o )
+[ 9 of 86] Compiling Bench.ProjectsTest ( ../bench/src/Bench/ProjectsTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/Bench/ProjectsTest.o ) [Test.Tasty package changed]
+[10 of 86] Compiling Bench.Queries    ( ../bench/src/Bench/Queries.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/Bench/Queries.o )
+[11 of 86] Compiling Bench.QueriesTest ( ../bench/src/Bench/QueriesTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/Bench/QueriesTest.o )
+[12 of 86] Compiling Bench.RtsStats   ( ../bench/src/Bench/RtsStats.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/Bench/RtsStats.o ) [Source file changed]
+[13 of 86] Compiling Bench.RtsStatsTest ( ../bench/src/Bench/RtsStatsTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/Bench/RtsStatsTest.o ) [Source file changed]
+[14 of 86] Compiling Bench.Shell      ( ../bench/src/Bench/Shell.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/Bench/Shell.o )
+[15 of 86] Compiling Bench.ShellTest  ( ../bench/src/Bench/ShellTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/Bench/ShellTest.o )
+[16 of 86] Compiling Bench.Stats      ( ../bench/src/Bench/Stats.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/Bench/Stats.o ) [Source file changed]
+[17 of 86] Compiling Bench.GcLog      ( ../bench/src/Bench/GcLog.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/Bench/GcLog.o )
+[18 of 86] Compiling Bench.GcLogTest  ( ../bench/src/Bench/GcLogTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/Bench/GcLogTest.o )
+[19 of 86] Compiling Bench.StatsTest  ( ../bench/src/Bench/StatsTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/Bench/StatsTest.o ) [Source file changed]
+[20 of 86] Compiling Bench.Targets    ( ../bench/src/Bench/Targets.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/Bench/Targets.o )
+[21 of 86] Compiling Bench.TargetsTest ( ../bench/src/Bench/TargetsTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/Bench/TargetsTest.o )
+[22 of 86] Compiling Bench.Url        ( ../bench/src/Bench/Url.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/Bench/Url.o )
+[23 of 86] Compiling Bench.UrlTest    ( ../bench/src/Bench/UrlTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/Bench/UrlTest.o )
+[24 of 86] Compiling HaskellReviewer.App.CliTest ( test/HaskellReviewer/App/CliTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/App/CliTest.o ) [Test.Tasty package changed]
+[25 of 86] Compiling HaskellReviewer.App.RunTest ( test/HaskellReviewer/App/RunTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/App/RunTest.o ) [Source file changed]
+[26 of 86] Compiling HaskellReviewer.Core.AddressTest ( test/HaskellReviewer/Core/AddressTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/AddressTest.o ) [Source file changed]
+[27 of 86] Compiling HaskellReviewer.Core.CabalFileTest ( test/HaskellReviewer/Core/CabalFileTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/CabalFileTest.o ) [Test.Tasty package changed]
+[28 of 86] Compiling HaskellReviewer.Core.CodeTest ( test/HaskellReviewer/Core/CodeTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/CodeTest.o )
+[29 of 86] Compiling HaskellReviewer.Core.ConfigGoldenTest ( test/HaskellReviewer/Core/ConfigGoldenTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/ConfigGoldenTest.o )
+[30 of 86] Compiling HaskellReviewer.Core.CppGoldenTest ( test/HaskellReviewer/Core/CppGoldenTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/CppGoldenTest.o )
+[31 of 86] Compiling HaskellReviewer.Core.CppPropertyTest ( test/HaskellReviewer/Core/CppPropertyTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/CppPropertyTest.o )
+[32 of 86] Compiling HaskellReviewer.Core.CppTest ( test/HaskellReviewer/Core/CppTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/CppTest.o ) [Source file changed]
+[33 of 86] Compiling HaskellReviewer.Core.DeclsTest ( test/HaskellReviewer/Core/DeclsTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/DeclsTest.o )
+[34 of 86] Compiling HaskellReviewer.Core.DocLinksTest ( test/HaskellReviewer/Core/DocLinksTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/DocLinksTest.o )
+[35 of 86] Compiling HaskellReviewer.Core.FileListTest ( test/HaskellReviewer/Core/FileListTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/FileListTest.o ) [Test.Tasty package changed]
+[36 of 86] Compiling HaskellReviewer.Core.GitTest ( test/HaskellReviewer/Core/GitTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/GitTest.o ) [Test.Tasty package changed]
+[37 of 86] Compiling HaskellReviewer.Core.HaddockTest ( test/HaskellReviewer/Core/HaddockTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/HaddockTest.o )
+[38 of 86] Compiling HaskellReviewer.Core.IndexQueueTest ( test/HaskellReviewer/Core/IndexQueueTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/IndexQueueTest.o )
+[39 of 86] Compiling HaskellReviewer.Core.InstanceKeyTest ( test/HaskellReviewer/Core/InstanceKeyTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/InstanceKeyTest.o )
+[40 of 86] Compiling HaskellReviewer.Core.ModulesTest ( test/HaskellReviewer/Core/ModulesTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/ModulesTest.o ) [Source file changed]
+[41 of 86] Compiling HaskellReviewer.Core.NameTableTest ( test/HaskellReviewer/Core/NameTableTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/NameTableTest.o )
+[42 of 86] Compiling HaskellReviewer.Core.PackageGlobTest ( test/HaskellReviewer/Core/PackageGlobTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/PackageGlobTest.o ) [Source file changed]
+[43 of 86] Compiling HaskellReviewer.Core.ParserTest ( test/HaskellReviewer/Core/ParserTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/ParserTest.o ) [Source file changed]
+[44 of 86] Compiling HaskellReviewer.Core.PrefsTest ( test/HaskellReviewer/Core/PrefsTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/PrefsTest.o )
+[45 of 86] Compiling HaskellReviewer.Core.ProjectFileTest ( test/HaskellReviewer/Core/ProjectFileTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/ProjectFileTest.o ) [Test.Tasty package changed]
+[46 of 86] Compiling HaskellReviewer.Core.ProjectLoadTest ( test/HaskellReviewer/Core/ProjectLoadTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/ProjectLoadTest.o ) [Test.Tasty package changed]
+[47 of 86] Compiling HaskellReviewer.Core.ProjectTest ( test/HaskellReviewer/Core/ProjectTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/ProjectTest.o ) [Test.Tasty package changed]
+[48 of 86] Compiling HaskellReviewer.Core.RelPathTest ( test/HaskellReviewer/Core/RelPathTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/RelPathTest.o ) [Test.Tasty package changed]
+[49 of 86] Compiling HaskellReviewer.Core.RootTest ( test/HaskellReviewer/Core/RootTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/RootTest.o ) [Test.Tasty package changed]
+[50 of 86] Compiling HaskellReviewer.Core.SearchTest ( test/HaskellReviewer/Core/SearchTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/SearchTest.o )
+[51 of 86] Compiling HaskellReviewer.Core.SourceTextTest ( test/HaskellReviewer/Core/SourceTextTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/SourceTextTest.o ) [Source file changed]
+[52 of 86] Compiling HaskellReviewer.Core.TokensTest ( test/HaskellReviewer/Core/TokensTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/TokensTest.o )
+[53 of 86] Compiling HaskellReviewer.Core.XdgTest ( test/HaskellReviewer/Core/XdgTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/XdgTest.o )
+[54 of 86] Compiling HaskellReviewer.Effects.AtomicFileTest ( test/HaskellReviewer/Effects/AtomicFileTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Effects/AtomicFileTest.o )
+[55 of 86] Compiling HaskellReviewer.Effects.ConfigTest ( test/HaskellReviewer/Effects/ConfigTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Effects/ConfigTest.o )
+[56 of 86] Compiling HaskellReviewer.Effects.HelperTest ( test/HaskellReviewer/Effects/HelperTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Effects/HelperTest.o ) [Test.Tasty package changed]
+[57 of 86] Compiling HaskellReviewer.Effects.LogTest ( test/HaskellReviewer/Effects/LogTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Effects/LogTest.o ) [Test.Tasty package changed]
+[58 of 86] Compiling HaskellReviewer.Effects.TraceTest ( test/HaskellReviewer/Effects/TraceTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Effects/TraceTest.o ) [Data.Aeson.KeyMap package changed]
+[59 of 86] Compiling HaskellReviewer.Server.ApiGoldenTest ( test/HaskellReviewer/Server/ApiGoldenTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Server/ApiGoldenTest.o ) [Source file changed]
+[60 of 86] Compiling HaskellReviewer.Server.ApiTest ( test/HaskellReviewer/Server/ApiTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Server/ApiTest.o ) [Source file changed]
+[61 of 86] Compiling HaskellReviewer.Server.AssetsTest ( test/HaskellReviewer/Server/AssetsTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Server/AssetsTest.o ) [Test.Tasty package changed]
+[62 of 86] Compiling HaskellReviewer.Server.CborTest ( test/HaskellReviewer/Server/CborTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Server/CborTest.o )
+[63 of 86] Compiling HaskellReviewer.Server.EventsTest ( test/HaskellReviewer/Server/EventsTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Server/EventsTest.o ) [Source file changed]
+[64 of 86] Compiling HaskellReviewer.Server.ListenTest ( test/HaskellReviewer/Server/ListenTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Server/ListenTest.o ) [Network.Socket.ByteString package changed]
+[65 of 86] Compiling HaskellReviewer.Server.PageTest ( test/HaskellReviewer/Server/PageTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Server/PageTest.o )
+[66 of 86] Compiling HaskellReviewer.Server.RouterTest ( test/HaskellReviewer/Server/RouterTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Server/RouterTest.o ) [Source file changed]
+[67 of 86] Compiling HaskellReviewer.Session.ClientsTest ( test/HaskellReviewer/Session/ClientsTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Session/ClientsTest.o ) [Test.Tasty package changed]
+[68 of 86] Compiling HaskellReviewer.Session.IndexTest ( test/HaskellReviewer/Session/IndexTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Session/IndexTest.o )
+[69 of 86] Compiling HaskellReviewer.Session.PrefsTest ( test/HaskellReviewer/Session/PrefsTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Session/PrefsTest.o )
+[70 of 86] Compiling HaskellReviewer.Session.SnapshotTest ( test/HaskellReviewer/Session/SnapshotTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Session/SnapshotTest.o ) [Source file changed]
+[71 of 86] Compiling ModulesDump      ( test/ModulesDump.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/ModulesDump.o ) [HaskellReviewer.Core.Modules changed]
+[72 of 86] Compiling HaskellReviewer.Core.ModulesGoldenTest ( test/HaskellReviewer/Core/ModulesGoldenTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/ModulesGoldenTest.o ) [Test.Tasty package changed]
+[73 of 86] Compiling ParseDump        ( test/ParseDump.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/ParseDump.o ) [Source file changed]
+[74 of 86] Compiling HaskellReviewer.Core.ParseGoldenTest ( test/HaskellReviewer/Core/ParseGoldenTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/ParseGoldenTest.o ) [Source file changed]
+[75 of 86] Compiling DeclsDump        ( test/DeclsDump.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/DeclsDump.o )
+[76 of 86] Compiling HaskellReviewer.Core.DeclsGoldenTest ( test/HaskellReviewer/Core/DeclsGoldenTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/DeclsGoldenTest.o )
+[78 of 86] Compiling HaskellReviewer.Core.ProjectGoldenTest ( test/HaskellReviewer/Core/ProjectGoldenTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/ProjectGoldenTest.o ) [Test.Tasty package changed]
+[79 of 86] Compiling RichDump         ( test/RichDump.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/RichDump.o )
+[80 of 86] Compiling HaskellReviewer.Core.RichTextGoldenTest ( test/HaskellReviewer/Core/RichTextGoldenTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Core/RichTextGoldenTest.o )
+[81 of 86] Compiling TestSupport      ( test/TestSupport.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/TestSupport.o ) [Source file changed]
+[82 of 86] Compiling HaskellReviewer.Effects.SpawnTest ( test/HaskellReviewer/Effects/SpawnTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Effects/SpawnTest.o ) [Test.Tasty package changed]
+[83 of 86] Compiling HaskellReviewer.Effects.GitTest ( test/HaskellReviewer/Effects/GitTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Effects/GitTest.o ) [Source file changed]
+[84 of 86] Compiling HaskellReviewer.Effects.FileSystemTest ( test/HaskellReviewer/Effects/FileSystemTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/HaskellReviewer/Effects/FileSystemTest.o ) [Test.Tasty package changed]
+[85 of 86] Compiling ExeTest          ( test/ExeTest.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/ExeTest.o ) [Source file changed]
+[86 of 86] Compiling Main             ( test/Main.hs, /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test-tmp/Main.o ) [Source file changed]
+[87 of 87] Linking /home/lorenzo/Development/haskell-reviewer/dist-newstyle/build/x86_64-linux/ghc-9.14.1/haskell-reviewer-0.1.0.0/t/haskell-reviewer-test/build/haskell-reviewer-test/haskell-reviewer-test [Objects changed]
+bench/fetch-projects.sh 
+optparse-applicative: up to date
+pandoc: fetching e51c9c6054c8f4ec5c3209d5abe10939dfe2963e
+wire-server: fetching 7568f595e42ece6f0791682336014853a9dfcac4
+"$(cabal list-bin bench:haskell-reviewer-bench)" \
+    --exe "$(cabal list-bin exe:haskell-reviewer)" \
+    --runs 10 \
+    --json bench/results/m1-2026-11-02.json \
+    --label "M1 reference" \
+     \
+     \
+    
+haskell-reviewer-bench: optparse-applicative: reading the module list
+haskell-reviewer-bench: optparse-applicative: warm-up run 1/1
+haskell-reviewer-bench: optparse-applicative: start-up run 1/10
+haskell-reviewer-bench: optparse-applicative: start-up run 2/10
+haskell-reviewer-bench: optparse-applicative: start-up run 3/10
+haskell-reviewer-bench: optparse-applicative: start-up run 4/10
+haskell-reviewer-bench: optparse-applicative: start-up run 5/10
+haskell-reviewer-bench: optparse-applicative: start-up run 6/10
+haskell-reviewer-bench: optparse-applicative: start-up run 7/10
+haskell-reviewer-bench: optparse-applicative: start-up run 8/10
+haskell-reviewer-bench: optparse-applicative: start-up run 9/10
+haskell-reviewer-bench: optparse-applicative: start-up run 10/10
+haskell-reviewer-bench: optparse-applicative: steady run 1/3
+haskell-reviewer-bench: optparse-applicative: steady run 2/3
+haskell-reviewer-bench: optparse-applicative: steady run 3/3
+haskell-reviewer-bench: optparse-applicative: search-during run 1/3
+haskell-reviewer-bench: optparse-applicative: search-during run 2/3
+haskell-reviewer-bench: optparse-applicative: search-during run 3/3
+haskell-reviewer-bench: pandoc: reading the module list
+haskell-reviewer-bench: pandoc: warm-up run 1/1
+haskell-reviewer-bench: pandoc: start-up run 1/10
+haskell-reviewer-bench: pandoc: start-up run 2/10
+haskell-reviewer-bench: pandoc: start-up run 3/10
+haskell-reviewer-bench: pandoc: start-up run 4/10
+haskell-reviewer-bench: pandoc: start-up run 5/10
+haskell-reviewer-bench: pandoc: start-up run 6/10
+haskell-reviewer-bench: pandoc: start-up run 7/10
+haskell-reviewer-bench: pandoc: start-up run 8/10
+haskell-reviewer-bench: pandoc: start-up run 9/10
+haskell-reviewer-bench: pandoc: start-up run 10/10
+haskell-reviewer-bench: pandoc: steady run 1/3
+haskell-reviewer-bench: pandoc: steady run 2/3
+haskell-reviewer-bench: pandoc: steady run 3/3
+haskell-reviewer-bench: pandoc: search-during run 1/3
+haskell-reviewer-bench: pandoc: search-during run 2/3
+haskell-reviewer-bench: pandoc: search-during run 3/3
+haskell-reviewer-bench: wire-server: reading the module list
+haskell-reviewer-bench: wire-server: warm-up run 1/1
+haskell-reviewer-bench: wire-server: start-up run 1/10
+haskell-reviewer-bench: wire-server: start-up run 2/10
+haskell-reviewer-bench: wire-server: start-up run 3/10
+haskell-reviewer-bench: wire-server: start-up run 4/10
+haskell-reviewer-bench: wire-server: start-up run 5/10
+haskell-reviewer-bench: wire-server: start-up run 6/10
+haskell-reviewer-bench: wire-server: start-up run 7/10
+haskell-reviewer-bench: wire-server: start-up run 8/10
+haskell-reviewer-bench: wire-server: start-up run 9/10
+haskell-reviewer-bench: wire-server: start-up run 10/10
+haskell-reviewer-bench: wire-server: steady run 1/3
+haskell-reviewer-bench: wire-server: steady run 2/3
+haskell-reviewer-bench: wire-server: steady run 3/3
+haskell-reviewer-bench: wire-server: search-during run 1/3
+haskell-reviewer-bench: wire-server: search-during run 2/3
+haskell-reviewer-bench: wire-server: search-during run 3/3
+haskell-reviewer bench - M1 reference
+runs: 10 start-up + 1 warm-up, 3 steady, 3 search-during; RTS: product defaults
+RLIMIT_NOFILE: soft=1024 hard=524288
+load average at start: 1.01 0.61 0.70
+
+== optparse-applicative (small, 34 modules listed, 34 parsed)
+start-up, 10 runs, ms, median [min-max]:
+  URL 23.6 [20.8-24.9] | accepting 26.4 [23.6-27.8]
+  UI usable 157.9 [145.4-218.2] (58.4 KiB on the wire, first run)
+    shell 26.4, assets 31.8, prefs 155.9, modules 156.2, search 156.6, module 157.2, files 155.4 (first search partial in 10)
+  on-demand module: median 34.7, p95 97.0, max 97.0 (10); last-queued Setup, largest Main, middle Examples.Alternatives
+  indexing done (harness) 210.7 [158.6-214.6] | product 88.5 [63.0-93.0] | span 89.1
+  done line: 34 modules, 34 ready, 0 failed, 0 text only (first run)
+  stop 44.8 [37.8-48.5]
+steady, 3 runs after indexing, ms:
+  navigation back to back: median 1.0, p95 3.6, max 5.1 (102)
+  navigation with idle gaps: median 2.5, p95 5.2, max 7.0 (150)
+  search: median 0.5, p95 1.1, max 2.2 (300)
+  GC: 207 pauses, 204 major (204 after indexing); max 5.0, max major 5.0, p99 4.0; max major after indexing 5.0
+      max during indexing 4.0, after 5.0; paused 585.0 in total
+search during indexing, 3 runs, report only, ms: median 0.5, p95 3.8, max 100.5 (213); 260 queries, 213 partial
+fallbacks: as expected; got: none
+memory, MiB, max over runs: max_mem_in_use 613.0, max_live 2.6, idle RSS 563.9, peak RSS 577.7
+
+== pandoc (typical, 367 modules listed, 366 parsed)
+start-up, 10 runs, ms, median [min-max]:
+  URL 24.4 [18.8-26.7] | accepting 27.3 [21.2-30.0]
+  UI usable 325.3 [277.4-393.4] (65.2 KiB on the wire, first run)
+    shell 27.3, assets 32.0, prefs 278.0, modules 279.5, search 275.2, module 316.5, files 269.1 (first search partial in 10)
+  on-demand module: median 86.9, p95 155.3, max 155.3 (10); last-queued test/command/6466-whole.hs, largest Text.Pandoc.Writers.Powerpoint.Output, middle Text.Pandoc.Readers.RST
+  indexing done (harness) 693.7 [655.3-744.2] | product 464.0 [446.0-512.0] | span 464.2
+  done line: 366 modules, 366 ready, 0 failed, 0 text only (first run)
+  stop 50.4 [43.2-59.5]
+steady, 3 runs after indexing, ms:
+  navigation back to back: median 1.0, p95 3.3, max 11.6 (1098)
+  navigation with idle gaps: median 2.3, p95 5.1, max 20.3 (150)
+  search: median 2.9, p95 5.7, max 9.5 (300)
+  GC: 258 pauses, 213 major (204 after indexing); max 9.0, max major 9.0, p99 8.0; max major after indexing 9.0
+      max during indexing 8.0, after 9.0; paused 1496.0 in total
+search during indexing, 3 runs, report only, ms: median 22.3, p95 56.4, max 205.1 (60); 100 queries, 60 partial
+fallbacks: as expected; got: no-source/autogen 1
+memory, MiB, max over runs: max_mem_in_use 681.0, max_live 31.8, idle RSS 629.2, peak RSS 735.7
+
+== wire-server (large, 2061 modules listed, 1972 parsed)
+start-up, 10 runs, ms, median [min-max]:
+  URL 24.4 [23.2-25.7] | accepting 27.1 [25.9-28.5]
+  UI usable 649.2 [572.4-738.3] (104.8 KiB on the wire, first run)
+    shell 27.1, assets 32.2, prefs 604.5, modules 608.3, search 594.4, module 647.5, files 572.3 (first search partial in 10)
+  on-demand module: median 104.9, p95 185.9, max 185.9 (10); last-queued services/proxy/test/unit/Main.hs, largest Test.Wire.API.Golden.Generated, middle Wire.ConversationStore.Cassandra
+  indexing done (harness) 1668.8 [1520.0-1735.8] | product 1113.5 [1081.0-1178.0] | span 1114.2
+  done line: 1972 modules, 1972 ready, 0 failed, 11 text only (first run)
+  stop 66.0 [58.4-81.6]
+steady, 3 runs after indexing, ms:
+  navigation back to back: median 0.8, p95 2.9, max 23.9 (5916)
+  navigation with idle gaps: median 2.1, p95 8.3, max 51.8 (150)
+  search: median 8.4, p95 17.7, max 27.3 (300)
+  GC: 368 pauses, 218 major (203 after indexing); max 22.2, max major 22.2, p99 22.0; max major after indexing 22.0
+      max during indexing 13.0, after 22.0; paused 4282.0 in total
+search during indexing, 3 runs, report only, ms: median 18.1, p95 57.8, max 612.4 (163); 200 queries, 163 partial
+fallbacks: as expected; got: preprocessed 11, generated 1, no-source/autogen 85, no-source/missing 3
+memory, MiB, max over runs: max_mem_in_use 797.0, max_live 103.8, idle RSS 784.4, peak RSS 862.5
+  §10.2 budget 2048.0 (max_mem_in_use): ok
+
+Targets (SPEC §10.1, D-208; a MISS never fails the bench, §10.3):
+  §10.1 URL + accepting < 300 ms (median): optparse-applicative: ok (26.4 ms; max 27.8)
+  §10.1 UI usable < 1 s (median): optparse-applicative: ok (157.9 ms; max 218.2)
+  §10.1 on-demand module < 300 ms (p95): optparse-applicative: ok (97.0 ms; max 97.0)
+  §10.1 navigation < 100 ms (back to back) (p95): optparse-applicative: ok (3.6 ms; max 5.1)
+  §10.1 navigation < 100 ms (idle gaps) (p95): optparse-applicative: ok (5.2 ms; max 7.0)
+  D-208 search after indexing ≤ 30 ms (median): optparse-applicative: ok (0.5 ms; max 2.2)
+  D-208 search after indexing ≤ 100 ms (p95): optparse-applicative: ok (1.1 ms; max 2.2)
+  §10.1 URL + accepting < 300 ms (median): pandoc: ok (27.3 ms; max 30.0)
+  §10.1 UI usable < 1 s (median): pandoc: ok (325.3 ms; max 393.4)
+  §10.1 on-demand module < 300 ms (p95): pandoc: ok (155.3 ms; max 155.3)
+  §10.1 navigation < 100 ms (back to back) (p95): pandoc: ok (3.3 ms; max 11.6)
+  §10.1 navigation < 100 ms (idle gaps) (p95): pandoc: ok (5.1 ms; max 20.3)
+  D-208 search after indexing ≤ 30 ms (median): pandoc: ok (2.9 ms; max 9.5)
+  D-208 search after indexing ≤ 100 ms (p95): pandoc: ok (5.7 ms; max 9.5)
+  §10.1 URL + accepting < 300 ms (median): wire-server: ok (27.1 ms; max 28.5)
+  §10.1 UI usable < 10 s (median): wire-server: ok (649.2 ms; max 738.3)
+  §10.1 on-demand module < 300 ms (p95): wire-server: ok (185.9 ms; max 185.9)
+  §10.1 navigation < 100 ms (back to back) (p95): wire-server: ok (2.9 ms; max 23.9)
+  §10.1 navigation < 100 ms (idle gaps) (p95): wire-server: ok (8.3 ms; max 51.8)
+  D-208 search after indexing ≤ 30 ms (median): wire-server: ok (8.4 ms; max 27.3)
+  D-208 search after indexing ≤ 100 ms (p95): wire-server: ok (17.7 ms; max 27.3)

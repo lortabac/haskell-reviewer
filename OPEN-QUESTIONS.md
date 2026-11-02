@@ -39,7 +39,8 @@ is updated if needed (§10.3).
   (`warmUpTempDirs`). Small repros
   (many threads doing their first printf, or stat on a missing file,
   under GC load) still didn't hang.
-- **Q-OLD-SYNTAX**: How real is "the newest parser rejects old code"? The
+- **Q-OLD-SYNTAX**: closed (D-217): no shim in v1; reopen on user
+  reports. How real is "the newest parser rejects old code"? The
   known cases (e.g. changes to `forall`/`!`/`~` lexing, `NoStarIsType`) need
   to be checked against the 3 supported GHCs, which may require a lexing-mode
   shim.
@@ -47,9 +48,11 @@ is updated if needed (§10.3).
   projects, and no old-syntax case in the extras. On a checklist of known
   cases, 9.10, 9.12 and 9.14 accept and reject the same things; `forall`
   as a term name is rejected from 9.10 on (9.6 accepts it; 9.8 not
-  tested). Re-run: `spikes/parser-count/old-syntax-probes/run.sh`. No
-  shim needed for now.
-  Left open until M1 parses more projects (check the text fallbacks).
+  tested). Re-run: `spikes/parser-count/old-syntax-probes/run.sh`.
+  M1 (T13b): the product's census finds no parse or pragma error in the
+  reference projects, and none of the 79 in the extras is old syntax
+  (missing flags, CPP, templates, markdown-unlit docs outside any
+  component). The probes give the same codes as in M0.
 - **Q-CLAUDE-CLI-FLAGS**: Confirm the exact `claude` flags for D-34/D-47
   with a real headless run on the tested CLI version range. Flags were seen in
   `claude --help` 2.1.281: `--tools`, `--mcp-config`, `--strict-mcp-config`,
@@ -60,9 +63,12 @@ is updated if needed (§10.3).
   backstop.
 - **Q-PERF-COLD**: Set a bound for the cold HIE-conversion cache from the
   first benchmarks (§10.1).
-- **Q-GC**: Check that major GC pauses stay within the < 100 ms
-  navigation target with large indexes. Options: compact regions for
-  finished module models, or the non-moving collector (§11.5).
+- **Q-GC**: closed for M1 (D-219): keep the copying GC and the D-162
+  defaults; re-check when M2 grows the index. Check that major GC pauses
+  stay within the < 100 ms navigation target with large indexes. Options:
+  compact regions for finished module models, or the non-moving collector
+  (§11.5). M1 reference run: wire-server max major pause after indexing
+  22 ms, idle-gap navigation p95 8.3 ms.
 - **Q-OPENAI-COMPAT**: Check that the `openai` package's raw stream and our
   delta decoder work with Ollama, llama.cpp and vLLM, not only OpenAI
   (§11.6.3).
