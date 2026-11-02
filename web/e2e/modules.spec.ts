@@ -1,9 +1,9 @@
 // The module tree in the sidebar, the project notices and the file
 // banners: on the main fixture (an implicit package) and on a cabal
 // project.
-import AxeBuilder from "@axe-core/playwright";
 import type { Locator, Page } from "@playwright/test";
 import { expect, showFiles, sidebar, tabKey, test } from "./support/fixtures";
+import { expectNoAxeViolations as axe } from "./support/a11y";
 
 const texts = {
   implicit:
@@ -13,20 +13,6 @@ const texts = {
   generated: "Generated from this file by alex: shown as text, not indexed.",
   preprocessed: "Preprocessed by hspec-discover: shown as text, not indexed.",
 };
-
-const wcag = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
-
-async function axe(page: Page, what: string): Promise<void> {
-  const result = await new AxeBuilder({ page }).withTags(wcag).analyze();
-  const summary = result.violations.map(
-    (v) =>
-      `${v.id} (${v.impact ?? "?"}): ${v.nodes
-        .slice(0, 3)
-        .map((n) => n.target.join(" "))
-        .join(", ")}`,
-  );
-  expect(summary, `axe violations on ${what}`).toEqual([]);
-}
 
 function toggle(page: Page, name: "Modules" | "Files"): Locator {
   return sidebar(page).getByRole("button", { name, exact: true });

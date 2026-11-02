@@ -589,6 +589,8 @@ also has a UI control, so nothing is lost with shortcuts off.
   focus and scroll, and the focused line is announced.
 - Text scales to 200% without loss of function. Side-by-side diffs fall
   back to unified below a minimum width.
+- Reflows to one column (header, then sidebar, then main) at 320px wide,
+  with no sideways scroll (D-212).
 
 ### 5.5 Visual design
 
@@ -1050,7 +1052,8 @@ appears at once and fills in progressively.
 
 - Indexing is **progressive**. Modules are parsed in the background, and a
   module the user requests jumps the queue. The header shows indexing
-  progress.
+  progress: plain text, shown once it's taken more than a second, hidden
+  again once done unless some modules failed (D-211).
 - Features that need the whole index say so while it is incomplete:
   declaration-level search, find-references, "Affected (not modified)" and
   the LLM `find_references` tool. They mark their results *partial*, and do

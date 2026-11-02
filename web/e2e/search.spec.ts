@@ -3,6 +3,11 @@
 // declaration too (amends D-183).
 import type { Locator, Page } from "@playwright/test";
 import { expect, moduleNotFound404, sidebar, test } from "./support/fixtures";
+import {
+  expectNoAxeViolations as axe,
+  noSideways,
+  themes,
+} from "./support/a11y";
 
 function escape(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -250,6 +255,7 @@ test("header box shrinks at narrow widths, no sideways scroll from it (C10)", as
     return { scrollWidth: h.scrollWidth, clientWidth: h.clientWidth };
   });
   expect(header.scrollWidth).toBeLessThanOrEqual(header.clientWidth);
+  await noSideways(page);
 });
 
 test("header: a pending Enter is cancelled by a sidebar click before a delayed answer lands (round 2, #1)", async ({
@@ -307,3 +313,23 @@ test("header: choosing the declaration already shown by mouse doesn't scroll to 
     .poll(() => page.evaluate(() => window.scrollY))
     .toBeGreaterThan(0);
 });
+
+for (const t of themes) {
+  test(`axe: header popup open, an active option, ${t.scheme} theme`, async ({
+    page,
+    startServer,
+    docsProject,
+  }) => {
+    const server = await startServer({ root: docsProject.root });
+    await page.emulateMedia({ colorScheme: t.scheme });
+    await page.goto(server.base);
+    const box = headerBox(page);
+    await box.fill("Shapes");
+    await expect(headerResults(page).first()).toBeVisible();
+    await box.press("ArrowDown");
+    const active = page.locator(".frame-header .search-result-active");
+    await expect(active).toBeVisible();
+    await expect(active).toHaveCSS("outline-style", "solid");
+    await axe(page, "header popup open, an active option");
+  });
+}

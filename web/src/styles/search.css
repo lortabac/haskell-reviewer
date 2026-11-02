@@ -15,6 +15,12 @@
   border-radius: 4px;
 }
 
+/* Firefox's own placeholder colour is too light against --color-bg. */
+.search-box input::placeholder {
+  color: var(--color-muted);
+  opacity: 1;
+}
+
 .search-status {
   margin: var(--space-1) 0 0;
   color: var(--color-muted);
@@ -44,9 +50,16 @@
   text-decoration: none;
 }
 
-.search-results a:hover,
+.search-results a:hover {
+  background: var(--color-surface);
+}
+
+/* The active option (arrow keys): background plus a ring, not colour
+   alone (SPEC §5.4). */
 .search-results a.search-result-active {
   background: var(--color-surface);
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
 }
 
 .search-result-name {

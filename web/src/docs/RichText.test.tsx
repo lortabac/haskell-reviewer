@@ -164,6 +164,28 @@ describe("DocView", () => {
     ).toEqual(["H4", "H5", "H6"]);
   });
 
+  it("a heading level never skips one, even if the markup jumps (D-192)", () => {
+    const h = (level: number): Block => ({
+      kind: "heading",
+      level,
+      inlines: [t(`l${level}`)],
+    });
+    // Straight to "===" (level 3): still one below the context (h4),
+    // not level + 3 (would have been h6).
+    const root = show(doc([h(3)]), 3);
+    expect(
+      [...root.querySelectorAll(".doc-heading")].map((e) => e.tagName),
+    ).toEqual(["H4"]);
+
+    // Deeper, then back to a level already seen: picks up the level it
+    // had then, not a fresh jump from the last one.
+    dispose?.();
+    const root2 = show(doc([h(1), h(2), h(1)]), 3);
+    expect(
+      [...root2.querySelectorAll(".doc-heading")].map((e) => e.tagName),
+    ).toEqual(["H4", "H5", "H4"]);
+  });
+
   it("lists, definitions, code, examples, property", () => {
     const root = show(
       doc([

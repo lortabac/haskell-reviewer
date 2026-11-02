@@ -1,8 +1,8 @@
 // The docs view: module pages from the sidebar, anchors, Haddock
 // links, go to source, wrapping, text-only and not found pages.
-import AxeBuilder from "@axe-core/playwright";
 import type { Locator, Page } from "@playwright/test";
 import { expect, moduleNotFound404, sidebar, test } from "./support/fixtures";
+import { expectNoAxeViolations as axe, themes } from "./support/a11y";
 import { shapesLine } from "./support/project";
 
 // The section of a declaration, by the start of its head.
@@ -376,14 +376,14 @@ test("unknown declaration: notice and box on the page", async ({
   await expect(page.locator("section.decl").first()).toBeVisible();
 });
 
-for (const scheme of ["light", "dark"] as const) {
-  test(`axe on a module page, ${scheme} theme`, async ({
+for (const t of themes) {
+  test(`axe on a module page, ${t.scheme} theme`, async ({
     page,
     startServer,
     docsProject,
   }) => {
     const server = await startServer({ root: docsProject.root });
-    await page.emulateMedia({ colorScheme: scheme });
+    await page.emulateMedia({ colorScheme: t.scheme });
     await page.goto(server.base + "docs/tree/Shapes");
     await expect(page.locator("section.decl").first()).toBeVisible();
     await page.locator(".docs-extensions summary").click();
@@ -394,16 +394,22 @@ for (const scheme of ["light", "dark"] as const) {
       .getByRole("button", { name: /Show source/ })
       .click();
     await expect(page.locator("pre.src")).toBeVisible();
-    const result = await new AxeBuilder({ page })
-      .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
-      .analyze();
-    const summary = result.violations.map(
-      (v) =>
-        `${v.id}: ${v.nodes
-          .slice(0, 3)
-          .map((n) => n.target.join(" "))
-          .join(", ")}`,
+    await axe(page, "module page, everything open");
+  });
+
+  test(`axe on an unknown module, ${t.scheme} theme`, async ({
+    page,
+    startServer,
+    docsProject,
+    guard,
+  }) => {
+    guard.allow(moduleNotFound404);
+    const server = await startServer({ root: docsProject.root });
+    await page.emulateMedia({ colorScheme: t.scheme });
+    await page.goto(server.base + "docs/tree/Nope");
+    await expect(page.locator("main h1")).toHaveText(
+      "Not found in this snapshot",
     );
-    expect(summary).toEqual([]);
+    await axe(page, "unknown module");
   });
 }

@@ -1,4 +1,12 @@
-/* Design tokens. Every colour pair here has >= 4.5:1 contrast (SPEC §5.4).
+/* Design tokens (SPEC §5.4): text needs >= 4.5:1, a ring or a border
+   that only has to be seen (not read) needs >= 3:1. Checked in
+   tokens.test.ts, both themes.
+
+   Pairs we use for text: fg/bg, fg/surface, fg/border, fg/mark,
+   muted/bg, muted/surface, link/bg, link/surface. Pairs for a ring or
+   a border only: focus/bg, focus/surface. Don't put text in
+   muted/border or muted/mark (dark theme): both are under 4.5:1.
+
    light-dark() picks a value from the element's own color-scheme
    (D-203): the root follows the OS (color-scheme: light dark) unless
    <html data-theme> fixes it one way. */

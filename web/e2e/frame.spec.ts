@@ -1,6 +1,4 @@
 // The page frame: security headers, themes, accessibility.
-import AxeBuilder from "@axe-core/playwright";
-import type { Page } from "@playwright/test";
 import {
   expect,
   notFound404,
@@ -9,30 +7,12 @@ import {
   tabKey,
   test,
 } from "./support/fixtures";
+import { expectNoAxeViolations as axe, themes } from "./support/a11y";
 
 const csp =
   "default-src 'self'; img-src 'self' data:; connect-src 'self'; " +
   "script-src 'self'; object-src 'none'; base-uri 'none'; " +
   "form-action 'none'; frame-ancestors 'none'";
-
-const wcag = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
-
-const themes = [
-  { scheme: "light", bg: "rgb(255, 255, 255)" },
-  { scheme: "dark", bg: "rgb(13, 17, 23)" },
-] as const;
-
-async function axe(page: Page, what: string): Promise<void> {
-  const result = await new AxeBuilder({ page }).withTags(wcag).analyze();
-  const summary = result.violations.map(
-    (v) =>
-      `${v.id} (${v.impact ?? "?"}): ${v.nodes
-        .slice(0, 3)
-        .map((n) => n.target.join(" "))
-        .join(", ")}`,
-  );
-  expect(summary, `axe violations on ${what}`).toEqual([]);
-}
 
 test("CSP header, and the guard sees violations", async ({
   page,

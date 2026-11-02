@@ -1,5 +1,6 @@
 import type { JSX, ParentProps } from "solid-js";
 import { ConnectionNotice } from "./events/ConnectionNotice";
+import { IndexingStatus } from "./events/IndexingStatus";
 
 // The page frame (SPEC §4.1): header, sidebar, main view.
 // No router hooks here, so tests can render it alone. The sidebar,
@@ -28,6 +29,7 @@ export function Frame(
       <header class="frame-header">
         <span class="app-name">haskell-reviewer</span>
         {props.search}
+        <IndexingStatus />
         {props.controls}
         <ConnectionNotice />
       </header>
