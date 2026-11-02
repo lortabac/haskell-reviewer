@@ -114,7 +114,10 @@ D-84):
    alone does nothing (GHC needs -F). -pgmL <tool>: the same for .lhs
    and .lhsig, except markdown-unlit, which we do ourselves (a module).
    Both "-pgmF tool" and "-pgmFtool"; the last one wins; the tool shown
-   is the file name. OPTIONS_GHC pragmas are not read here.
+   is the file name. OPTIONS_GHC pragmas are not read here. A loose
+   .lhs/.lhsig (an other file, no component, so no known -pgmL) gets
+   'LooseLiterate': we guess between GHC's unlit and markdown-unlit
+   from the text itself (D-218, 'HaskellReviewer.Core.SourceText.unlitLoose').
 4. main-is: under each source dir in order, read like a path written
    in a .cabal file (may hold ..). The first listed file wins. If it's
    outside ROOT under every dir: no source, "outside". A .git segment
@@ -248,6 +251,9 @@ data Literate
     BirdOrLatex
   | -- | -pgmL markdown-unlit: code blocks only (D-84).
     MarkdownUnlit
+  | -- | .lhs or .lhsig outside any component: no -pgmL is known, so
+    -- we guess between the two above from the text itself (D-218).
+    LooseLiterate
   deriving (Eq, Show)
 
 -- | A preprocessor input.
@@ -430,10 +436,17 @@ findModule idx = \case
     pure (looseModule path)
 
 -- | An other file's module: plain Haskell, maybe literate (no tools for
--- other files), with 'looseSettings'.
+-- other files), with 'looseSettings'. A @.lhs@\/@.lhsig@ gets
+-- 'LooseLiterate' (D-218), since no component means no known
+-- @-pgmL@: 'HaskellReviewer.Core.Parser.unlit' reads the text itself
+-- to decide between GHC's unlit and markdown-unlit.
 looseModule :: RelPath -> FoundModule
 looseModule path =
-  FoundModule {source = fileSource (toolsFrom []) path, settings = looseSettings}
+  FoundModule {source = loosen (fileSource (toolsFrom []) path), settings = looseSettings}
+  where
+    loosen (HaskellSource f@HaskellFile {literate = BirdOrLatex}) =
+      HaskellSource f {literate = LooseLiterate}
+    loosen s = s
 
 -- * Identity
 

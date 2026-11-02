@@ -140,10 +140,12 @@ import HaskellReviewer.Core.Project
 import HaskellReviewer.Core.Project qualified as Project (Language (..))
 import HaskellReviewer.Core.RelPath (relPathName)
 import HaskellReviewer.Core.SourceText
-  ( blankSpans,
+  ( LooseUnlit (..),
+    blankSpans,
     columnMap,
     stripBom,
     unlitBirdLatex,
+    unlitLoose,
     unlitMarkdown,
   )
 import HaskellReviewer.Core.Tokens (noTokens)
@@ -371,6 +373,9 @@ unlit settings input = case settings.literate of
   MarkdownUnlit -> case unlitMarkdown (stripBom input) of
     Just t -> (t, [])
     Nothing -> ("", [NoMarkdownCode])
+  LooseLiterate -> case unlitLoose (stripBom input) of
+    (t, UsedGhcUnlit) -> (t, [])
+    (t, UsedMarkdownUnlit) -> (t, [ReadAsMarkdown])
 
 -- | Spans on text that didn't go through CPP.
 plainSpans :: Text -> SpanMap

@@ -6,16 +6,18 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import HaskellReviewer.Core.SourceText
   ( GhcRange (..),
+    LooseUnlit (..),
     columnMap,
     ghcToSpan,
     sliceSpan,
     sourceLines,
     stripBom,
     unlitBirdLatex,
+    unlitLoose,
     unlitMarkdown,
   )
 import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
-import Hedgehog (forAll, property, (===))
+import Hedgehog (assert, forAll, property, (===))
 import Hedgehog.Gen qualified as Gen
 import Hedgehog.Range qualified as Range
 import System.Timeout (timeout)
@@ -51,6 +53,57 @@ tests =
         unlitMarkdown t @?= Just "\n\nx = 1\n\n\n\n\n\n\n"
         (lineCount <$> unlitMarkdown t) @?= Just (lineCount t)
         unlitMarkdown "# t\n```sh\nx\n```\n" @?= Nothing,
+      testCase "unlitLoose: no Bird or LaTeX, a haskell block: read as markdown" $ do
+        let t = "# t\n```haskell\nx = 1\n```\n"
+            expected = fromMaybe (error "no block") (unlitMarkdown t)
+        unlitLoose t @?= (expected, UsedMarkdownUnlit)
+        (lineCount . fst . unlitLoose) t @?= lineCount t,
+      testCase "unlitLoose: a Bird line outside fences wins, even with a block" $ do
+        let t = "> module Bird where\n\n```haskell\nx = 1\n```\n"
+        unlitLoose t @?= (unlitBirdLatex t, UsedGhcUnlit),
+      testCase "unlitLoose: \\begin{code} outside fences wins, even with a block" $ do
+        let t = "\\begin{code}\nx = 1\n\\end{code}\n\n```haskell\ny = 2\n```\n"
+        unlitLoose t @?= (unlitBirdLatex t, UsedGhcUnlit),
+      testCase "unlitLoose: a > line inside an unrelated fence doesn't count as Bird" $ do
+        let t = "```\n> GET /x\n```\n\n```haskell\nx = 1\n```\n"
+            expected = fromMaybe (error "no block") (unlitMarkdown t)
+        unlitLoose t @?= (expected, UsedMarkdownUnlit),
+      testCase "unlitLoose: \"``` haskell\", a space after the fence, still opens" $ do
+        let t = "``` haskell\nx = 1\n```\n"
+        (snd . unlitLoose) t @?= UsedMarkdownUnlit,
+      testCase "unlitLoose: only ```hs (not \"haskell\"): no block, GHC's unlit" $ do
+        let t = "```hs\nx = 1\n```\n"
+        unlitLoose t @?= (unlitBirdLatex t, UsedGhcUnlit),
+      testCase "unlitLoose: only ```haskell ignore: no block, GHC's unlit" $ do
+        let t = "```haskell ignore\nx = 1\n```\n"
+        unlitLoose t @?= (unlitBirdLatex t, UsedGhcUnlit),
+      testCase "unlitLoose: plain prose, no fence: GHC's unlit" $ do
+        let t = "Just prose.\nNo code here.\n"
+        unlitLoose t @?= (unlitBirdLatex t, UsedGhcUnlit),
+      testProperty
+        "unlitLoose: line count never changes; each style's own contract holds"
+        . property
+        $ do
+          let pieces =
+                [ "a = 1",
+                  ">",
+                  "> x",
+                  "```",
+                  "```haskell",
+                  "```hs",
+                  "\\begin{code}",
+                  "\\end{code}",
+                  ""
+                ]
+          ls <- forAll (Gen.list (Range.linear 0 12) (Gen.element pieces))
+          let t = Text.intercalate "\n" ls
+              (t', style) = unlitLoose t
+          lineCount t' === lineCount t
+          case style of
+            UsedGhcUnlit -> t' === unlitBirdLatex t
+            UsedMarkdownUnlit -> do
+              t' === fromMaybe (error "expected a block") (unlitMarkdown t)
+              assert (noBirdOrLatexOutsideFences t),
       testCase "columns: no tab, no change" $
         ghcToSpan (columnMap "abc\ndef") (range 2 2 2 4) @?= spanOf 2 2 2 4,
       testCase "columns: a tab is one column" $ do
@@ -114,5 +167,18 @@ tests =
                   <> [Text.take (c2 - 1) (line l2)]
     lineCount :: Text -> Int
     lineCount = length . Text.splitOn "\n"
+    -- An independent re-check of unlitLoose's precondition for
+    -- markdown-unlit, written separately from SourceText's own fence
+    -- tracking, so the property test can't just restate the code.
+    noBirdOrLatexOutsideFences :: Text -> Bool
+    noBirdOrLatexOutsideFences = go False . Text.splitOn "\n"
+      where
+        go _ [] = True
+        go inFence (l : ls)
+          | "```" `Text.isPrefixOf` Text.stripStart l = go (not inFence) ls
+          | inFence = go inFence ls
+          | "\\begin{code}" `Text.isPrefixOf` Text.stripStart l = False
+          | ">" `Text.isPrefixOf` l = False
+          | otherwise = go inFence ls
     range a b c d = GhcRange {startLine = a, startCol = b, endLine = c, endCol = d}
     spanOf a b c d = Span (Line a) (Col b) (Line c) (Col d)

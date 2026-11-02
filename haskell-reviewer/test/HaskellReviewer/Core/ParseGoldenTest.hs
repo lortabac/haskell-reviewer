@@ -107,6 +107,23 @@ cases =
       },
     (plain "markdown.lhs") {settings = with {literate = MarkdownUnlit}},
     (plain "markdown-no-code.lhs") {settings = with {literate = MarkdownUnlit}},
+    -- A loose .lhs (no component, so no known -pgmL, D-218): no Bird
+    -- or LaTeX code outside fences, and a haskell block, so read as
+    -- markdown-unlit, with a warning.
+    (plain "markdown-loose.lhs") {settings = with {literate = LooseLiterate}},
+    -- bird.lhs and latex.lhs have no fence at all, so unlitLoose
+    -- behaves exactly like BirdOrLatex: same goldens as above.
+    (plain "bird.lhs")
+      { golden = "bird-loose",
+        settings = with {literate = LooseLiterate}
+      },
+    (plain "latex.lhs")
+      { golden = "latex-loose",
+        settings = with {literate = LooseLiterate}
+      },
+    -- A loose .lhs with Bird code outside fences *and* a haskell
+    -- block: Bird wins (D-218), so it's GHC's unlit, with no warning.
+    (plain "bird-fence.lhs") {settings = with {literate = LooseLiterate}},
     (plain "sig.hsig") {settings = with {kind = SignatureFile}},
     plain "hspec-discover.hs",
     -- -pgmF without -F: parsed.

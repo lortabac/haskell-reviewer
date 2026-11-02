@@ -480,7 +480,7 @@ findTest = do
             P.cppOptions = ["-DX"],
             P.buildDepends = [PackageName "base"]
           }
-      idx = onePackage ["p/src/A.hs", "p/tools/B.lhs"] [c]
+      idx = onePackage ["p/src/A.hs", "p/tools/B.lhs", "p/tools/C.lhsig"] [c]
       settings =
         ComponentSettings
           { language = GHC2024,
@@ -495,7 +495,14 @@ findTest = do
   findModule idx (LooseModule (path "p/tools/B.lhs"))
     @?= Just
       FoundModule
-        { source = haskell "p/tools/B.lhs" BirdOrLatex,
+        { source = haskell "p/tools/B.lhs" LooseLiterate,
+          settings = looseSettings
+        }
+  -- A loose .lhsig gets LooseLiterate too, not just .lhs.
+  findModule idx (LooseModule (path "p/tools/C.lhsig"))
+    @?= Just
+      FoundModule
+        { source = haskell "p/tools/C.lhsig" LooseLiterate,
           settings = looseSettings
         }
   looseSettings.language @?= GHC2021
