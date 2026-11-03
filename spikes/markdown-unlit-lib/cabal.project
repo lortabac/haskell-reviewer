@@ -1,0 +1,10 @@
+-- Own project: the root cabal.project never sees this package.
+packages: . ../../haskell-reviewer
+
+-- Same pins and index-state as the root.
+import: ../../cabal.project.freeze
+
+-- As in the root cabal.project: needed on GHC 9.14.
+allow-newer: cborg:base, cborg:containers, cborg:ghc-prim
+
+constraints: markdown-unlit ==0.6.0, base-compat ==0.15.0

@@ -1,0 +1,88 @@
+=== cases/a-plain.lhs
+  P0 ours: parsed, names 2, wrong 0
+  P1 lib-raw: parsed, names 2, wrong 0
+  P2 lib-layout: parsed, names 2, wrong 0
+  layout: in place, same code as lib: True
+  P2 tokens == P0 tokens: True (17 vs 17)
+=== cases/b-indented.lhs
+  P0 ours: parsed, names 2, wrong 0
+  P1 lib-raw: parsed, names 2, wrong 2
+    wrong: foo at 8:1-8:4 cuts "   "
+    wrong: bar at 15:1-15:4 cuts "   "
+  P2 lib-layout: parsed, names 2, wrong 0
+  layout: moved, same code as lib: True
+  P2 tokens == P0 tokens: True (15 vs 15)
+=== cases/c-top.lhs
+  P0 ours: text-only: ParseFailed (ParseError {message = "parse error on input `module'", code = Just "GHC-58481", span = Just (Span {startLin, names 0, wrong 0
+  P1 lib-raw: parsed, names 1, wrong 0
+  P2 lib-layout: parsed, names 1, wrong 0
+  layout: moved, same code as lib: True
+=== cases/d-tilde.lhs
+  P0 ours: parsed, names 0, wrong 0
+    warnings: ["no Haskell code block"]
+  P1 lib-raw: parsed, names 2, wrong 0
+  P2 lib-layout: parsed, names 2, wrong 0
+  layout: in place, same code as lib: True
+  P2 tokens == P0 tokens: False (15 vs 0)
+=== cases/e-tabs.lhs
+  P0 ours: parsed, names 2, wrong 0
+  P1 lib-raw: parsed, names 2, wrong 2
+    wrong: foo at 6:1-6:2 cuts " "
+    wrong: bar at 11:1-11:4 cuts "  b"
+  P2 lib-layout: parsed, names 2, wrong 0
+  layout: moved, same code as lib: True
+  P2 tokens == P0 tokens: True (20 vs 20)
+=== cases/f-cpp.lhs
+  P0 ours: parsed, names 2, wrong 0
+    pragmas: ["CPP"]
+  P1 lib-raw: parsed, names 2, wrong 2
+    wrong: foo at 9:1-9:4 cuts ""
+    wrong: bar at 12:1-12:4 cuts "gon"
+    warnings: ["line 1: #line ignored","line 4: #line ignored","line 11: #line ignored"]
+    pragmas: ["CPP"]
+  P2 lib-layout: parsed, names 2, wrong 0
+    pragmas: ["CPP"]
+  layout: in place, same code as lib: True
+  P2 tokens == P0 tokens: True (16 vs 16)
+  CPP regions P0: [(11,11),(12,13),(14,14)]
+  CPP regions P2 (layout lines -> file lines): [((11,11),(11,11)),((12,13),(12,13)),((14,14),(14,14))]
+=== cases/g-line-pragma.lhs
+  P0 ours: parsed, names 1, wrong 0
+  P1 lib-raw: parsed, names 1, wrong 1
+    wrong: foo at 100:1-100:4 cuts ""
+  P2 lib-layout: parsed, names 1, wrong 0
+  layout: in place, same code as lib: True
+  P2 tokens == P0 tokens: True (10 vs 10)
+=== cases/h-hash-line.lhs
+  P0 ours: parsed, names 1, wrong 1
+    wrong: foo at 1:1-1:4 cuts "# A"
+  P1 lib-raw: parsed, names 1, wrong 1
+    wrong: foo at 1:1-1:4 cuts "# A"
+  P2 lib-layout: parsed, names 1, wrong 1
+    wrong: foo at 1:1-1:4 cuts "# A"
+  layout: in place, same code as lib: True
+  P2 tokens == P0 tokens: True (9 vs 9)
+  CPP regions P0: [(6,6)]
+  CPP regions P2 (layout lines -> file lines): [((6,6),(6,6))]
+=== cases/i-classes.lhs
+  P0 ours: text-only: ParseFailed (ParseError {message = "parse error on input `module'", code = Just "GHC-58481", span = Just (Span {startLin, names 0, wrong 0
+  P1 lib-raw: parsed, names 1, wrong 0
+  P2 lib-layout: parsed, names 1, wrong 0
+  layout: in place, same code as lib: True
+=== cases/j-pairing.lhs
+  P0 ours: parsed, names 2, wrong 0
+  P1 lib-raw: parsed, names 1, wrong 0
+  P2 lib-layout: parsed, names 1, wrong 0
+  layout: in place, same code as lib: True
+  P2 tokens == P0 tokens: False (9 vs 15)
+=== cases/k-cpp-indented.lhs
+  P0 ours: text-only: ParseFailed (ParseError {message = "parse error on input `#'", code = Just "GHC-58481", span = Just (Span {startLine = L, names 0, wrong 0
+    warnings: ["line 13: directive not in column 1, read as text","line 16: directive not in column 1, read as text"]
+  P1 lib-raw: parsed, names 1, wrong 1
+    wrong: foo at 9:1-9:4 cuts ""
+    warnings: ["line 1: #line ignored","line 4: #line ignored"]
+    pragmas: ["CPP"]
+  P2 lib-layout: parsed, names 1, wrong 0
+    pragmas: ["CPP"]
+  layout: moved, same code as lib: True
+  CPP regions P2 (layout lines -> file lines): [((3,3),(13,13)),((4,5),(14,15)),((6,6),(16,16))]

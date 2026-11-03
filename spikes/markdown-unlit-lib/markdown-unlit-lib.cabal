@@ -1,0 +1,29 @@
+cabal-version: 3.0
+name:          markdown-unlit-lib
+version:       0
+synopsis:      Throwaway M2 spike (T02): markdown-unlit 0.6.0 as a library.
+license:       BSD-3-Clause
+build-type:    Simple
+
+executable markdown-unlit-lib
+  main-is:          Main.hs
+  hs-source-dirs:   src
+  other-modules:    LibUnlit Shapes Census Check
+  default-language: GHC2021
+  default-extensions:
+    DuplicateRecordFields
+    LambdaCase
+    NoFieldSelectors
+    OverloadedRecordDot
+    OverloadedStrings
+  ghc-options:      -O1 -Wall -rtsopts
+  build-depends:
+    , base
+    , bytestring
+    , containers
+    , directory
+    , filepath
+    , haskell-reviewer
+    , markdown-unlit    ==0.6.0
+    , text
+    , vector
