@@ -138,12 +138,21 @@ In browse mode there is exactly one side.
   hspec-discover) or any `-pgmL` tool is shown as text, with a
   "preprocessed by <tool>, not indexed" banner, since we never run project
   preprocessors (§9.1). The one exception is `-pgmL markdown-unlit`,
-  supported approximately: the `.lhs` file is read from its
-  ```` ```haskell ```` code blocks only. If no code blocks are found, it
-  gets the same banner. A loose `.lhs`/`.lhsig` (no component, so no known
-  `-pgmL`) is read the same way when it has no Bird or LaTeX code outside
-  fences and at least one code block, with a warning; otherwise it's read
-  as plain `.lhs`, GHC's unlit style (D-218, D-221).
+  read with markdown-unlit 0.6.0's rules, as our own code (D-224). A
+  fence is a line starting (after indentation) with ```` ``` ```` or
+  `~~~`, and any fence closes the open block. A block is Haskell when its
+  classes (the info string's words; `.` counts as a space; `{…}` is
+  unwrapped up to the first `}`) include `haskell` and not `ignore`.
+  `-optL` selectors are ignored (D-226). With no Haskell block, the
+  module is empty, with a "no Haskell code block" warning. If
+  markdown-unlit would move code (`top`/`top:N` blocks out of file order,
+  or an indented Haskell fence, which it dedents), the module is shown as
+  text with the "preprocessed by markdown-unlit, not indexed" banner and
+  a warning saying why (D-225). A loose `.lhs`/`.lhsig` (no component, so
+  no known `-pgmL`) is read the same way when it has no Bird or LaTeX
+  code outside fenced blocks and at least one code block, with a
+  warning; otherwise it's read as plain `.lhs`, GHC's unlit style (D-218,
+  D-221, D-224).
 - **Module identity** (D-44): a module is identified by
   `<package>:<component>:<Module.Name>`, because the same module name can
   appear in several components (every executable's `Main`, or the same
@@ -1172,6 +1181,7 @@ The main library splits into layers. Lower layers never import upper ones:
 | CBOR in the browser | `cbor-x`, **no-eval build** | CSP forbids `eval` (D-51). |
 | Virtual scrolling | A headless virtualiser (TanStack Virtual) | All source and diff views (D-70). |
 | Haskell tests | `tasty`, `tasty-hunit`, `hedgehog`, `tasty-golden`, `temporary` | §11.9. |
+| markdown-unlit oracle (tests only) | `markdown-unlit ==0.6.0`, with `base-compat ==0.15.0`, test suite only | The port in `Core.SourceText` is checked against it (D-224). Never a runtime dependency, never run (D-223). |
 | Browser tests | Playwright + axe-core | §11.9. |
 | CI | GitHub Actions | §11.9. |
 | License | BSD-3-Clause | D-73. |

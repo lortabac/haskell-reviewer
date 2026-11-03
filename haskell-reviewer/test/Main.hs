@@ -31,6 +31,7 @@ import HaskellReviewer.Core.GitTest qualified
 import HaskellReviewer.Core.HaddockTest qualified
 import HaskellReviewer.Core.IndexQueueTest qualified
 import HaskellReviewer.Core.InstanceKeyTest qualified
+import HaskellReviewer.Core.MarkdownUnlitTest qualified
 import HaskellReviewer.Core.ModulesGoldenTest qualified
 import HaskellReviewer.Core.ModulesTest qualified
 import HaskellReviewer.Core.NameTableTest qualified
@@ -172,6 +173,13 @@ main = do
               HaskellReviewer.Core.HaddockTest.tests,
               HaskellReviewer.Core.HaddockTest.linearTests,
               HaskellReviewer.Core.InstanceKeyTest.tests,
+              -- The library is a test-only oracle: its shared values
+              -- too, built once (Q-RTS-BLACKHOLE).
+              withResource
+                HaskellReviewer.Core.MarkdownUnlitTest.warmUpOracle
+                (const (pure ()))
+                (const HaskellReviewer.Core.MarkdownUnlitTest.tests),
+              HaskellReviewer.Core.MarkdownUnlitTest.linearTests,
               HaskellReviewer.Core.NameTableTest.tests,
               HaskellReviewer.Core.ParseGoldenTest.tests,
               HaskellReviewer.Core.ParserTest.tests,

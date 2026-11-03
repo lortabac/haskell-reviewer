@@ -7,8 +7,10 @@ import Data.Text qualified as Text
 import HaskellReviewer.Core.SourceText
   ( GhcRange (..),
     LooseUnlit (..),
+    MarkdownCode (..),
     columnMap,
     ghcToSpan,
+    looseReadsMarkdown,
     sliceSpan,
     sourceLines,
     stripBom,
@@ -50,36 +52,33 @@ tests =
           @?= "\n\nx = 1\n  \\end{code}\n\n",
       testCase "markdown: haskell blocks only" $ do
         let t = "# t\n```haskell\nx = 1\n```\n```haskell ignore\nno\n```\n```sh\nno\n```"
-        unlitMarkdown t @?= Just "\n\nx = 1\n\n\n\n\n\n\n"
-        (lineCount <$> unlitMarkdown t) @?= Just (lineCount t)
+        unlitMarkdown t @?= Just (InPlace "\n\nx = 1\n\n\n\n\n\n\n")
         unlitMarkdown "# t\n```sh\nx\n```\n" @?= Nothing,
       testCase "unlitLoose: no Bird or LaTeX, a haskell block: read as markdown" $ do
         let t = "# t\n```haskell\nx = 1\n```\n"
-            expected = fromMaybe (error "no block") (unlitMarkdown t)
-        unlitLoose t @?= (expected, UsedMarkdownUnlit)
-        (lineCount . fst . unlitLoose) t @?= lineCount t,
+        unlitLoose t @?= UsedMarkdownUnlit (InPlace "\n\nx = 1\n\n")
+        looseReadsMarkdown t @?= True,
       testCase "unlitLoose: a Bird line outside fences wins, even with a block" $ do
         let t = "> module Bird where\n\n```haskell\nx = 1\n```\n"
-        unlitLoose t @?= (unlitBirdLatex t, UsedGhcUnlit),
+        unlitLoose t @?= UsedGhcUnlit (unlitBirdLatex t)
+        looseReadsMarkdown t @?= False,
       testCase "unlitLoose: \\begin{code} outside fences wins, even with a block" $ do
         let t = "\\begin{code}\nx = 1\n\\end{code}\n\n```haskell\ny = 2\n```\n"
-        unlitLoose t @?= (unlitBirdLatex t, UsedGhcUnlit),
+        unlitLoose t @?= UsedGhcUnlit (unlitBirdLatex t),
       testCase "unlitLoose: a > line inside an unrelated fence doesn't count as Bird" $ do
         let t = "```\n> GET /x\n```\n\n```haskell\nx = 1\n```\n"
-            expected = fromMaybe (error "no block") (unlitMarkdown t)
-        unlitLoose t @?= (expected, UsedMarkdownUnlit),
-      testCase "unlitLoose: \"``` haskell\", a space after the fence, still opens" $ do
-        let t = "``` haskell\nx = 1\n```\n"
-        (snd . unlitLoose) t @?= UsedMarkdownUnlit,
+        unlitLoose t @?= UsedMarkdownUnlit (InPlace "\n\n\n\n\nx = 1\n\n"),
+      testCase "unlitLoose: \"``` haskell\", a space after the fence, still opens" $
+        looseReadsMarkdown "``` haskell\nx = 1\n```\n" @?= True,
       testCase "unlitLoose: only ```hs (not \"haskell\"): no block, GHC's unlit" $ do
         let t = "```hs\nx = 1\n```\n"
-        unlitLoose t @?= (unlitBirdLatex t, UsedGhcUnlit),
+        unlitLoose t @?= UsedGhcUnlit (unlitBirdLatex t),
       testCase "unlitLoose: only ```haskell ignore: no block, GHC's unlit" $ do
         let t = "```haskell ignore\nx = 1\n```\n"
-        unlitLoose t @?= (unlitBirdLatex t, UsedGhcUnlit),
+        unlitLoose t @?= UsedGhcUnlit (unlitBirdLatex t),
       testCase "unlitLoose: plain prose, no fence: GHC's unlit" $ do
         let t = "Just prose.\nNo code here.\n"
-        unlitLoose t @?= (unlitBirdLatex t, UsedGhcUnlit),
+        unlitLoose t @?= UsedGhcUnlit (unlitBirdLatex t),
       testProperty
         "unlitLoose: line count never changes; each style's own contract holds"
         . property
@@ -91,18 +90,24 @@ tests =
                   "```",
                   "```haskell",
                   "```hs",
+                  "~~~",
+                  "~~~ haskell",
+                  "  ```haskell",
+                  "```haskell top",
                   "\\begin{code}",
                   "\\end{code}",
                   ""
                 ]
           ls <- forAll (Gen.list (Range.linear 0 12) (Gen.element pieces))
           let t = Text.intercalate "\n" ls
-              (t', style) = unlitLoose t
-          lineCount t' === lineCount t
-          case style of
-            UsedGhcUnlit -> t' === unlitBirdLatex t
-            UsedMarkdownUnlit -> do
-              t' === fromMaybe (error "expected a block") (unlitMarkdown t)
+          looseReadsMarkdown t === isMarkdown (unlitLoose t)
+          case unlitLoose t of
+            UsedGhcUnlit t' -> t' === unlitBirdLatex t
+            UsedMarkdownUnlit c -> do
+              Just c === unlitMarkdown t
+              case c of
+                InPlace t' -> lineCount t' === lineCount t
+                NeedsLayout _ -> pure ()
               assert (noBirdOrLatexOutsideFences t),
       testCase "columns: no tab, no change" $
         ghcToSpan (columnMap "abc\ndef") (range 2 2 2 4) @?= spanOf 2 2 2 4,
@@ -165,6 +170,9 @@ tests =
                 [Text.drop (c1 - 1) (line l1)]
                   <> [line l | l <- [l1 + 1 .. l2 - 1]]
                   <> [Text.take (c2 - 1) (line l2)]
+    isMarkdown = \case
+      UsedMarkdownUnlit _ -> True
+      UsedGhcUnlit _ -> False
     lineCount :: Text -> Int
     lineCount = length . Text.splitOn "\n"
     -- An independent re-check of unlitLoose's precondition for
@@ -175,7 +183,7 @@ tests =
       where
         go _ [] = True
         go inFence (l : ls)
-          | "```" `Text.isPrefixOf` Text.stripStart l = go (not inFence) ls
+          | any (`Text.isPrefixOf` Text.stripStart l) ["```", "~~~"] = go (not inFence) ls
           | inFence = go inFence ls
           | "\\begin{code}" `Text.isPrefixOf` Text.stripStart l = False
           | ">" `Text.isPrefixOf` l = False

@@ -1,0 +1,3 @@
+text only: preprocessed by markdown-unlit
+  markdown-unlit assumed: no Bird or LaTeX code; read from haskell code blocks only
+  markdown-unlit moves code blocks marked top: shown as text, positions not mapped

@@ -1,0 +1,13 @@
+parsed
+module: Tilde @6:8-6:13
+exports:
+  one@6:15-6:18 @6:15-6:18
+  two@6:20-6:23 @6:20-6:23
+imports:
+  import Data.Char@8:8-8:17 @8:1-8:23
+    only:
+      ord@8:19-8:22 @8:19-8:22
+language: GHC2021
+from pragmas: 
+enabled: BangPatterns, BinaryLiterals, ConstrainedClassMethods, ConstraintKinds, DeriveDataTypeable, DeriveFoldable, DeriveFunctor, DeriveGeneric, DeriveLift, DeriveTraversable, DoAndIfThenElse, EmptyCase, EmptyDataDecls, EmptyDataDeriving, ExistentialQuantification, ExplicitForAll, FieldSelectors, FlexibleContexts, FlexibleInstances, ForeignFunctionInterface, GADTSyntax, GeneralizedNewtypeDeriving, HexFloatLiterals, ImplicitPrelude, ImplicitStagePersistence, ImportQualifiedPost, InstanceSigs, KindSignatures, ListTuplePuns, MonomorphismRestriction, MultiParamTypeClasses, NamedFieldPuns, NamedWildCards, NumericUnderscores, PatternGuards, PolyKinds, PostfixOperators, RankNTypes, RelaxedPolyRec, ScopedTypeVariables, StandaloneDeriving, StandaloneKindSignatures, StarIsType, TraditionalRecordSyntax, TupleSections, TypeApplications, TypeOperators, TypeSynonymInstances
+warnings:

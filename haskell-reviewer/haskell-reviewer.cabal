@@ -223,6 +223,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.HaddockTest
     HaskellReviewer.Core.IndexQueueTest
     HaskellReviewer.Core.InstanceKeyTest
+    HaskellReviewer.Core.MarkdownUnlitTest
     HaskellReviewer.Core.ModulesGoldenTest
     HaskellReviewer.Core.ModulesTest
     HaskellReviewer.Core.NameTableTest
@@ -283,6 +284,8 @@ test-suite haskell-reviewer-test
     , filepath
     , haskell-reviewer
     , http-types
+    -- Test-only oracle for our port in Core.SourceText (D-224).
+    , markdown-unlit    ==0.6.0
     , network
     , process
     , stm
