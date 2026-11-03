@@ -1,4 +1,5 @@
 # haskell-reviewer
 
 - What the tool does: `SPEC.md`. Plan: `ROADMAP.md`.
-- How agents work here: `WORKFLOW.md`. Follow it.
+- Decisions: `DECISIONS.md`. Open questions: `OPEN-QUESTIONS.md`.
+- Haskell style: `STYLE.md`.

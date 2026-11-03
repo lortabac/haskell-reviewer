@@ -5,6 +5,7 @@ import Bench.FallbacksTest qualified
 import Bench.GcLogTest qualified
 import Bench.IndexLogTest qualified
 import Bench.ModuleListTest qualified
+import Bench.PathTest qualified
 import Bench.ProjectsTest qualified
 import Bench.QueriesTest qualified
 import Bench.RtsStatsTest qualified
@@ -105,6 +106,7 @@ main = do
         Bench.GcLogTest.tests,
         Bench.IndexLogTest.tests,
         Bench.ModuleListTest.tests,
+        Bench.PathTest.tests,
         Bench.ProjectsTest.tests,
         Bench.QueriesTest.tests,
         Bench.RtsStatsTest.tests,
