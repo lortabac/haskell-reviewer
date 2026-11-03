@@ -110,6 +110,11 @@ needed), plus any throwaway code kept out of the main build.
 Tasks run one at a time, in order, unless the rules in
 [Parallel tasks](#3-parallel-tasks) allow running some together.
 
+**Reuse first.** If a task rebuilds something that already exists (a tool,
+a library, an algorithm), the plan lists "use the existing one" as an
+option, with its costs (dependencies, SPEC §9.1, speed, fidelity). The
+coordinator asks the human.
+
 For each task:
 
 1. **Plan.** Ask a planner for a plan. Give it the task, its acceptance
@@ -255,6 +260,25 @@ human says so.
 - Benchmark numbers from the agent sandbox aren't reference numbers (its
   open-file limit and network differ). Use them only for before/after in
   the same sandbox. Reference runs come from the human's machine.
+- Test binary run by hand: set `HASKELL_REVIEWER_EXE` to the worktree's
+  exe (else ExeTest uses an old one on PATH) and `TASTY_NO_CREATE=true`.
+  Never run another branch's test binary in a worktree: it can create
+  stray golden files.
+- Product run by hand: temp `XDG_CONFIG_HOME` and `XDG_STATE_HOME`.
+  Never touch the user's real config or state (D-202 covers the tests and
+  the bench).
+- The full suite takes about 12 s. Much slower means tests run one at a
+  time (e.g. lost `-N`, D-167): find out why.
+- Q-RTS-BLACKHOLE loops: shared values include library lazy tables (e.g.
+  `printf` in `temporary`). Record the load with each kill: at high load it
+  may be a timeout, at low load it is a real hang.
+- `make freeze` re-solves everything and drops the haddock-library line on
+  GHC 9.12+ (D-150). For one new dependency, add its line by hand and check
+  with `cabal build all --dry-run` on each GHC.
+- WebKit doesn't run in the sandbox: locally use
+  `make e2e E2E_ARGS="--project=chromium --project=firefox"`. Only CI runs
+  WebKit (and macOS, whose file system ignores case): check those jobs.
+- Never `pkill -f` a pattern that matches your own shell. Kill by PID.
 
 ## 7. Prompt templates
 
@@ -272,6 +296,8 @@ Relevant spec: <SPEC.md sections, DECISIONS.md ids>
 Context: <code already there, earlier tasks>
 
 Give: files to add or change, steps in order, tests to add, risks.
+If something here already exists (a tool, a library), give the option of
+using it, with its costs.
 Flag anything the spec doesn't cover, any new dependency, and any public
 interface change.
 ```
