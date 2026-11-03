@@ -73,7 +73,7 @@ import Bench.Steady
     runSteady,
   )
 import Control.Exception (Exception, IOException, throwIO, try)
-import Control.Monad (forM, unless)
+import Control.Monad (forM, mfilter, unless)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
@@ -81,7 +81,12 @@ import Data.Text qualified as Text
 import Data.Text.IO qualified as Text.IO
 import Data.Time.Clock (getCurrentTime)
 import Options.Applicative qualified as Opt
-import System.Directory (doesDirectoryExist, getCurrentDirectory, getFileSize)
+import System.Directory
+  ( canonicalizePath,
+    doesDirectoryExist,
+    getCurrentDirectory,
+    getFileSize,
+  )
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..), exitWith)
 import System.FilePath (takeDirectory, (</>))
@@ -515,12 +520,14 @@ getToolInfo exePath = do
   let rtsInfo = readRtsPairs infoOut
   gitSha <- tryGit ["rev-parse", "HEAD"]
   dirtyOut <- tryGit ["status", "--porcelain"]
+  -- Resolve symlinks like getCurrentDirectory does, else the match fails.
   cwd <- getCurrentDirectory
-  home <- lookupEnv "HOME"
+  home <- traverse canonicalizePath . mfilter (not . null) =<< lookupEnv "HOME"
+  exeFull <- canonicalizePath exePath
   pure
     ToolInfo
       { -- Short, so a committed report has no home directory in it.
-        exe = shortPath cwd home exePath,
+        exe = shortPath cwd home exeFull,
         version = Text.pack (firstLine (verOut <> verErr)),
         gitSha = Text.pack <$> gitSha,
         gitDirty = not . null <$> dirtyOut,

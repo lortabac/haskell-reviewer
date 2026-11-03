@@ -5,10 +5,10 @@ import Bench.FallbacksTest qualified
 import Bench.GcLogTest qualified
 import Bench.IndexLogTest qualified
 import Bench.ModuleListTest qualified
+import Bench.PathTest qualified
 import Bench.ProjectsTest qualified
 import Bench.QueriesTest qualified
 import Bench.RtsStatsTest qualified
-import Bench.PathTest qualified
 import Bench.ShellTest qualified
 import Bench.StatsTest qualified
 import Bench.TargetsTest qualified
