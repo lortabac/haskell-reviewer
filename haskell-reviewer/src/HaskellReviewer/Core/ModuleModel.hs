@@ -10,6 +10,7 @@ module HaskellReviewer.Core.ModuleModel
   ( -- * Result of a parse
     ModuleParse (..),
     TextOnlyModule (..),
+    textOnlyModule,
     TextOnlyReason (..),
     ParseError (..),
     ParseWarning (..),
@@ -63,6 +64,7 @@ import HaskellReviewer.Core.Decls
     forcePragmas,
     forceWarningText,
   )
+import HaskellReviewer.Core.LineRegions (LineRegions, noLineRegions)
 import HaskellReviewer.Core.Project (ModuleName)
 import HaskellReviewer.Core.RichText (Doc, Inline, forceInlines)
 import HaskellReviewer.Core.SourceText (MarkdownLayout (..))
@@ -83,13 +85,26 @@ data TextOnlyModule = TextOnlyModule
   { reason :: TextOnlyReason,
     -- | Found before we gave up. They may explain the reason (an
     -- unknown extension, say).
-    warnings :: [ParseWarning]
+    warnings :: [ParseWarning],
+    -- | CPP's lines and literate prose, when we got that far.
+    regions :: LineRegions
   }
   deriving (Eq, Show)
 
+-- | Text only, with nothing to highlight.
+textOnlyModule :: TextOnlyReason -> [ParseWarning] -> TextOnlyModule
+textOnlyModule reason warnings =
+  TextOnlyModule
+    { reason = reason,
+      warnings = warnings,
+      regions = noLineRegions
+    }
+
 -- | Why a module is text only.
 data TextOnlyReason
-  = ParseFailed ParseError
+  = -- | With the tokens, for highlighting, if the lex worked (Note
+    -- [Text-only tokens] in "HaskellReviewer.Core.Parser").
+    ParseFailed ParseError (Maybe Tokens)
   | -- | A bad @LANGUAGE@ or @OPTIONS_GHC@ pragma, as GHC says it.
     PragmaFailed ParseError
   | -- | Run through a tool we don't run: @-F -pgmF <tool>@ (from
@@ -177,7 +192,9 @@ data ParsedModule = ParsedModule
     pragmas :: [ModulePragma],
     -- | The whole module's, after CPP (Note [Packed tokens] in
     -- "HaskellReviewer.Core.Tokens").
-    tokens :: Tokens
+    tokens :: Tokens,
+    -- | CPP's lines and literate prose, for highlighting.
+    regions :: LineRegions
   }
   deriving (Eq, Show)
 
@@ -339,10 +356,11 @@ data WhyNotPrecise = NoHieFile
 forceModuleParse :: ModuleParse -> ()
 forceModuleParse = \case
   Parsed m -> parsed m
-  TextOnly t -> reason t.reason `seq` list t.warnings
+  TextOnly t ->
+    reason t.reason `seq` list t.warnings `seq` t.regions `seq` ()
   where
     reason = \case
-      ParseFailed e -> parseError e
+      ParseFailed e ts -> parseError e `seq` whnf ts
       PragmaFailed e -> parseError e
       _ -> ()
     parseError e = whnf e.code `seq` whnf e.span
@@ -357,7 +375,8 @@ forceModuleParse = \case
                     each docItem m.docItems `seq`
                       forcePragmas m.pragmas `seq`
                         m.tokens `seq`
-                          ()
+                          m.regions `seq`
+                            ()
     header h =
       whnf h.name `seq`
         maybe () forceDocComment h.haddock `seq`

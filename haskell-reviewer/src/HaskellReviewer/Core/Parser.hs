@@ -111,6 +111,7 @@ import HaskellReviewer.Core.Cpp
     runCpp,
     sameLines,
   )
+import HaskellReviewer.Core.LineRegions (lineRegions)
 import HaskellReviewer.Core.ModuleModel
   ( Extensions (..),
     ModuleParse (..),
@@ -119,6 +120,7 @@ import HaskellReviewer.Core.ModuleModel
     TextOnlyModule (..),
     TextOnlyReason (..),
     forceModuleParse,
+    textOnlyModule,
   )
 import HaskellReviewer.Core.Modules
   ( ComponentSettings (..),
@@ -147,6 +149,7 @@ import HaskellReviewer.Core.SourceText
     columnMap,
     hasMarkdownBlock,
     looseReadsMarkdown,
+    proseLines,
     stripBom,
     unlitBirdLatex,
     unlitLoose,
@@ -309,38 +312,59 @@ run settings input = case unlit settings input of
   Right text -> withText text
   where
     withText text = case readPragmas (initParserOpts comp.dflags) (toBuffer text) of
-      Left e -> textOnly (PragmaFailed (headerError (plainSpans text) e)) []
+      Left e ->
+        textOnlyWith
+          (lineRegions [] (prose text))
+          (PragmaFailed (headerError (plainSpans text) e))
+          []
       Right args
         | Just tool <- (toolsFrom (settings.ghcOptions <> args)).pgmF ->
             textOnly (Preprocessed tool) []
-        | not (xopt LangExt.Cpp first.dflags) -> parseWith first text (plainSpans text) []
-        | otherwise -> afterCpp args (runCpp settings.cpp first.macros text)
+        | not (xopt LangExt.Cpp first.dflags) ->
+            parseWith first text (plainSpans text) (lineRegions [] (prose text)) []
+        | otherwise -> afterCpp args (prose text) (runCpp settings.cpp first.macros text)
         where
           first = applyPragmas comp.dflags args
     comp = componentFlags settings
     early = earlyWarnings settings input
-    textOnly reason later =
-      TextOnly TextOnlyModule {reason = reason, warnings = early <> later}
+    textOnly reason later = TextOnly (textOnlyModule reason (early <> later))
+    textOnlyWith regions reason later =
+      TextOnly
+        TextOnlyModule {reason = reason, warnings = early <> later, regions = regions}
+    -- Only literate files have prose.
+    prose text = case settings.literate of
+      NotLiterate -> []
+      _ -> proseLines (stripBom input) text
     -- The pragmas again, on the text after CPP, from the component's
     -- flags (Note [Pragmas after CPP]).
-    afterCpp firstArgs out =
+    afterCpp firstArgs proseRanges out =
       let spans = SpanMap {columns = columnMap out.text, cpp = out.positions}
           notes = map FromCpp out.warnings
+          regions = lineRegions out.regions proseRanges
           -- -F and -pgmF from both reads.
           tools args = toolsFrom (settings.ghcOptions <> firstArgs <> args)
        in case readPragmas (initParserOpts comp.dflags) (toBuffer out.text) of
-            Left e -> textOnly (PragmaFailed (headerError spans e)) notes
+            Left e ->
+              textOnlyWith regions (PragmaFailed (headerError spans e)) notes
             Right args
               | Just tool <- (tools args).pgmF -> textOnly (Preprocessed tool) notes
               | otherwise ->
-                  parseWith (applyPragmas comp.dflags args) out.text spans notes
-    parseWith pragmas t spans notes =
+                  parseWith (applyPragmas comp.dflags args) out.text spans regions notes
+    parseWith pragmas t spans regions notes =
       case unP parser (initParserState opts parseBuf startLoc) of
         PFailed st -> failed (errorsOf st)
         POk st m -> case errorsOf st of
           [] ->
             spans `seq`
-              Parsed (convertModule spans exts (early <> later <> lexWarnings) tokens m)
+              Parsed
+                ( convertModule
+                    spans
+                    exts
+                    (early <> later <> lexWarnings)
+                    tokens
+                    regions
+                    m
+                )
           errs -> failed errs
       where
         -- See Note [Second lex] and Note [LINE pragmas] in
@@ -360,11 +384,28 @@ run settings input = case unlit settings input of
         opts = initParserOpts pragmas.dflags
         exts = extensionsOf pragmas.dflags pragmas.names
         errorsOf st = toList (getMessages (getPsErrorMessages st))
-        failed errs = textOnly (ParseFailed (firstError errs)) later
+        -- See Note [Text-only tokens].
+        failed errs =
+          textOnlyWith regions (ParseFailed (firstError errs) ((.tokens) <$> lexed)) later
         firstError = \case
           e : _ -> diagnosticError spans (errMsgSpan e) (errMsgDiagnostic e)
           -- PFailed always has an error. Just in case.
           [] -> ParseError {message = "parse failed", code = Nothing, span = Nothing}
+
+{- Note [Text-only tokens]
+
+A module that lexes but fails to parse is still highlighted (SPEC
+§5.6, §3.1), so a parse failure keeps the tokens of the second lex
+(they're built anyway: the parse needs the lex first). If the lex
+failed too, there are none.
+
+Other text-only modules get no tokens: no extra lex for a pragma
+failure or a markdown file that moves code, and a -pgmF file, a crash
+or a timeout stay plain. CPP's regions and literate prose are kept
+whenever we have them (all but -pgmF, markdown that moves code, a crash
+and a timeout), so a module that fails to lex still shows its #if
+lines.
+-}
 
 -- | The warnings known before parsing: unlit's and the component's.
 -- For a parse that gave up (too slow, crashed). Cheap: no sort, no

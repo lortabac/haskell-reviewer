@@ -7,6 +7,7 @@ module HaskellReviewer.Core.Span
     Line (..),
     Col (..),
     Span (..),
+    LineRange (..),
 
     -- * Rendering
     renderSpan,
@@ -59,6 +60,13 @@ data Span = Span
     endCol :: Col
   }
   deriving (Eq, Ord, Show)
+
+-- | Whole lines, @firstLine@ to @lastLine@, both included.
+data LineRange = LineRange
+  { firstLine :: Line,
+    lastLine :: Line
+  }
+  deriving (Eq, Show)
 
 -- * Rendering
 

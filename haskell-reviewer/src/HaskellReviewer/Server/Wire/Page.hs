@@ -121,6 +121,7 @@ import HaskellReviewer.Core.ModuleModel
     WarningKind (..),
     WarningText (..),
     renderParseWarning,
+    textOnlyModule,
   )
 import HaskellReviewer.Core.Modules
   ( ModuleId (..),
@@ -313,7 +314,7 @@ encodeModulePage (Generation g) idx v =
           ("warnings", Cbor.list (Cbor.text . renderParseWarning) ws)
         ]
     parserReason = \case
-      ParseFailed e -> kind "parse-error" : parseError e
+      ParseFailed e _ -> kind "parse-error" : parseError e
       PragmaFailed e -> kind "pragma-error" : parseError e
       Preprocessed tool -> [kind "preprocessed", ("tool", Cbor.text tool)]
       ParserCrashed t -> [kind "parser-crashed", ("message", Cbor.text t)]
@@ -380,7 +381,7 @@ pageWarmUp =
   map parsedPage [declsWarmUp, haddockWarmUp, cppPage, exportsPage]
     <> map
       (page . TextOnlyAnswer . textOnly)
-      [ ParseFailed parseError,
+      [ ParseFailed parseError Nothing,
         PragmaFailed parseError,
         Preprocessed "x",
         ParserCrashed "x",
@@ -405,11 +406,9 @@ pageWarmUp =
         warmUpIndex
         ModuleView {moduleId = warmUpId, path = Nothing, answer = a}
     textOnly r =
-      TextOnlyModule
-        { reason = r,
-          warnings =
-            [NoMarkdownCode, MarkdownMovesCode Reorders, MarkdownMovesCode Dedents]
-        }
+      textOnlyModule
+        r
+        [NoMarkdownCode, MarkdownMovesCode Reorders, MarkdownMovesCode Dedents]
     parseError =
       ParseError
         { message = "x",

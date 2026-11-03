@@ -1,0 +1,14 @@
+parsed
+1:1-2:1 comment "Some prose."
+3:3-3:9 keyword "module"
+3:10-3:14 typeCon "Bird"
+3:16-3:17 variable "x"
+3:19-3:24 keyword "where"
+5:1-6:1 comment "More prose, then a comment across chunks."
+7:3-7:4 variable "x"
+7:8-7:11 typeCon "Int"
+8:3-8:4 variable "x"
+8:7-8:8 literal "1"
+8:9-10:1 comment "{-"…
+10:1-11:1 comment "Prose inside the comment."
+11:1-12:5 comment ""…

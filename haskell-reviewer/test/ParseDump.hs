@@ -144,7 +144,7 @@ extensions e =
 
 reason :: TextOnlyReason -> Text
 reason = \case
-  ParseFailed e -> "parse error " <> parseError e
+  ParseFailed e _ -> "parse error " <> parseError e
   PragmaFailed e -> "pragma error " <> parseError e
   Preprocessed tool -> "preprocessed by " <> tool
   ParserCrashed t -> "parser crashed: " <> t

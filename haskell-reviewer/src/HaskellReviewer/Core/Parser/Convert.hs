@@ -33,6 +33,7 @@ import GHC.Types.PkgQual (RawPkgQual (..))
 import GHC.Types.SourceText (StringLiteral (..))
 import GHC.Types.SrcLoc (GenLocated (..), Located, unLoc)
 import HaskellReviewer.Core.Exported (markExported)
+import HaskellReviewer.Core.LineRegions (LineRegions)
 import HaskellReviewer.Core.ModuleModel
   ( DocComment (..),
     Export (..),
@@ -69,15 +70,17 @@ import HaskellReviewer.Core.Tokens (Tokens)
 import Language.Haskell.Syntax.ImpExp.IsBoot (IsBootInterface (..))
 
 -- | The model of a parsed module. The extensions and warnings come from
--- the flags, the tokens from the second lex.
+-- the flags, the tokens from the second lex, the regions from CPP and
+-- unlit.
 convertModule ::
   SpanMap ->
   Extensions ->
   [ParseWarning] ->
   Tokens ->
+  LineRegions ->
   Located (HsModule GhcPs) ->
   ParsedModule
-convertModule spans exts warnings tokens (L _ m) =
+convertModule spans exts warnings tokens regions (L _ m) =
   ParsedModule
     { header = header,
       exports = exports,
@@ -87,7 +90,8 @@ convertModule spans exts warnings tokens (L _ m) =
       declarations = markExported self exports converted.decls,
       docItems = converted.docItems,
       pragmas = converted.pragmas,
-      tokens = tokens
+      tokens = tokens,
+      regions = regions
     }
   where
     ext = hsmodExt m
