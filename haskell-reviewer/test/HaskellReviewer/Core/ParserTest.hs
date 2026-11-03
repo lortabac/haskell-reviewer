@@ -44,6 +44,7 @@ import HaskellReviewer.Core.Decls
   )
 import HaskellReviewer.Core.ModuleModel
   ( DocItem (..),
+    MarkdownLayout (..),
     ModuleParse (..),
     ParseWarning (..),
     TextOnlyReason (..),
@@ -62,6 +63,7 @@ import HaskellReviewer.Core.Parser
   ( ParseSettings (..),
     canonicalExtensionNames,
     defaultParseSettings,
+    earlyWarnings,
     parseSource,
   )
 import HaskellReviewer.Core.Project (Extension (..))
@@ -71,6 +73,7 @@ import HaskellReviewer.Effects.Parser
   ( cppParseWarmUp,
     cppSettings,
     declsWarmUp,
+    markdownWarmUp,
     parseGuarded,
     parseWithin,
   )
@@ -199,6 +202,26 @@ tests =
               PragmaFailed _ -> pure ()
               other -> assertFailure (show other)
           other -> assertFailure (show other),
+      testCase "the markdown warm-up takes every path (Q-RTS-BLACKHOLE)" $ do
+        let settings l = defaultParseSettings {literate = l}
+            outcome (l, t) = case parseSource (settings l) t of
+              Parsed m -> (Nothing, m.warnings)
+              TextOnly o -> (Just o.reason, o.warnings)
+            notice = Just (Preprocessed "markdown-unlit")
+        map outcome markdownWarmUp
+          @?= [ (Nothing, []),
+                (notice, [MarkdownMovesCode Reorders]),
+                (notice, [MarkdownMovesCode Dedents]),
+                (Nothing, []),
+                (notice, [MarkdownMovesCode Reorders]),
+                (Nothing, [NoMarkdownCode]),
+                (Nothing, [ReadAsMarkdown]),
+                (notice, [ReadAsMarkdown, MarkdownMovesCode Reorders]),
+                (Nothing, [])
+              ]
+        map (\(l, t) -> earlyWarnings (settings l) t) markdownWarmUp
+          @?= replicate 5 []
+            <> [[NoMarkdownCode], [ReadAsMarkdown], [ReadAsMarkdown], []],
       testCase "the declarations warm-up has every kind (Q-RTS-BLACKHOLE)" $
         parsed defaultParseSettings declsWarmUp $ \m -> do
           m.warnings @?= []

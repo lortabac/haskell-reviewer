@@ -1,0 +1,12 @@
+parsed
+module: IndentedOther @4:8-4:21
+exports:
+  x@4:23-4:24 @4:23-4:24
+imports:
+  import Data.Char@6:8-6:17 @6:1-6:23
+    only:
+      ord@6:19-6:22 @6:19-6:22
+language: GHC2021
+from pragmas: 
+enabled: BangPatterns, BinaryLiterals, ConstrainedClassMethods, ConstraintKinds, DeriveDataTypeable, DeriveFoldable, DeriveFunctor, DeriveGeneric, DeriveLift, DeriveTraversable, DoAndIfThenElse, EmptyCase, EmptyDataDecls, EmptyDataDeriving, ExistentialQuantification, ExplicitForAll, FieldSelectors, FlexibleContexts, FlexibleInstances, ForeignFunctionInterface, GADTSyntax, GeneralizedNewtypeDeriving, HexFloatLiterals, ImplicitPrelude, ImplicitStagePersistence, ImportQualifiedPost, InstanceSigs, KindSignatures, ListTuplePuns, MonomorphismRestriction, MultiParamTypeClasses, NamedFieldPuns, NamedWildCards, NumericUnderscores, PatternGuards, PolyKinds, PostfixOperators, RankNTypes, RelaxedPolyRec, ScopedTypeVariables, StandaloneDeriving, StandaloneKindSignatures, StarIsType, TraditionalRecordSyntax, TupleSections, TypeApplications, TypeOperators, TypeSynonymInstances
+warnings:

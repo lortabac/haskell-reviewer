@@ -13,6 +13,7 @@ module HaskellReviewer.Core.ModuleModel
     TextOnlyReason (..),
     ParseError (..),
     ParseWarning (..),
+    MarkdownLayout (..),
     renderParseWarning,
 
     -- * Parsed module
@@ -64,6 +65,7 @@ import HaskellReviewer.Core.Decls
   )
 import HaskellReviewer.Core.Project (ModuleName)
 import HaskellReviewer.Core.RichText (Doc, Inline, forceInlines)
+import HaskellReviewer.Core.SourceText (MarkdownLayout (..))
 import HaskellReviewer.Core.Span (Span)
 import HaskellReviewer.Core.Tokens (Tokens)
 
@@ -90,7 +92,9 @@ data TextOnlyReason
   = ParseFailed ParseError
   | -- | A bad @LANGUAGE@ or @OPTIONS_GHC@ pragma, as GHC says it.
     PragmaFailed ParseError
-  | -- | @-F -pgmF <tool>@, from ghc-options and @OPTIONS_GHC@ together.
+  | -- | Run through a tool we don't run: @-F -pgmF <tool>@ (from
+    -- ghc-options and @OPTIONS_GHC@ together), or markdown-unlit when
+    -- it would move code (a 'MarkdownMovesCode' warning says how).
     Preprocessed Text
   | -- | The parser threw. A bug, in GHC or ours.
     ParserCrashed Text
@@ -125,6 +129,9 @@ data ParseWarning
   | -- | A loose .lhs/.lhsig read as markdown-unlit, our guess: no
     -- Bird or LaTeX code outside fences, and a Haskell block (D-218).
     ReadAsMarkdown
+  | -- | markdown-unlit would move code, so the module is text only
+    -- (D-225). See Note [Unlit] in "HaskellReviewer.Core.SourceText".
+    MarkdownMovesCode MarkdownLayout
   | -- | Off under Safe Haskell, like GHC does (with a warning too).
     SafeTurnsOff Text
   | -- | Two Safe Haskell modes (first, then second). GHC fails; we keep
@@ -145,6 +152,10 @@ renderParseWarning = \case
   NoMarkdownCode -> "no Haskell code block"
   ReadAsMarkdown ->
     "markdown-unlit assumed: no Bird or LaTeX code; read from haskell code blocks only"
+  MarkdownMovesCode Reorders ->
+    "markdown-unlit moves code blocks marked top: shown as text, positions not mapped"
+  MarkdownMovesCode Dedents ->
+    "markdown-unlit dedents an indented code block: shown as text, positions not mapped"
   SafeTurnsOff t -> "turned off by Safe: " <> t
   SafeModesClash a b -> "Safe Haskell modes clash: " <> a <> ", " <> b <> " ignored"
   CouldNotLex -> "could not lex"

@@ -16,6 +16,7 @@ module HaskellReviewer.Effects.Parser
     haddockWarmUp,
     cppWarmUp,
     cppLimitsWarmUp,
+    markdownWarmUp,
   )
 where
 
@@ -46,6 +47,7 @@ import HaskellReviewer.Core.ModuleModel
     TextOnlyReason (..),
     forceModuleParse,
   )
+import HaskellReviewer.Core.Modules (Literate (..))
 import HaskellReviewer.Core.Parser
   ( FileKind (..),
     ParseSettings (..),
@@ -150,6 +152,15 @@ warmUpParser = do
   _ <- parse defaultParseSettings haddockWarmUp
   _ <- evaluate noTokens
   mapM_ (parse cppSettings) cppParseWarmUp
+  -- Every markdown-unlit outcome, and the cheap check behind
+  -- earlyWarnings.
+  mapM_
+    ( \(l, t) -> do
+        let s = defaultParseSettings {literate = l}
+        _ <- parse s t
+        evaluate (length (earlyWarnings s t))
+    )
+    markdownWarmUp
   -- The CPP evaluator, on every kind of line (Q-RTS-BLACKHOLE).
   _ <- evaluate (forceCpp cppWarmUp)
   _ <- evaluate (forceCpp cppLimitsWarmUp)
@@ -319,6 +330,34 @@ haddockWarmUp =
       "x :: Int",
       "x = 1"
     ]
+
+-- | Markdown and loose literate files for the warm-up: in place
+-- (with @~~~@ and classes), @top@ blocks out of order and in order,
+-- an indented fence, @top:@ keys of each kind, no block, and a loose
+-- file each way. A test
+-- checks they take every path.
+markdownWarmUp :: [(Literate, Text)]
+markdownWarmUp =
+  [ ( MarkdownUnlit,
+      "# M\n```haskell top\nmodule M where\n```\n~~~ {.haskell}\nx = 1\n~~~\n"
+    ),
+    (MarkdownUnlit, "```haskell\nx = 1\n```\n```haskell top:2\nmodule M where\n```\n"),
+    (MarkdownUnlit, "  ```haskell\n  x = 1\n  ```\n"),
+    -- top: keys that read fail, in parentheses, and overflow: the
+    -- Read paths get built too.
+    ( MarkdownUnlit,
+      "~~~ {.haskell top:x top:(2)}\nmodule M where\n~~~\n"
+        <> "```haskell\nx = 1\n```\n"
+    ),
+    ( MarkdownUnlit,
+      "```haskell\nx = 1\n```\n"
+        <> "```haskell top:99999999999999999999\ny = 2\n```\n"
+    ),
+    (MarkdownUnlit, "```{.haskell .ignore}\nx\n```\n```sh\n> x\n"),
+    (LooseLiterate, "```haskell\nx = 1\n```\n```\n> GET /\n```\n"),
+    (LooseLiterate, "```haskell\nx = 1\n```\n```haskell top\nmodule M where\n```\n"),
+    (LooseLiterate, "> x = 1\n```haskell\ny = 2\n```\n")
+  ]
 
 -- | CPP modules for the parser's warm-up, with 'cppSettings': CPP, then
 -- the pragmas again, spans mapped back, CPP notes; then a parse error

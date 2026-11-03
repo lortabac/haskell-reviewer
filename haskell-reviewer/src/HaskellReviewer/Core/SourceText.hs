@@ -8,8 +8,12 @@ module HaskellReviewer.Core.SourceText
     stripBom,
     unlitBirdLatex,
     unlitMarkdown,
+    MarkdownCode (..),
+    MarkdownLayout (..),
+    hasMarkdownBlock,
     unlitLoose,
     LooseUnlit (..),
+    looseReadsMarkdown,
 
     -- * Columns
     ColumnMap,
@@ -22,9 +26,17 @@ module HaskellReviewer.Core.SourceText
     SourceLines,
     sourceLines,
     sliceSpan,
+
+    -- * For tests
+    markdownPieces,
+    MarkdownPiece (..),
+    FencedBlock (..),
+    fenceClasses,
+    reorderKey,
   )
 where
 
+import Data.Char (isSpace)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IntMap
 import Data.Maybe (fromMaybe)
@@ -33,7 +45,9 @@ import Data.Text qualified as Text
 import Data.Text.Unsafe qualified as Text.Unsafe
 import Data.Vector qualified as Vector
 import Data.Vector.Unboxed qualified as Unboxed
+import Data.Word (Word32)
 import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
+import Text.Read (readMaybe)
 
 {- Note [Unlit]
 
@@ -46,27 +60,56 @@ columns don't move either.
   column 1 only, like GHC's unlit). Outside code, a line with @#@ in
   column 1 is kept as it is, unless it starts with @#!@: GHC's unlit
   does the same, so cpp sees those lines.
-- markdown-unlit (D-84): lines inside a fenced block whose info string
-  has "haskell" and not "ignore". Approximate: that's all we read.
+- markdown-unlit (D-84, D-224): markdown-unlit 0.6.0's rules, our own
+  code. A fence is a line that starts, after spaces, with @```@ or
+  @~~~@. A fence opens a block and the next fence closes it, whatever
+  its kind or info string. No close: the block runs to the end. The
+  classes are the info string's words, with @.@ as a space and a
+  @{...}@ unwrapped up to the first @}@. A block is code when its
+  classes have @haskell@ and not @ignore@. That's markdown-unlit's
+  default selector; we ignore selectors given with @-optL@ (D-226).
 - a loose @.lhs@\/@.lhsig@, outside any component (D-218): no @-pgmL@
   is known, so we guess. markdown-unlit if the file has no Bird or
-  LaTeX code outside fences and at least one Haskell block; GHC's
-  unlit otherwise. A fence (a @```@ line, open or close, whatever its
-  info string) hides what's inside it from the Bird\/LaTeX check, so
-  a @>@ line inside an unrelated fenced block (a shell session, say)
-  doesn't count.
+  LaTeX code outside fenced blocks and at least one Haskell block;
+  GHC's unlit otherwise. The fenced blocks are the ones above, fences
+  included, so a @>@ line inside an unrelated block (a shell session,
+  say) doesn't count.
+
+markdown-unlit can also move code: blocks with a @top@ or @top:N@
+class go first (sorted by N), and an indented fence's lines lose that
+many characters. We don't map positions for that. Such a file is
+shown as text, "preprocessed by markdown-unlit", with a warning saying
+why (D-225). Blocks already in order don't count, and neither do
+indented fences of blocks that aren't code.
+
+We drop a BOM before reading fences; markdown-unlit doesn't, so a
+fence on line 1 after a BOM is a fence for us and not for it.
 
 GHC's unlit also rejects a bird line right next to a text line. We
 don't: the code still parses.
 
-Heuristic limit: we track fences by toggling on every @```@ line, same
-as markdown-unlit (D-221). So an odd number of @```@ in running prose
-before the real Bird code (a typo, or a backtick run in shown output,
-not meant as a fence) leaves us thinking we're still inside one: a
-later @>@ line is then hidden from the Bird\/LaTeX check, and a loose
-file with a Haskell block could be read as markdown-unlit instead of
-GHC's unlit. Rare, and markdown-unlit itself would be fooled the same
-way.
+The markdown-unlit rules are ported from markdown-unlit 0.6.0's
+Text.Markdown.Unlit (MIT, © 2012-2021 Simon Hengel). Its license:
+
+  Copyright (c) 2012-2021 Simon Hengel <sol@typeful.net>
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in
+  all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+  THE SOFTWARE.
 -}
 
 -- * Preparing
@@ -91,66 +134,155 @@ unlitBirdLatex = overLines (go False)
       | "#" `Text.isPrefixOf` l, not ("#!" `Text.isPrefixOf` l) = l : go inCode ls
       | otherwise = "" : go inCode ls
 
--- | markdown-unlit. 'Nothing' when there is no Haskell block. See
--- Note [Unlit].
-unlitMarkdown :: Text -> Maybe Text
+-- | What markdown-unlit gives for a file with a Haskell block.
+data MarkdownCode
+  = -- | The code at the same lines: every other line is empty.
+    InPlace Text
+  | -- | markdown-unlit would move code: we show the file as text.
+    NeedsLayout MarkdownLayout
+  deriving (Eq, Show)
+
+-- | How markdown-unlit would move code. See Note [Unlit].
+data MarkdownLayout
+  = -- | @top@ or @top:N@ blocks out of file order.
+    Reorders
+  | -- | A Haskell block with an indented fence.
+    Dedents
+  deriving (Eq, Show)
+
+-- | markdown-unlit. 'Nothing' when there is no Haskell block. If both
+-- a reorder and a dedent happen, 'Reorders'. See Note [Unlit].
+unlitMarkdown :: Text -> Maybe MarkdownCode
 unlitMarkdown t
-  | any isOpen (Text.splitOn "\n" t) = Just (overLines (go False) t)
-  | otherwise = Nothing
+  | null code = Nothing
+  | any (isTop . fenceClasses . (.fence)) code,
+    not (ascending (map (reorderKey . fenceClasses . (.fence)) code)) =
+      Just (NeedsLayout Reorders)
+  | any ((> 0) . fenceIndent) code = Just (NeedsLayout Dedents)
+  | otherwise = Just (InPlace (Text.intercalate "\n" (concatMap keep pieces)))
   where
-    go _ [] = []
-    go inCode (l : rest)
-      | Just _ <- fence l = "" : go (not inCode && isOpen l) rest
-      | inCode = l : go inCode rest
-      | otherwise = "" : go inCode rest
+    pieces = markdownPieces t
+    code = [b | Fenced b <- pieces, isCode b]
+    -- Only a block with such a class can have a key other than 0.
+    isTop = any (\c -> c == "top" || "top:" `Text.isPrefixOf` c)
+    ascending ks = and (zipWith (<=) ks (drop 1 ks))
+    keep = \case
+      Prose _ -> [""]
+      Fenced b ->
+        ""
+          : (if isCode b then b.body else map (const "") b.body)
+            <> ["" | b.closed]
 
--- | A @```@ line's info string (after stripping indent), open or
--- close, whatever the string says.
-fence :: Text -> Maybe Text
-fence l = Text.stripPrefix "```" (Text.stripStart l)
-
--- | Does this fence line open a Haskell block, roughly as
--- markdown-unlit's default selector does. markdown-unlit splits the
--- info string into words (a @.@ counts as a space, and @{...}@ is
--- unwrapped first) and needs "haskell" as one of them, "ignore" as
--- none; we just look for the two as substrings, which is close
--- enough for how projects write fences (D-221 follow-up).
-isOpen :: Text -> Bool
-isOpen l = case fence l of
-  Just info -> "haskell" `Text.isInfixOf` info && not ("ignore" `Text.isInfixOf` info)
-  Nothing -> False
-
--- | Is there a Bird (@>@ in column 1) or LaTeX (@\\begin{code}@) line
--- outside any fence? Used to pick GHC's unlit over markdown-unlit for
--- a loose file (D-218): a fence hides what's inside it, so a @>@ line
--- in an unrelated fenced block doesn't count.
-birdOrLatexOutsideFences :: Text -> Bool
-birdOrLatexOutsideFences = go False . Text.splitOn "\n"
-  where
-    go _ [] = False
-    go inFence (l : ls)
-      | Just _ <- fence l = go (not inFence) ls
-      | inFence = go inFence ls
-      | "\\begin{code}" `Text.isPrefixOf` Text.stripStart l = True
-      | ">" `Text.isPrefixOf` l = True
-      | otherwise = go inFence ls
+-- | Is there a Haskell block? Stops at the first one: no sort, no
+-- @top:@ key read, so it's cheap even on hostile input.
+hasMarkdownBlock :: Text -> Bool
+hasMarkdownBlock = any isCodePiece . markdownPieces
 
 -- | Which unlit 'unlitLoose' used.
 data LooseUnlit
   = -- | Bird or LaTeX code outside fences won, or there's no block.
-    UsedGhcUnlit
+    UsedGhcUnlit Text
   | -- | No Bird or LaTeX code outside fences, and a Haskell block.
-    UsedMarkdownUnlit
+    UsedMarkdownUnlit MarkdownCode
   deriving (Eq, Show)
 
 -- | A loose @.lhs@\/@.lhsig@ file, outside any component: no
 -- @-pgmL@ is known, so we guess (D-218). See Note [Unlit].
-unlitLoose :: Text -> (Text, LooseUnlit)
+unlitLoose :: Text -> LooseUnlit
 unlitLoose t
-  | not (birdOrLatexOutsideFences t),
-    Just m <- unlitMarkdown t =
-      (m, UsedMarkdownUnlit)
-  | otherwise = (unlitBirdLatex t, UsedGhcUnlit)
+  | looseReadsMarkdown t, Just c <- unlitMarkdown t = UsedMarkdownUnlit c
+  | otherwise = UsedGhcUnlit (unlitBirdLatex t)
+
+-- | Does 'unlitLoose' pick markdown-unlit? Cheap, like
+-- 'hasMarkdownBlock'.
+looseReadsMarkdown :: Text -> Bool
+looseReadsMarkdown t = not (any birdOrLatex prose) && any isCodePiece pieces
+  where
+    pieces = markdownPieces t
+    prose = [l | Prose l <- pieces]
+    birdOrLatex l =
+      "\\begin{code}" `Text.isPrefixOf` Text.stripStart l || ">" `Text.isPrefixOf` l
+
+-- | A file's lines, as markdown-unlit splits them.
+data MarkdownPiece
+  = -- | A line outside any fenced block.
+    Prose Text
+  | -- | A fenced block, open fence to close fence (or the end).
+    Fenced FencedBlock
+
+-- | A fenced block, fences included.
+data FencedBlock = FencedBlock
+  { -- | The open fence's line.
+    line :: Line,
+    -- | The open fence.
+    fence :: Text,
+    -- | The lines between the fences, as they are (not dedented).
+    body :: [Text],
+    -- | A close fence follows. If not, the block runs to the end.
+    closed :: Bool
+  }
+
+-- | The file's lines, in order. Lazy and linear: the block search
+-- stops early.
+markdownPieces :: Text -> [MarkdownPiece]
+markdownPieces = go 1 . Text.splitOn "\n"
+  where
+    -- Strict in n: no chain of (+ 1) thunks on a long file.
+    go :: Word32 -> [Text] -> [MarkdownPiece]
+    go !_ [] = []
+    go !n (l : ls)
+      | isFence l = case break isFence ls of
+          (body, _ : rest) ->
+            Fenced (FencedBlock (Line n) l body True)
+              : go (n + fromIntegral (length body) + 2) rest
+          (body, []) -> [Fenced (FencedBlock (Line n) l body False)]
+      | otherwise = Prose l : go (n + 1) ls
+
+-- | A fenced block that markdown-unlit's default selector takes.
+isCodePiece :: MarkdownPiece -> Bool
+isCodePiece = \case
+  Fenced b -> isCode b
+  Prose _ -> False
+
+isCode :: FencedBlock -> Bool
+isCode b = "haskell" `elem` cs && "ignore" `notElem` cs
+  where
+    cs = fenceClasses b.fence
+
+-- | @```@ or @~~~@ (or longer) after spaces.
+isFence :: Text -> Bool
+isFence l = "```" `Text.isPrefixOf` s || "~~~" `Text.isPrefixOf` s
+  where
+    s = Text.stripStart l
+
+-- | The spaces before a fence: markdown-unlit drops that many
+-- characters from each line of the block.
+fenceIndent :: FencedBlock -> Int
+fenceIndent b = Text.length (Text.takeWhile isSpace b.fence)
+
+-- | A fence's classes, like markdown-unlit's parseClasses.
+fenceClasses :: Text -> [Text]
+fenceClasses l = Text.words (Text.map dot inner)
+  where
+    info = Text.stripStart (Text.dropWhile (`elem` ['`', '~']) (Text.stripStart l))
+    inner = case Text.uncons info of
+      Just ('{', rest) -> Text.takeWhile (/= '}') rest
+      _ -> info
+    dot c = if c == '.' then ' ' else c
+
+-- | A block's sort key, like markdown-unlit's parseReorderingKey: the
+-- first @top@ class gives @minBound@, the first @top:N@ (N an Int, as
+-- @read@ takes it) gives @minBound + N@, overflow wraps, same as
+-- markdown-unlit. Else 0.
+reorderKey :: [Text] -> Int
+reorderKey = \case
+  [] -> 0
+  "top" : _ -> minBound
+  c : cs
+    | Just k <- Text.stripPrefix "top:" c,
+      Just n <- readMaybe (Text.unpack k) ->
+        minBound + n
+    | otherwise -> reorderKey cs
 
 -- * Columns
 

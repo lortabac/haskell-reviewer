@@ -141,8 +141,12 @@ import HaskellReviewer.Core.Project qualified as Project (Language (..))
 import HaskellReviewer.Core.RelPath (relPathName)
 import HaskellReviewer.Core.SourceText
   ( LooseUnlit (..),
+    MarkdownCode (..),
+    MarkdownLayout,
     blankSpans,
     columnMap,
+    hasMarkdownBlock,
+    looseReadsMarkdown,
     stripBom,
     unlitBirdLatex,
     unlitLoose,
@@ -299,19 +303,22 @@ parseSource settings input = forceModuleParse r `seq` r
     r = run settings input
 
 run :: ParseSettings -> Text -> ModuleParse
-run settings input = case readPragmas (initParserOpts comp.dflags) (toBuffer text) of
-  Left e -> textOnly (PragmaFailed (headerError (plainSpans text) e)) []
-  Right args
-    | Just tool <- (toolsFrom (settings.ghcOptions <> args)).pgmF ->
-        textOnly (Preprocessed tool) []
-    | not (xopt LangExt.Cpp first.dflags) -> parseWith first text (plainSpans text) []
-    | otherwise -> afterCpp args (runCpp settings.cpp first.macros text)
-    where
-      first = applyPragmas comp.dflags args
+run settings input = case unlit settings input of
+  -- See Note [Unlit] in HaskellReviewer.Core.SourceText.
+  Left layout -> textOnly (Preprocessed "markdown-unlit") [MarkdownMovesCode layout]
+  Right text -> withText text
   where
-    (text, unlitWarnings) = unlit settings input
+    withText text = case readPragmas (initParserOpts comp.dflags) (toBuffer text) of
+      Left e -> textOnly (PragmaFailed (headerError (plainSpans text) e)) []
+      Right args
+        | Just tool <- (toolsFrom (settings.ghcOptions <> args)).pgmF ->
+            textOnly (Preprocessed tool) []
+        | not (xopt LangExt.Cpp first.dflags) -> parseWith first text (plainSpans text) []
+        | otherwise -> afterCpp args (runCpp settings.cpp first.macros text)
+        where
+          first = applyPragmas comp.dflags args
     comp = componentFlags settings
-    early = unlitWarnings <> comp.warnings
+    early = earlyWarnings settings input
     textOnly reason later =
       TextOnly TextOnlyModule {reason = reason, warnings = early <> later}
     -- The pragmas again, on the text after CPP, from the component's
@@ -360,22 +367,31 @@ run settings input = case readPragmas (initParserOpts comp.dflags) (toBuffer tex
           [] -> ParseError {message = "parse failed", code = Nothing, span = Nothing}
 
 -- | The warnings known before parsing: unlit's and the component's.
--- For a parse that gave up (too slow, crashed).
+-- For a parse that gave up (too slow, crashed). Cheap: no sort, no
+-- @top:@ key read (Note [Unlit] in "HaskellReviewer.Core.SourceText").
 earlyWarnings :: ParseSettings -> Text -> [ParseWarning]
-earlyWarnings settings input =
-  snd (unlit settings input) <> (componentFlags settings).warnings
+earlyWarnings settings input = unlitWarnings <> (componentFlags settings).warnings
+  where
+    unlitWarnings = case settings.literate of
+      NotLiterate -> []
+      BirdOrLatex -> []
+      MarkdownUnlit -> [NoMarkdownCode | not (hasMarkdownBlock (stripBom input))]
+      LooseLiterate -> [ReadAsMarkdown | looseReadsMarkdown (stripBom input)]
 
--- | The text GHC reads, and unlit's warning.
-unlit :: ParseSettings -> Text -> (Text, [ParseWarning])
+-- | The text GHC reads. Or, when markdown-unlit would move code, how:
+-- then we don't parse.
+unlit :: ParseSettings -> Text -> Either MarkdownLayout Text
 unlit settings input = case settings.literate of
-  NotLiterate -> (stripBom input, [])
-  BirdOrLatex -> (unlitBirdLatex (stripBom input), [])
-  MarkdownUnlit -> case unlitMarkdown (stripBom input) of
-    Just t -> (t, [])
-    Nothing -> ("", [NoMarkdownCode])
+  NotLiterate -> Right (stripBom input)
+  BirdOrLatex -> Right (unlitBirdLatex (stripBom input))
+  MarkdownUnlit -> maybe (Right "") markdown (unlitMarkdown (stripBom input))
   LooseLiterate -> case unlitLoose (stripBom input) of
-    (t, UsedGhcUnlit) -> (t, [])
-    (t, UsedMarkdownUnlit) -> (t, [ReadAsMarkdown])
+    UsedGhcUnlit t -> Right t
+    UsedMarkdownUnlit c -> markdown c
+  where
+    markdown = \case
+      InPlace t -> Right t
+      NeedsLayout l -> Left l
 
 -- | Spans on text that didn't go through CPP.
 plainSpans :: Text -> SpanMap

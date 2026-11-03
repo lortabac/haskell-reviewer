@@ -282,6 +282,11 @@ toolTests =
           @?= [ ("p:lib:A", haskell "p/s/A.lhs" MarkdownUnlit),
                 ("p:lib:B", haskell "p/s/B.hs" NotLiterate)
               ]
+        -- -optL selectors are ignored (D-226).
+        with ["-pgmL", "markdown-unlit", "-optL", "bar"]
+          @?= [ ("p:lib:A", haskell "p/s/A.lhs" MarkdownUnlit),
+                ("p:lib:B", haskell "p/s/B.hs" NotLiterate)
+              ]
     ]
 
 -- * Other files

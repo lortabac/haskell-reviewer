@@ -104,6 +104,7 @@ import HaskellReviewer.Core.ModuleModel
     ItemName (..),
     ListKind (..),
     Located (..),
+    MarkdownLayout (..),
     ModuleExport (..),
     ModuleHeader (..),
     ModuleParse (..),
@@ -403,7 +404,12 @@ pageWarmUp =
         (Generation 1)
         warmUpIndex
         ModuleView {moduleId = warmUpId, path = Nothing, answer = a}
-    textOnly r = TextOnlyModule {reason = r, warnings = [NoMarkdownCode]}
+    textOnly r =
+      TextOnlyModule
+        { reason = r,
+          warnings =
+            [NoMarkdownCode, MarkdownMovesCode Reorders, MarkdownMovesCode Dedents]
+        }
     parseError =
       ParseError
         { message = "x",

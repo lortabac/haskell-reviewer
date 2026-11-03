@@ -107,6 +107,21 @@ cases =
       },
     (plain "markdown.lhs") {settings = with {literate = MarkdownUnlit}},
     (plain "markdown-no-code.lhs") {settings = with {literate = MarkdownUnlit}},
+    -- markdown-unlit 0.6.0's rules (D-224): ~~~ fences, classes as
+    -- whole words, any fence closes (so Data.Char is lost, like in the
+    -- real build).
+    (plain "markdown-tilde.lhs") {settings = with {literate = MarkdownUnlit}},
+    (plain "markdown-classes.lhs") {settings = with {literate = MarkdownUnlit}},
+    (plain "markdown-pairing.lhs") {settings = with {literate = MarkdownUnlit}},
+    -- markdown-unlit would move code: text only, with why (D-225).
+    (plain "markdown-top.lhs") {settings = with {literate = MarkdownUnlit}},
+    (plain "markdown-indented.lhs") {settings = with {literate = MarkdownUnlit}},
+    (plain "markdown-top.lhs")
+      { golden = "markdown-top-loose",
+        settings = with {literate = LooseLiterate}
+      },
+    -- An indented fence that isn't Haskell moves nothing: in place.
+    (plain "markdown-indented-other.lhs") {settings = with {literate = MarkdownUnlit}},
     -- A loose .lhs (no component, so no known -pgmL, D-218): no Bird
     -- or LaTeX code outside fences, and a haskell block, so read as
     -- markdown-unlit, with a warning.

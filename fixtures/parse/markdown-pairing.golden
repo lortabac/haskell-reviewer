@@ -1,0 +1,12 @@
+parsed
+module: Pairing @4:8-4:15
+exports:
+  foo@4:17-4:20 @4:17-4:20
+imports:
+  import Data.Maybe@6:8-6:18 @6:1-6:30
+    only:
+      fromMaybe@6:20-6:29 @6:20-6:29
+language: GHC2021
+from pragmas: 
+enabled: BangPatterns, BinaryLiterals, ConstrainedClassMethods, ConstraintKinds, DeriveDataTypeable, DeriveFoldable, DeriveFunctor, DeriveGeneric, DeriveLift, DeriveTraversable, DoAndIfThenElse, EmptyCase, EmptyDataDecls, EmptyDataDeriving, ExistentialQuantification, ExplicitForAll, FieldSelectors, FlexibleContexts, FlexibleInstances, ForeignFunctionInterface, GADTSyntax, GeneralizedNewtypeDeriving, HexFloatLiterals, ImplicitPrelude, ImplicitStagePersistence, ImportQualifiedPost, InstanceSigs, KindSignatures, ListTuplePuns, MonomorphismRestriction, MultiParamTypeClasses, NamedFieldPuns, NamedWildCards, NumericUnderscores, PatternGuards, PolyKinds, PostfixOperators, RankNTypes, RelaxedPolyRec, ScopedTypeVariables, StandaloneDeriving, StandaloneKindSignatures, StarIsType, TraditionalRecordSyntax, TupleSections, TypeApplications, TypeOperators, TypeSynonymInstances
+warnings:
