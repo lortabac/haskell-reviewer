@@ -66,7 +66,7 @@ getMachineInfo = do
       }
 
 -- | The 1, 5 and 15 minute load averages. Recorded with every run:
--- numbers taken under load mean little (WORKFLOW § 6).
+-- numbers taken under load mean little.
 data LoadAvg = LoadAvg
   { one :: Double,
     five :: Double,
