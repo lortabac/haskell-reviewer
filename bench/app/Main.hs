@@ -35,6 +35,7 @@ import Bench.ModuleList
     pickSamples,
     queueOrder,
   )
+import Bench.Path (shortPath)
 import Bench.Projects
   ( Project (..),
     Role (..),
@@ -80,7 +81,7 @@ import Data.Text qualified as Text
 import Data.Text.IO qualified as Text.IO
 import Data.Time.Clock (getCurrentTime)
 import Options.Applicative qualified as Opt
-import System.Directory (doesDirectoryExist, getFileSize)
+import System.Directory (doesDirectoryExist, getCurrentDirectory, getFileSize)
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..), exitWith)
 import System.FilePath (takeDirectory, (</>))
@@ -122,6 +123,7 @@ data Options = Options
     rts :: [String],
     censusOnly :: Bool,
     jsonOut :: Maybe FilePath,
+    reportOut :: Maybe FilePath,
     label :: Maybe Text,
     names :: [Text]
   }
@@ -179,6 +181,12 @@ optionsParser =
           Opt.long "json"
             <> Opt.metavar "FILE"
             <> Opt.help "Also write the report as JSON"
+      )
+    <*> Opt.optional
+      ( Opt.strOption $
+          Opt.long "report"
+            <> Opt.metavar "FILE"
+            <> Opt.help "Also write the text report (no progress lines)"
       )
     <*> Opt.optional
       ( Text.pack
@@ -245,6 +253,7 @@ runBench opts rows projects = do
             }
     Text.IO.putStr (renderTable report)
     maybe (pure ()) (`LBS.writeFile` encodeReportJson report) opts.jsonOut
+    maybe (pure ()) (`Text.IO.writeFile` renderTable report) opts.reportOut
     unless (null failedNames) $
       hPutStrLn stderr $
         "haskell-reviewer-bench: failed: " <> show (map Text.unpack failedNames)
@@ -506,9 +515,12 @@ getToolInfo exePath = do
   let rtsInfo = readRtsPairs infoOut
   gitSha <- tryGit ["rev-parse", "HEAD"]
   dirtyOut <- tryGit ["status", "--porcelain"]
+  cwd <- getCurrentDirectory
+  home <- lookupEnv "HOME"
   pure
     ToolInfo
-      { exe = exePath,
+      { -- Short, so a committed report has no home directory in it.
+        exe = shortPath cwd home exePath,
         version = Text.pack (firstLine (verOut <> verErr)),
         gitSha = Text.pack <$> gitSha,
         gitDirty = not . null <$> dirtyOut,

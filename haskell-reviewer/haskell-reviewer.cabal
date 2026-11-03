@@ -188,6 +188,8 @@ test-suite haskell-reviewer-test
     Bench.IndexLogTest
     Bench.ModuleList
     Bench.ModuleListTest
+    Bench.Path
+    Bench.PathTest
     Bench.Projects
     Bench.ProjectsTest
     Bench.Queries
@@ -315,6 +317,7 @@ benchmark haskell-reviewer-bench
     Bench.IndexLog
     Bench.Machine
     Bench.ModuleList
+    Bench.Path
     Bench.Projects
     Bench.Queries
     Bench.Report

@@ -4,6 +4,8 @@ BINDIR ?= $(PREFIX)/bin
 BENCH_RUNS ?= 10
 BENCH_PROJECTS ?=
 BENCH_JSON ?=
+# Text report only, without the build log and progress lines.
+BENCH_REPORT ?=
 BENCH_LABEL ?=
 # Extra +RTS options for the product, e.g. BENCH_RTS="--nonmoving-gc".
 BENCH_RTS ?=
@@ -30,6 +32,7 @@ bench: build
 	    --exe "$$($(CABAL) list-bin exe:haskell-reviewer)" \
 	    --runs $(BENCH_RUNS) \
 	    $(if $(BENCH_JSON),--json $(BENCH_JSON)) \
+	    $(if $(BENCH_REPORT),--report $(BENCH_REPORT)) \
 	    $(if $(BENCH_LABEL),--label "$(BENCH_LABEL)") \
 	    $(if $(BENCH_RTS),--rts "$(BENCH_RTS)") \
 	    $(BENCH_ARGS) \
