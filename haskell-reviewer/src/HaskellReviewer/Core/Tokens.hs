@@ -17,6 +17,14 @@ module HaskellReviewer.Core.Tokens
     tokenAt,
     tokenList,
     tokensIn,
+    tokenIndexFrom,
+    tokenClassAt,
+    tokenSpanAt,
+    nameLikeClass,
+
+    -- * Spans as words
+    spanWords,
+    wordsSpan,
   )
 where
 
@@ -78,9 +86,7 @@ width = 5
 tokensFromList :: [Token] -> Tokens
 tokensFromList ts = Tokens (Vector.fromListN (width * length ts) (concatMap words5 ts))
   where
-    words5 t =
-      let Span (Line l1) (Col c1) (Line l2) (Col c2) = t.span
-       in [l1, c1, l2, c2, fromIntegral (fromEnum t.kind)]
+    words5 t = spanWords t.span <> [fromIntegral (fromEnum t.kind)]
 
 -- | None, as when the lexer failed.
 noTokens :: Tokens
@@ -92,41 +98,68 @@ tokenCount (Tokens v) = Vector.length v `div` width
 
 -- | The token at this index, from 0. Out of range: 'Nothing'.
 tokenAt :: Tokens -> Int -> Maybe Token
-tokenAt ts@(Tokens v) i
+tokenAt ts i
   | i < 0 || i >= tokenCount ts = Nothing
   | otherwise =
-      Just
-        Token
-          { span = Span (Line (w 0)) (Col (w 1)) (Line (w 2)) (Col (w 3)),
-            kind = toClass (w 4)
-          }
-  where
-    w k = v Vector.! (i * width + k)
-    -- Only tokensFromList writes the class word, so it is always in
-    -- range. Special is just a total fallback, no error.
-    toClass n
-      | n <= fromIntegral (fromEnum (maxBound :: TokenClass)) = toEnum (fromIntegral n)
-      | otherwise = Special
+      Just Token {span = tokenSpanAt ts i, kind = tokenClassAt ts i}
 
 -- | All of them.
 tokenList :: Tokens -> [Token]
 tokenList ts = [t | i <- [0 .. tokenCount ts - 1], Just t <- [tokenAt ts i]]
 
--- | The tokens that start inside the span, in order.
-tokensIn :: Span -> Tokens -> [Token]
-tokensIn s ts = takeWhile inside (from (firstAtOrAfter 0 (tokenCount ts)))
+-- | The index of the first token that starts at or after this place:
+-- 'tokenCount' if none does. A binary search on the raw words.
+tokenIndexFrom :: Tokens -> Line -> Col -> Int
+tokenIndexFrom ts@(Tokens v) (Line l) (Col c) = go 0 (tokenCount ts)
   where
-    start t = (t.span.startLine, t.span.startCol)
-    inside t = start t < (s.endLine, s.endCol)
-    from i = case tokenAt ts i of
-      Just t -> t : from (i + 1)
-      Nothing -> []
-    -- The first index whose token starts at or after the span.
-    firstAtOrAfter lo hi
+    go lo hi
       | lo >= hi = lo
       | otherwise =
           let mid = (lo + hi) `div` 2
-           in case tokenAt ts mid of
-                Just t
-                  | start t < (s.startLine, s.startCol) -> firstAtOrAfter (mid + 1) hi
-                _ -> firstAtOrAfter lo mid
+              at k = v Vector.! (mid * width + k)
+           in if (at 0, at 1) < (l, c) then go (mid + 1) hi else go lo mid
+
+-- | The class of the token at this index, which must be in range.
+-- Cheaper than 'tokenAt' when only the class is needed.
+tokenClassAt :: Tokens -> Int -> TokenClass
+tokenClassAt (Tokens v) i = toClass (v Vector.! (i * width + 4))
+
+-- | The span of the token at this index, which must be in range.
+tokenSpanAt :: Tokens -> Int -> Span
+tokenSpanAt (Tokens v) i = wordsSpan v (i * width)
+
+-- | The classes that are always names, or words that look like names:
+-- each such token gets an occurrence entry.
+nameLikeClass :: TokenClass -> Bool
+nameLikeClass = \case
+  VarId -> True
+  ConId -> True
+  VarSym -> True
+  ConSym -> True
+  _ -> False
+
+-- | A span as 4 words: start line and column, end line and column.
+spanWords :: Span -> [Word32]
+spanWords (Span (Line l1) (Col c1) (Line l2) (Col c2)) = [l1, c1, l2, c2]
+
+-- | The span in the 4 words at this offset.
+wordsSpan :: Vector.Vector Word32 -> Int -> Span
+wordsSpan v o = Span (Line (w 0)) (Col (w 1)) (Line (w 2)) (Col (w 3))
+  where
+    w k = v Vector.! (o + k)
+
+-- | Only tokensFromList writes the class word, so it is always in
+-- range. Special is just a total fallback, no error.
+toClass :: Word32 -> TokenClass
+toClass n
+  | n <= fromIntegral (fromEnum (maxBound :: TokenClass)) = toEnum (fromIntegral n)
+  | otherwise = Special
+
+-- | The tokens that start inside the span, in order.
+tokensIn :: Span -> Tokens -> [Token]
+tokensIn s ts = takeWhile inside (from (tokenIndexFrom ts s.startLine s.startCol))
+  where
+    inside t = (t.span.startLine, t.span.startCol) < (s.endLine, s.endCol)
+    from i = case tokenAt ts i of
+      Just t -> t : from (i + 1)
+      Nothing -> []

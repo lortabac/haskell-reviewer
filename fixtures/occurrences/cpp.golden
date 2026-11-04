@@ -1,0 +1,8 @@
+conflicts: 0
+2:8-2:11 "Cpp" module use -> not-a-name module
+8:1-8:5 "used" var def -> top val:used
+8:8-8:16 "macroDef" var use -> top val:macroDef
+8:17-8:18 "+" var use -> free
+10:1-10:6 "local" var def -> top val:local
+10:28-10:29 "v" var use -> local #0
+#0 (v) 10:13-10:20 scope 10:9-10:29

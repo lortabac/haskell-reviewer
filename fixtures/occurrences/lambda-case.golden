@@ -1,0 +1,27 @@
+conflicts: 0
+2:8-2:18 "LambdaCase" module use -> not-a-name module
+4:1-4:2 "f" var def -> top val:f
+5:3-5:7 "Just" con use -> free
+5:8-5:9 "x" var def -> local #0
+5:13-5:14 "x" var use -> local #0
+6:3-6:10 "Nothing" con use -> free
+8:1-8:2 "g" var def -> top val:g
+9:3-9:4 "a" var def -> local #1
+9:5-9:6 "b" var def -> local #2
+9:9-9:10 "a" var use -> local #1
+9:11-9:12 ">" var use -> free
+9:13-9:14 "b" var use -> local #2
+9:18-9:19 "a" var use -> local #1
+10:5-10:6 "b" var def -> local #3
+10:10-10:11 "b" var use -> local #3
+12:1-12:2 "h" var def -> top val:h
+12:6-12:7 "x" var def -> local #4
+12:8-12:9 "y" var def -> local #5
+12:13-12:14 "x" var use -> local #4
+12:15-12:16 "y" var use -> local #5
+#0 x 5:8-5:9 scope 5:3-5:14
+#1 a 9:3-9:4 scope 9:3-9:19
+#2 b 9:5-9:6 scope 9:3-9:19
+#3 b 10:5-10:6 scope 10:3-10:11
+#4 x 12:6-12:7 scope 12:5-12:16
+#5 y 12:8-12:9 scope 12:5-12:16

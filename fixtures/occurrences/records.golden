@@ -1,0 +1,82 @@
+conflicts: 0
+2:8-2:15 "Records" module use -> not-a-name module
+4:8-4:20 "Data.Foreign" module use -> not-a-name module
+4:22-4:25 "Ext" type import -> free
+6:6-6:12 "Config" type def -> top type:Config
+6:15-6:21 "Config" con def -> top con:Config
+6:23-6:27 "port" field def -> top field:Config.port
+6:31-6:34 "Int" type use -> free
+6:36-6:40 "host" field def -> top field:Config.host
+6:44-6:50 "String" type use -> free
+8:6-8:11 "Other" type def -> top type:Other
+8:14-8:19 "Other" con def -> top con:Other
+8:21-8:25 "port" field def -> top field:Other.port
+8:29-8:32 "Int" type use -> free
+10:1-10:3 "mk" var def -> top val:mk
+10:4-10:5 "p" var def -> local #0
+10:8-10:14 "Config" con use -> top con:Config
+10:16-10:20 "port" field use -> top field:Config.port
+10:23-10:24 "p" var use -> local #0
+10:26-10:30 "host" field use -> top field:Config.host
+12:1-12:4 "pun" var def -> top val:pun
+12:5-12:11 "Config" con use -> top con:Config
+12:13-12:17 "port" var def -> local #1 [pun: top field:Config.port]
+12:21-12:25 "port" var use -> local #1
+14:1-14:5 "wild" var def -> top val:wild
+14:6-14:12 "Config" con use -> top con:Config
+14:20-14:24 "host" var use -> local #2
+14:25-14:27 "<>" var use -> free
+14:28-14:32 "show" var use -> free
+14:33-14:37 "port" var use -> local #3
+16:1-16:8 "partial" var def -> top val:partial
+16:9-16:15 "Config" con use -> top con:Config
+16:17-16:21 "port" field use -> top field:Config.port
+16:24-16:25 "p" var def -> local #4
+16:34-16:35 "p" var use -> local #4
+16:37-16:41 "host" var use -> local #5
+18:1-18:8 "fromExt" var def -> top val:fromExt
+18:9-18:12 "Ext" con use -> free
+18:20-18:28 "extField" var use -> free [maybe wildcard of Ext@18:9-18:12]
+18:29-18:30 "+" var use -> free
+18:31-18:38 "missing" var use -> free [maybe wildcard of Ext@18:9-18:12]
+20:1-20:7 "update" var def -> top val:update
+20:8-20:9 "c" var def -> local #6
+20:12-20:13 "c" var use -> local #6
+20:15-20:19 "host" field use -> top field:Config.host
+22:1-22:4 "dup" var def -> top val:dup
+22:5-22:6 "o" var def -> local #7
+22:9-22:10 "o" var use -> local #7
+22:12-22:16 "port" field use -> top field:Config.port [heuristic]
+24:1-24:4 "dot" var def -> top val:dot
+24:5-24:6 "c" var def -> local #8
+24:9-24:10 "c" var use -> local #8
+24:11-24:15 "host" field use -> top field:Config.host [heuristic]
+24:16-24:18 "<>" var use -> free
+24:21-24:25 "host" field use -> top field:Config.host [heuristic]
+24:27-24:28 "c" var use -> local #8
+26:1-26:7 "conPun" var def -> top val:conPun
+26:8-26:12 "host" var def -> local #9
+26:15-26:21 "Config" con use -> top con:Config
+26:23-26:27 "port" field use -> top field:Config.port
+26:33-26:37 "host" var use -> local #9 [pun: top field:Config.host]
+28:1-28:3 "w1" var def -> top val:w1
+28:4-28:7 "Ext" con use -> free
+28:15-28:18 "top" var use -> top val:top [heuristic]
+30:1-30:4 "top" var def -> top val:top
+32:9-32:10 "P" con def -> top pat:P
+32:12-32:16 "port" var def -> local #10 [pun: top field:P.port]
+32:18-32:20 "pb" var def -> local #11 [pun: top field:P.pb]
+32:25-32:29 "port" var use -> local #10
+32:31-32:33 "pb" var use -> local #11
+#0 p 10:4-10:5 scope 10:1-10:37
+#1 port 12:13-12:17 scope 12:1-12:25
+#2 (host) 14:14-14:16 scope 14:1-14:37
+#3 (port) 14:14-14:16 scope 14:1-14:37
+#4 p 16:24-16:25 scope 16:1-16:42
+#5 (host) 16:27-16:29 scope 16:1-16:42
+#6 c 20:8-20:9 scope 20:1-20:26
+#7 o 22:5-22:6 scope 22:1-22:21
+#8 c 24:5-24:6 scope 24:1-24:28
+#9 host 26:8-26:12 scope 26:1-26:38
+#10 port 32:12-32:16 scope 32:9-32:34
+#11 pb 32:18-32:20 scope 32:9-32:34

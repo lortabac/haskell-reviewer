@@ -16,6 +16,10 @@ module HaskellReviewer.Core.Parser
     parseSource,
     earlyWarnings,
 
+    -- * For tests
+    ParsedAst (..),
+    parseAst,
+
     -- * Helpers
     canonicalExtensionNames,
   )
@@ -52,6 +56,7 @@ import GHC.Driver.Session
     xopt_set,
     xopt_unset,
   )
+import GHC.Hs (GhcPs, HsModule)
 import GHC.LanguageExtensions qualified as LangExt
 import GHC.Parser qualified as Ghc (parseModule, parseSignature)
 import GHC.Parser.Errors.Types (PsHeaderMessage (..), PsMessage (..))
@@ -111,12 +116,13 @@ import HaskellReviewer.Core.Cpp
     runCpp,
     sameLines,
   )
-import HaskellReviewer.Core.LineRegions (lineRegions)
+import HaskellReviewer.Core.LineRegions (LineRegions, lineRegions)
 import HaskellReviewer.Core.ModuleModel
   ( Extensions (..),
     ModuleParse (..),
     ParseError (..),
     ParseWarning (..),
+    ParsedModule,
     TextOnlyModule (..),
     TextOnlyReason (..),
     forceModuleParse,
@@ -155,7 +161,7 @@ import HaskellReviewer.Core.SourceText
     unlitLoose,
     unlitMarkdown,
   )
-import HaskellReviewer.Core.Tokens (noTokens)
+import HaskellReviewer.Core.Tokens (Tokens, noTokens)
 
 {- Note [Parser settings]
 
@@ -303,10 +309,49 @@ withoutIncludes = \case
 parseSource :: ParseSettings -> Text -> ModuleParse
 parseSource settings input = forceModuleParse r `seq` r
   where
-    r = run settings input
+    r = run (\p -> Parsed (convertParsed p)) id settings input
 
-run :: ParseSettings -> Text -> ModuleParse
-run settings input = case unlit settings input of
+-- | GHC's AST of a module that parsed, with what we need to read it,
+-- and our model of it. For tests (the oracles of the occurrence table).
+data ParsedAst = ParsedAst
+  { ast :: GenLocated SrcSpan (HsModule GhcPs),
+    spans :: SpanMap,
+    tokens :: Tokens,
+    model :: ParsedModule
+  }
+
+-- | Like 'parseSource', with GHC's AST when the parse works. For tests.
+parseAst :: ParseSettings -> Text -> Either ModuleParse ParsedAst
+parseAst =
+  run
+    ( \p ->
+        Right
+          ParsedAst
+            { ast = p.ast,
+              spans = p.spans,
+              tokens = p.tokens,
+              model = convertParsed p
+            }
+    )
+    Left
+
+-- | What a successful parse hands to the conversion.
+data GhcParse = GhcParse
+  { spans :: SpanMap,
+    extensions :: Extensions,
+    warnings :: [ParseWarning],
+    tokens :: Tokens,
+    regions :: LineRegions,
+    ast :: GenLocated SrcSpan (HsModule GhcPs)
+  }
+
+convertParsed :: GhcParse -> ParsedModule
+convertParsed p = convertModule p.spans p.extensions p.warnings p.tokens p.regions p.ast
+
+-- | Parse, then the first function on success, the second on anything
+-- else.
+run :: (GhcParse -> r) -> (ModuleParse -> r) -> ParseSettings -> Text -> r
+run onParsed onOther settings input = case unlit settings input of
   -- See Note [Unlit] in HaskellReviewer.Core.SourceText.
   Left layout -> textOnly (Preprocessed "markdown-unlit") [MarkdownMovesCode layout]
   Right text -> withText text
@@ -327,10 +372,12 @@ run settings input = case unlit settings input of
           first = applyPragmas comp.dflags args
     comp = componentFlags settings
     early = earlyWarnings settings input
-    textOnly reason later = TextOnly (textOnlyModule reason (early <> later))
+    textOnly reason later = onOther (TextOnly (textOnlyModule reason (early <> later)))
     textOnlyWith regions reason later =
-      TextOnly
-        TextOnlyModule {reason = reason, warnings = early <> later, regions = regions}
+      onOther
+        ( TextOnly
+            TextOnlyModule {reason = reason, warnings = early <> later, regions = regions}
+        )
     -- Only literate files have prose.
     prose text = case settings.literate of
       NotLiterate -> []
@@ -356,15 +403,15 @@ run settings input = case unlit settings input of
         POk st m -> case errorsOf st of
           [] ->
             spans `seq`
-              Parsed
-                ( convertModule
-                    spans
-                    exts
-                    (early <> later <> lexWarnings)
-                    tokens
-                    regions
-                    m
-                )
+              onParsed
+                GhcParse
+                  { spans = spans,
+                    extensions = exts,
+                    warnings = early <> later <> lexWarnings,
+                    tokens = tokens,
+                    regions = regions,
+                    ast = m
+                  }
           errs -> failed errs
       where
         -- See Note [Second lex] and Note [LINE pragmas] in

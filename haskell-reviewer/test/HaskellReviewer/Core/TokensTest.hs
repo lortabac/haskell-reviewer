@@ -6,8 +6,11 @@ import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
 import HaskellReviewer.Core.Tokens
   ( Token (..),
     tokenAt,
+    tokenClassAt,
     tokenCount,
+    tokenIndexFrom,
     tokenList,
+    tokenSpanAt,
     tokensFromList,
     tokensIn,
   )
@@ -22,7 +25,8 @@ tests =
   testGroup
     "Tokens"
     [ testProperty "pack, then read back: the same tokens" roundTrip,
-      testProperty "tokensIn: the tokens that start inside" inside
+      testProperty "tokensIn: the tokens that start inside" inside,
+      testProperty "tokenIndexFrom: where tokensIn starts" indexFrom
     ]
 
 roundTrip :: Property
@@ -42,6 +46,19 @@ inside = property $ do
       end = (s.endLine, s.endCol)
   tokensIn s (tokensFromList ts)
     === [t | t <- ts, start t >= begin, start t < end]
+  where
+    start t = (t.span.startLine, t.span.startCol)
+
+indexFrom :: Property
+indexFrom = property $ do
+  ts <- sortOn start <$> forAll (Gen.list (Range.linear 0 100) genToken)
+  s <- forAll genSpan
+  let packed = tokensFromList ts
+      i = tokenIndexFrom packed s.startLine s.startCol
+  -- The first token at or after the place, as tokensIn finds it.
+  i === length [t | t <- ts, start t < (s.startLine, s.startCol)]
+  [Token (tokenSpanAt packed k) (tokenClassAt packed k) | k <- [i .. length ts - 1]]
+    === drop i ts
   where
     start t = (t.span.startLine, t.span.startCol)
 

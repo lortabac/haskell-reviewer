@@ -1,0 +1,59 @@
+conflicts: 0
+2:8-2:14 "Arrows" module use -> not-a-name module
+4:8-4:21 "Control.Arrow" module use -> not-a-name module
+6:1-6:5 "addA" var def -> top val:addA
+6:6-6:7 "f" var def -> local #0
+6:8-6:9 "g" var def -> local #1
+6:17-6:18 "x" var def -> local #2
+7:3-7:4 "y" var def -> local #3
+7:8-7:9 "f" var use -> local #0
+7:13-7:14 "x" var use -> local #2
+8:3-8:4 "z" var def -> local #4
+8:8-8:9 "g" var use -> local #1
+8:13-8:14 "x" var use -> local #2
+9:7-9:8 "s" var def -> local #5
+9:11-9:12 "y" var use -> local #3
+9:13-9:14 "+" var use -> free
+9:15-9:16 "z" var use -> local #4
+10:3-10:10 "returnA" var use -> free
+10:14-10:15 "s" var use -> local #5
+12:1-12:6 "caseA" var def -> top val:caseA
+12:7-12:8 "f" var def -> local #6
+12:16-12:17 "x" var def -> local #7
+12:26-12:27 "x" var use -> local #7
+13:3-13:7 "Left" con use -> free
+13:8-13:9 "a" var def -> local #8
+13:13-13:14 "f" var use -> local #6
+13:18-13:19 "a" var use -> local #8
+14:3-14:8 "Right" con use -> free
+14:9-14:10 "b" var def -> local #9
+14:14-14:21 "returnA" var use -> free
+14:25-14:26 "b" var use -> local #9
+16:1-16:6 "formA" var def -> top val:formA
+16:7-16:8 "f" var def -> local #10
+16:9-16:10 "g" var def -> local #11
+16:18-16:19 "x" var def -> local #12
+16:26-16:32 "untilA" var use -> free
+16:34-16:35 "f" var use -> local #10
+16:39-16:40 "x" var use -> local #12
+16:43-16:44 "g" var use -> local #11
+16:48-16:49 "x" var use -> local #12
+18:1-18:7 "escape" var def -> top val:escape
+18:8-18:9 "f" var def -> local #13
+18:17-18:18 "f" var def -> local #14
+18:22-18:23 "f" var use -> local #13
+#0 f 6:6-6:7 scope 6:1-10:15
+#1 g 6:8-6:9 scope 6:1-10:15
+#2 x 6:17-6:18 scope 6:12-10:15
+#3 y 7:3-7:4 scope 8:3-10:15
+#4 z 8:3-8:4 scope 9:3-10:15
+#5 s 9:7-9:8 scope 9:3-9:16,10:3-10:15
+#6 f 12:7-12:8 scope 12:1-14:26
+#7 x 12:16-12:17 scope 12:11-14:26
+#8 a 13:8-13:9 scope 13:3-13:19
+#9 b 14:9-14:10 scope 14:3-14:26
+#10 f 16:7-16:8 scope 16:1-16:53
+#11 g 16:9-16:10 scope 16:1-16:53
+#12 x 16:18-16:19 scope 16:13-16:53
+#13 f 18:8-18:9 scope 18:1-18:28
+#14 f 18:17-18:18 scope 18:12-18:28

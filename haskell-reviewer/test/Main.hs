@@ -37,6 +37,8 @@ import HaskellReviewer.Core.MarkdownUnlitTest qualified
 import HaskellReviewer.Core.ModulesGoldenTest qualified
 import HaskellReviewer.Core.ModulesTest qualified
 import HaskellReviewer.Core.NameTableTest qualified
+import HaskellReviewer.Core.OccurrencesGoldenTest qualified
+import HaskellReviewer.Core.OccurrencesTest qualified
 import HaskellReviewer.Core.PackageGlobTest qualified
 import HaskellReviewer.Core.ParseGoldenTest qualified
 import HaskellReviewer.Core.ParserTest qualified
@@ -186,6 +188,9 @@ main = do
                 (const HaskellReviewer.Core.MarkdownUnlitTest.tests),
               HaskellReviewer.Core.MarkdownUnlitTest.linearTests,
               HaskellReviewer.Core.NameTableTest.tests,
+              HaskellReviewer.Core.OccurrencesGoldenTest.tests,
+              HaskellReviewer.Core.OccurrencesTest.tests,
+              HaskellReviewer.Core.OccurrencesTest.linearTests,
               HaskellReviewer.Core.ParseGoldenTest.tests,
               HaskellReviewer.Core.ParserTest.tests,
               HaskellReviewer.Core.RichTextGoldenTest.tests,
