@@ -67,6 +67,7 @@ library
     HaskellReviewer.Core.Parser.Convert
     HaskellReviewer.Core.Parser.ConvertDecls
     HaskellReviewer.Core.Parser.ConvertOccurrences
+    HaskellReviewer.Core.Parser.FreeTyVars
     HaskellReviewer.Core.Parser.Haddock
     HaskellReviewer.Core.Parser.Helpers
     HaskellReviewer.Core.Parser.InstanceKey

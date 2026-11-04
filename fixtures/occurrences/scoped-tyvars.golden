@@ -1,0 +1,253 @@
+conflicts: 0
+3:8-3:20 "ScopedTyVars" module use -> not-a-name module
+5:8-5:18 "Data.Proxy" module use -> not-a-name module
+5:20-5:25 "Proxy" type import -> free
+8:1-8:9 "implicit" var sig -> top val:implicit
+8:13-8:14 "a" tyvar def -> local #0
+8:19-8:20 "a" tyvar use -> local #0
+8:26-8:27 "a" tyvar use -> local #0
+9:1-9:9 "implicit" var def -> top val:implicit
+9:10-9:11 "x" var def -> local #10
+9:12-9:14 "xs" var def -> local #11
+9:17-9:22 "const" var use -> free
+9:23-9:24 "x" var use -> local #10
+9:26-9:33 "Nothing" con use -> free
+9:37-9:42 "Maybe" type use -> free
+9:43-9:44 "a" tyvar def -> local #12
+9:46-9:47 ":" con use -> builtin
+9:48-9:50 "xs" var use -> local #11
+12:1-12:9 "explicit" var sig -> top val:explicit
+12:20-12:21 "a" tyvar def -> local #1
+12:22-12:23 "b" tyvar def -> local #2
+12:26-12:30 "Show" type use -> free
+12:31-12:32 "a" tyvar use -> local #1
+12:37-12:38 "a" tyvar use -> local #1
+12:42-12:43 "b" tyvar use -> local #2
+12:47-12:53 "String" type use -> free
+13:1-13:9 "explicit" var def -> top val:explicit
+13:10-13:11 "x" var def -> local #13
+13:16-13:20 "show" var use -> free
+13:22-13:23 "x" var use -> local #13
+13:27-13:28 "a" tyvar use -> local #1
+13:30-13:32 "<>" var use -> free
+13:33-13:35 "go" var use -> local #14
+13:36-13:37 "x" var use -> local #13
+15:5-15:7 "go" var sig -> local #14
+15:11-15:12 "a" tyvar use -> local #1
+15:16-15:22 "String" type use -> free
+16:5-16:7 "go" var def -> local #14
+16:10-16:14 "show" var use -> free
+16:16-16:17 "a" tyvar use -> local #1
+19:1-19:7 "shadow" var sig -> top val:shadow
+19:18-19:19 "a" tyvar def -> local #3
+19:21-19:22 "a" tyvar use -> local #3
+19:26-19:27 "a" tyvar use -> local #3
+20:1-20:7 "shadow" var def -> top val:shadow
+20:8-20:9 "x" var def -> local #15
+21:7-21:12 "inner" var sig -> local #16
+21:23-21:24 "a" tyvar def -> local #17
+21:26-21:27 "a" tyvar use -> local #17
+21:31-21:32 "a" tyvar use -> local #17
+22:7-22:12 "inner" var def -> local #16
+22:13-22:14 "y" var def -> local #18
+22:18-22:19 "y" var use -> local #18
+22:23-22:24 "a" tyvar use -> local #17
+23:7-23:12 "inner" var use -> local #16
+23:13-23:14 "x" var use -> local #15
+26:1-26:7 "patSig" var sig -> top val:patSig
+26:18-26:19 "a" tyvar def -> local #4
+26:21-26:22 "a" tyvar use -> local #4
+26:26-26:29 "Int" type use -> free
+27:1-27:7 "patSig" var def -> top val:patSig
+27:9-27:10 "x" var def -> local #19
+27:14-27:15 "a" tyvar use -> local #4
+27:24-27:28 "Just" con use -> free
+27:29-27:30 "x" var use -> local #19
+28:3-28:7 "Just" con use -> free
+28:9-28:10 "y" var def -> local #20
+28:14-28:15 "c" tyvar def -> local #21
+28:20-28:25 "const" var use -> free
+28:29-28:30 "y" var use -> local #20
+28:34-28:35 "c" tyvar use -> local #21
+29:3-29:10 "Nothing" con use -> free
+32:1-32:4 "lam" var sig -> top val:lam
+32:8-32:13 "Maybe" type use -> free
+32:14-32:17 "Int" type use -> free
+33:1-33:4 "lam" var def -> top val:lam
+33:10-33:11 "n" var def -> local #22
+33:15-33:16 "k" tyvar def -> local #23
+33:21-33:25 "Just" con use -> free
+33:27-33:28 "n" var use -> local #22
+33:32-33:33 "k" tyvar use -> local #23
+33:38-33:41 ">>=" var use -> free
+33:43-33:44 "m" var def -> local #24
+34:4-34:5 "v" var def -> local #25
+34:9-34:10 "w" tyvar def -> local #26
+34:15-34:19 "Just" con use -> free
+34:20-34:21 "m" var use -> local #24
+35:3-35:7 "pure" var use -> free
+35:9-35:10 "v" var use -> local #25
+35:14-35:15 "w" tyvar use -> local #26
+38:1-38:5 "expr" var sig -> top val:expr
+38:9-38:12 "Int" type use -> free
+39:1-39:5 "expr" var def -> top val:expr
+39:9-39:11 "id" var use -> free
+39:22-39:23 "t" tyvar def -> local #27
+39:25-39:26 "t" tyvar use -> local #27
+39:30-39:31 "t" tyvar use -> local #27
+39:35-39:36 "+" var use -> free
+39:37-39:43 "length" var use -> free
+39:59-39:60 "t" tyvar def -> local #28
+42:1-42:7 "nested" var sig -> top val:nested
+42:11-42:14 "Int" type use -> free
+42:26-42:27 "b" tyvar def -> local #5
+42:29-42:30 "b" tyvar use -> local #5
+42:41-42:42 "c" tyvar def -> local #6
+42:44-42:45 "c" tyvar use -> local #6
+42:49-42:50 "b" tyvar use -> local #5
+42:55-42:58 "Int" type use -> free
+43:1-43:7 "nested" var def -> top val:nested
+43:8-43:9 "n" var def -> local #29
+43:14-43:15 "n" var use -> local #29
+45:1-45:8 "visible" var sig -> top val:visible
+45:19-45:20 "a" tyvar def -> local #7
+45:24-45:25 "a" tyvar use -> local #7
+45:29-45:30 "a" tyvar use -> local #7
+46:1-46:8 "visible" var def -> top val:visible
+46:9-46:10 "t" var def -> local #30
+46:11-46:12 "x" var def -> local #31
+46:16-46:17 "x" var use -> local #31
+46:21-46:22 "t" tyvar use -> local #30
+49:1-49:6 "abstr" var sig -> top val:abstr
+49:17-49:18 "a" tyvar def -> local #8
+49:20-49:25 "Proxy" type use -> free
+49:26-49:27 "a" tyvar use -> local #8
+49:31-49:34 "Int" type use -> free
+50:1-50:6 "abstr" var def -> top val:abstr
+50:8-50:9 "b" tyvar def -> local #32
+50:10-50:15 "Proxy" con use -> free
+50:18-50:23 "const" var use -> free
+50:27-50:32 "Proxy" con use -> free
+50:34-50:35 "b" tyvar use -> local #32
+53:1-53:7 "conApp" var sig -> top val:conApp
+53:18-53:19 "a" tyvar def -> local #9
+53:21-53:26 "Maybe" type use -> free
+53:27-53:28 "a" tyvar use -> local #9
+53:32-53:35 "Int" type use -> free
+54:1-54:7 "conApp" var def -> top val:conApp
+54:9-54:13 "Just" con use -> free
+54:15-54:16 "a" tyvar use -> local #9
+55:1-55:7 "conApp" var def -> top val:conApp
+55:9-55:16 "Nothing" con use -> free
+55:18-55:19 "z" tyvar def -> local #33
+55:23-55:28 "const" var use -> free
+55:32-55:37 "Proxy" con use -> free
+55:39-55:40 "z" tyvar use -> local #33
+58:33-58:34 "x" var def -> local #35
+58:38-58:39 "q" tyvar def -> local #34
+58:41-58:43 "xs" var def -> local #36
+58:45-58:53 "implicit" var use -> top val:implicit
+58:54-58:55 "x" var use -> local #35
+58:56-58:58 "xs" var use -> local #36
+58:61-58:62 "x" var use -> local #35
+58:63-58:64 ":" con use -> builtin
+58:66-58:68 "xs" var use -> local #36
+58:73-58:74 "q" tyvar use -> local #34
+59:27-59:28 "r" tyvar def -> local #37
+59:38-59:39 "y" var def -> local #38
+59:43-59:44 "r" tyvar use -> local #37
+59:47-59:55 "implicit" var use -> top val:implicit
+59:56-59:57 "y" var use -> local #38
+59:64-59:65 "y" var use -> local #38
+63:7-63:10 "Def" type def -> top class:Def
+63:11-63:12 "a" tyvar def -> local #39
+64:3-64:6 "def" var def -> top val:def
+64:17-64:18 "b" tyvar def -> local #40
+64:20-64:21 "a" tyvar use -> local #39
+64:25-64:26 "b" tyvar use -> local #40
+64:30-64:31 "a" tyvar use -> local #39
+65:3-65:6 "def" var def -> top val:def
+65:7-65:8 "x" var def -> local #41
+65:15-65:16 "b" tyvar use -> local #40
+65:21-65:22 "x" var use -> local #41
+65:26-65:27 "a" tyvar use -> local #39
+67:10-67:13 "Def" type use -> top class:Def
+67:15-67:16 "e" tyvar def -> local #42
+68:3-68:6 "def" var sig -> top val:def
+68:17-68:18 "c" tyvar def -> local #43
+68:21-68:22 "e" tyvar use -> local #42
+68:27-68:28 "c" tyvar use -> local #43
+68:33-68:34 "e" tyvar use -> local #42
+69:3-69:6 "def" var instance-def -> top val:def
+69:7-69:9 "xs" var def -> local #44
+69:16-69:17 "c" tyvar use -> local #43
+69:22-69:24 "xs" var use -> local #44
+69:29-69:30 "e" tyvar use -> local #42
+72:7-72:11 "Dflt" type def -> top class:Dflt
+72:12-72:13 "a" tyvar def -> local #45
+73:11-73:15 "dflt" var sig -> top val:dflt
+73:26-73:27 "c" tyvar def -> local #47
+73:30-73:34 "Show" type use -> free
+73:35-73:36 "c" tyvar use -> local #47
+73:41-73:42 "a" tyvar use -> local #45
+73:46-73:47 "c" tyvar use -> local #47
+73:51-73:57 "String" type use -> free
+74:3-74:7 "dflt" var def -> top val:dflt
+74:18-74:19 "b" tyvar def -> local #46
+74:21-74:22 "a" tyvar use -> local #45
+74:26-74:27 "b" tyvar use -> local #46
+74:31-74:37 "String" type use -> free
+75:3-75:7 "dflt" var def -> top val:dflt
+75:10-75:11 "y" var def -> local #48
+75:14-75:18 "show" var use -> free
+75:20-75:21 "y" var use -> local #48
+75:25-75:26 "c" tyvar use -> local #47
+#0 a 8:13-8:14 scope 8:13-8:28
+#1 a 12:20-12:21 scope 12:13-12:53,13:1-16:17
+#2 b 12:22-12:23 scope 12:13-12:53,13:1-16:17
+#3 a 19:18-19:19 scope 19:11-19:27,20:1-23:14
+#4 a 26:18-26:19 scope 26:11-26:29,27:1-29:15
+#5 b 42:26-42:27 scope 42:19-42:50
+#6 c 42:41-42:42 scope 42:34-42:50
+#7 a 45:19-45:20 scope 45:12-45:30
+#8 a 49:17-49:18 scope 49:10-49:34,50:1-50:36
+#9 a 53:18-53:19 scope 53:11-53:35,54:1-55:41
+#10 x 9:10-9:11 scope 9:1-9:50
+#11 xs 9:12-9:14 scope 9:1-9:50
+#12 a 9:43-9:44 scope 9:37-9:44
+#13 x 13:10-13:11 scope 13:1-16:17
+#14 go 16:5-16:7 scope 13:14-16:17
+#15 x 20:8-20:9 scope 20:1-23:14
+#16 inner 22:7-22:12 scope 21:3-23:14
+#17 a 21:23-21:24 scope 21:16-21:32,22:7-22:25
+#18 y 22:13-22:14 scope 22:7-22:25
+#19 x 27:9-27:10 scope 27:1-29:15
+#20 y 28:9-28:10 scope 28:3-28:36
+#21 c 28:14-28:15 scope 28:3-28:36
+#22 n 33:10-33:11 scope 33:8-33:34
+#23 k 33:15-33:16 scope 33:8-33:34
+#24 m 33:43-33:44 scope 33:42-35:16
+#25 v 34:4-34:5 scope 35:3-35:16
+#26 w 34:9-34:10 scope 35:3-35:16
+#27 t 39:22-39:23 scope 39:9-39:31
+#28 t 39:59-39:60 scope 39:58-39:61
+#29 n 43:8-43:9 scope 43:1-43:15
+#30 t 46:9-46:10 scope 46:1-46:23
+#31 x 46:11-46:12 scope 46:1-46:23
+#32 b 50:8-50:9 scope 50:1-50:36
+#33 z 55:18-55:19 scope 55:1-55:41
+#34 q 58:38-58:39 scope 58:11-58:76
+#35 x 58:33-58:34 scope 58:11-58:76
+#36 xs 58:41-58:43 scope 58:11-58:76
+#37 r 59:27-59:28 scope 59:11-59:66
+#38 y 59:38-59:39 scope 59:11-59:66
+#39 a 63:11-63:12 scope 63:1-65:28
+#40 b 64:17-64:18 scope 64:10-64:31,65:3-65:28
+#41 x 65:7-65:8 scope 65:3-65:28
+#42 e 67:15-67:16 scope 67:1-69:32
+#43 c 68:17-68:18 scope 68:10-68:35,69:3-69:32
+#44 xs 69:7-69:9 scope 69:3-69:32
+#45 a 72:12-72:13 scope 72:1-75:27
+#46 b 74:18-74:19 scope 74:11-74:37
+#47 c 73:26-73:27 scope 73:19-73:57,75:3-75:27
+#48 y 75:10-75:11 scope 75:3-75:27

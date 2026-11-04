@@ -1,0 +1,43 @@
+conflicts: 0
+2:8-2:22 "NoScopedTyVars" module use -> not-a-name module
+5:1-5:2 "f" var sig -> top val:f
+5:13-5:14 "a" tyvar def -> local #0
+5:16-5:17 "a" tyvar use -> local #0
+5:21-5:22 "a" tyvar use -> local #0
+6:1-6:2 "f" var def -> top val:f
+6:3-6:4 "x" var def -> local #1
+6:7-6:12 "const" var use -> free
+6:13-6:14 "x" var use -> local #1
+6:16-6:23 "Nothing" con use -> free
+6:27-6:32 "Maybe" type use -> free
+6:33-6:34 "a" tyvar def -> local #2
+9:7-9:8 "C" type def -> top class:C
+9:9-9:10 "a" tyvar def -> local #3
+10:3-10:4 "m" var def -> top val:m
+10:8-10:9 "a" tyvar use -> local #3
+10:13-10:14 "a" tyvar use -> local #3
+11:3-11:4 "m" var def -> top val:m
+11:5-11:6 "x" var def -> local #4
+11:9-11:14 "const" var use -> free
+11:15-11:16 "x" var use -> local #4
+11:18-11:25 "Nothing" con use -> free
+11:29-11:34 "Maybe" type use -> free
+11:35-11:36 "a" tyvar def -> local #5
+13:10-13:11 "C" type use -> top class:C
+13:13-13:14 "e" tyvar def -> local #6
+14:3-14:4 "m" var instance-def -> top val:m
+14:5-14:7 "xs" var def -> local #7
+14:10-14:15 "const" var use -> free
+14:16-14:18 "xs" var use -> local #7
+14:20-14:27 "Nothing" con use -> free
+14:31-14:36 "Maybe" type use -> free
+14:37-14:38 "e" tyvar def -> local #8
+#0 a 5:13-5:14 scope 5:6-5:22
+#1 x 6:3-6:4 scope 6:1-6:35
+#2 a 6:33-6:34 scope 6:27-6:34
+#3 a 9:9-9:10 scope 9:1-11:37
+#4 x 11:5-11:6 scope 11:3-11:37
+#5 a 11:35-11:36 scope 11:29-11:36
+#6 e 13:13-13:14 scope 13:1-14:39
+#7 xs 14:5-14:7 scope 14:3-14:39
+#8 e 14:37-14:38 scope 14:31-14:38
