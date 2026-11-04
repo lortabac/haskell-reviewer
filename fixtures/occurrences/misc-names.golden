@@ -13,9 +13,9 @@ conflicts: 0
 13:30-13:31 "M" module use -> not-a-name module
 13:40-13:46 "lookup" var import -> free
 15:6-15:7 "T" type def -> top type:T
-15:8-15:9 "a" tyvar def -> free
+15:8-15:9 "a" tyvar def -> local #0
 15:12-15:13 "T" con def -> top con:T
-15:14-15:15 "a" tyvar use -> free
+15:14-15:15 "a" tyvar use -> local #0
 17:11-17:12 "T" type use -> top type:T
 17:13-17:20 "nominal" other use -> not-a-name other
 19:1-19:3 "as" var def -> top val:as
@@ -29,14 +29,15 @@ conflicts: 0
 27:14-27:17 "Int" type use -> free
 28:9-28:10 "P" con def -> top pat:P
 30:12-30:14 "as" var sig -> top val:as
-31:23-31:24 "n" var def -> local #0
+31:23-31:24 "n" var def -> local #1
 31:26-31:35 "fromMaybe" var use -> free
-31:36-31:37 "n" var use -> local #0
+31:36-31:37 "n" var use -> local #1
 31:38-31:45 "Nothing" con use -> free
-31:48-31:49 "n" var use -> local #0
+31:48-31:49 "n" var use -> local #1
 32:9-32:15 "hiding" var sig -> top val:hiding
 34:1-34:6 "label" var def -> top val:label
 34:9-34:13 "#foo" other use -> not-a-name label
 36:1-36:5 "used" var def -> top val:used
 36:8-36:15 "M.empty" var use -> free
-#0 n 31:23-31:24 scope 31:11-31:49
+#0 a 15:8-15:9 scope 15:1-15:15
+#1 n 31:23-31:24 scope 31:11-31:49

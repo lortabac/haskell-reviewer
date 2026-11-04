@@ -320,8 +320,8 @@ declsWarmUp =
 
 -- | A module that takes every path of the occurrence table: each kind
 -- of scope, record form, pun and wildcard, instance methods, splices,
--- quotes, implicit parameters, arrows, and each resolution, role and
--- namespace (Note [Syntactic scoping] in
+-- quotes, implicit parameters, arrows, type variable scopes, and each
+-- resolution, role and namespace (Note [Syntactic scoping] in
 -- "HaskellReviewer.Core.Parser.ConvertOccurrences"). A test checks it.
 occurrencesWarmUp :: Text
 occurrencesWarmUp =
@@ -331,6 +331,8 @@ occurrencesWarmUp =
       "{-# LANGUAGE Arrows, RecursiveDo, ParallelListComp, TransformListComp #-}",
       "{-# LANGUAGE ViewPatterns, PatternSynonyms, OverloadedLabels, LambdaCase #-}",
       "{-# LANGUAGE TypeFamilies, MultiWayIf, NPlusKPatterns, RoleAnnotations #-}",
+      "{-# LANGUAGE DataKinds, TypeAbstractions, RequiredTypeArguments, DerivingVia #-}",
+      "{-# LANGUAGE TypeFamilyDependencies, RankNTypes, GADTs, DefaultSignatures #-}",
       "module W (R (..), f, module X, pattern P, W.k) where",
       "import X (y)",
       "import qualified Z as Q",
@@ -361,7 +363,32 @@ occurrencesWarmUp =
       "dq = [d| dv = 1 |]",
       "$(pure [])",
       "{-# RULES \"r\" forall n. f n = n #-}",
-      "{-# INLINE f #-}"
+      "{-# INLINE f #-}",
+      "sv :: forall a. a -> a",
+      "sv @b (y :: b) = (y :: a) where { g :: forall c. c -> a; g _ = undefined :: a }",
+      "ex = (id :: forall q. q -> q) (\\(z :: r) -> z) [] (Just @s Nothing :: Maybe s)",
+      "data G where { G1 :: forall x. x -> G; G2 :: (Show y) => {gy :: y} -> G }",
+      "data X (k :: kk) = forall e. X e | Y (forall z. z -> k) deriving Show",
+      "data N = Z | Sn N",
+      "type One = Sn 'Z",
+      "type family TF (a :: k) = (r :: k) | r -> a",
+      "type family Open a",
+      "type instance Open [o] = o",
+      "type Syn (a :: k) = (a, forall b. b)",
+      "type Phk :: k -> k",
+      "class Cl a where { type At a; type At a = a; mc :: a -> b; mc = undefined }",
+      "class Cd a where",
+      "  { default md :: forall c. a -> c; md :: forall b. a -> b;",
+      "    md _ = undefined :: c }",
+      "instance Cl [a] where",
+      "  { type At [a] = a; mc :: forall b. [a] -> b; mc = undefined :: b }",
+      "newtype Wm m = Wm (Maybe m) deriving (Eq) via (Maybe m)",
+      "deriving via (Maybe m) instance Ord (Wm m)",
+      "vis :: forall a -> a -> a",
+      "vis t x = (x :: t)",
+      "pattern Pv :: forall a. a -> Maybe a",
+      "pattern Pv v <- Just (v :: a)",
+      "{-# RULES \"rt\" forall t. forall (n :: t) (m :: u). f n = m #-}"
     ]
 
 -- | A module with every kind of Haddock markup (haddock-library has

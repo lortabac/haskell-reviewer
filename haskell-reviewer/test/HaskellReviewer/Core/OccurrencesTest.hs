@@ -9,9 +9,9 @@ import Control.Monad.ST (runST)
 import Data.ByteString qualified as BS
 import Data.Containers.ListUtils (nubOrdOn)
 import Data.Data (Data, cast, gmapQ)
-import Data.List (nub, sort, (\\))
+import Data.List (intersperse, nub, sort, (\\))
 import Data.Map.Strict qualified as Map
-import Data.Maybe (isJust, mapMaybe)
+import Data.Maybe (fromMaybe, isJust, mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
@@ -84,7 +84,7 @@ import HaskellReviewer.Core.Tokens
     tokenSpanAt,
   )
 import HaskellReviewer.Effects.Parser (occurrencesWarmUp, parserWarmUp)
-import Hedgehog (Gen, Property, annotate, assert, forAll, property, (===))
+import Hedgehog (Gen, Property, PropertyT, annotate, assert, forAll, property, (===))
 import Hedgehog.Gen qualified as Gen
 import Hedgehog.Range qualified as Range
 import System.Directory qualified as Dir
@@ -100,6 +100,7 @@ tests =
     "Occurrences"
     [ testProperty "pack, then read back" packing,
       testProperty "generated modules: each name finds its binder" generated,
+      testProperty "generated types: each type variable finds its binder" generatedTypes,
       testCase "fixtures and warm-up: invariants" fixtureInvariants,
       testCase "GHC's AST: every located name has an entry (Data.Data oracle)" astOracle,
       testCase "GHC's collectors: their binders are ours" collectorOracle,
@@ -365,9 +366,16 @@ render e0 = fst (go [] e0 0)
 generated :: Property
 generated = property $ do
   e <- forAll genExpr
-  let pieces = render e
-      code = Text.concat (map fst pieces)
-      text = "{-# LANGUAGE RecursiveDo #-}\nmodule M where\nx = " <> code <> "\n"
+  checkMarked "{-# LANGUAGE RecursiveDo #-}" ((Text.pack "x = ", Plain') : render e)
+
+-- | A module with these pieces on the line after the pragmas and the
+-- module line: each binder and use must be what its mark says.
+checkMarked :: Text -> [(Text, Mark)] -> PropertyT IO ()
+checkMarked pragma pieces = do
+  let code = Text.concat (map fst pieces)
+      text = pragma <> "\nmodule M where\n" <> code <> "\n"
+      -- After the pragmas and the module line.
+      codeLine = Line (fromIntegral (Text.count "\n" pragma + 3))
   annotate (Text.unpack text)
   case parseSource defaultParseSettings text of
     TextOnly t -> do
@@ -375,11 +383,11 @@ generated = property $ do
       assert False
     Parsed m -> do
       let occs = m.occurrences
-          cols = scanl (+) 5 [Text.length t | (t, _) <- pieces]
+          cols = scanl (+) 1 [Text.length t | (t, _) <- pieces]
           marked = [(c, mk) | ((_, mk), c) <- zip pieces cols, mk /= Plain']
           binderCol = [(b, c) | (c, Bind b) <- marked]
           at c =
-            let i = tokenIndexFrom m.tokens (Line 3) (Col (fromIntegral c))
+            let i = tokenIndexFrom m.tokens codeLine (Col (fromIntegral c))
              in occurrenceAt occs (TokenIx i)
           binderStart r = case r of
             Just Occurrence {resolution = LocalRef b} ->
@@ -395,16 +403,289 @@ generated = property $ do
         Plain' -> pure ()
       invariants text m === []
 
+-- * Generated type-level modules
+
+-- | A small type language, with a pool of three type variables.
+data Ty
+  = TV Text
+  | TFun Ty Ty
+  | TList Ty
+  | -- | A nested forall.
+    TForall Text Ty
+  deriving (Show)
+
+-- | Top-level declarations with type variables (ScopedTypeVariables on).
+data TDecl
+  = -- | @f :: [forall vs.] t; f [\@w] (_ :: p) = (undefined :: b)@: the
+    -- forall is in scope in the equation; @\@w@ binds anew; p binds the
+    -- variables not in scope, b sees them.
+    FunD (Maybe [Text]) Ty (Maybe Text) Ty Ty
+  | -- | @data D (v :: k) .. = C t ..@: kind variables bind at their first
+    -- place; the head is in scope in the fields.
+    DataD [(Text, Maybe Ty)] [Ty]
+  | -- | @class K vs where { methods }@.
+    ClassD [Text] [Method]
+  | -- | @instance Q (P vs) where { m :: [forall xs.] t; m = (undefined
+    -- :: b) }@: the head's variables bind at their first place.
+    InstD [Text] [(TySig, Ty)]
+  | -- | @type family F a; type instance F p = t@: p binds, t sees it.
+    FamD Ty Ty
+  deriving (Show)
+
+-- | A class method: its signature, maybe a default signature (it wins in
+-- the default method), maybe a default method @m = (undefined :: b)@.
+data Method = Method
+  { sig :: TySig,
+    defaultSig :: Maybe TySig,
+    body :: Maybe Ty
+  }
+  deriving (Show)
+
+-- | A signature, with or without a forall. (@forall@ is a keyword in
+-- terms here, so the field is @quant@.)
+data TySig = TySig
+  { quant :: Maybe [Text],
+    ty :: Ty
+  }
+  deriving (Show)
+
+genTy :: Gen Ty
+genTy =
+  Gen.recursive
+    Gen.choice
+    [TV <$> tyVarName]
+    [ Gen.subterm2 genTy genTy TFun,
+      Gen.subterm genTy TList,
+      Gen.subtermM genTy (\t -> (`TForall` t) <$> tyVarName)
+    ]
+
+tyVarName :: Gen Text
+tyVarName = Gen.element ["a", "b", "c"]
+
+genTDecl :: Gen TDecl
+genTDecl =
+  Gen.choice
+    [ FunD <$> Gen.maybe vars <*> genTy <*> Gen.maybe tyVarName <*> genTy <*> genTy,
+      DataD <$> some ((,) <$> tyVarName <*> Gen.maybe genTy) <*> some genTy,
+      ClassD <$> vars <*> some genMethod,
+      InstD <$> vars <*> some ((,) <$> genSig <*> genTy),
+      FamD <$> genTy <*> genTy
+    ]
+  where
+    vars = some tyVarName
+    some = Gen.list (Range.linear 1 3)
+    genSig = TySig <$> Gen.maybe vars <*> genTy
+    genMethod =
+      Method
+        <$> genSig
+        <*> Gen.maybe genSig
+        <*> Gen.maybe genTy
+
+-- | Where a type's free variables go.
+data Implicit
+  = -- | Nowhere: they are free (under an explicit forall).
+    NoImplicit
+  | -- | New binders at their first place; the ones made so far.
+    Implicit [(Text, Int)]
+
+-- | The declarations, marked, in one line. Binders are numbered in
+-- order.
+renderTDecls :: [TDecl] -> [(Text, Mark)]
+renderTDecls ds0 = plain "{ " <> go (0 :: Int) 0 ds0 <> plain "}"
+  where
+    go i k = \case
+      [] -> []
+      d : rest ->
+        let (ms, k') = renderTDecl i d k
+         in ms <> plain "; " <> go (i + 1) k' rest
+
+plain :: Text -> [(Text, Mark)]
+plain t = [(t, Plain')]
+
+-- | One declaration, number i, binders from k on.
+renderTDecl :: Int -> TDecl -> Int -> ([(Text, Mark)], Int)
+renderTDecl i d k0 = case d of
+  FunD qs t1 at p b ->
+    let (sm, outer, k2) = renderSig [] (TySig qs t1) k0
+        (atMs, scope1, k3) = case at of
+          Just w -> (plain " @" <> [(w, Bind k2)], (w, k2) : outer, k2 + 1)
+          Nothing -> ([], outer, k2)
+        (pm, pBound, k4) = renderTy scope1 (Implicit []) p k3
+        (bm, _, k5) = renderTy (pBound <> scope1) (Implicit []) b k4
+     in ( plain ("f" <> n i <> " :: ")
+            <> sm
+            <> plain ("; f" <> n i)
+            <> atMs
+            <> plain " (_ :: "
+            <> pm
+            <> plain (") = (undefined :: ")
+            <> bm
+            <> plain ")",
+          k5
+        )
+  DataD bndrs fields ->
+    -- Each kind sees the binders before it, then the kind variables
+    -- so far.
+    let step (ms, before, kvs, k) (v, kind) =
+          let (km, kvs', kb) = case kind of
+                Just t ->
+                  let (m, imp, k') = renderTy before (Implicit kvs) t k
+                   in (plain " :: " <> m, imp, k')
+                Nothing -> ([], kvs, k)
+              bm = plain " (" <> [(v, Bind kb)] <> km <> plain ")"
+           in (ms <> bm, (v, kb) : before, kvs', kb + 1)
+        (hm, stack, kinds, k1) = foldl' step ([], [], [], k0) bndrs
+        (fs, k2) = renderMany (stack <> kinds) NoImplicit fields k1
+     in ( plain ("data D" <> n i)
+            <> hm
+            <> plain (" = C" <> n i)
+            <> concatMap (plain " " <>) fs,
+          k2
+        )
+  ClassD vs methods ->
+    let (bs, outer, k1) = markBinders vs k0
+        method (ms, k) (j, m) =
+          let (mm, k') = renderMethod outer ("m" <> n i <> "x" <> n j) m k
+           in (ms <> [mm], k')
+        (methodMs, k2) = foldl' method ([], k1) (zip [0 :: Int ..] methods)
+     in (plain ("class K" <> n i) <> concatMap (plain " " <>) bs <> block methodMs, k2)
+  InstD vs methods ->
+    let (hm, headVars, k1) =
+          renderTy [] (Implicit []) (foldr1 TFun (map TV vs)) k0
+        method (ms, k) (j, (sg, b)) =
+          let name = "m" <> n i <> "y" <> n j
+              (sm, o, ka) = renderSig headVars sg k
+              (bm, _, kb) = renderTy (o <> headVars) (Implicit []) b ka
+              m = plain (name <> " :: ") <> sm <> plain "; " <> undefinedAs name bm
+           in (ms <> [m], kb)
+        (methodMs, k2) = foldl' method ([], k1) (zip [0 :: Int ..] methods)
+     in (plain ("instance Q" <> n i <> " ") <> hm <> block methodMs, k2)
+  FamD p t ->
+    let (pm, pBound, k1) = renderTy [] (Implicit []) p (k0 + 1)
+        (tm, _, k2) = renderTy pBound NoImplicit t k1
+     in ( plain ("type family F" <> n i <> " ")
+            <> [("a", Bind k0)]
+            <> plain ("; type instance F" <> n i <> " ")
+            <> pm
+            <> plain " = "
+            <> tm,
+          k2
+        )
+  where
+    n = Text.pack . show
+    block ms = plain " where { " <> concat (intersperse (plain "; ") ms) <> plain " }"
+    renderMany outer implicit ts k = case ts of
+      [] -> ([], k)
+      t : rest ->
+        let (a, _, k1) = renderTy outer implicit t k
+            (as, k2) = renderMany outer implicit rest k1
+         in (a : as, k2)
+
+-- | A class method, with the class's variables in scope. Its default
+-- method sees the default signature's forall if there is a default
+-- signature (it wins), else the plain one's.
+renderMethod :: [(Text, Int)] -> Text -> Method -> Int -> ([(Text, Mark)], Int)
+renderMethod outer name m k0 =
+  let (pm, pOuter, k1) = renderSig outer m.sig k0
+      (dm, dOuter, k2) = case m.defaultSig of
+        Just sg ->
+          let (tm, o, k') = renderSig outer sg k1
+           in (plain ("; default " <> name <> " :: ") <> tm, Just o, k')
+        Nothing -> ([], Nothing, k1)
+      scoped = fromMaybe pOuter dOuter
+      (bm, k3) = case m.body of
+        Just t ->
+          let (tm, _, k') = renderTy (scoped <> outer) (Implicit []) t k2
+           in (plain "; " <> undefinedAs name tm, k')
+        Nothing -> ([], k2)
+   in (plain (name <> " :: ") <> pm <> dm <> bm, k3)
+
+-- | A signature with these in scope: its text and its forall's binders
+-- (latest first). With no forall, its free variables bind.
+renderSig :: [(Text, Int)] -> TySig -> Int -> ([(Text, Mark)], [(Text, Int)], Int)
+renderSig outer sg k0 =
+  let (q, o, k1) = quantify sg.quant k0
+      implicit = maybe (Implicit []) (const NoImplicit) sg.quant
+      (tm, _, k2) = renderTy (o <> outer) implicit sg.ty k1
+   in (q <> tm, o, k2)
+
+-- | An optional forall: its text, its binders (latest first).
+quantify :: Maybe [Text] -> Int -> ([(Text, Mark)], [(Text, Int)], Int)
+quantify qs k = case qs of
+  Nothing -> ([], [], k)
+  Just vs ->
+    let (bs, outer, k') = markBinders vs k
+     in (plain "forall " <> concatMap (<> plain " ") bs <> plain ". ", outer, k')
+
+-- | Binders, marked, then latest first.
+markBinders :: [Text] -> Int -> ([[(Text, Mark)]], [(Text, Int)], Int)
+markBinders vs k =
+  ( [[(v, Bind b)] | (v, b) <- zip vs [k ..]],
+    reverse (zip vs [k ..]),
+    k + length vs
+  )
+
+-- | @name = (undefined :: t)@.
+undefinedAs :: Text -> [(Text, Mark)] -> [(Text, Mark)]
+undefinedAs name t = plain (name <> " = (undefined :: ") <> t <> plain ")"
+
+-- | A type, marked, with the implicit binders it ends with (latest
+-- first). Lookup: nested foralls, then the outer scope, then the
+-- implicit binders made so far; else a new implicit binder, or free.
+renderTy ::
+  [(Text, Int)] -> Implicit -> Ty -> Int -> ([(Text, Mark)], [(Text, Int)], Int)
+renderTy outer implicit0 t0 k0 =
+  let (ms, imp, k) = go [] implicit0 t0 k0
+   in ( ms,
+        case imp of
+          Implicit m -> m
+          NoImplicit -> [],
+        k
+      )
+  where
+    go stack implicit t k = case t of
+      TV v -> case (lookup v stack, lookup v outer, made implicit v) of
+        (Just b, _, _) -> ([(v, UseOf (Just b))], implicit, k)
+        (_, Just b, _) -> ([(v, UseOf (Just b))], implicit, k)
+        (_, _, Just b) -> ([(v, UseOf (Just b))], implicit, k)
+        _ -> case implicit of
+          Implicit m -> ([(v, Bind k)], Implicit ((v, k) : m), k + 1)
+          NoImplicit -> ([(v, UseOf Nothing)], implicit, k)
+      TFun a b ->
+        let (x, i1, k1) = go stack implicit a k
+            (y, i2, k2) = go stack i1 b k1
+         in (plain "(" <> x <> plain " -> " <> y <> plain ")", i2, k2)
+      TList a ->
+        let (x, i1, k1) = go stack implicit a k
+         in (plain "[" <> x <> plain "]", i1, k1)
+      TForall v a ->
+        let (x, i1, k1) = go ((v, k) : stack) implicit a (k + 1)
+         in (plain "(forall " <> [(v, Bind k)] <> plain ". " <> x <> plain ")", i1, k1)
+    made implicit v = case implicit of
+      Implicit m -> lookup v m
+      NoImplicit -> Nothing
+
+generatedTypes :: Property
+generatedTypes = property $ do
+  ds <- forAll (Gen.list (Range.linear 1 4) genTDecl)
+  checkMarked
+    ( "{-# LANGUAGE ScopedTypeVariables, RankNTypes, TypeAbstractions #-}\n"
+        <> "{-# LANGUAGE DefaultSignatures, TypeFamilies #-}"
+    )
+    (renderTDecls ds)
+
 -- * Invariants
 
 -- | What must hold for any table: an entry for every identifier token,
 -- no conflict, each local use inside its binder's scope, each binder
 -- inside or apart from each of its scopes (@x <- e@ binds from the next
 -- statement on; a comprehension's head comes before), and no free or
--- top-level variable inside the scope of a local binder of the same name.
+-- top-level variable or type variable inside the scope of a local binder
+-- of the same name and namespace.
 --
 -- Skipped by the last one: names in a splice (top-level names are free
--- there), and fields and implicit parameters (not VarNs). Not skipped:
+-- there), and names not VarNs or TyVarNs (fields, implicit parameters).
+-- Not skipped:
 -- arrow tails and the operator of @(| |)@, which see only the scope
 -- outside the proc and so could break it; no corpus module has one.
 invariants :: Text -> ParsedModule -> [String]
@@ -430,10 +711,11 @@ invariants text m =
     <> [ "shadowed but not local: " <> show (spanText (spanOf i))
        | (i, o) <- occurrenceList occs,
          o.role == Use,
-         o.namespace == VarNs,
+         o.namespace `elem` [VarNs, TyVarNs],
          not o.inSplice,
          notLocal o.resolution,
-         bd <- Map.findWithDefault [] (sliceSpan src (spanOf i)) bindersByName,
+         let key = (o.namespace, sliceSpan src (spanOf i)),
+         bd <- Map.findWithDefault [] key bindersByName,
          any (inside (spanOf i)) bd.scopes
        ]
   where
@@ -449,13 +731,20 @@ invariants text m =
     bindersByName =
       Map.fromListWith
         (<>)
-        [ (name, [bd])
+        [ ((ns, name), [bd])
         | k <- [0 .. binderCount occs - 1],
           Just bd <- [binderAt occs (BinderId k)],
-          let name = case bd.name of
-                AtSpan -> sliceSpan src bd.span
-                Stored t -> t
+          let (ns, name) = case bd.name of
+                AtSpan -> (binderNs bd.span, sliceSpan src bd.span)
+                -- A field a @..@ binds (or a macro's name).
+                Stored t -> (VarNs, t)
         ]
+    -- The namespace of the binder's own entry.
+    binderNs s =
+      let t = tokenIndexFrom ts s.startLine s.startCol
+       in case occurrenceAt occs (TokenIx t) of
+            Just o | t < tokenCount ts, tokenSpanAt ts t == s -> o.namespace
+            _ -> OtherNs
     inside a s = start a >= start s && end a <= end s
     apart a s = end a <= start s || start a >= end s
     start s = (s.startLine, s.startCol)
@@ -614,12 +903,20 @@ warmUpCovers = case parseSource defaultParseSettings occurrencesWarmUp of
     nub (sort (map (.role) occs)) @?= [minBound .. maxBound]
     nub (sort (map (.namespace) occs)) @?= [minBound .. maxBound]
     assertBool "a pun" (any (isJust . (.punField)) occs)
+    assertBool "a local type variable" (any localTyVar occs)
+    assertBool "a DataKinds guess" (any dataKindsGuess occs)
     assertBool "a splice" (any (.inSplice) occs)
     assertBool "top-level splices" (hasTopSplices m.occurrences)
     assertBool
       "a .. binder"
       (any isNamed (mapMaybe (binderAt occs' . BinderId) [0 .. binderCount occs' - 1]))
   where
+    localTyVar o = case o.resolution of
+      LocalRef _ -> o.namespace == TyVarNs && o.role == Use
+      _ -> False
+    dataKindsGuess o = case o.resolution of
+      TopLevelRef (Named DCon _) Heuristic -> True
+      _ -> False
     isNamed b = case b.name of
       Stored _ -> True
       AtSpan -> False
@@ -697,12 +994,59 @@ linearTests =
               <> Text.concat ["rec { v" <> n i <> " <- f; " | i <- [1 .. k]]
               <> "pure v1"
               <> Text.replicate k " }"
-              <> "; pure () }\n"
+              <> "; pure () }\n",
+        testCase "nested foralls" $
+          linear 10_000 $ \k ->
+            "{-# LANGUAGE RankNTypes #-}\nf :: Int -> " <> foralls k <> "v1\n",
+        testCase "nested foralls in a scoped signature" $
+          linear 10_000 $ \k ->
+            "{-# LANGUAGE RankNTypes #-}\nf :: forall v0. "
+              <> foralls k
+              <> "v1\nf = undefined :: v0\n",
+        testCase "a data head with many variables" $
+          linear 10_000 $ \k ->
+            "data T "
+              <> Text.unwords ["(v" <> n i <> " :: k" <> n i <> ")" | i <- [1 .. k]]
+              <> " = T "
+              <> Text.unwords ["v" <> n i | i <- [1 .. k]]
+              <> "\n",
+        testCase "a signature with many implicit variables" $
+          linear 10_000 $ \k ->
+            "f :: "
+              <> Text.concat [arg i | i <- [1 .. k]]
+              <> "v1\n",
+        testCase "a class with many methods" $
+          linear 10_000 $ \k ->
+            "class C a where\n"
+              <> Text.unlines ["  m" <> n i <> " :: a -> b -> a" | i <- [1 .. k]],
+        testCase "many scoped signatures in one group" $
+          linear 10_000 $ \k ->
+            Text.unlines
+              [ "f" <> n i <> " :: forall a. a -> a\nf" <> n i <> " x = (x :: a)"
+              | i <- [1 .. k]
+              ],
+        testCase "one scoped signature, many names and variables" $
+          linear 4_000 $ \k ->
+            Text.intercalate ", " ["f" <> n i | i <- [1 .. k]]
+              <> " :: forall "
+              <> Text.unwords ["v" <> n i | i <- [1 .. k]]
+              <> ". v1\n"
+              <> Text.unlines ["f" <> n i <> " = undefined :: v1" | i <- [1 .. k]],
+        testCase "nested pattern signatures" $
+          linear 10_000 $ \k ->
+            "f "
+              <> Text.replicate k "("
+              <> "x"
+              <> Text.concat [" :: v" <> n i <> ")" | i <- [1 .. k]]
+              <> " = x\n"
       ]
   where
     n :: Int -> Text
     n = Text.pack . show
+    arg i = "v" <> n i <> " -> v" <> n (i - 1) <> " -> "
     lets i = "let v" <> n i <> " = v" <> n (i - 1) <> " in "
+    foralls k = Text.concat [quant i | i <- [1 .. k]]
+    quant i = "forall v" <> n i <> ". v" <> n (i - 1) <> " -> "
 
 -- | Parse at big / 4 and big: the allocation must grow about linearly.
 linear :: Int -> (Int -> Text) -> Assertion

@@ -2,7 +2,7 @@
 
 -- | The occurrence table of a module (Note [Occurrence table] in
 -- "HaskellReviewer.Core.Occurrences"), from GHC's AST while it's alive
--- (D-61). Values only: type variables are all free here.
+-- (D-61).
 module HaskellReviewer.Core.Parser.ConvertOccurrences
   ( convertOccurrences,
   )
@@ -13,6 +13,7 @@ import Control.Monad.ST (ST, runST)
 import Data.Foldable (toList)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IntMap
+import Data.List (partition)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Map.Strict qualified as Map
@@ -27,9 +28,11 @@ import GHC.Types.Name.Occurrence
     OccName,
     OccSet,
     dataName,
+    delListFromOccEnv,
     elemOccSet,
     emptyOccEnv,
     extendOccEnv,
+    extendOccEnvList,
     isDataOcc,
     isSymOcc,
     isTcOcc,
@@ -93,6 +96,13 @@ import HaskellReviewer.Core.Occurrences
     record,
     recordPun,
   )
+import HaskellReviewer.Core.Parser.FreeTyVars
+  ( bndrKind,
+    famEqnFree,
+    gadtFree,
+    headFree,
+    typeFree,
+  )
 import HaskellReviewer.Core.Parser.Helpers (SpanMap, occText, toSpan)
 import HaskellReviewer.Core.Project (ModuleName (..))
 import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
@@ -124,7 +134,7 @@ The environment maps a name (with its namespace) to a local binder.
 Lookup: locals, then the module's top level (from the converted
 declarations, so the ids are the model's), then free.
 
-Scopes, values only:
+Scopes of values:
 
 - A match (an equation, a case alternative, a lambda): its patterns,
   left to right (a view pattern sees the patterns before it), are in
@@ -182,9 +192,43 @@ Import and free. A class method's signature is its definition (Def),
 like a default method's equations; a default signature is Sig. RULES
 binders scope over both sides.
 
-Types are walked for their names (types and classes: top-level or free)
-and their splices. Type variables are all free, binders included (role
-Def).
+Types and classes are top-level or free. With DataKinds, a name in a
+type that is no type here but a constructor here is that constructor,
+with the heuristic flag.
+
+Scopes of type variables (GHC's renamer, lexically):
+
+- A signature with no forall binds each free type variable that isn't
+  in scope, at its first place; scope: the signature. A forall binds its
+  variables over its type. With ScopedTypeVariables, a signature's outer
+  forall is in scope in the bindings of its names too (same group,
+  pattern synonyms included; in a class, the default signature wins over
+  the plain one). An expression signature's forall is in scope in the
+  expression too.
+- Pattern signatures, and @\@a@ in a constructor pattern, bind the
+  variables not in scope, where the pattern's variables are. As a
+  function or lambda argument, @\@a@ and @type a@ bind anew.
+- Data, newtype, synonym, class and family heads: the head's variables
+  (and the free ones in its kinds) over the whole declaration. A class's
+  covers its superclasses, fundeps, signatures, associated types and
+  defaults, and its default methods with ScopedTypeVariables. An
+  associated family's head variable that is the class's is a use of it.
+  An existential forall covers its constructor. GADT constructors don't
+  see the head: they bind their own.
+- Instances and standalone deriving: the head's free variables over the
+  whole declaration (methods with ScopedTypeVariables). A via type binds
+  its free ones first, over the declaration (or the deriving clause).
+- Family equations each bind their own free variables (in an instance
+  or a class, the ones in scope are uses).
+- RULES: the type forall over the rule; a binder's signature binds the
+  ones not in scope.
+- RequiredTypeArguments: a type variable with no binder may be a term
+  variable bound as a type argument (@f t x = (x :: t)@), and a forall
+  written in a term is left free.
+
+The free type variables of a type, in order, come from
+"HaskellReviewer.Core.Parser.FreeTyVars"; their binders are made first,
+at their first place, and the walk skips that token.
 
 At the end every VarId, ConId, VarSym or ConSym token with no entry is
 NotAName (module names, role words, labels get their kind on the way).
@@ -217,6 +261,9 @@ convertOccurrences spans exts tokens self decls m
                 top = top,
                 self = Ghc.mkModuleName (maybe "Main" moduleText self),
                 fieldSelectors = "FieldSelectors" `elem` exts.enabled,
+                dataKinds = "DataKinds" `elem` exts.enabled,
+                scopedTyVars = "ScopedTypeVariables" `elem` exts.enabled,
+                requiredTypeArgs = "RequiredTypeArguments" `elem` exts.enabled,
                 wildcardBinders = wildcardBinders,
                 wildcardCount = wildcardCount
               }
@@ -240,6 +287,9 @@ data Ctx s = Ctx
     top :: Top,
     self :: Ghc.ModuleName,
     fieldSelectors :: Bool,
+    dataKinds :: Bool,
+    scopedTyVars :: Bool,
+    requiredTypeArgs :: Bool,
     -- | The binders each local @C {..}@ has made so far, by its number.
     wildcardBinders :: STRef s (IntMap (OccEnv BinderId)),
     wildcardCount :: STRef s Int
@@ -267,7 +317,10 @@ data Env = Env
 -- | A local binder in scope.
 data Local = Local
   { binder :: BinderId,
-    depth :: Int
+    depth :: Int,
+    -- | The binder's token. A type variable's implicit binder is its
+    -- first use: the walk skips that token.
+    token :: Maybe TokenIx
   }
 
 -- | A @C {..}@ pattern with C from here. Its binders are made when a
@@ -619,7 +672,8 @@ bindLocal ctx env scope mark (L l rdr) = do
       record ctx.builder i (occNamespace occ) Def (LocalR b) env.splice
     _ -> pure ()
   let depth = env.depth + 1
-  pure (env {locals = extendOccEnv env.locals occ (Local b depth), depth = depth}, b)
+      local = Local {binder = b, depth = depth, token = tok}
+  pure (env {locals = extendOccEnv env.locals occ local, depth = depth}, b)
 
 -- | A local binder that is also a field pun: the field goes to the side
 -- table.
@@ -718,7 +772,7 @@ data PatMode
 walkPat :: Ctx s -> PatMode -> Env -> LPat GhcPs -> ST s Env
 walkPat ctx mode = go
   where
-    go env (L _ pat) = case pat of
+    go env (L lp pat) = case pat of
       WildPat _ -> pure env
       VarPat _ n -> bindVar env n
       LazyPat _ p -> go env p
@@ -741,12 +795,18 @@ walkPat ctx mode = go
       LitPat _ _ -> pure env
       NPat {} -> pure env
       NPlusKPat _ n _ _ _ _ -> bindVar env n
+      -- A type variable not in scope is bound here.
       SigPat _ p (HsPS _ t) -> do
         e <- go env p
-        walkType ctx e t
-        pure e
-      EmbTyPat _ (HsTP _ t) -> env <$ walkType ctx env t
-      InvisPat _ (HsTP _ t) -> env <$ walkType ctx env t
+        bindTyPat ctx UseInScope e (tyScope lp) t
+      EmbTyPat _ (HsTP _ t) -> bindTyPat ctx UseInScope env (tyScope lp) t
+      InvisPat _ (HsTP _ t) -> bindTyPat ctx UseInScope env (tyScope lp) t
+
+    -- Where a pattern's type variables are in scope.
+    tyScope lp = case mode of
+      BindIn scope -> scope
+      BindTop -> spanL ctx (locA lp)
+      UseVars -> spanL ctx (locA lp)
 
     bindVar env n = case mode of
       BindIn scope -> fst <$> bindLocal ctx env scope MarkToken n
@@ -872,7 +932,12 @@ walkExpr ctx env (L l expr) = case expr of
           else mapM_ (putDotField ctx env) dots >> go rhs
   HsGetField {gf_expr = e, gf_field = L _ f} -> go e >> putDotField ctx env f
   HsProjection {proj_flds = fs} -> mapM_ (putDotField ctx env) fs
-  ExprWithTySig _ e (HsWC _ t) -> go e >> walkSigType ctx env t
+  -- With ScopedTypeVariables, a forall here is in scope in e too.
+  ExprWithTySig _ e (HsWC _ t)
+    | scopesOver ctx t -> do
+        env' <- bindSigType ctx env (spanL ctx (locA l)) t
+        walkExpr ctx env' e
+    | otherwise -> go e >> walkSigType ctx env t
   ArithSeq _ _ info -> case info of
     From a -> go a
     FromThen a b -> go a >> go b
@@ -894,7 +959,7 @@ walkExpr ctx env (L l expr) = case expr of
   HsHole kind -> case kind of
     HoleVar n -> useName ctx env Use n
     HoleError -> pure ()
-  HsForAll _ tele e -> walkTelescope ctx env tele >> go e
+  HsForAll _ tele e -> walkTermTelescope ctx env tele >> go e
   HsQual _ (L _ cs) e -> mapM_ go cs >> go e
   HsFunArr _ mult a b -> do
     case mult of
@@ -1015,8 +1080,18 @@ walkMatches ctx env scope funName body = \case
         PatSyn -> pure ()
         LazyPatCtx -> pure ()
       let whole = spanL ctx (locA l)
-      env' <- foldM (walkPat ctx (BindIn (fromMaybe whole scope))) env pats
+      env' <- foldM (walkArgPat ctx (fromMaybe whole scope)) env pats
       walkGRHSs ctx env' whole body grhss
+
+-- | A match's argument. A type argument there (@\@a@, @type a@) binds
+-- its type variables anew, even ones in scope (GHC's rule for type
+-- abstractions); elsewhere it's like a pattern signature.
+walkArgPat :: Ctx s -> [Span] -> Env -> LPat GhcPs -> ST s Env
+walkArgPat ctx scope env p@(L _ pat) = case pat of
+  InvisPat _ (HsTP _ t) -> bindTyPat ctx Shadow env scope t
+  EmbTyPat _ (HsTP _ t) -> bindTyPat ctx Shadow env scope t
+  ParPat _ q@(L _ EmbTyPat {}) -> walkArgPat ctx scope env q
+  _ -> walkPat ctx (BindIn scope) env p
 
 -- | Right-hand sides with their where clause, which is in scope from
 -- the first guard to the end of the match.
@@ -1191,8 +1266,8 @@ declareLocalBinds ctx env scope = \case
       pure
         ( env',
           \e -> do
-            mapM_ ($ e) (reverse ks)
-            mapM_ (walkSig ctx e (useName ctx e) Sig) sigs
+            sv <- walkSigs ctx e (useName ctx e) Sig (bindSpans ctx (toList binds)) sigs
+            mapM_ (\k -> k e sv) (reverse ks)
         )
     -- Only after the renamer.
     XValBindsLR _ -> pure (env, \_ -> pure ())
@@ -1217,28 +1292,32 @@ declareLocalBinds ctx env scope = \case
   where
     fsText = Text.pack . unpackFS
 
--- | One binding of a group: its binders now, its right-hand side later.
+-- | One binding of a group: its binders now, its right-hand side later,
+-- with the type variables of its signature's forall.
 declareBind ::
   Ctx s ->
   [Span] ->
-  (Env, [Env -> ST s ()]) ->
+  (Env, [Env -> SigScopes -> ST s ()]) ->
   LHsBind GhcPs ->
-  ST s (Env, [Env -> ST s ()])
+  ST s (Env, [Env -> SigScopes -> ST s ()])
 declareBind ctx scope (env, ks) (L l bind) = case bind of
   FunBind _ n mg -> do
     (env', b) <- bindLocal ctx env scope LeaveToken n
-    let k e = walkMatches ctx e Nothing (\x -> putLocalDef e b x) (walkExpr ctx) mg
+    let k e0 sv =
+          let e = withSigScopes sv n e0
+           in walkMatches ctx e Nothing (\x -> putLocalDef e b x) (walkExpr ctx) mg
     pure (env', k : ks)
   PatBind _ pat mult grhss -> do
     env' <- walkPat ctx (BindIn scope) env pat
-    let k e = do
+    let k e _ = do
           walkMult ctx e mult
           walkGRHSs ctx e (spanL ctx (locA l)) (walkExpr ctx) grhss
     pure (env', k : ks)
   -- Only made by the type checker.
   VarBind {} -> pure (env, ks)
   -- Only at the top level (or in a quote).
-  PatSynBind _ psb -> pure (env, (\e -> walkPatSyn ctx e psb) : ks)
+  PatSynBind _ psb@(PSB _ n _ _ _) ->
+    pure (env, (\e sv -> walkPatSyn ctx (withSigScopes sv n e) psb) : ks)
   where
     putLocalDef e b (L ln rdr) =
       put ctx e (locA ln) (occNamespace (rdrNameOcc rdr)) Def (LocalR b)
@@ -1249,67 +1328,140 @@ walkMult ctx env = \case
   HsLinearAnn _ -> pure ()
   HsExplicitMult _ t -> walkType ctx env t
 
+-- | With ScopedTypeVariables, the scope inside each binding's signature
+-- forall, by the binding's name. A group's signatures are walked in the
+-- scope its bindings are, so that scope is the binding's: one per
+-- signature, shared by all its names.
+type SigScopes = OccEnv Env
+
+-- | A binding's scope: inside its signature's forall, if any.
+withSigScopes :: SigScopes -> LIdP GhcPs -> Env -> Env
+withSigScopes sv (L _ rdr) env = fromMaybe env (lookupOccEnv sv (rdrNameOcc rdr))
+
+-- | Where each binding of a group is, by name: a signature's forall is
+-- in scope there too.
+bindSpans :: Ctx s -> [LHsBind GhcPs] -> OccEnv [Span]
+bindSpans ctx binds =
+  foldl'
+    (\m (o, sp) -> extendOccEnv m o (sp <> fromMaybe [] (lookupOccEnv m o)))
+    emptyOccEnv
+    [(rdrNameOcc rdr, spanL ctx (locA l)) | L l b <- binds, L _ rdr <- named b]
+  where
+    named :: HsBind GhcPs -> [LIdP GhcPs]
+    named = \case
+      FunBind _ n _ -> [n]
+      PatSynBind _ (PSB _ n _ _ _) -> [n]
+      PatBind {} -> []
+      VarBind {} -> []
+
+-- | A group's signatures, fixities and pragmas (see 'walkSig'). In a
+-- class, a method's default signature wins over its plain one (GHC's
+-- mkHsSigEnv): the plain one's forall doesn't reach the default method.
+walkSigs ::
+  Ctx s ->
+  Env ->
+  (Role -> LIdP GhcPs -> ST s ()) ->
+  Role ->
+  OccEnv [Span] ->
+  [LSig GhcPs] ->
+  ST s SigScopes
+walkSigs ctx env name classOpRole binds sigs = do
+  let (dflts, plains) = partition isDefault sigs
+      defaulted = [rdrNameOcc rdr | L _ (ClassOpSig _ True ns _) <- dflts, L _ rdr <- ns]
+      plainBinds = delListFromOccEnv binds defaulted
+      unions = foldl' plusOccEnv emptyOccEnv
+  p <- mapM (walkSig ctx env name classOpRole plainBinds) plains
+  d <- mapM (walkSig ctx env name classOpRole binds) dflts
+  -- Default signatures win (plusOccEnv keeps the right one).
+  pure (plusOccEnv (unions p) (unions d))
+  where
+    isDefault = \case
+      L _ (ClassOpSig _ True _ _) -> True
+      _ -> False
+
 -- | A signature, fixity or pragma. The callback writes each name with
 -- a role; class method signatures get the given role (Def in a class).
+-- With ScopedTypeVariables, returns the forall's scope by name, for the
+-- bindings (spans by name).
 walkSig ::
-  Ctx s -> Env -> (Role -> LIdP GhcPs -> ST s ()) -> Role -> LSig GhcPs -> ST s ()
-walkSig ctx env name classOpRole (L l sig) = case sig of
-  TypeSig _ ns (HsWC _ t) -> mapM_ (name Sig) ns >> walkSigType ctx env t
-  PatSynSig _ ns t -> mapM_ (name Sig) ns >> walkSigType ctx env t
+  Ctx s ->
+  Env ->
+  (Role -> LIdP GhcPs -> ST s ()) ->
+  Role ->
+  OccEnv [Span] ->
+  LSig GhcPs ->
+  ST s SigScopes
+walkSig ctx env name classOpRole binds (L l sig) = case sig of
+  TypeSig _ ns (HsWC _ t) -> mapM_ (name Sig) ns >> sigType ns t
+  PatSynSig _ ns t -> mapM_ (name Sig) ns >> sigType ns t
   ClassOpSig _ isDefault ns t -> do
     mapM_ (name (if isDefault then Sig else classOpRole)) ns
-    walkSigType ctx env t
+    sigType ns t
   FixSig _ f -> case f of
-    FixitySig _ ns _ -> mapM_ (name Sig) ns
-  InlineSig _ n _ -> name Sig n
-  SpecSig _ n ts _ -> name Sig n >> mapM_ (walkSigType ctx env) ts
-  SpecSigE _ bndrs e _ -> do
+    FixitySig _ ns _ -> none (mapM_ (name Sig) ns)
+  InlineSig _ n _ -> none (name Sig n)
+  SpecSig _ n ts _ -> none (name Sig n >> mapM_ (walkSigType ctx env) ts)
+  SpecSigE _ bndrs e _ -> none $ do
     env' <- ruleBinders ctx env (spanL ctx (locA l)) bndrs
     walkExpr ctx env' e
-  SpecInstSig _ t -> walkSigType ctx env t
-  MinimalSig _ (L _ formula) -> boolFormula formula
-  SCCFunSig _ n _ -> name Sig n
-  CompleteMatchSig _ ns ty -> do
+  SpecInstSig _ t -> none (walkSigType ctx env t)
+  MinimalSig _ (L _ formula) -> none (boolFormula formula)
+  SCCFunSig _ n _ -> none (name Sig n)
+  CompleteMatchSig _ ns ty -> none $ do
     mapM_ (useEither ctx env Sig) ns
     mapM_ (useName ctx env Use) ty
   where
+    none act = emptyOccEnv <$ act
     boolFormula = \case
       Var n -> name Sig n
       And fs -> mapM_ (boolFormula . unLoc) fs
       Or fs -> mapM_ (boolFormula . unLoc) fs
       Parens f -> boolFormula (unLoc f)
+    sigType ns t
+      | scopesOver ctx t = do
+          let bound =
+                [ (o, sp)
+                | L _ rdr <- ns,
+                  let o = rdrNameOcc rdr,
+                  Just sp <- [lookupOccEnv binds o]
+                ]
+          env' <- bindSigType ctx env (concatMap snd bound) t
+          pure (extendOccEnvList emptyOccEnv [(o, env') | (o, _) <- bound])
+      | otherwise = emptyOccEnv <$ walkSigType ctx env t
 
--- | RULES and SPECIALISE binders: in scope in the given spans.
+-- | RULES and SPECIALISE binders: in scope in the given spans. Type
+-- variables in a binder's signature are bound there if not in scope.
 ruleBinders :: Ctx s -> Env -> [Span] -> RuleBndrs GhcPs -> ST s Env
 ruleBinders ctx env scope = \case
   RuleBndrs _ tyvs tmvs -> do
-    mapM_ (mapM_ (walkTyVarBndr ctx env)) tyvs
+    env0 <- bindTyVarBndrs ctx env scope (fromMaybe [] tyvs)
     foldM
       ( \e (L _ r) -> case r of
           RuleBndr _ n -> fst <$> bindLocal ctx e scope MarkToken n
           RuleBndrSig _ n (HsPS _ t) -> do
-            walkType ctx e t
-            fst <$> bindLocal ctx e scope MarkToken n
+            e' <- bindTyPat ctx UseInScope e scope t
+            fst <$> bindLocal ctx e' scope MarkToken n
       )
-      env
+      env0
       tmvs
 
 -- * Types
 
--- | A type. Type variables are free here: types and classes resolve,
--- splices are walked.
+-- | A type. Each forall binds over its own type.
 walkType :: Ctx s -> Env -> LHsType GhcPs -> ST s ()
-walkType ctx env (L _ ty) = case ty of
-  HsForAllTy _ tele body -> walkTelescope ctx env tele >> go body
+walkType ctx env (L l ty) = case ty of
+  HsForAllTy _ tele body -> do
+    env' <- bindTelescope ctx env (spanL ctx (locA l)) tele
+    walkType ctx env' body
   HsQualTy _ (L _ cs) body -> mapM_ go cs >> go body
-  HsTyVar _ prom n -> tyName prom n
+  HsTyVar _ prom n -> tyName ctx env prom n
   HsAppTy _ a b -> go a >> go b
   HsAppKindTy _ a k -> go a >> go k
   HsFunTy _ mult a b -> walkMult ctx env mult >> go a >> go b
   HsListTy _ a -> go a
   HsTupleTy _ _ ts -> mapM_ go ts
   HsSumTy _ ts -> mapM_ go ts
-  HsOpTy _ prom a op b -> go a >> tyName prom op >> go b
+  HsOpTy _ prom a op b -> go a >> tyName ctx env prom op >> go b
   HsParTy _ a -> go a
   HsIParamTy _ (L ln (HsIPName f)) t -> do
     put ctx env (locA ln) IPNs Use (ipRef env f)
@@ -1334,52 +1486,147 @@ walkType ctx env (L _ ty) = case ty of
           CDF {cdf_type = t} -> go t
   where
     go = walkType ctx env
-    -- A promoted name is a constructor.
-    tyName prom n@(L l rdr) = case prom of
-      NotPromoted -> useName ctx env Use n
-      IsPromoted -> useName ctx env Use (L l (promoted rdr))
-    promoted rdr = case rdr of
+
+-- | A name in a type: a type variable, a type or class, or a promoted
+-- constructor. With DataKinds, a name that is no type here but a
+-- constructor here is that constructor, a guess.
+tyName :: Ctx s -> Env -> PromotionFlag -> LIdP GhcPs -> ST s ()
+tyName ctx env prom n@(L l rdr) = case prom of
+  IsPromoted -> useName ctx env Use (L l (promoted rdr))
+  NotPromoted
+    | isTvOcc occ -> tyVarName ctx env n
+    | otherwise ->
+        resolve ctx env rdr >>= \case
+          (_, FreeR Plain)
+            | ctx.dataKinds,
+              not env.splice,
+              isSelfName ctx rdr,
+              Just t <- topLookup ctx (setOccNameSpace dataName occ) ->
+                put ctx env (locA l) ConNs Use (TopLevelR t.target Heuristic)
+          (ns, ref) -> put ctx env (locA l) ns Use ref
+  where
+    occ = rdrNameOcc rdr
+    promoted = \case
       Unqual o | isTcOcc o -> Unqual (setOccNameSpace dataName o)
       Qual m o | isTcOcc o -> Qual m (setOccNameSpace dataName o)
-      _ -> rdr
+      r -> r
+
+-- | A type variable: its binder, else free. Its binder's own token is
+-- written already (an implicit binder is the variable's first place).
+tyVarName :: Ctx s -> Env -> LIdP GhcPs -> ST s ()
+tyVarName ctx env (L l rdr) = forM_ (tokenAtLoc ctx (locA l)) $ \i ->
+  case lookupTyVar ctx env (rdrNameOcc rdr) of
+    Just loc
+      | loc.token == Just i -> pure ()
+      | otherwise -> record ctx.builder i TyVarNs Use (LocalR loc.binder) env.splice
+    Nothing -> record ctx.builder i TyVarNs Use (FreeR Plain) env.splice
+
+-- | A type variable's binder. With RequiredTypeArguments, a term
+-- variable of that name if no type variable has it (as GHC: @f t x =
+-- (x :: t)@ for @f :: forall a -> a -> a@).
+lookupTyVar :: Ctx s -> Env -> OccName -> Maybe Local
+lookupTyVar ctx env occ = case lookupOccEnv env.locals occ of
+  Just l -> Just l
+  Nothing
+    | ctx.requiredTypeArgs -> lookupOccEnv env.locals (setOccNameSpace varName occ)
+    | otherwise -> Nothing
+
+-- | A name written plainly or qualified with this module's name.
+isSelfName :: Ctx s -> RdrName -> Bool
+isSelfName ctx = \case
+  Unqual _ -> True
+  Qual m _ -> m == ctx.self
+  _ -> False
 
 walkSigType :: Ctx s -> Env -> LHsSigType GhcPs -> ST s ()
-walkSigType ctx env (L _ s) = case s of
-  HsSig _ outer body -> walkOuter ctx env outer >> walkType ctx env body
+walkSigType ctx env t = void (bindSigType ctx env [] t)
 
-walkOuter :: Ctx s -> Env -> HsOuterTyVarBndrs flag GhcPs -> ST s ()
-walkOuter ctx env = \case
-  HsOuterImplicit _ -> pure ()
-  HsOuterExplicit _ bs -> mapM_ (walkTyVarBndr ctx env) bs
+-- | A signature type. Its outer binders are in scope in it and in the
+-- extra spans. Returns the scope inside.
+bindSigType :: Ctx s -> Env -> [Span] -> LHsSigType GhcPs -> ST s Env
+bindSigType ctx env extra (L l (HsSig _ outer body)) = do
+  let scope = mergeScopes (spanL ctx (locA l) <> extra)
+  env' <- bindOuter ctx env scope outer (typeFree body)
+  walkType ctx env' body
+  pure env'
 
-walkTelescope :: Ctx s -> Env -> HsForAllTelescope GhcPs -> ST s ()
-walkTelescope ctx env = \case
-  HsForAllVis _ bs -> mapM_ (walkTyVarBndr ctx env) bs
-  HsForAllInvis _ bs -> mapM_ (walkTyVarBndr ctx env) bs
+-- | Outer binders: an explicit forall, else the given free type
+-- variables that aren't in scope (GHC's implicit forall).
+bindOuter ::
+  Ctx s -> Env -> [Span] -> HsOuterTyVarBndrs flag GhcPs -> [LIdP GhcPs] -> ST s Env
+bindOuter ctx env scope outer free = case outer of
+  HsOuterExplicit _ bs -> bindTyVarBndrs ctx env scope bs
+  HsOuterImplicit _ -> bindFree ctx env UseInScope scope free
 
--- | A type variable binder: free, role Def.
-walkTyVarBndr :: Ctx s -> Env -> LHsTyVarBndr flag GhcPs -> ST s ()
-walkTyVarBndr ctx env (L _ b) = case b of
-  HsTvb _ _ var kind -> do
-    case var of
-      HsBndrVar _ (L l rdr) ->
-        put ctx env (locA l) (occNamespace (rdrNameOcc rdr)) Def (FreeR Plain)
-      HsBndrWildCard _ -> pure ()
-    case kind of
-      HsBndrKind _ k -> walkType ctx env k
-      HsBndrNoKind _ -> pure ()
+-- | The signature starts with a forall, and ScopedTypeVariables is on:
+-- its variables are in scope in the binding too.
+scopesOver :: Ctx s -> LHsSigType GhcPs -> Bool
+scopesOver ctx (L _ (HsSig _ outer _)) =
+  ctx.scopedTyVars && not (null (hsOuterExplicitBndrs outer))
 
-walkQTyVars :: Ctx s -> Env -> LHsQTyVars GhcPs -> ST s ()
-walkQTyVars ctx env = \case
-  HsQTvs _ bs -> mapM_ (walkTyVarBndr ctx env) bs
+-- | A type pattern (a pattern signature, @\@a@, @type a@): its free type
+-- variables are bound in the given spans.
+bindTyPat :: Ctx s -> Rebind -> Env -> [Span] -> LHsType GhcPs -> ST s Env
+bindTyPat ctx rebind env scope t = do
+  env' <- bindFree ctx env rebind scope (typeFree t)
+  walkType ctx env' t
+  pure env'
+
+-- | Whether a variable already in scope gets a new binder.
+data Rebind
+  = -- | Yes: it shadows the old one.
+    Shadow
+  | -- | No: it's a use of the old one.
+    UseInScope
+
+-- | Binders for free type variables, at their first places.
+bindFree :: Ctx s -> Env -> Rebind -> [Span] -> [LIdP GhcPs] -> ST s Env
+bindFree ctx env rebind scope = foldM bind env
+  where
+    bind e v@(L _ rdr) = case (rebind, lookupTyVar ctx e (rdrNameOcc rdr)) of
+      (UseInScope, Just _) -> pure e
+      _ -> fst <$> bindLocal ctx e scope MarkToken v
+
+-- | Explicit binders, in order: each one's kind sees the ones before.
+bindTyVarBndrs :: Ctx s -> Env -> [Span] -> [LHsTyVarBndr flag GhcPs] -> ST s Env
+bindTyVarBndrs ctx env scope = foldM (bindTyVarBndr ctx Shadow scope) env
+
+-- | One explicit binder. With 'UseInScope', a name already in scope is a
+-- use (an associated family's head, which shares the class's variables).
+bindTyVarBndr :: Ctx s -> Rebind -> [Span] -> Env -> LHsTyVarBndr flag GhcPs -> ST s Env
+bindTyVarBndr ctx rebind scope env lb@(L _ b) = do
+  mapM_ (walkType ctx env) (bndrKind b)
+  case hsLTyVarLocName lb of
+    Just n@(L _ rdr) -> case (rebind, lookupTyVar ctx env (rdrNameOcc rdr)) of
+      (UseInScope, Just _) -> env <$ tyVarName ctx env n
+      _ -> fst <$> bindLocal ctx env scope MarkToken n
+    Nothing -> pure env
+
+bindTelescope :: Ctx s -> Env -> [Span] -> HsForAllTelescope GhcPs -> ST s Env
+bindTelescope ctx env scope = bindTyVarBndrs ctx env scope . hsForAllTelescopeBndrs
+
+-- | A declaration head (data, class, synonym, family): its binders,
+-- after the free type variables of their kinds and of the extra kinds
+-- (a result kind), all in scope in the given spans.
+bindHead ::
+  Ctx s -> Env -> Rebind -> [Span] -> LHsQTyVars GhcPs -> [LHsType GhcPs] -> ST s Env
+bindHead ctx env rebind scope (HsQTvs _ bs) kinds = do
+  env' <- bindFree ctx env UseInScope scope (headFree bs kinds)
+  foldM (bindTyVarBndr ctx rebind scope) env' bs
 
 walkContext :: Ctx s -> Env -> Maybe (LHsContext GhcPs) -> ST s ()
 walkContext ctx env = mapM_ (\(L _ cs) -> mapM_ (walkType ctx env) cs)
 
--- | A type variable written as a name (fundeps, injectivity).
-tyVarUse :: Ctx s -> Env -> LIdP GhcPs -> ST s ()
-tyVarUse ctx env (L l rdr) =
-  put ctx env (locA l) (occNamespace (rdrNameOcc rdr)) Use (FreeR Plain)
+-- | A forall in a term (RequiredTypeArguments): its variables are
+-- terms in the body, so the binders are left free.
+walkTermTelescope :: Ctx s -> Env -> HsForAllTelescope GhcPs -> ST s ()
+walkTermTelescope ctx env = mapM_ (termTyVarBndr ctx env) . hsForAllTelescopeBndrs
+
+termTyVarBndr :: Ctx s -> Env -> LHsTyVarBndr flag GhcPs -> ST s ()
+termTyVarBndr ctx env lb@(L _ b) = do
+  forM_ (hsLTyVarLocName lb) $ \(L l rdr) ->
+    put ctx env (locA l) (occNamespace (rdrNameOcc rdr)) Def (FreeR Plain)
+  mapM_ (walkType ctx env) (bndrKind b)
 
 -- * Declarations
 
@@ -1409,7 +1656,10 @@ walkModule ctx m = do
         IEGroup {} -> pure ()
         IEDoc {} -> pure ()
         IEDocNamed {} -> pure ()
-  mapM_ (walkDecl ctx emptyEnv) (hsmodDecls m)
+  let decls = hsmodDecls m
+      (binds, sigs) = valsAndSigs decls
+  sv <- walkSigs ctx emptyEnv (useName ctx emptyEnv) Sig (bindSpans ctx binds) sigs
+  mapM_ (walkDecl ctx emptyEnv sv) decls
   where
     moduleWord (L l _) = put ctx emptyEnv (locA l) ModuleNs Use (NotANameR ModuleWord)
     wrapped role (L _ w) = useEither ctx emptyEnv role (ieWrappedLName w)
@@ -1431,6 +1681,10 @@ walkModule ctx m = do
       let L l rdr = ieWrappedLName w
        in put ctx emptyEnv (locA l) (occNamespace (rdrNameOcc rdr)) Import (FreeR Plain)
 
+-- | The bindings and signatures of some declarations.
+valsAndSigs :: [LHsDecl GhcPs] -> ([LHsBind GhcPs], [LSig GhcPs])
+valsAndSigs ds = ([L l b | L l (ValD _ b) <- ds], [L l s | L l (SigD _ s) <- ds])
+
 -- | The declarations of a @[d| |]@ quote: its values are local to it,
 -- the rest is free.
 walkQuoteDecls :: Ctx s -> Env -> [LHsDecl GhcPs] -> ST s ()
@@ -1439,23 +1693,29 @@ walkQuoteDecls ctx env ds = do
       scope = case [s | L l _ <- ds, s <- spanL ctx (locA l)] of
         [] -> []
         ss@(a : _) -> [hull a (last ss)]
-  (env', ks) <- foldM (declareBind ctx scope) (env0, []) [L l b | L l (ValD _ b) <- ds]
-  mapM_ ($ env') (reverse ks)
-  forM_ ds $ \d@(L l decl) -> case decl of
+      (binds, sigs) = valsAndSigs ds
+  (env', ks) <- foldM (declareBind ctx scope) (env0, []) binds
+  sv <- walkSigs ctx env' (useName ctx env') Sig (bindSpans ctx binds) sigs
+  mapM_ (\k -> k env' sv) (reverse ks)
+  forM_ ds $ \d@(L _ decl) -> case decl of
     ValD {} -> pure ()
-    SigD _ s -> walkSig ctx env' (useName ctx env') Sig (L l s)
-    _ -> walkDecl ctx env' d
+    _ -> walkDecl ctx env' sv d
 
-walkDecl :: Ctx s -> Env -> LHsDecl GhcPs -> ST s ()
-walkDecl ctx env (L l decl) = case decl of
-  TyClD _ d -> walkTyClDecl ctx env d
-  InstD _ d -> walkInstDecl ctx env d
+-- | A declaration. Signatures are walked before, with their group
+-- (they give the 'SigScopes').
+walkDecl :: Ctx s -> Env -> SigScopes -> LHsDecl GhcPs -> ST s ()
+walkDecl ctx env sv (L l decl) = case decl of
+  TyClD _ d -> walkTyClDecl ctx env whole d
+  InstD _ d -> walkInstDecl ctx env whole d
+  -- A via type binds its free type variables over the whole
+  -- declaration, then the head's free ones bind (GHC's
+  -- rnLDerivStrategy).
   DerivD _ d -> case d of
     DerivDecl _ (HsWC _ t) strategy _ -> do
-      mapM_ (walkStrategy ctx env) strategy
-      walkSigType ctx env t
-  ValD _ b -> walkTopBind ctx env (locA l) b
-  SigD _ s -> walkSig ctx env (useName ctx env) Sig (L l s)
+      env' <- bindStrategy ctx env whole strategy
+      void (bindSigType ctx env' whole t)
+  ValD _ b -> walkTopBind ctx env sv (locA l) b
+  SigD _ _ -> pure ()
   KindSigD _ k -> case k of
     StandaloneKindSig _ n t -> useName ctx env Sig n >> walkSigType ctx env t
   DefD _ d -> case d of
@@ -1484,24 +1744,32 @@ walkDecl ctx env (L l decl) = case decl of
   DocD _ _ -> pure ()
   RoleAnnotD _ r -> case r of
     RoleAnnotDecl _ n _ -> useName ctx env Use n
+  where
+    whole = spanL ctx (locA l)
 
-walkStrategy :: Ctx s -> Env -> LDerivStrategy GhcPs -> ST s ()
-walkStrategy ctx env (L _ s) = case s of
-  StockStrategy _ -> pure ()
-  AnyclassStrategy _ -> pure ()
-  NewtypeStrategy _ -> pure ()
-  ViaStrategy (XViaStrategyPs _ t) -> walkSigType ctx env t
+-- | A deriving strategy: a via type's free type variables are in scope
+-- in it and the given spans.
+bindStrategy :: Ctx s -> Env -> [Span] -> Maybe (LDerivStrategy GhcPs) -> ST s Env
+bindStrategy ctx env scope = \case
+  Nothing -> pure env
+  Just (L _ s) -> case s of
+    StockStrategy _ -> pure env
+    AnyclassStrategy _ -> pure env
+    NewtypeStrategy _ -> pure env
+    ViaStrategy (XViaStrategyPs _ t) -> bindSigType ctx env scope t
 
 -- | A top-level binding: its names are the module's.
-walkTopBind :: Ctx s -> Env -> SrcSpan -> HsBind GhcPs -> ST s ()
-walkTopBind ctx env l = \case
-  FunBind _ _ mg -> walkMatches ctx env Nothing (defName ctx env Def) (walkExpr ctx) mg
+walkTopBind :: Ctx s -> Env -> SigScopes -> SrcSpan -> HsBind GhcPs -> ST s ()
+walkTopBind ctx env sv l = \case
+  FunBind _ n mg ->
+    let env' = withSigScopes sv n env
+     in walkMatches ctx env' Nothing (defName ctx env' Def) (walkExpr ctx) mg
   PatBind _ pat mult grhss -> do
     env' <- walkPat ctx BindTop env pat
     walkMult ctx env' mult
     walkGRHSs ctx env' (spanL ctx l) (walkExpr ctx) grhss
   VarBind {} -> pure ()
-  PatSynBind _ psb -> walkPatSyn ctx env psb
+  PatSynBind _ psb@(PSB _ n _ _ _) -> walkPatSyn ctx (withSigScopes sv n env) psb
 
 -- | A pattern synonym: its arguments are in scope in the right-hand
 -- side, where they are uses.
@@ -1532,17 +1800,19 @@ walkPatSyn ctx env = \case
       ExplicitBidirectional mg ->
         walkMatches ctx env Nothing (defName ctx env Def) (walkExpr ctx) mg
 
-walkTyClDecl :: Ctx s -> Env -> TyClDecl GhcPs -> ST s ()
-walkTyClDecl ctx env = \case
-  FamDecl _ f -> walkFamily ctx env f
+-- | A type, class or family declaration. Its head's variables are in
+-- scope in the whole declaration.
+walkTyClDecl :: Ctx s -> Env -> [Span] -> TyClDecl GhcPs -> ST s ()
+walkTyClDecl ctx env whole = \case
+  FamDecl _ f -> walkFamily ctx env whole f
   SynDecl _ n tvs _ rhs -> do
     defName ctx env Def n
-    walkQTyVars ctx env tvs
-    walkType ctx env rhs
+    env' <- bindHead ctx env Shadow whole tvs []
+    walkType ctx env' rhs
   DataDecl _ n tvs _ defn -> do
     defName ctx env Def n
-    walkQTyVars ctx env tvs
-    walkDataDefn ctx env defn
+    env' <- bindHead ctx env Shadow whole tvs (dataKindSig defn)
+    walkDataDefn ctx env env' defn
   ClassDecl
     { tcdCtxt = cxt,
       tcdLName = n,
@@ -1553,16 +1823,23 @@ walkTyClDecl ctx env = \case
       tcdATs = ats,
       tcdATDefs = defs
     } -> do
-      walkContext ctx env cxt
       defName ctx env Def n
-      walkQTyVars ctx env tvs
+      env' <- bindHead ctx env Shadow whole tvs []
+      walkContext ctx env' cxt
       forM_ fds $ \(L _ fd) -> case fd of
-        FunDep _ as bs -> mapM_ (tyVarUse ctx env) (as <> bs)
-      mapM_ (walkSig ctx env (defOrUse ctx env) Def) sigs
-      -- Default methods: definitions of the class's methods.
-      forM_ meths $ \(L lb b) -> walkTopBind ctx env (locA lb) b
-      mapM_ (walkFamily ctx env . unLoc) ats
-      forM_ defs $ \(L _ d) -> walkTyFamInst ctx env d
+        FunDep _ as bs -> mapM_ (tyVarName ctx env') (as <> bs)
+      sv <- walkSigs ctx env' (defOrUse ctx env') Def (bindSpans ctx meths) sigs
+      -- Default methods: definitions of the class's methods. They see
+      -- the class's variables with ScopedTypeVariables.
+      let envM = if ctx.scopedTyVars then env' else env
+      forM_ meths $ \(L lb b) -> walkTopBind ctx envM sv (locA lb) b
+      forM_ ats $ \(L la f) -> walkFamily ctx env' (spanL ctx (locA la)) f
+      forM_ defs $ \(L ld d) -> walkTyFamInst ctx env' (spanL ctx (locA ld)) d
+
+-- | The result kind of a data declaration.
+dataKindSig :: HsDataDefn GhcPs -> [LHsType GhcPs]
+dataKindSig = \case
+  HsDataDefn {dd_kindSig = k} -> toList k
 
 -- | In a class: Def for a method's signature, else what the name is.
 defOrUse :: Ctx s -> Env -> Role -> LIdP GhcPs -> ST s ()
@@ -1570,103 +1847,129 @@ defOrUse ctx env role = case role of
   Def -> defName ctx env Def
   _ -> useName ctx env role
 
-walkFamily :: Ctx s -> Env -> FamilyDecl GhcPs -> ST s ()
-walkFamily ctx env = \case
+-- | A family. In a class, a head variable that is the class's is a use
+-- of it (GHC's newTyVarNameRn). A closed family's equations don't see
+-- the head: each binds its own.
+walkFamily :: Ctx s -> Env -> [Span] -> FamilyDecl GhcPs -> ST s ()
+walkFamily ctx env whole = \case
   FamilyDecl _ info _ n tvs _ (L _ res) inj -> do
     defName ctx env Def n
-    walkQTyVars ctx env tvs
-    case res of
-      NoSig _ -> pure ()
-      KindSig _ k -> walkType ctx env k
-      TyVarSig _ b -> walkTyVarBndr ctx env b
+    let resKind = case res of
+          NoSig _ -> []
+          KindSig _ k -> [k]
+          TyVarSig _ (L _ b) -> toList (bndrKind b)
+    env' <- bindHead ctx env UseInScope whole tvs resKind
+    env'' <- case res of
+      NoSig _ -> pure env'
+      KindSig _ k -> env' <$ walkType ctx env' k
+      TyVarSig _ b -> bindTyVarBndr ctx Shadow whole env' b
     forM_ inj $ \(L _ i) -> case i of
-      InjectivityAnn _ a bs -> mapM_ (tyVarUse ctx env) (a : bs)
+      InjectivityAnn _ a bs -> mapM_ (tyVarName ctx env'') (a : bs)
     case info of
       DataFamily -> pure ()
       OpenTypeFamily -> pure ()
-      ClosedTypeFamily eqns -> forM_ (fromMaybe [] eqns) $ \(L _ e) ->
-        walkFamEqn ctx env (walkType ctx env) e
+      ClosedTypeFamily eqns -> forM_ (fromMaybe [] eqns) $ \(L le e) ->
+        walkFamEqn ctx env (spanL ctx (locA le)) [] (\e' -> walkType ctx e') e
 
-walkFamEqn :: Ctx s -> Env -> (rhs -> ST s ()) -> FamEqn GhcPs rhs -> ST s ()
-walkFamEqn ctx env rhs = \case
+-- | A family equation: its forall, or its free type variables not in
+-- scope (and those of the extra kinds), are bound in the given spans.
+walkFamEqn ::
+  Ctx s ->
+  Env ->
+  [Span] ->
+  [LHsType GhcPs] ->
+  (Env -> rhs -> ST s ()) ->
+  FamEqn GhcPs rhs ->
+  ST s ()
+walkFamEqn ctx env scope kinds rhs = \case
   FamEqn _ tycon bndrs pats _ r -> do
     useName ctx env Use tycon
-    walkOuter ctx env bndrs
+    env' <- bindOuter ctx env scope bndrs (famEqnFree pats kinds)
     forM_ pats $ \case
-      HsValArg _ t -> walkType ctx env t
-      HsTypeArg _ k -> walkType ctx env k
+      HsValArg _ t -> walkType ctx env' t
+      HsTypeArg _ k -> walkType ctx env' k
       HsArgPar _ -> pure ()
-    rhs r
+    rhs env' r
 
-walkTyFamInst :: Ctx s -> Env -> TyFamInstDecl GhcPs -> ST s ()
-walkTyFamInst ctx env = \case
-  TyFamInstDecl _ e -> walkFamEqn ctx env (walkType ctx env) e
+walkTyFamInst :: Ctx s -> Env -> [Span] -> TyFamInstDecl GhcPs -> ST s ()
+walkTyFamInst ctx env scope = \case
+  TyFamInstDecl _ e -> walkFamEqn ctx env scope [] (walkType ctx) e
 
-walkDataFamInst :: Ctx s -> Env -> DataFamInstDecl GhcPs -> ST s ()
-walkDataFamInst ctx env (DataFamInstDecl e) = walkFamEqn ctx env (walkDataDefn ctx env) e
+walkDataFamInst :: Ctx s -> Env -> [Span] -> DataFamInstDecl GhcPs -> ST s ()
+walkDataFamInst ctx env scope (DataFamInstDecl e) =
+  walkFamEqn ctx env scope (dataKindSig (feqn_rhs e)) (walkDataDefn ctx env) e
 
-walkDataDefn :: Ctx s -> Env -> HsDataDefn GhcPs -> ST s ()
-walkDataDefn ctx env = \case
+-- | A data declaration's body. The first scope is the one outside the
+-- head, for GADT constructors (they don't see the head, they bind their
+-- own); the second is the head's, for the rest.
+walkDataDefn :: Ctx s -> Env -> Env -> HsDataDefn GhcPs -> ST s ()
+walkDataDefn ctx gadtEnv env = \case
   HsDataDefn {dd_ctxt = cxt, dd_kindSig = k, dd_cons = cons, dd_derivs = derivs} -> do
     walkContext ctx env cxt
     mapM_ (walkType ctx env) k
-    mapM_ (walkConDecl ctx env) (toList cons)
-    forM_ derivs $ \(L _ d) -> case d of
+    mapM_ (walkConDecl ctx gadtEnv env) (toList cons)
+    forM_ derivs $ \(L ld d) -> case d of
       HsDerivingClause _ strategy (L _ tys) -> do
-        mapM_ (walkStrategy ctx env) strategy
+        env' <- bindStrategy ctx env (spanL ctx (locA ld)) strategy
         case tys of
-          DctSingle _ t -> walkSigType ctx env t
-          DctMulti _ ts -> mapM_ (walkSigType ctx env) ts
+          DctSingle _ t -> walkSigType ctx env' t
+          DctMulti _ ts -> mapM_ (walkSigType ctx env') ts
 
-walkConDecl :: Ctx s -> Env -> LConDecl GhcPs -> ST s ()
-walkConDecl ctx env (L _ c) = case c of
+-- | A constructor: an existential forall is in scope in it. The scopes
+-- are as in 'walkDataDefn': a GADT constructor is walked in the first,
+-- with its own forall or its free type variables bound; a plain one in
+-- the head's.
+walkConDecl :: Ctx s -> Env -> Env -> LConDecl GhcPs -> ST s ()
+walkConDecl ctx gadtEnv env (L l c) = case c of
   ConDeclH98 {con_name = n, con_ex_tvs = tvs, con_mb_cxt = cxt, con_args = args} -> do
     defName ctx env Def n
-    mapM_ (walkTyVarBndr ctx env) tvs
-    walkContext ctx env cxt
+    env' <- bindTyVarBndrs ctx env whole tvs
+    walkContext ctx env' cxt
     case args of
-      PrefixCon fs -> mapM_ field fs
-      InfixCon a b -> field a >> field b
-      RecCon (L _ rs) -> mapM_ (recField n) rs
+      PrefixCon fs -> mapM_ (field env') fs
+      InfixCon a b -> field env' a >> field env' b
+      RecCon (L _ rs) -> mapM_ (recField env' n) rs
   ConDeclGADT
     { con_names = ns,
-      con_outer_bndrs = L _ outer,
+      con_outer_bndrs = L _ outerBndrs,
       con_inner_bndrs = inner,
       con_mb_cxt = cxt,
       con_g_args = args,
       con_res_ty = res
     } -> do
-      mapM_ (defName ctx env Def) ns
-      walkOuter ctx env outer
-      mapM_ (walkTelescope ctx env) inner
-      walkContext ctx env cxt
+      mapM_ (defName ctx gadtEnv Def) ns
+      env0 <- bindOuter ctx gadtEnv whole outerBndrs (gadtFree inner cxt args res)
+      env' <- foldM (\e t -> bindTelescope ctx e whole t) env0 inner
+      walkContext ctx env' cxt
       case args of
-        PrefixConGADT _ fs -> mapM_ field fs
-        RecConGADT _ (L _ rs) -> mapM_ (recField (NonEmpty.head ns)) rs
-      walkType ctx env res
+        PrefixConGADT _ fs -> mapM_ (field env') fs
+        RecConGADT _ (L _ rs) -> mapM_ (recField env' (NonEmpty.head ns)) rs
+      walkType ctx env' res
   where
-    field = \case
+    whole = spanL ctx (locA l)
+    field e = \case
       CDF {cdf_multiplicity = mult, cdf_type = t} -> do
-        walkMult ctx env mult
-        walkType ctx env t
-    recField con (L _ r) = case r of
+        walkMult ctx e mult
+        walkType ctx e t
+    recField e con (L _ r) = case r of
       HsConDeclRecField _ names spec -> do
-        let ci = if env.quote then ForeignCon Nothing else conInfo ctx env con
+        let ci = if e.quote then ForeignCon Nothing else conInfo ctx e con
         forM_ names $ \(L _ fo) -> case fo of
-          FieldOcc _ (L l rdr) -> put ctx env (locA l) FieldNs Def (conFieldRef ci rdr)
-        field spec
+          FieldOcc _ (L lf rdr) -> put ctx e (locA lf) FieldNs Def (conFieldRef ci rdr)
+        field e spec
 
-walkInstDecl :: Ctx s -> Env -> InstDecl GhcPs -> ST s ()
-walkInstDecl ctx env = \case
-  ClsInstD _ i -> walkClsInst ctx env i
-  DataFamInstD _ d -> walkDataFamInst ctx env d
-  TyFamInstD _ d -> walkTyFamInst ctx env d
+walkInstDecl :: Ctx s -> Env -> [Span] -> InstDecl GhcPs -> ST s ()
+walkInstDecl ctx env whole = \case
+  ClsInstD _ i -> walkClsInst ctx env whole i
+  DataFamInstD _ d -> walkDataFamInst ctx env whole d
+  TyFamInstD _ d -> walkTyFamInst ctx env whole d
 
--- | An instance: its methods are the class's, if the class is from
--- here; else free, with the class's token (GHC finds the class with
--- getLHsInstDeclClass_maybe).
-walkClsInst :: Ctx s -> Env -> ClsInstDecl GhcPs -> ST s ()
-walkClsInst ctx env = \case
+-- | An instance: its head's type variables are in scope in the whole
+-- declaration (methods with ScopedTypeVariables). Its methods are the
+-- class's, if the class is from here; else free, with the class's token
+-- (GHC finds the class with getLHsInstDeclClass_maybe).
+walkClsInst :: Ctx s -> Env -> [Span] -> ClsInstDecl GhcPs -> ST s ()
+walkClsInst ctx env whole = \case
   ClsInstDecl
     { cid_poly_ty = poly,
       cid_binds = binds,
@@ -1674,13 +1977,13 @@ walkClsInst ctx env = \case
       cid_tyfam_insts = tyfams,
       cid_datafam_insts = datafams
     } -> do
-      walkSigType ctx env poly
+      env' <- bindSigType ctx env whole poly
       let cls = getLHsInstDeclClass_maybe poly
           anchor = cls >>= \(L l _) -> tokenAtLoc ctx (locA l)
           local = case cls of
             Just (L _ rdr)
               | not env.quote,
-                isLocalName rdr ->
+                isSelfName ctx rdr ->
                   lookupOccEnv ctx.top.methods (rdrNameOcc rdr)
             _ -> Nothing
           methodRef occ = case local of
@@ -1690,18 +1993,15 @@ walkClsInst ctx env = \case
             _ -> FreeR (maybe Plain MethodOfClass anchor)
           method role (L l rdr) =
             put ctx env (locA l) VarNs role (methodRef (rdrNameOcc rdr))
+          envM = if ctx.scopedTyVars then env' else env
+      sv <- walkSigs ctx env' method Sig (bindSpans ctx binds) sigs
       forM_ binds $ \(L lb b) -> case b of
-        FunBind _ _ mg ->
-          walkMatches ctx env Nothing (method InstanceDef) (walkExpr ctx) mg
-        _ -> walkTopBind ctx env (locA lb) b
-      mapM_ (walkSig ctx env method Sig) sigs
-      forM_ tyfams $ \(L _ d) -> walkTyFamInst ctx env d
-      forM_ datafams $ \(L _ d) -> walkDataFamInst ctx env d
-  where
-    isLocalName = \case
-      Unqual _ -> True
-      Qual m _ -> m == ctx.self
-      _ -> False
+        FunBind _ n mg ->
+          let envB = withSigScopes sv n envM
+           in walkMatches ctx envB Nothing (method InstanceDef) (walkExpr ctx) mg
+        _ -> walkTopBind ctx envM sv (locA lb) b
+      forM_ tyfams $ \(L lt d) -> walkTyFamInst ctx env' (spanL ctx (locA lt)) d
+      forM_ datafams $ \(L ld d) -> walkDataFamInst ctx env' (spanL ctx (locA ld)) d
 
 -- * The rest
 

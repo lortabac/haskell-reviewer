@@ -47,7 +47,7 @@ data Case = Case
 plain :: FilePath -> Case
 plain f = Case {golden = dropExtension f, file = f, settings = defaultParseSettings}
 
--- | Value-level cases: type variables are all free.
+-- | The cases: values, then types.
 cases :: [Case]
 cases =
   map
@@ -66,7 +66,13 @@ cases =
       "misc-names.hs",
       "cpp.hs",
       "arrows.hs",
-      "exact-names.hs"
+      "exact-names.hs",
+      "scoped-tyvars.hs",
+      "types.hs",
+      "promoted.hs",
+      "deriving-via.hs",
+      "patsyn.hs",
+      "no-scoped-tyvars.hs"
     ]
 
 fixtureDir :: FilePath

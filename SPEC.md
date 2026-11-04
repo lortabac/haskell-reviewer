@@ -1302,8 +1302,9 @@ the memory budget (§10.2). The model holds:
   the similarity metric;
 - an occurrence table parallel to the token stream (one entry per token):
   for each identifier token, its namespace, role and what it refers to (a
-  local binder with its scope, a top-level declaration of the module, a
-  built-in, or a free name with what the syntax tells about it), D-236..D-242.
+  local binder with its scope (type variables too), a top-level
+  declaration of the module, a built-in, or a free name with what the
+  syntax tells about it), D-236..D-242, D-246..D-248.
   It does not depend on the side, so it is shared with the parse result;
   free names get their candidates in the next step (§11.4.5).
 
