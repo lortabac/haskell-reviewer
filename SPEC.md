@@ -1298,10 +1298,14 @@ the memory budget (§10.2). The model holds:
 - header, exports, imports, extensions in effect;
 - declarations with namespace, name, extent (a set of ranges, §4.3), head
   tokens, Haddock (as rich text, §11.4.9), and flags (exported, orphan, …);
-- the token stream (class, span, occurrence id), used for highlighting,
-  links, hover and the similarity metric;
-- an occurrence table: for each identifier span, its binder or its target
-  candidates, resolved in the next step.
+- the token stream (class, span), used for highlighting, links, hover and
+  the similarity metric;
+- an occurrence table parallel to the token stream (one entry per token):
+  for each identifier token, its namespace, role and what it refers to (a
+  local binder with its scope, a top-level declaration of the module, a
+  built-in, or a free name with what the syntax tells about it), D-236..D-242.
+  It does not depend on the side, so it is shared with the parse result;
+  free names get their candidates in the next step (§11.4.5).
 
 Spans: lines and columns are 1-based, columns count code points (a tab is
 one column), and the end is exclusive. The HIE index uses the same rule

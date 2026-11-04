@@ -65,6 +65,7 @@ import HaskellReviewer.Core.Decls
     forceWarningText,
   )
 import HaskellReviewer.Core.LineRegions (LineRegions, noLineRegions)
+import HaskellReviewer.Core.Occurrences (Occurrences, forceOccurrences)
 import HaskellReviewer.Core.Project (ModuleName)
 import HaskellReviewer.Core.RichText (Doc, Inline, forceInlines)
 import HaskellReviewer.Core.SourceText (MarkdownLayout (..))
@@ -193,6 +194,9 @@ data ParsedModule = ParsedModule
     -- | The whole module's, after CPP (Note [Packed tokens] in
     -- "HaskellReviewer.Core.Tokens").
     tokens :: Tokens,
+    -- | What each identifier token names, parallel to the tokens (Note
+    -- [Occurrence table] in "HaskellReviewer.Core.Occurrences").
+    occurrences :: Occurrences,
     -- | CPP's lines and literate prose, for highlighting.
     regions :: LineRegions
   }
@@ -375,8 +379,9 @@ forceModuleParse = \case
                     each docItem m.docItems `seq`
                       forcePragmas m.pragmas `seq`
                         m.tokens `seq`
-                          m.regions `seq`
-                            ()
+                          forceOccurrences m.occurrences `seq`
+                            m.regions `seq`
+                              ()
     header h =
       whnf h.name `seq`
         maybe () forceDocComment h.haddock `seq`

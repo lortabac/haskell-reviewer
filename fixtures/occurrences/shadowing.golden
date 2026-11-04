@@ -1,0 +1,46 @@
+conflicts: 0
+1:8-1:17 "Shadowing" module use -> not-a-name module
+1:19-1:20 "f" var export -> top val:f
+1:22-1:23 "g" var export -> top val:g
+3:1-3:2 "x" var sig -> top val:x
+3:6-3:9 "Int" type use -> free
+4:1-4:2 "x" var def -> top val:x
+6:1-6:2 "f" var sig -> top val:f
+6:6-6:9 "Int" type use -> free
+6:13-6:16 "Int" type use -> free
+7:1-7:2 "f" var def -> top val:f
+7:3-7:4 "x" var def -> local #0
+7:7-7:8 "x" var use -> local #0
+7:9-7:10 "+" var use -> free
+7:11-7:12 "y" var use -> local #1
+9:5-9:6 "y" var def -> local #1
+9:13-9:14 "x" var def -> local #2
+9:22-9:23 "x" var use -> local #2
+9:24-9:25 "*" var use -> free
+9:26-9:37 "Shadowing.x" var use -> top val:x
+11:1-11:2 "g" var def -> top val:g
+11:6-11:7 "x" var def -> local #4
+11:16-11:17 "x" var use -> local #4
+12:3-12:7 "Just" con use -> free
+12:8-12:9 "x" var def -> local #5
+12:13-12:14 "x" var use -> local #5
+13:3-13:10 "Nothing" con use -> free
+13:14-13:16 "x'" var use -> local #3
+15:5-15:7 "x'" var def -> local #3
+17:1-17:2 "h" var def -> top val:h
+17:3-17:4 "a" var def -> local #6
+17:5-17:6 "b" var def -> local #7
+17:7-17:8 "c" var def -> local #8
+17:12-17:13 "a" var use -> local #6
+17:15-17:16 "b" var use -> local #7
+17:18-17:19 "c" var use -> local #8
+17:21-17:22 "h" var use -> top val:h
+#0 x 7:3-7:4 scope 7:1-9:37
+#1 y 9:5-9:6 scope 7:5-9:37
+#2 x 9:13-9:14 scope 9:9-9:37
+#3 x' 15:5-15:7 scope 11:3-15:11
+#4 x 11:6-11:7 scope 11:5-13:16
+#5 x 12:8-12:9 scope 12:3-12:14
+#6 a 17:3-17:4 scope 17:1-17:23
+#7 b 17:5-17:6 scope 17:1-17:23
+#8 c 17:7-17:8 scope 17:1-17:23

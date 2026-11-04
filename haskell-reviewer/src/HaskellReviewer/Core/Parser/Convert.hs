@@ -57,6 +57,7 @@ import HaskellReviewer.Core.ModuleModel
   )
 import HaskellReviewer.Core.ModuleModel qualified as Model (Located (..))
 import HaskellReviewer.Core.Parser.ConvertDecls (Converted (..), convertDecls)
+import HaskellReviewer.Core.Parser.ConvertOccurrences (convertOccurrences)
 import HaskellReviewer.Core.Parser.Helpers
   ( SpanMap,
     docComment,
@@ -71,7 +72,7 @@ import Language.Haskell.Syntax.ImpExp.IsBoot (IsBootInterface (..))
 
 -- | The model of a parsed module. The extensions and warnings come from
 -- the flags, the tokens from the second lex, the regions from CPP and
--- unlit.
+-- unlit. The occurrence table is built here, while the AST is alive.
 convertModule ::
   SpanMap ->
   Extensions ->
@@ -87,10 +88,11 @@ convertModule spans exts warnings tokens regions (L _ m) =
       imports = map importDecl (hsmodImports m),
       extensions = exts,
       warnings = warnings,
-      declarations = markExported self exports converted.decls,
+      declarations = declarations,
       docItems = converted.docItems,
       pragmas = converted.pragmas,
       tokens = tokens,
+      occurrences = convertOccurrences spans exts tokens self declarations m,
       regions = regions
     }
   where
@@ -104,6 +106,7 @@ convertModule spans exts warnings tokens regions (L _ m) =
     exports = map export . unLoc <$> hsmodExports m
     self = (.value) <$> header.name
     converted = convertDecls spans self (hsmodDecls m)
+    declarations = markExported self exports converted.decls
 
     spanOf = Helpers.spanOf spans
 

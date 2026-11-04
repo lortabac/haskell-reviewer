@@ -15,6 +15,7 @@ module HaskellReviewer.Effects.Parser
     cppSettings,
     declsWarmUp,
     haddockWarmUp,
+    occurrencesWarmUp,
     cppWarmUp,
     cppLimitsWarmUp,
     markdownWarmUp,
@@ -46,11 +47,13 @@ import HaskellReviewer.Core.Highlight (Run (..), highlightModule, noRuns, runLis
 import HaskellReviewer.Core.LineRegions (noLineRegions)
 import HaskellReviewer.Core.ModuleModel
   ( ModuleParse (..),
+    ParsedModule (occurrences),
     TextOnlyReason (..),
     forceModuleParse,
     textOnlyModule,
   )
 import HaskellReviewer.Core.Modules (Literate (..))
+import HaskellReviewer.Core.Occurrences (forceOccurrences, noOccurrences, occurrenceList)
 import HaskellReviewer.Core.Parser
   ( FileKind (..),
     ParseSettings (..),
@@ -147,6 +150,7 @@ warmUpParser = do
   _ <- evaluate noTokens
   _ <- evaluate noLineRegions
   _ <- evaluate noRuns
+  _ <- evaluate (forceOccurrences noOccurrences)
   mapM_ (uncurry parse) parserWarmUp
   -- The cheap check behind earlyWarnings.
   mapM_
@@ -164,8 +168,12 @@ warmUpParser = do
     parse s t =
       tryParse (parseSource s t) >>= \case
         -- runList reads the class words back, as the API will.
-        Right p ->
-          () <$ evaluate (sum [fromEnum r.display | r <- runList (highlightModule p)])
+        Right p -> do
+          _ <- evaluate (sum [fromEnum r.display | r <- runList (highlightModule p)])
+          -- Decode the occurrence table too, as the API will.
+          case p of
+            Parsed m -> () <$ evaluate (length (show (occurrenceList m.occurrences)))
+            TextOnly _ -> pure ()
         Left _ -> pure ()
 
 -- | Every module 'warmUpParser' parses, with its settings. A test checks
@@ -181,7 +189,8 @@ parserWarmUp =
     ]
     <> [ (defaultParseSettings {kind = SignatureFile}, "signature S (T) where\ndata T\n"),
          (defaultParseSettings, declsWarmUp),
-         (defaultParseSettings, haddockWarmUp)
+         (defaultParseSettings, haddockWarmUp),
+         (defaultParseSettings, occurrencesWarmUp)
        ]
     <> map (cppSettings,) cppParseWarmUp
     -- Every markdown-unlit outcome.
@@ -307,6 +316,52 @@ declsWarmUp =
       "$(pure [])",
       "{-# LINE 100 \"Other.y\" #-}",
       "-- The end."
+    ]
+
+-- | A module that takes every path of the occurrence table: each kind
+-- of scope, record form, pun and wildcard, instance methods, splices,
+-- quotes, implicit parameters, arrows, and each resolution, role and
+-- namespace (Note [Syntactic scoping] in
+-- "HaskellReviewer.Core.Parser.ConvertOccurrences"). A test checks it.
+occurrencesWarmUp :: Text
+occurrencesWarmUp =
+  Text.unlines
+    [ "{-# LANGUAGE TemplateHaskell, QuasiQuotes, RecordWildCards, NamedFieldPuns #-}",
+      "{-# LANGUAGE OverloadedRecordDot, DuplicateRecordFields, ImplicitParams #-}",
+      "{-# LANGUAGE Arrows, RecursiveDo, ParallelListComp, TransformListComp #-}",
+      "{-# LANGUAGE ViewPatterns, PatternSynonyms, OverloadedLabels, LambdaCase #-}",
+      "{-# LANGUAGE TypeFamilies, MultiWayIf, NPlusKPatterns, RoleAnnotations #-}",
+      "module W (R (..), f, module X, pattern P, W.k) where",
+      "import X (y)",
+      "import qualified Z as Q",
+      "data R = R {a :: Int, b :: Int} | S {a :: Int}",
+      "data D = D {a :: Int}",
+      "data E a where E :: {e :: Int} -> E Int",
+      "class C t where { m :: t -> Int; m _ = 0; infixl 5 `m` }",
+      "instance C R where { m :: R -> Int; m R {a} = a }",
+      "instance Show R where show _ = \"\"",
+      "type family F x where F x = x",
+      "data T a = T",
+      "type role T nominal",
+      "pattern P x <- Just x where P x = Just x",
+      "pattern Q {qa} = Just qa",
+      "f :: (?i :: Int) => R -> Int",
+      "f r@R {..} | let z = a, Just w <- Nothing = z + w + ?i + r.a + (.b) r",
+      "  where q = 1",
+      "f (view -> n) = let ?i = 1 in g n where g (k + 1) = k",
+      "h = \\case { R {a = v, b} -> v + b; _ -> 0 }",
+      "k = do { rec { x <- pure y; rec { y <- pure x } }; pure [u | u <- x | t <- y] }",
+      "l = mdo { s <- pure s; pure s }",
+      "o x = proc p -> do { q <- x -< p; returnA -< q }",
+      "u = $(pure []) + [| a |] + 'a + ''R + [qq|x|] + $$(t) + Q.v + W.u",
+      "v = #lab : [] ++ [z | z <- [], then group by z using groupWith]",
+      "w = (R 1 2) {b = 4} {a = 3} : [R {a, b = 1}]",
+      "x' = if | True -> 1 | otherwise -> 2",
+      "ext Foreign {..} = field + Foreign {fld = 1}",
+      "dq = [d| dv = 1 |]",
+      "$(pure [])",
+      "{-# RULES \"r\" forall n. f n = n #-}",
+      "{-# INLINE f #-}"
     ]
 
 -- | A module with every kind of Haddock markup (haddock-library has

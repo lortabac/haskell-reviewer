@@ -1,0 +1,15 @@
+conflicts: 0
+1:8-1:18 "ExactNames" module use -> not-a-name module
+3:1-3:3 "xs" var def -> top val:xs
+3:8-3:9 ":" con use -> builtin
+3:12-3:13 ":" con use -> builtin
+5:1-5:5 "unit" var def -> top val:unit
+7:1-7:5 "pair" var def -> top val:pair
+9:1-9:4 "fun" var sig -> top val:fun
+9:13-9:16 "Int" type use -> free
+9:17-9:20 "Int" type use -> free
+10:1-10:4 "fun" var def -> top val:fun
+10:7-10:9 "id" var use -> free
+12:1-12:5 "list" var sig -> top val:list
+12:12-12:15 "Int" type use -> free
+13:1-13:5 "list" var def -> top val:list

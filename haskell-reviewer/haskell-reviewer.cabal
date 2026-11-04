@@ -61,10 +61,12 @@ library
     HaskellReviewer.Core.Modules
     HaskellReviewer.Core.Names
     HaskellReviewer.Core.NameTable
+    HaskellReviewer.Core.Occurrences
     HaskellReviewer.Core.PackageGlob
     HaskellReviewer.Core.Parser
     HaskellReviewer.Core.Parser.Convert
     HaskellReviewer.Core.Parser.ConvertDecls
+    HaskellReviewer.Core.Parser.ConvertOccurrences
     HaskellReviewer.Core.Parser.Haddock
     HaskellReviewer.Core.Parser.Helpers
     HaskellReviewer.Core.Parser.InstanceKey
@@ -231,6 +233,8 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.ModulesGoldenTest
     HaskellReviewer.Core.ModulesTest
     HaskellReviewer.Core.NameTableTest
+    HaskellReviewer.Core.OccurrencesGoldenTest
+    HaskellReviewer.Core.OccurrencesTest
     HaskellReviewer.Core.PackageGlobTest
     HaskellReviewer.Core.ParseGoldenTest
     HaskellReviewer.Core.ParserTest
@@ -268,6 +272,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Session.SnapshotTest
     HighlightDump
     ModulesDump
+    OccurrencesDump
     ParseDump
     ProjectDump
     RichDump
@@ -287,6 +292,8 @@ test-suite haskell-reviewer-test
     , containers
     , directory
     , filepath
+    -- GHC's AST and collectors, as oracles for the occurrence table.
+    , ghc-lib-parser
     , haskell-reviewer
     , http-types
     -- Test-only oracle for our port in Core.SourceText (D-224).

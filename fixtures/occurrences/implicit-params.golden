@@ -1,0 +1,17 @@
+conflicts: 0
+2:8-2:22 "ImplicitParams" module use -> not-a-name module
+4:1-4:2 "f" var sig -> top val:f
+4:7-4:9 "?x" ip use -> free
+4:13-4:16 "Int" type use -> free
+4:21-4:24 "Int" type use -> free
+5:1-5:2 "f" var def -> top val:f
+5:5-5:7 "?x" ip use -> free
+5:8-5:9 "+" var use -> free
+7:1-7:2 "g" var def -> top val:g
+7:9-7:11 "?x" ip def -> local #0
+7:19-7:20 "f" var use -> top val:f
+7:21-7:22 "+" var use -> free
+7:23-7:25 "?x" ip use -> local #0
+9:1-9:2 "h" var def -> top val:h
+9:5-9:7 "?y" ip use -> free
+#0 ?x 7:9-7:11 scope 7:5-7:25

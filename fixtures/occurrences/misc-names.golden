@@ -1,0 +1,42 @@
+conflicts: 0
+2:8-2:18 "Misc.Names" module use -> not-a-name module
+3:5-3:6 "T" type export -> top type:T
+4:5-4:7 "as" var export -> top val:as
+5:5-5:14 "qualified" var export -> top val:qualified
+6:12-6:22 "Data.Maybe" module use -> not-a-name module
+7:13-7:14 "P" con export -> top pat:P
+8:5-8:22 "Misc.Names.hiding" var export -> top val:hiding
+12:8-12:18 "Data.Maybe" module use -> not-a-name module
+12:20-12:29 "fromMaybe" var import -> free
+12:31-12:36 "Maybe" type import -> free
+13:18-13:26 "Data.Map" module use -> not-a-name module
+13:30-13:31 "M" module use -> not-a-name module
+13:40-13:46 "lookup" var import -> free
+15:6-15:7 "T" type def -> top type:T
+15:8-15:9 "a" tyvar def -> free
+15:12-15:13 "T" con def -> top con:T
+15:14-15:15 "a" tyvar use -> free
+17:11-17:12 "T" type use -> top type:T
+17:13-17:20 "nominal" other use -> not-a-name other
+19:1-19:3 "as" var def -> top val:as
+21:1-21:10 "qualified" var def -> top val:qualified
+21:13-21:15 "as" var use -> top val:as
+23:1-23:7 "hiding" var def -> top val:hiding
+23:10-23:19 "qualified" var use -> top val:qualified
+25:1-25:7 "family" var def -> top val:family
+25:10-25:16 "hiding" var use -> top val:hiding
+27:9-27:10 "P" con sig -> top pat:P
+27:14-27:17 "Int" type use -> free
+28:9-28:10 "P" con def -> top pat:P
+30:12-30:14 "as" var sig -> top val:as
+31:23-31:24 "n" var def -> local #0
+31:26-31:35 "fromMaybe" var use -> free
+31:36-31:37 "n" var use -> local #0
+31:38-31:45 "Nothing" con use -> free
+31:48-31:49 "n" var use -> local #0
+32:9-32:15 "hiding" var sig -> top val:hiding
+34:1-34:6 "label" var def -> top val:label
+34:9-34:13 "#foo" other use -> not-a-name label
+36:1-36:5 "used" var def -> top val:used
+36:8-36:15 "M.empty" var use -> free
+#0 n 31:23-31:24 scope 31:11-31:49

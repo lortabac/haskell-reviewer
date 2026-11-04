@@ -1,0 +1,63 @@
+conflicts: 0
+1:8-1:17 "Operators" module use -> not-a-name module
+1:20-1:23 "<+>" var export -> top val:<+>
+1:27-1:29 "|>" var export -> top val:|>
+3:18-3:27 "Data.List" module use -> not-a-name module
+3:31-3:32 "L" module use -> not-a-name module
+5:10-5:13 "<+>" var sig -> top val:<+>
+7:2-7:5 "<+>" var sig -> top val:<+>
+7:10-7:13 "Int" type use -> free
+7:17-7:20 "Int" type use -> free
+7:24-7:27 "Int" type use -> free
+8:1-8:2 "a" var def -> local #0
+8:3-8:6 "<+>" var def -> top val:<+>
+8:7-8:8 "b" var def -> local #1
+8:11-8:12 "a" var use -> local #0
+8:13-8:14 "+" var use -> free
+8:15-8:16 "b" var use -> local #1
+10:1-10:2 "x" var def -> local #2
+10:3-10:5 "|>" var def -> top val:|>
+10:6-10:7 "f" var def -> local #3
+10:10-10:11 "f" var use -> local #3
+10:12-10:13 "x" var use -> local #2
+12:1-12:9 "sections" var def -> top val:sections
+12:13-12:16 "<+>" var use -> top val:<+>
+12:20-12:21 "." var use -> free
+12:25-12:28 "<+>" var use -> top val:<+>
+12:30-12:31 "." var use -> free
+12:34-12:37 "div" var use -> free
+12:42-12:43 "." var use -> free
+12:50-12:51 "." var use -> free
+12:52-12:60 "subtract" var use -> free
+14:1-14:4 "neg" var def -> top val:neg
+14:5-14:6 "y" var def -> local #4
+14:11-14:12 "y" var use -> local #4
+16:1-16:6 "minus" var def -> top val:minus
+16:10-16:11 "-" var use -> free
+18:1-18:8 "compose" var def -> top val:compose
+18:9-18:10 "f" var def -> local #5
+18:11-18:12 "g" var def -> local #6
+18:15-18:16 "f" var use -> local #5
+18:17-18:18 "." var use -> free
+18:19-18:20 "g" var use -> local #6
+20:1-20:4 "dot" var def -> top val:dot
+20:8-20:9 "." var use -> free
+22:1-22:10 "qualified" var def -> top val:qualified
+22:17-22:21 "L.\\\\" var use -> free
+24:1-24:7 "selfOp" var def -> top val:selfOp
+24:12-24:25 "Operators.<+>" var use -> top val:<+>
+26:1-26:9 "backtick" var def -> top val:backtick
+26:10-26:11 "a" var def -> local #7
+26:12-26:13 "b" var def -> local #8
+26:16-26:17 "a" var use -> local #7
+26:19-26:23 "elem" var use -> free
+26:25-26:26 "b" var use -> local #8
+#0 a 8:1-8:2 scope 8:1-8:16
+#1 b 8:7-8:8 scope 8:1-8:16
+#2 x 10:1-10:2 scope 10:1-10:13
+#3 f 10:6-10:7 scope 10:1-10:13
+#4 y 14:5-14:6 scope 14:1-14:12
+#5 f 18:9-18:10 scope 18:1-18:20
+#6 g 18:11-18:12 scope 18:1-18:20
+#7 a 26:10-26:11 scope 26:1-26:26
+#8 b 26:12-26:13 scope 26:1-26:26
