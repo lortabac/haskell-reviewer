@@ -1,0 +1,10 @@
+parsed
+warning: markdown-unlit assumed: no Bird or LaTeX code; read from haskell code blocks only
+1:1-2:1 comment "Loose: no component, read as markdown."
+3:1-4:1 comment "```haskell"
+4:1-4:7 keyword "module"
+4:8-4:13 typeCon "Loose"
+4:14-4:19 keyword "where"
+6:1-6:2 variable "w"
+6:5-6:8 literal "'w'"
+7:1-8:1 comment "```"

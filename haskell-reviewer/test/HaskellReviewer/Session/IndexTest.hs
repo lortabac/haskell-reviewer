@@ -36,9 +36,10 @@ import HaskellReviewer.Core.FileContent (FileContent (..), FileSize (..))
 import HaskellReviewer.Core.FileList (EntryKind (..), ListSource (..), mkFileList)
 import HaskellReviewer.Core.ModuleModel
   ( ModuleParse (..),
-    TextOnlyModule (..),
+    TextOnlyModule,
     TextOnlyReason (..),
   )
+import HaskellReviewer.Core.ModuleModel qualified as Model (textOnlyModule)
 import HaskellReviewer.Core.Modules (ModuleId (..), buildModuleIndex)
 import HaskellReviewer.Core.NameTable (NameEntry (..))
 import HaskellReviewer.Core.Parser (ParseSettings)
@@ -436,7 +437,7 @@ textOnly :: ModuleParse
 textOnly = TextOnly textOnlyModule
 
 textOnlyModule :: TextOnlyModule
-textOnlyModule = TextOnlyModule {reason = TooSlow, warnings = []}
+textOnlyModule = Model.textOnlyModule TooSlow []
 
 textOnlyResult :: Indexed
 textOnlyResult = IndexedTextOnly textOnlyModule

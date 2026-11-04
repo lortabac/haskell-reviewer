@@ -4,6 +4,7 @@ import Control.Exception (evaluate)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Word (Word32)
 import HaskellReviewer.Core.SourceText
   ( GhcRange (..),
     LooseUnlit (..),
@@ -11,6 +12,7 @@ import HaskellReviewer.Core.SourceText
     columnMap,
     ghcToSpan,
     looseReadsMarkdown,
+    proseLines,
     sliceSpan,
     sourceLines,
     stripBom,
@@ -18,7 +20,7 @@ import HaskellReviewer.Core.SourceText
     unlitLoose,
     unlitMarkdown,
   )
-import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
+import HaskellReviewer.Core.Span (Col (..), Line (..), LineRange (..), Span (..))
 import Hedgehog (assert, forAll, property, (===))
 import Hedgehog.Gen qualified as Gen
 import Hedgehog.Range qualified as Range
@@ -31,7 +33,25 @@ tests :: TestTree
 tests =
   testGroup
     "SourceText"
-    [ testCase "stripBom" $ do
+    [ testCase "proseLines: bird, blank lines aren't prose" $ do
+        let t = "text\n\n> x = 1\n  \nmore\nand more\n> y\r\nend\r\n\r"
+        lineRanges (proseLines t (unlitBirdLatex t)) @?= [(1, 1), (5, 6), (8, 8)],
+      testCase "proseLines: LaTeX, begin and end lines are prose" $ do
+        let t = "a\n\\begin{code}\nx = 1\n\n\\end{code}\nb"
+        lineRanges (proseLines t (unlitBirdLatex t)) @?= [(1, 2), (5, 6)],
+      testCase "proseLines: kept # lines aren't prose, #! is" $ do
+        let t = "#!/x\n#if 0\n> x\n#endif"
+        lineRanges (proseLines t (unlitBirdLatex t)) @?= [(1, 1)],
+      testCase "proseLines: markdown fences and other blocks are prose" $ do
+        let t = "# t\n```haskell\nx = 1\n```\n```sh\nls\n```"
+        fmap (lineRanges . proseLines t) (inPlace (unlitMarkdown t))
+          @?= Just [(1, 2), (4, 7)]
+        -- No code at all: unlit gives "".
+        lineRanges (proseLines "# t\n\nx" "") @?= [(1, 1), (3, 3)],
+      testCase "proseLines: CRLF, a BOM dropped first" $ do
+        let t = stripBom "\xFEFFtext\r\n> x\r\n"
+        lineRanges (proseLines t (unlitBirdLatex t)) @?= [(1, 1)],
+      testCase "stripBom" $ do
         stripBom "\xFEFFmodule M" @?= "module M"
         stripBom "module M" @?= "module M"
         stripBom "x\xFEFF" @?= "x\xFEFF",
@@ -190,3 +210,13 @@ tests =
           | otherwise = go inFence ls
     range a b c d = GhcRange {startLine = a, startCol = b, endLine = c, endCol = d}
     spanOf a b c d = Span (Line a) (Col b) (Line c) (Col d)
+
+-- | The in-place text, if any.
+inPlace :: Maybe MarkdownCode -> Maybe Text
+inPlace = \case
+  Just (InPlace t) -> Just t
+  _ -> Nothing
+
+-- | First and last lines.
+lineRanges :: [LineRange] -> [(Word32, Word32)]
+lineRanges rs = [(a, b) | LineRange (Line a) (Line b) <- rs]

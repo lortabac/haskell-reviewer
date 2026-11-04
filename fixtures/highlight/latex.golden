@@ -1,0 +1,12 @@
+parsed
+1:1-5:1 comment "\\documentclass{article}"…
+5:1-5:7 keyword "module"
+5:8-5:13 typeCon "Latex"
+5:15-5:16 variable "y"
+5:18-5:23 keyword "where"
+6:1-9:1 comment "\\end{code}"…
+9:1-9:2 variable "y"
+9:6-9:9 typeCon "Int"
+10:1-10:2 variable "y"
+10:5-10:6 literal "2"
+11:1-13:1 comment "\\end{code}"…

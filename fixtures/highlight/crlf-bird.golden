@@ -1,0 +1,9 @@
+parsed
+1:1-2:1 comment "Prose with CRLF."
+3:3-3:9 keyword "module"
+3:10-3:18 typeCon "CrlfBird"
+3:19-3:24 keyword "where"
+5:1-6:1 comment "More prose."
+7:3-7:4 variable "x"
+7:7-7:8 literal "1"
+7:9-7:20 comment "-- comment"

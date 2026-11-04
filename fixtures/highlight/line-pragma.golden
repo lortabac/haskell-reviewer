@@ -1,0 +1,10 @@
+parsed
+1:1-1:7 keyword "module"
+1:8-1:18 typeCon "LinePragma"
+1:19-1:24 keyword "where"
+3:1-3:27 pragma "{-# LINE 100 \"Other.y\" #-}"
+4:1-4:2 variable "x"
+4:5-4:6 literal "1"
+5:1-5:17 pragma "{-# COLUMN 5 #-}"
+6:1-6:2 variable "y"
+6:5-6:6 literal "2"

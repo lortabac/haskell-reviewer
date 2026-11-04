@@ -39,6 +39,12 @@ is updated if needed (§10.3).
   (`warmUpTempDirs`). Small repros
   (many threads doing their first printf, or stat on a missing file,
   under GC load) still didn't hang.
+  M2/T03: a test that repeated `parseWithin 1_000 … (slowModule 20000)`
+  let GHC share that call as one top-level thunk; two test threads
+  evaluated it at once, both stopped by 1 ms timeouts, and the 9.12 RTS
+  segfaulted (7 in ~357 runs; gdb: a worker inside the test's static
+  closure). Duplicate removed (D-235). It broke D-125's rule (inputs
+  forced before a timed parse).
 - **Q-OLD-SYNTAX**: closed (D-217): no shim in v1; reopen on user
   reports. How real is "the newest parser rejects old code"? The
   known cases (e.g. changes to `forall`/`!`/`~` lexing, `NoStarIsType`) need

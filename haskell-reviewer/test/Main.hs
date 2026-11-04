@@ -29,6 +29,8 @@ import HaskellReviewer.Core.DocLinksTest qualified
 import HaskellReviewer.Core.FileListTest qualified
 import HaskellReviewer.Core.GitTest qualified
 import HaskellReviewer.Core.HaddockTest qualified
+import HaskellReviewer.Core.HighlightGoldenTest qualified
+import HaskellReviewer.Core.HighlightTest qualified
 import HaskellReviewer.Core.IndexQueueTest qualified
 import HaskellReviewer.Core.InstanceKeyTest qualified
 import HaskellReviewer.Core.MarkdownUnlitTest qualified
@@ -172,6 +174,9 @@ main = do
               HaskellReviewer.Core.DocLinksTest.tests,
               HaskellReviewer.Core.HaddockTest.tests,
               HaskellReviewer.Core.HaddockTest.linearTests,
+              HaskellReviewer.Core.HighlightGoldenTest.tests,
+              HaskellReviewer.Core.HighlightTest.tests,
+              HaskellReviewer.Core.HighlightTest.linearTests,
               HaskellReviewer.Core.InstanceKeyTest.tests,
               -- The library is a test-only oracle: its shared values
               -- too, built once (Q-RTS-BLACKHOLE).

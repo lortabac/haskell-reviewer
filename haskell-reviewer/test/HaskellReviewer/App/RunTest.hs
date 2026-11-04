@@ -43,8 +43,8 @@ import HaskellReviewer.Core.FileList
 import HaskellReviewer.Core.Git (GitVersion (..))
 import HaskellReviewer.Core.ModuleModel
   ( ModuleParse (..),
-    TextOnlyModule (..),
     TextOnlyReason (..),
+    textOnlyModule,
   )
 import HaskellReviewer.Core.Project (GhcVersion (..))
 import HaskellReviewer.Core.RelPath (relPathFromBytes)
@@ -537,7 +537,7 @@ oneModule =
   mkFileList FromDisk 0 [(p, EntryFile) | Just p <- [relPathFromBytes "A.hs"]]
 
 textOnly :: ModuleParse
-textOnly = TextOnly TextOnlyModule {reason = TooSlow, warnings = []}
+textOnly = TextOnly (textOnlyModule TooSlow [])
 
 -- | Run with this lister until the action is done, then stop with a
 -- signal. The action gets the app warp would serve.

@@ -1,6 +1,7 @@
 module HaskellReviewer.Core.ParserTest (tests) where
 
 import Control.Concurrent (forkIO, newEmptyMVar, putMVar, takeMVar)
+import Control.Exception (evaluate)
 import Data.List (nub, sort)
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Text qualified as Text
@@ -42,6 +43,13 @@ import HaskellReviewer.Core.Decls
     ValueDecl (..),
     declInfo,
   )
+import HaskellReviewer.Core.LineRegions
+  ( LineKind (..),
+    LineRegion (..),
+    LineRegions,
+    lineRegionList,
+    noLineRegions,
+  )
 import HaskellReviewer.Core.ModuleModel
   ( DocItem (..),
     MarkdownLayout (..),
@@ -59,6 +67,7 @@ import HaskellReviewer.Core.ModuleModel qualified as Model
     ParsedModule (..),
     TextOnlyModule (..),
   )
+import HaskellReviewer.Core.Modules (Literate (..))
 import HaskellReviewer.Core.Parser
   ( ParseSettings (..),
     canonicalExtensionNames,
@@ -67,8 +76,8 @@ import HaskellReviewer.Core.Parser
     parseSource,
   )
 import HaskellReviewer.Core.Project (Extension (..))
-import HaskellReviewer.Core.Span (renderSpan)
-import HaskellReviewer.Core.Tokens (Token (..), TokenClass (..), tokenList)
+import HaskellReviewer.Core.Span (Line (..), renderSpan)
+import HaskellReviewer.Core.Tokens (Token (..), TokenClass (..), tokenCount, tokenList)
 import HaskellReviewer.Effects.Parser
   ( cppParseWarmUp,
     cppSettings,
@@ -180,7 +189,7 @@ tests =
           other -> assertFailure (show other),
       testCase "CPP warnings on the text-only path" $
         case parseSource defaultParseSettings "{-# LANGUAGE CPP #-}\n#error e\nx = = 1" of
-          TextOnly t | ParseFailed e <- t.reason -> do
+          TextOnly t | ParseFailed e _ <- t.reason -> do
             fmap renderSpan e.span @?= Just "3:5-3:6"
             t.warnings @?= [FromCpp (CppWarning 2 (ErrorDirective "e"))]
           other -> assertFailure (show other),
@@ -196,7 +205,7 @@ tests =
                     "line 12: #error e"
                   ]
             case bad.reason of
-              ParseFailed e -> fmap renderSpan e.span @?= Just "15:5-15:6"
+              ParseFailed e _ -> fmap renderSpan e.span @?= Just "15:5-15:6"
               other -> assertFailure (show other)
             case badPragma.reason of
               PragmaFailed _ -> pure ()
@@ -228,12 +237,49 @@ tests =
           sort (nub (declKinds m)) @?= sort allDeclKinds
           sort (nub [t.kind | t <- tokenList m.tokens])
             @?= [c | c <- [minBound .. maxBound], c /= Macro],
+      testCase "a parse failure keeps its tokens, and the regions" $
+        case parseSource defaultParseSettings parseFailureCpp of
+          TextOnly t | ParseFailed _ ts <- t.reason -> do
+            fmap ((>= 7) . tokenCount) ts @?= Just True
+            regionsOf t.regions @?= ifZero
+          other -> assertFailure (show other),
+      testCase "a lex failure: no tokens, CPP regions kept" $
+        case parseSource defaultParseSettings lexFailureCpp of
+          TextOnly t | ParseFailed _ ts <- t.reason -> do
+            ts @?= Nothing
+            regionsOf t.regions @?= ifZero
+          other -> assertFailure (show other),
+      testCase "a pragma failure: CPP regions kept" $
+        case parseSource defaultParseSettings pragmaAfterCpp of
+          TextOnly t | PragmaFailed _ <- t.reason -> do
+            regionsOf t.regions @?= [(CppDirectives, 2, 3), (CppDirectives, 5, 5)]
+          other -> assertFailure (show other),
+      testCase "-pgmF: no regions" $
+        case parseSource defaultParseSettings "{-# OPTIONS_GHC -F -pgmF t #-}" of
+          TextOnly t | Preprocessed _ <- t.reason -> t.regions @?= noLineRegions
+          other -> assertFailure (show other),
+      testCase "a parsed module keeps CPP's regions and literate prose" $ do
+        parsed defaultParseSettings parseCpp $ \m ->
+          regionsOf m.regions @?= ifZero
+        let bird = defaultParseSettings {literate = BirdOrLatex}
+        parsed bird "Text.\n\n> module M where\n" $ \m ->
+          regionsOf m.regions @?= [(Prose, 1, 1)]
+        parsed defaultParseSettings "module M where" $ \m -> m.regions @?= noLineRegions,
       testCase "a parse over the time limit stops soon" $
         mapM_ stopsWithin [20_000, 200_000],
-      testCase "after a stopped parse, another thread parses" $ do
-        _ <- parseWithin 1_000 defaultParseSettings (slowModule 20000)
+      -- Inputs are forced before the timed parse, as in the server
+      -- (D-125). A constant like slowModule 20000 can become a shared
+      -- top-level thunk: built inside a timeout by two threads at once,
+      -- it crashed the 9.12 RTS (a segfault).
+      testCase "after a stopped parse (no regions), another thread parses" $ do
+        slow <- evaluate (slowModule 20000)
+        small <- evaluate (slowModule 2)
+        stopped <- parseWithin 1_000 defaultParseSettings slow
+        case stopped of
+          TextOnly t | TooSlow <- t.reason -> t.regions @?= noLineRegions
+          other -> assertFailure (take 200 (show other))
         done <- newEmptyMVar
-        _ <- forkIO (parseGuarded defaultParseSettings (slowModule 2) >>= putMVar done)
+        _ <- forkIO (parseGuarded defaultParseSettings small >>= putMVar done)
         r <- timeout 10_000_000 (takeMVar done)
         case r of
           Just (Parsed m) -> fmap length m.exports @?= Just 1024
@@ -474,8 +520,11 @@ pragmaAfterCpp =
 -- limit, and keep the warnings known before.
 stopsWithin :: Int -> Assertion
 stopsWithin limit = do
+  -- Built before the clock and the timeout (D-125); parseWithin parses
+  -- it afresh on each call.
+  text <- evaluate (slowModule 20000)
   t0 <- getMonotonicTime
-  r <- parseWithin limit settings (slowModule 20000)
+  r <- parseWithin limit settings text
   t1 <- getMonotonicTime
   case r of
     TextOnly t | TooSlow <- t.reason -> t.warnings @?= [UnknownExtension "NoSuchThing"]
@@ -506,3 +555,28 @@ parsed :: ParseSettings -> Text.Text -> (Model.ParsedModule -> Assertion) -> Ass
 parsed settings src check = case parseSource settings src of
   Parsed m -> check m
   other -> assertFailure (show other)
+
+-- | CPP, then a parse error.
+parseFailureCpp :: Text.Text
+parseFailureCpp = "{-# LANGUAGE CPP #-}\n#if 0\nx\n#endif\nmodule M where\nx = = 1\n"
+
+-- | CPP, parses.
+parseCpp :: Text.Text
+parseCpp = "{-# LANGUAGE CPP #-}\n#if 0\nx\n#endif\nmodule M where\n"
+
+-- | CPP, then a comment never closed.
+lexFailureCpp :: Text.Text
+lexFailureCpp = "{-# LANGUAGE CPP #-}\n#if 0\nx\n#endif\n{-"
+
+-- | The regions of @#if 0@, a line, @#endif@ at line 2.
+ifZero :: [(LineKind, Word, Word)]
+ifZero = [(CppDirectives, 2, 2), (CppExcluded, 3, 3), (CppDirectives, 4, 4)]
+
+-- | Kind, first and last line.
+regionsOf :: LineRegions -> [(LineKind, Word, Word)]
+regionsOf rs =
+  [ (r.kind, fromIntegral a, fromIntegral b)
+  | r <- lineRegionList rs,
+    let Line a = r.firstLine
+        Line b = r.lastLine
+  ]

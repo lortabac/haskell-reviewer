@@ -1,0 +1,16 @@
+parsed
+1:1-2:1 comment "# A markdown module"
+3:1-4:1 comment "Some text."
+5:1-6:1 comment "```haskell"
+6:1-6:7 keyword "module"
+6:8-6:16 typeCon "Markdown"
+6:18-6:19 variable "z"
+6:21-6:26 keyword "where"
+7:1-8:1 comment "```"
+9:1-12:1 comment "```bash"…
+13:1-14:1 comment "~~~ haskell"
+14:1-14:2 variable "z"
+14:6-14:9 typeCon "Int"
+15:1-15:2 variable "z"
+15:5-15:6 literal "3"
+16:1-17:1 comment "~~~"

@@ -14,6 +14,7 @@ module HaskellReviewer.Core.SourceText
     unlitLoose,
     LooseUnlit (..),
     looseReadsMarkdown,
+    proseLines,
 
     -- * Columns
     ColumnMap,
@@ -46,7 +47,7 @@ import Data.Text.Unsafe qualified as Text.Unsafe
 import Data.Vector qualified as Vector
 import Data.Vector.Unboxed qualified as Unboxed
 import Data.Word (Word32)
-import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
+import HaskellReviewer.Core.Span (Col (..), Line (..), LineRange (..), Span (..))
 import Text.Read (readMaybe)
 
 {- Note [Unlit]
@@ -202,6 +203,29 @@ looseReadsMarkdown t = not (any birdOrLatex prose) && any isCodePiece pieces
     prose = [l | Prose l <- pieces]
     birdOrLatex l =
       "\\begin{code}" `Text.isPrefixOf` Text.stripStart l || ">" `Text.isPrefixOf` l
+
+-- | The prose of a literate file, as ranges of lines, from the file
+-- (BOM dropped) and what unlit made of it. Prose: a line unlit emptied
+-- that isn't blank in the file. Works for every unlit, as they all keep
+-- lines (Note [Unlit]): @\\begin{code}@ and fence lines are prose, kept
+-- @#@ lines and bird code aren't.
+proseLines :: Text -> Text -> [LineRange]
+proseLines file code = ranges (zipWith prose fileLines (codeLines <> repeat ""))
+  where
+    fileLines = Text.splitOn "\n" file
+    codeLines = Text.splitOn "\n" code
+    prose l c = Text.null c && not (Text.all isSpace l)
+    ranges = go (1 :: Word32)
+      where
+        go !_ [] = []
+        go !n bs@(b : _)
+          | b =
+              let (run, rest) = span id bs
+                  k = fromIntegral (length run)
+               in LineRange {firstLine = Line n, lastLine = Line (n + k - 1)}
+                    : go (n + k) rest
+          | otherwise =
+              let (gap, rest) = break id bs in go (n + fromIntegral (length gap)) rest
 
 -- | A file's lines, as markdown-unlit splits them.
 data MarkdownPiece

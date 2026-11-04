@@ -10,6 +10,7 @@ module HaskellReviewer.Effects.Parser
 
     -- * For tests
     parseWithin,
+    parserWarmUp,
     cppParseWarmUp,
     cppSettings,
     declsWarmUp,
@@ -41,11 +42,13 @@ import HaskellReviewer.Core.Cpp
     renderCppWarning,
     runCpp,
   )
+import HaskellReviewer.Core.Highlight (Run (..), highlightModule, noRuns, runList)
+import HaskellReviewer.Core.LineRegions (noLineRegions)
 import HaskellReviewer.Core.ModuleModel
   ( ModuleParse (..),
-    TextOnlyModule (..),
     TextOnlyReason (..),
     forceModuleParse,
+    textOnlyModule,
   )
 import HaskellReviewer.Core.Modules (Literate (..))
 import HaskellReviewer.Core.Parser
@@ -104,7 +107,7 @@ parseWithin limit settings text = do
     Just (Left message) -> gaveUp (ParserCrashed message)
     Nothing -> gaveUp TooSlow
   where
-    textOnly reason ws = TextOnly TextOnlyModule {reason = reason, warnings = ws}
+    textOnly reason ws = TextOnly (textOnlyModule reason ws)
     -- Cheap, but they could crash too.
     gaveUp reason =
       either (const (textOnly reason [])) id
@@ -137,28 +140,18 @@ rethrowAsync e = case fromException e of
 -- (Q-RTS-BLACKHOLE). Each one takes a different path: pragmas and
 -- extension names, Haddock, tabs, a parse error, a pragma error, a
 -- signature, every kind of declaration, every kind of Haddock markup,
--- and CPP modules end to end.
+-- CPP modules end to end, and literate files. Each result is
+-- highlighted too.
 warmUpParser :: IO ()
 warmUpParser = do
-  mapM_
-    (parse defaultParseSettings {extensions = [Extension "LambdaCase" True]})
-    [ "{-# LANGUAGE CPP, Safe #-}\n{-# OPTIONS_GHC -Wall -XMultiWayIf #-}\n"
-        <> "-- | Doc.\nmodule M (x, T (..)) where\nimport A (b)\nx =\t1\n",
-      "module M where\nx = = 1\n",
-      "{-# LANGUAGE NoSuchThing #-}\nmodule M where\n"
-    ]
-  _ <- parse defaultParseSettings {kind = SignatureFile} "signature S (T) where\ndata T\n"
-  _ <- parse defaultParseSettings declsWarmUp
-  _ <- parse defaultParseSettings haddockWarmUp
   _ <- evaluate noTokens
-  mapM_ (parse cppSettings) cppParseWarmUp
-  -- Every markdown-unlit outcome, and the cheap check behind
-  -- earlyWarnings.
+  _ <- evaluate noLineRegions
+  _ <- evaluate noRuns
+  mapM_ (uncurry parse) parserWarmUp
+  -- The cheap check behind earlyWarnings.
   mapM_
-    ( \(l, t) -> do
-        let s = defaultParseSettings {literate = l}
-        _ <- parse s t
-        evaluate (length (earlyWarnings s t))
+    ( \(l, t) ->
+        evaluate (length (earlyWarnings defaultParseSettings {literate = l} t))
     )
     markdownWarmUp
   -- The CPP evaluator, on every kind of line (Q-RTS-BLACKHOLE).
@@ -168,7 +161,50 @@ warmUpParser = do
   pure ()
   where
     -- No time limit (Note [Parse time limit]).
-    parse s t = tryParse (parseSource s t)
+    parse s t =
+      tryParse (parseSource s t) >>= \case
+        -- runList reads the class words back, as the API will.
+        Right p ->
+          () <$ evaluate (sum [fromEnum r.display | r <- runList (highlightModule p)])
+        Left _ -> pure ()
+
+-- | Every module 'warmUpParser' parses, with its settings. A test checks
+-- they take every path, and that their runs have every class.
+parserWarmUp :: [(ParseSettings, Text)]
+parserWarmUp =
+  map
+    (defaultParseSettings {extensions = [Extension "LambdaCase" True]},)
+    [ "{-# LANGUAGE CPP, Safe #-}\n{-# OPTIONS_GHC -Wall -XMultiWayIf #-}\n"
+        <> "-- | Doc.\nmodule M (x, T (..)) where\nimport A (b)\nx =\t1\n",
+      "module M where\nx = = 1\n",
+      "{-# LANGUAGE NoSuchThing #-}\nmodule M where\n"
+    ]
+    <> [ (defaultParseSettings {kind = SignatureFile}, "signature S (T) where\ndata T\n"),
+         (defaultParseSettings, declsWarmUp),
+         (defaultParseSettings, haddockWarmUp)
+       ]
+    <> map (cppSettings,) cppParseWarmUp
+    -- Every markdown-unlit outcome.
+    <> [(defaultParseSettings {literate = l}, t) | (l, t) <- markdownWarmUp]
+    <> highlightWarmUp
+
+-- | Modules for the highlighting paths: bird and LaTeX prose, CPP
+-- around prose, a comment across @#if@ lines, a module that fails to
+-- lex and parse.
+highlightWarmUp :: [(ParseSettings, Text)]
+highlightWarmUp =
+  [ (literate BirdOrLatex, "Prose.\n\n> module M where\n\n> x = 1\n"),
+    (literate BirdOrLatex, "Prose.\n\\begin{code}\nmodule M where\n\\end{code}\n"),
+    ( (literate BirdOrLatex) {extensions = [Extension "CPP" True]},
+      "#if 0\nProse.\n#endif\n> module M where\n"
+    ),
+    ( defaultParseSettings,
+      "{-# LANGUAGE CPP #-}\nmodule M where\nx = 1 {-\n#if 0\na\n#else\nb\n#endif\n-}\n"
+    ),
+    (defaultParseSettings, "{-# LANGUAGE CPP #-}\n#if 1\nmodule M where\n#endif\n{-\n")
+  ]
+  where
+    literate l = defaultParseSettings {literate = l}
 
 -- | A module with every kind of declaration, every constructor and
 -- export form, for the warm-up. A test checks it has them all.

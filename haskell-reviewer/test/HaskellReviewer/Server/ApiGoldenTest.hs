@@ -24,8 +24,8 @@ import Data.Text qualified as Text
 import HaskellReviewer.Core.Config (SidebarView (..), Theme (..), UiDefaults (..))
 import HaskellReviewer.Core.ModuleModel
   ( ModuleParse (..),
-    TextOnlyModule (..),
     TextOnlyReason (..),
+    textOnlyModule,
   )
 import HaskellReviewer.Core.Xdg (XdgProblem (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), newLogger)
@@ -131,7 +131,7 @@ cases =
         (Left HomeUnset)
     answering r =
       projectApi
-        { parse = \_ _ -> pure (TextOnly TextOnlyModule {reason = r, warnings = []})
+        { parse = \_ _ -> pure (TextOnly (textOnlyModule r []))
         }
 
 fixtureDir :: FilePath

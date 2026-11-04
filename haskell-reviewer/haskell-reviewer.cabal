@@ -53,8 +53,10 @@ library
     HaskellReviewer.Core.Exported
     HaskellReviewer.Core.FileContent
     HaskellReviewer.Core.FileList
+    HaskellReviewer.Core.Highlight
     HaskellReviewer.Core.Git
     HaskellReviewer.Core.IndexQueue
+    HaskellReviewer.Core.LineRegions
     HaskellReviewer.Core.ModuleModel
     HaskellReviewer.Core.Modules
     HaskellReviewer.Core.Names
@@ -221,6 +223,8 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.FileListTest
     HaskellReviewer.Core.GitTest
     HaskellReviewer.Core.HaddockTest
+    HaskellReviewer.Core.HighlightGoldenTest
+    HaskellReviewer.Core.HighlightTest
     HaskellReviewer.Core.IndexQueueTest
     HaskellReviewer.Core.InstanceKeyTest
     HaskellReviewer.Core.MarkdownUnlitTest
@@ -262,6 +266,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Session.IndexTest
     HaskellReviewer.Session.PrefsTest
     HaskellReviewer.Session.SnapshotTest
+    HighlightDump
     ModulesDump
     ParseDump
     ProjectDump
