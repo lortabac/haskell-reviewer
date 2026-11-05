@@ -1,0 +1,9 @@
+cabal-version: 3.0
+name: scope
+version: 1
+
+library
+  hs-source-dirs: src
+  exposed-modules: A B Use
+  build-depends: base
+  default-language: GHC2021

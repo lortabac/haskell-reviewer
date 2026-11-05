@@ -1,0 +1,15 @@
+cabal-version: 3.0
+name: prelude
+version: 1
+
+library
+  hs-source-dirs: src
+  exposed-modules: Prelude UsesHome NoPre Hiding QualPre Util UsesUtil
+  build-depends: base
+  default-language: GHC2021
+
+executable app
+  hs-source-dirs: app
+  main-is: Main.hs
+  build-depends: base, prelude
+  default-language: GHC2021

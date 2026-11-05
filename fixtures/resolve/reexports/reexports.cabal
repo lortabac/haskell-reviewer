@@ -1,0 +1,9 @@
+cabal-version: 3.0
+name: reexports
+version: 1
+
+library
+  hs-source-dirs: src
+  exposed-modules: Base Mid Top CycA CycB Use
+  build-depends: base, containers
+  default-language: GHC2021

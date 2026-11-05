@@ -13,6 +13,8 @@ import HaskellReviewer.Core.Project
     FlagName (..),
     FlagSource (..),
     FlagValue (..),
+    LibraryDep (..),
+    LibraryName (..),
     ListedModule (..),
     ModuleKind (..),
     ModuleName (..),
@@ -89,6 +91,12 @@ component c =
           <> ["language: " <> Text.pack (show c.language)]
           <> field "extensions" (map ext c.extensions)
           <> field "build-depends" [n | PackageName n <- c.buildDepends]
+          -- Only when a sub-library is named: the main ones are above.
+          <> field
+            "sub-libraries"
+            [ p <> ":" <> s
+            | LibraryDep (PackageName p) (SubLibrary s) <- c.libraryDepends
+            ]
           <> ["main-is: " <> m | Just m <- [c.mainIs]]
           <> field "modules" (map listed c.modules)
           <> field "ghc-options" c.ghcOptions

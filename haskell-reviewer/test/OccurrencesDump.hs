@@ -95,6 +95,7 @@ renderResolution src spanOf = \case
       FieldOfCon t -> " [field of " <> anchor t <> "]"
       MaybeWildcardOf t -> " [maybe wildcard of " <> anchor t <> "]"
       QuasiQuoter -> " [quasi-quoter]"
+      FieldOfDot -> " [record dot]"
     anchor t = let s = spanOf t in sliceSpan src s <> "@" <> renderSpan s
     kindText = \case
       ModuleWord -> "module"

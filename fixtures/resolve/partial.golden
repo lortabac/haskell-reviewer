@@ -1,0 +1,38 @@
+== partial:lib:Broken (not parsed)
+== partial:lib:Ext
+exports:
+  val:e @partial:lib:Ext
+  6:5-6:16 "fromMissing" var use -> external A.Missing (only open import)
+  6:17-6:24 "nowhere" var use -> external A.Missing (only open import)
+== partial:lib:NoCandidate
+exports:
+  val:n @partial:lib:NoCandidate
+  4:5-4:12 "nowhere" var use -> unresolved (no candidate)
+== partial:lib:OrderUse
+exports:
+  val:u @partial:lib:OrderUse
+  6:5-6:8 "foo" var use -> heuristic[not parsed] partial:lib:Broken
+== partial:lib:QualOpen
+exports:
+  open: not parsed partial:lib:Broken
+== partial:lib:QualOpenUse
+exports:
+  val:c @partial:lib:QualOpenUse
+  6:5-6:6 "a" var use -> heuristic[not parsed] partial:lib:QualOpen
+== partial:lib:Splicy
+exports:
+  open: splices partial:lib:Splicy
+  4:3-4:7 "pure" var use [splice] -> external Prelude (only open import)
+== partial:lib:Use
+exports:
+  type:R @partial:lib:Use (R, f)
+  con:R @partial:lib:Use
+  field:f @partial:lib:Use
+  val:g @partial:lib:Use
+  val:u @partial:lib:Use
+  val:v @partial:lib:Use
+  4:16-4:17 "x" var import -> heuristic[not parsed, listed, not found] partial:lib:Broken
+  10:5-10:6 "x" var use -> heuristic[not parsed, listed, not found] partial:lib:Broken
+  10:7-10:10 "B.y" var use -> heuristic[not parsed] partial:lib:Broken
+  12:5-12:9 "gone" var use -> unresolved (import excluded by CPP)
+  16:9-16:18 "notAField" field use -> unresolved (no candidate)

@@ -1,0 +1,14 @@
+-- source-hash: 244df9ae0433a99a
+-- module: th-cpp:lib:Gen
+import Language.Haskell.TH ( mkName, clause, normalB, funD )
+-- module: th-cpp:lib:GenNoList
+import Language.Haskell.TH ( mkName, clause, normalB, funD )
+-- module: th-cpp:lib:Plain
+-- module: th-cpp:lib:Use
+import Gen ( made, helper )
+import GenNoList ( plain, fromSplice )
+import Language.Haskell.TH ( Exp(VarE) )
+-- module: th-cpp:lib:UsePlain
+import Plain ( base )
+-- module: th-cpp:lib:UseSplice
+import GenNoList ( fromSplice )

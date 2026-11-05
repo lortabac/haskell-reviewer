@@ -1,0 +1,16 @@
+-- source-hash: 646659b1500ccd5
+-- module: reexports:lib:Base
+import Data.Map ( Map )
+-- module: reexports:lib:CycA
+import CycB ( A, B(..) )
+-- module: reexports:lib:CycB
+import {-# SOURCE #-} CycA ( A )
+-- module: reexports:lib:Mid
+import Base ( Base(..), Ext, base )
+import Data.Map ( Map )
+import Data.Char as X ( chr, ord )
+-- module: reexports:lib:Top
+import Mid ( Map, ord, Base(..), Ext, base, chr )
+-- module: reexports:lib:Use
+import CycA ( A(..), B(B) )
+import Top ( Map, ord, Base(Base, bf), Ext, base, top )

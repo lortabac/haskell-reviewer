@@ -1,0 +1,25 @@
+== Main.hs
+exports:
+  val:main @Main.hs
+  3:11-3:12 "a" var import -> heuristic[ambiguous module] one/A.hs val:a
+  4:11-4:12 "b" var import -> exact sub/B.hs val:b
+  5:19-5:26 "toUpper" var import -> external Data.Char (listed)
+  7:9-7:11 "IO" type use -> external Prelude (only open import)
+  8:8-8:13 "print" var use -> external Prelude (only open import)
+  8:15-8:16 "a" var use -> heuristic[ambiguous module] one/A.hs val:a
+  8:17-8:18 "+" var use -> external Prelude (only open import)
+  8:19-8:20 "b" var use -> exact sub/B.hs val:b
+  8:22-8:29 "toUpper" var use -> external Data.Char (listed)
+  10:14-10:17 "Int" type use -> external Prelude (only open import)
+== one/A.hs
+exports:
+  val:a @one/A.hs
+  3:6-3:9 "Int" type use -> external Prelude (only open import)
+== sub/B.hs
+exports:
+  val:b @sub/B.hs
+  3:6-3:9 "Int" type use -> external Prelude (only open import)
+== two/A.hs
+exports:
+  val:a @two/A.hs
+  3:6-3:9 "Int" type use -> external Prelude (only open import)

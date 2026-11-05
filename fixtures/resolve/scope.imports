@@ -1,0 +1,11 @@
+-- source-hash: f5ed5b03aae73d54
+-- module: scope:lib:A
+-- module: scope:lib:B
+-- module: scope:lib:Use
+import A ( C(method), R(..), T(..), g, pattern P, type (+++) )
+import B ( h, k )
+import Data.List ( intercalate )
+import Data.Maybe ( fromMaybe )
+import qualified B ( Shape, f )
+import qualified A as Q ( Shape(Circle), f )
+import qualified B as Q ( Shape(..) )

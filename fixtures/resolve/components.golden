@@ -1,0 +1,61 @@
+== p:lib:Helper
+exports:
+  val:apiHelper @p:lib:Helper
+  3:14-3:17 "Int" type use -> external Prelude (only open import)
+== p:lib:P.Api
+exports:
+  val:api @p:lib:P.Api
+  val:apiHelper @p:lib:Helper
+  val:internal @p:lib:internal:P.Internal
+  open: not parsed p:lib:Paths_p
+  1:20-1:29 "apiHelper" var export -> exact p:lib:Helper val:apiHelper
+  1:31-1:39 "internal" var export -> exact p:lib:internal:P.Internal val:internal
+  1:41-1:48 "version" var export -> heuristic[not parsed, listed, not found] p:lib:Paths_p
+  3:16-3:25 "apiHelper" var import -> exact p:lib:Helper val:apiHelper
+  4:20-4:28 "internal" var import -> exact p:lib:internal:P.Internal val:internal
+  5:17-5:24 "version" var import -> heuristic[not parsed, listed, not found] p:lib:Paths_p
+  6:18-6:26 "unlisted" var import -> heuristic[unlisted module] p/src/Unlisted.hs val:unlisted
+  8:8-8:11 "Int" type use -> external Prelude (only open import)
+  9:7-9:15 "internal" var use -> exact p:lib:internal:P.Internal val:internal
+  9:16-9:17 "+" var use -> external Prelude (only open import)
+  9:18-9:26 "unlisted" var use -> heuristic[unlisted module] p/src/Unlisted.hs val:unlisted
+== p:lib:Paths_p (not parsed)
+== p:lib:internal:P.Internal
+exports:
+  val:internal @p:lib:internal:P.Internal
+  3:13-3:16 "Int" type use -> external Prelude (only open import)
+== p:test:spec:Helper
+exports:
+  val:specHelper @p:test:spec:Helper
+  3:15-3:18 "Int" type use -> external Prelude (only open import)
+== p:test:spec:Main
+exports:
+  val:main @p:test:spec:Main
+  3:16-3:26 "specHelper" var import -> exact p:test:spec:Helper val:specHelper
+  4:15-4:18 "api" var import -> exact p:lib:P.Api val:api
+  6:20-6:28 "internal" var import -> external P.Internal (listed)
+  8:9-8:11 "IO" type use -> external Prelude (only open import)
+  9:8-9:13 "print" var use -> external Prelude (only open import)
+  9:15-9:18 "api" var use -> exact p:lib:P.Api val:api
+  9:19-9:20 "+" var use -> external Prelude (only open import)
+  9:21-9:28 "Api.api" var use -> exact p:lib:P.Api val:api
+  9:29-9:30 "+" var use -> external Prelude (only open import)
+  9:31-9:41 "specHelper" var use -> exact p:test:spec:Helper val:specHelper
+  9:42-9:43 "+" var use -> external Prelude (only open import)
+  9:44-9:52 "internal" var use -> external P.Internal (listed)
+== q:lib:Q
+exports:
+  val:q @q:lib:Q
+  3:26-3:30 "sort" var import -> external "base" Data.List (listed)
+  4:26-4:33 "missing" var import -> external "this" Q.Missing (listed)
+  5:15-5:18 "api" var import -> exact p:lib:P.Api val:api
+  6:20-6:28 "internal" var import -> exact p:lib:internal:P.Internal val:internal
+  8:7-8:10 "Int" type use -> external Prelude (only open import)
+  9:5-9:9 "sort" var use -> external "base" Data.List (listed)
+  9:11-9:14 "api" var use -> exact p:lib:P.Api val:api
+  9:16-9:24 "internal" var use -> exact p:lib:internal:P.Internal val:internal
+  9:26-9:33 "missing" var use -> external "this" Q.Missing (listed)
+== p/src/Unlisted.hs
+exports:
+  val:unlisted @p/src/Unlisted.hs
+  3:13-3:16 "Int" type use -> external Prelude (only open import)

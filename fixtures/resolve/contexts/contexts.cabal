@@ -1,0 +1,9 @@
+cabal-version: 3.0
+name: contexts
+version: 1
+
+library
+  hs-source-dirs: src
+  exposed-modules: Defs Use
+  build-depends: base, template-haskell
+  default-language: GHC2021

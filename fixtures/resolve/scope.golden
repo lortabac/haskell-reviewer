@@ -1,0 +1,94 @@
+== scope:lib:A
+exports:
+  type:+++ @scope:lib:A
+  type:C @scope:lib:A (method)
+  type:R @scope:lib:A (R, size)
+  type:Shape @scope:lib:A (Circle)
+  type:T @scope:lib:A (MkT, Other)
+  con:Circle @scope:lib:A
+  con:MkT @scope:lib:A
+  con:Other @scope:lib:A
+  pat:P @scope:lib:A
+  con:R @scope:lib:A
+  val:f @scope:lib:A
+  val:g @scope:lib:A
+  method:method @scope:lib:A
+  field:size @scope:lib:A
+  4:14-4:17 "Int" type use -> external Prelude (only open import)
+  6:21-6:24 "Int" type use -> external Prelude (only open import)
+  6:35-6:41 "String" type use -> external Prelude (only open import)
+  8:6-8:9 "Int" type use -> external Prelude (only open import)
+  8:13-8:16 "Int" type use -> external Prelude (only open import)
+  9:5-9:7 "id" var use -> external Prelude (only open import)
+  11:6-11:9 "Int" type use -> external Prelude (only open import)
+  15:18-15:21 "Int" type use -> external Prelude (only open import)
+  17:14-17:17 "Int" type use -> external Prelude (only open import)
+  20:16-20:22 "Either" type use -> external Prelude (only open import)
+== scope:lib:B
+exports:
+  type:Shape @scope:lib:B (Shape)
+  con:Shape @scope:lib:B
+  val:f @scope:lib:B
+  val:h @scope:lib:B
+  val:k @scope:lib:B
+  3:6-3:9 "Int" type use -> external Prelude (only open import)
+  3:13-3:16 "Int" type use -> external Prelude (only open import)
+  4:5-4:11 "negate" var use -> external Prelude (only open import)
+  6:6-6:9 "Int" type use -> external Prelude (only open import)
+  9:20-9:23 "Int" type use -> external Prelude (only open import)
+  11:6-11:9 "Int" type use -> external Prelude (only open import)
+== scope:lib:Use
+exports:
+  val:u1 @scope:lib:Use
+  val:u2 @scope:lib:Use
+  val:u3 @scope:lib:Use
+  val:u4 @scope:lib:Use
+  val:u5 @scope:lib:Use
+  4:11-4:12 "C" type import -> exact scope:lib:A class:C
+  4:14-4:20 "method" var import -> exact scope:lib:A val:method
+  4:23-4:24 "R" type import -> exact scope:lib:A type:R
+  4:31-4:32 "T" type import -> exact scope:lib:A type:T
+  4:39-4:40 "g" var import -> exact scope:lib:A val:g
+  4:50-4:51 "P" con import -> exact scope:lib:A pat:P
+  4:59-4:62 "+++" type import -> exact scope:lib:A type:+++
+  6:18-6:23 "Shape" type import -> exact scope:lib:B type:Shape
+  6:25-6:26 "f" var import -> exact scope:lib:B val:f
+  8:26-8:31 "Shape" type import -> exact scope:lib:B type:Shape
+  10:20-10:29 "fromMaybe" var import -> external Data.Maybe (listed)
+  12:7-12:8 "T" type use -> exact scope:lib:A type:T
+  12:12-12:15 "Int" type use -> external Prelude (one of 2)
+  13:5-13:8 "MkT" con use -> exact scope:lib:A con:MkT
+  13:16-13:17 "+" var use -> external Prelude (one of 2)
+  13:18-13:19 "g" var use -> exact scope:lib:A val:g
+  13:20-13:21 "+" var use -> external Prelude (one of 2)
+  13:22-13:23 "h" var use -> exact scope:lib:B val:h
+  13:24-13:25 "+" var use -> external Prelude (one of 2)
+  13:26-13:27 "k" var use -> exact scope:lib:B val:k
+  14:4-14:9 "Other" con use -> exact scope:lib:A con:Other
+  14:12-14:18 "method" var use -> exact scope:lib:A val:method
+  14:25-14:28 "Int" type use -> external Prelude (one of 2)
+  14:30-14:31 "+" var use -> external Prelude (one of 2)
+  14:32-14:33 "P" con use -> exact scope:lib:A pat:P
+  16:7-16:10 "Int" type use -> external Prelude (one of 2)
+  17:6-17:9 "Q.f" var use -> exact scope:lib:A val:f
+  17:12-17:13 "+" var use -> external Prelude (one of 2)
+  17:14-17:17 "B.f" var use -> exact scope:lib:B val:f
+  17:20-17:21 "+" var use -> external Prelude (one of 2)
+  17:22-17:26 "size" var use -> exact scope:lib:A field:R.size
+  17:28-17:29 "R" con use -> exact scope:lib:A con:R
+  19:7-19:10 "Int" type use -> external Prelude (one of 2)
+  19:11-19:14 "+++" type use -> exact scope:lib:A type:+++
+  19:15-19:19 "Bool" type use -> external Prelude (one of 2)
+  20:6-20:10 "Left" con use -> external Prelude (one of 2)
+  20:12-20:21 "fromMaybe" var use -> external Data.Maybe (listed)
+  20:24-20:31 "Nothing" con use -> external Prelude (one of 2)
+  22:7-22:14 "B.Shape" type use -> exact scope:lib:B type:Shape
+  23:6-23:13 "Q.Shape" con use -> exact scope:lib:B con:Shape
+  25:7-25:10 "Int" type use -> external Prelude (one of 2)
+  26:11-26:19 "Q.Circle" con use -> exact scope:lib:A con:Circle
+  27:8-27:14 "length" var use -> external Prelude (one of 2)
+  27:16-27:27 "intercalate" var use -> external Prelude (one of 2)
+  29:10-29:11 "C" type use -> exact scope:lib:A class:C
+  29:12-29:15 "Int" type use -> external Prelude (one of 2)
+  30:3-30:9 "method" var instance-def -> exact scope:lib:A val:method
+  30:12-30:14 "id" var use -> external Prelude (one of 2)

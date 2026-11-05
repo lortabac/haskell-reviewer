@@ -181,7 +181,7 @@ for each side and each module:
 
 | Tier | Source | Gives |
 |------|--------|-------|
-| **Syntactic** | Parsing with the bundled GHC parser (§7.1), using the project's language edition and extensions | Declarations, signatures, Haddock comments, exports, imports, local scoping. Cross-module resolution is *import-directed*: exact when, after following explicit import and export lists, exactly one candidate remains; heuristic otherwise. |
+| **Syntactic** | Parsing with the bundled GHC parser (§7.1), using the project's language edition and extensions | Declarations, signatures, Haddock comments, exports, imports, local scoping. Cross-module resolution is *import-directed*: exact when, after following import and export lists, exactly one declaration of the project remains, every module it went through is parsed, and its mapping is sure; otherwise a guess with the reasons (ambiguous, not ready, not parsed, Template Haskell, CPP, record dot, …), an external module guess, or unresolved (D-251). |
 | **Precise** | `.hie` files from a prior build whose recorded sources match this side (see rules) | Exact resolution of every identifier, types of identifiers at their binding and, where different, at each use (including inferred types of bindings without signatures); no expression types. Instance resolution, references. |
 
 Rules:

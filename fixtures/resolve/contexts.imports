@@ -1,0 +1,6 @@
+-- source-hash: 29f75a4ae6dba141
+-- module: contexts:lib:Defs
+import Language.Haskell.TH.Quote ( QuasiQuoter(..) )
+-- module: contexts:lib:Use
+import Data.Proxy ( Proxy(..) )
+import Defs ( Nat(Z, S), Point(Point, px), Cls(..), Rec(..), qq )

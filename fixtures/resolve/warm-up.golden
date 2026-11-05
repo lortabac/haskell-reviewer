@@ -1,0 +1,224 @@
+== w:lib:Bare
+exports:
+  type:R @w:lib:Bare (R, get)
+  con:R @w:lib:Bare
+  bare-field:get @w:lib:Bare
+  bare-field:twice @w:lib:Bare
+  bare-field:twice @w:lib:Bare
+  lone:S twice
+  lone:T twice
+  2:22-2:25 "get" var export -> exact w:lib:Bare field:R.get
+  2:27-2:32 "twice" var export -> heuristic[ambiguous 2] w:lib:Bare field:S.twice
+  3:20-3:23 "Int" type use -> external Prelude (only open import)
+  4:22-4:25 "Int" type use -> external Prelude (only open import)
+  5:22-5:25 "Int" type use -> external Prelude (only open import)
+  6:9-6:14 "twice" field use -> heuristic[record dot, ambiguous 2] w:lib:Bare field:S.twice
+== w:lib:Bare2
+exports:
+  val:b @w:lib:Bare2
+  val:d @w:lib:Bare2
+  4:5-4:12 "nothing" var use -> external Ext (only open import)
+  5:9-5:16 "nofield" field use -> unresolved (no candidate)
+== w:lib:Broken (not parsed)
+== w:lib:Cpp
+exports:
+  val:c @w:lib:Cpp
+  7:14-7:17 "val" var import -> heuristic[cpp import] w:lib:Defs val:val
+  9:5-9:8 "val" var use -> heuristic[cpp import] w:lib:Defs val:val
+  9:9-9:13 "gone" var use -> unresolved (import excluded by CPP)
+== w:lib:CycA
+exports:
+  val:a @w:lib:CycA
+  val:b @w:lib:CycB
+== w:lib:CycB
+exports:
+  val:a @w:lib:CycA
+  val:b @w:lib:CycB
+  open: cycle w:lib:CycA
+== w:lib:CycUse
+exports:
+  val:c @w:lib:CycUse
+  5:5-5:6 "b" var use -> exact w:lib:CycB val:b
+  5:7-5:14 "unknown" var use -> heuristic[import cycle] w:lib:CycB
+== w:lib:Defs
+exports:
+  type::+ @w:lib:Defs
+  type:Cls @w:lib:Defs (cm)
+  type:Fam @w:lib:Defs
+  type:KA @w:lib:Defs
+  type:KB @w:lib:Defs
+  type:Kind @w:lib:Defs (KA, KB)
+  type:Nat @w:lib:Defs (S, Z)
+  type:Rec @w:lib:Defs (Rec, ra, rb)
+  pat:P @w:lib:Defs
+  con:Rec @w:lib:Defs
+  con:S @w:lib:Defs
+  con:Z @w:lib:Defs
+  val:amb @w:lib:Defs
+  method:cm @w:lib:Defs
+  val:qq @w:lib:Defs
+  field:ra @w:lib:Defs
+  field:rb @w:lib:Defs
+  val:val @w:lib:Defs
+  4:23-4:26 "Int" type use -> external Prelude (only open import)
+  4:34-4:37 "Int" type use -> external Prelude (only open import)
+  5:32-5:35 "Int" type use -> external Prelude (only open import)
+  5:49-5:52 "Int" type use -> external Prelude (only open import)
+  7:14-7:17 "Int" type use -> external Prelude (only open import)
+  9:18-9:20 "KA" type def -> exact w:lib:Defs con:KA
+  9:23-9:25 "KB" type def -> exact w:lib:Defs con:KB
+  10:15-10:21 "Either" type use -> external Prelude (only open import)
+  12:17-12:20 "Int" type use -> external Prelude (only open import)
+== w:lib:Gen
+exports:
+  val:gen @splice w:lib:Gen
+  2:13-2:16 "gen" var export -> external Prelude (only open import)
+  3:3-3:7 "pure" var use [splice] -> external Prelude (only open import)
+== w:lib:NoList
+exports:
+  val:nl @w:lib:NoList
+  open: splices w:lib:NoList
+  3:3-3:7 "pure" var use [splice] -> heuristic[made by splice here] w:lib:NoList
+  4:6-4:13 "mystery" var use -> heuristic[made by splice here] w:lib:NoList
+== w:lib:Other
+exports:
+  val:amb @w:lib:Other
+  2:8-2:11 "Int" type use -> external Prelude (only open import)
+== w:lib:Pending (not ready)
+== w:lib:Re
+exports:
+  type::+ @w:lib:Defs
+  type:Cls @w:lib:Defs (cm)
+  type:Fam @w:lib:Defs
+  type:Map @external Data.Map
+  type:Nat @w:lib:Defs (S, Z)
+  type:Rec @w:lib:Defs (Rec, ra, rb)
+  pat:P @w:lib:Defs
+  con:Rec @w:lib:Defs
+  con:S @w:lib:Defs
+  con:Z @w:lib:Defs
+  val:amb @w:lib:Defs
+  method:cm @w:lib:Defs
+  val:gen @splice w:lib:Gen
+  val:ghost @external Prelude
+  val:qq @w:lib:Defs
+  field:ra @w:lib:Defs
+  field:rb @w:lib:Defs
+  open: external Data.Char
+  1:35-1:38 "Map" type export -> external Data.Map (listed)
+  1:40-1:43 "gen" var export -> heuristic[made by splice] w:lib:Gen
+  1:45-1:50 "ghost" var export -> external Prelude (one of 2)
+  1:52-1:55 "Rec" type export -> exact w:lib:Defs type:Rec
+  2:21-2:24 "val" var import -> exact w:lib:Defs val:val
+  2:26-2:30 "Kind" type import -> exact w:lib:Defs type:Kind
+  4:18-4:21 "Map" type import -> external Data.Map (listed)
+== w:lib:Shared
+exports:
+  val:sh @w:lib:Shared
+== w:lib:Use
+exports:
+  type:KA @w:lib:Defs
+  type:Kind @w:lib:Defs (KA)
+  type:Rec @w:lib:Defs (Rec, ra, rb)
+  con:Rec @w:lib:Defs
+  val:gen @splice w:lib:Gen
+  field:ra @w:lib:Defs
+  field:rb @w:lib:Defs
+  val:use @w:lib:Use
+  4:13-4:16 "Rec" type export -> exact w:lib:Defs type:Rec
+  4:28-4:31 "gen" var export -> heuristic[made by splice] w:lib:Gen
+  4:33-4:37 "Kind" type export -> exact w:lib:Defs type:Kind
+  4:39-4:41 "KA" type export -> exact w:lib:Defs con:KA
+  6:29-6:32 "Nat" type import -> exact w:lib:Defs type:Nat
+  7:14-7:17 "Cls" type import -> exact w:lib:Defs class:Cls
+  7:32-7:33 "P" con import -> exact w:lib:Defs pat:P
+  7:41-7:43 ":+" type import -> exact w:lib:Defs type::+
+  7:46-7:50 "Kind" type import -> exact w:lib:Defs type:Kind
+  7:57-7:65 "notThere" var import -> heuristic[listed, not found] w:lib:Defs
+  8:21-8:24 "val" var import -> exact w:lib:Defs val:val
+  10:17-10:21 "pend" var import -> heuristic[not ready, listed, not found] w:lib:Pending
+  12:18-12:21 "unl" var import -> heuristic[unlisted module] w/src/Unlisted.hs val:unl
+  13:19-13:23 "sort" var import -> external Data.List (listed)
+  15:28-15:33 "lefts" var import -> external Data.Either (listed)
+  16:29-16:30 "R" type import -> exact w:lib:Bare type:R
+  17:8-17:13 "D.Nat" type use -> exact w:lib:Defs type:Nat
+  17:17-17:20 "Int" type use -> heuristic[not parsed] w:lib:Broken
+  17:21-17:23 ":+" type use -> exact w:lib:Defs type::+
+  17:24-17:28 "Bool" type use -> heuristic[not parsed] w:lib:Broken
+  18:9-18:13 "Left" con use -> heuristic[not parsed] w:lib:Broken
+  18:15-18:17 "ra" var use -> exact w:lib:Defs field:Rec.ra
+  18:19-18:22 "Rec" con use -> exact w:lib:Defs con:Rec
+  18:24-18:26 "ra" field use -> exact w:lib:Defs field:Rec.ra
+  18:32-18:34 "rb" field use -> exact w:lib:Defs field:Rec.rb
+  18:37-18:38 "P" con use -> exact w:lib:Defs pat:P
+  18:41-18:42 "+" var use -> heuristic[not parsed] w:lib:Broken
+  18:43-18:46 "amb" var use -> heuristic[ambiguous 2] w:lib:Defs val:amb
+  18:47-18:48 "+" var use -> heuristic[not parsed] w:lib:Broken
+  18:49-18:53 "pend" var use -> heuristic[not ready, listed, not found] w:lib:Pending
+  18:54-18:55 "+" var use -> heuristic[not parsed] w:lib:Broken
+  18:56-18:57 "x" var use -> heuristic[not parsed] w:lib:Broken
+  18:58-18:59 "+" var use -> heuristic[not parsed] w:lib:Broken
+  18:60-18:63 "unl" var use -> heuristic[unlisted module] w/src/Unlisted.hs val:unl
+  18:64-18:65 "+" var use -> heuristic[not parsed] w:lib:Broken
+  18:66-18:69 "ord" var use -> heuristic[not parsed] w:lib:Broken
+  18:74-18:75 "+" var use -> heuristic[not parsed] w:lib:Broken
+  18:76-18:79 "gen" var use -> heuristic[made by splice] w:lib:Gen
+  19:10-19:13 "Cls" type use -> exact w:lib:Defs class:Cls
+  19:14-19:18 "Bool" type use -> heuristic[not parsed] w:lib:Broken
+  19:27-19:29 "cm" var instance-def -> exact w:lib:Defs val:cm
+  19:37-19:40 "cm2" var instance-def -> exact w:lib:Defs val:cm2
+  20:10-20:14 "Show" type use -> heuristic[not parsed] w:lib:Broken
+  20:15-20:18 "Rec" type use -> exact w:lib:Defs type:Rec
+  20:25-20:29 "show" var instance-def -> heuristic[not parsed] w:lib:Broken
+  20:34-20:38 "show" var use -> heuristic[not parsed] w:lib:Broken
+  20:41-20:43 "rb" field use -> heuristic[record dot] w:lib:Defs field:Rec.rb
+  21:3-21:6 "Rec" con use -> exact w:lib:Defs con:Rec
+  21:14-21:16 "ra" var use -> heuristic[wildcard] w:lib:Defs field:Rec.ra
+  22:4-22:11 "Foreign" con use -> heuristic[not parsed] w:lib:Broken
+  22:19-22:22 "fld" var use -> heuristic[wildcard, not parsed] w:lib:Broken
+  23:7-23:12 "Proxy" type use -> heuristic[not parsed] w:lib:Broken
+  23:14-23:15 "S" type use -> heuristic[datakinds] w:lib:Defs con:S
+  23:16-23:17 "Z" type use -> heuristic[datakinds] w:lib:Defs con:Z
+  24:6-24:15 "undefined" var use -> heuristic[not parsed] w:lib:Broken
+  25:5-25:12 "[qq|x|]" var use [splice] -> exact w:lib:Defs val:qq
+  26:8-26:13 "local" var use [splice] -> heuristic[via splice] w:lib:Use val:local
+  27:9-27:18 "undefined" var use -> heuristic[not parsed] w:lib:Broken
+  28:6-28:10 "?imp" ip use -> unresolved (not a global)
+  29:5-29:9 "sort" var use -> external Data.List (listed)
+  29:11-29:20 "fromMaybe" var use -> heuristic[not parsed] w:lib:Broken
+  29:24-29:31 "Nothing" con use -> heuristic[not parsed] w:lib:Broken
+  30:6-30:9 "Map" type use -> external Data.Map (listed)
+  30:10-30:13 "Int" type use -> heuristic[not parsed] w:lib:Broken
+  30:14-30:17 "Int" type use -> heuristic[not parsed] w:lib:Broken
+  31:5-31:14 "undefined" var use -> heuristic[not parsed] w:lib:Broken
+  32:6-32:8 "KA" type use -> exact w:lib:Defs con:KA
+  33:5-33:14 "undefined" var use -> heuristic[not parsed] w:lib:Broken
+  34:11-34:16 "B.get" var use -> unresolved (no candidate)
+  34:21-34:26 "B.get" field use -> exact w:lib:Bare field:R.get
+partial: w:lib:Pending
+== w:lib:s:Shared
+exports:
+  val:sh @w:lib:s:Shared
+== w:exe:e:Main
+exports:
+  val:main @w:exe:e:Main
+  4:8-4:13 "print" var use -> external Prelude (only open import)
+  4:15-4:17 "sh" var use -> heuristic[ambiguous module] w:lib:Shared val:sh
+  4:18-4:19 "+" var use -> external Prelude (only open import)
+  4:20-4:23 "val" var use -> exact w:lib:Defs val:val
+== loose/L.hs
+exports:
+  val:l @loose/L.hs
+  2:14-2:17 "val" var import -> heuristic[loose import] w:lib:Defs val:val
+  4:5-4:8 "val" var use -> heuristic[loose import] w:lib:Defs val:val
+  4:9-4:10 "+" var use -> external Prelude (only open import)
+  4:11-4:14 "dup" var use -> heuristic[ambiguous module] loose/a/Dup.hs val:dup
+== loose/a/Dup.hs
+exports:
+  val:dup @loose/a/Dup.hs
+== loose/b/Dup.hs
+exports:
+  val:dup @loose/b/Dup.hs
+== w/src/Unlisted.hs
+exports:
+  val:unl @w/src/Unlisted.hs
