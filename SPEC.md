@@ -1326,11 +1326,15 @@ with parsing.
 
 Per side, the occurrence table is resolved against the side's module
 graph: import-directed at the syntactic tier (§3), and replaced by the HIE
-index at the precise tier. The results are a definition target for each
-occurrence, and the per-side tables built from them: name → declarations,
-and a reverse-reference table for find-references and "Affected". The
-reverse table is built in the background, and is marked *partial* until it
-is complete (§10.2).
+index at the precise tier. Resolution is computed on request, per module:
+a definition target for each free occurrence. Each side keeps only a memo
+of *final* export sets (every module read is done, no import cycle was
+cut), per generation. A result that may change once a module is indexed
+is marked *partial*, and the client asks again as indexing goes on (D-252,
+D-259, D-262). The per-side tables built from the results (name →
+declarations, and a reverse-reference table for find-references and
+"Affected") come later. The reverse table is built in the background, and
+is marked *partial* until it is complete (§10.2).
 
 #### 11.4.6 HIE companions
 

@@ -7,7 +7,6 @@ module HaskellReviewer.Effects.Parser
 
     -- * Warm-up
     warmUpParser,
-    warmUpResolve,
 
     -- * For tests
     parseWithin,
@@ -44,10 +43,8 @@ import HaskellReviewer.Core.Cpp
     renderCppWarning,
     runCpp,
   )
-import HaskellReviewer.Core.Entities (forceExportSet)
 import HaskellReviewer.Core.Highlight (Run (..), highlightModule, noRuns, runList)
 import HaskellReviewer.Core.LineRegions (noLineRegions)
-import HaskellReviewer.Core.ModuleGraph (forceModuleGraph)
 import HaskellReviewer.Core.ModuleModel
   ( ModuleParse (..),
     ParsedModule (occurrences),
@@ -70,14 +67,6 @@ import HaskellReviewer.Core.Project
     hostPlatform,
     parserGhcVersion,
   )
-import HaskellReviewer.Core.Resolve
-  ( ExportSets (..),
-    ResolveInput (..),
-    exportSets,
-    forceModuleResolution,
-    resolveModule,
-  )
-import HaskellReviewer.Core.ResolveWarmUp (resolveWarmUpInput, resolveWarmUpModules)
 import HaskellReviewer.Core.Tokens (noTokens)
 import System.Timeout (timeout)
 
@@ -186,21 +175,6 @@ warmUpParser = do
             Parsed m -> () <$ evaluate (length (show (occurrenceList m.occurrences)))
             TextOnly _ -> pure ()
         Left _ -> pure ()
-
--- | Resolve the warm-up project once, so resolution's shared values
--- are built before request threads use them (Q-RTS-BLACKHOLE). Every
--- result and export set is forced. Parses with no time limit, like
--- 'warmUpParser'.
-warmUpResolve :: IO ()
-warmUpResolve = do
-  let input = resolveWarmUpInput
-      sets = exportSets input resolveWarmUpModules
-  _ <- evaluate (forceModuleGraph input.graph)
-  _ <- evaluate (foldr (\x r -> forceExportSet x `seq` r) () sets.sets)
-  _ <- evaluate (foldr (\x r -> forceExportSet x `seq` r) () sets.newFinal)
-  mapM_
-    (evaluate . maybe () forceModuleResolution . resolveModule input)
-    resolveWarmUpModules
 
 -- | Every module 'warmUpParser' parses, with its settings. A test checks
 -- they take every path, and that their runs have every class.

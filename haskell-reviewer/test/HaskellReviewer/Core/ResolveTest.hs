@@ -67,22 +67,7 @@ import HaskellReviewer.Core.Occurrences
     occurrenceList,
   )
 import HaskellReviewer.Core.Parser (moduleParseSettings, parseSource)
-import HaskellReviewer.Core.Project
-  ( Component (..),
-    ComponentName (..),
-    DetectedGhc (..),
-    GhcSource (..),
-    Language (..),
-    ListedModule (..),
-    ModuleKind (..),
-    ModuleName (..),
-    Package (..),
-    PackageName (..),
-    Project (..),
-    ProjectSource (..),
-    parserGhcVersion,
-  )
-import HaskellReviewer.Core.RelPath (relDirFromSegments, relPathFromSegments)
+import HaskellReviewer.Core.Project (ModuleName (..))
 import HaskellReviewer.Core.Resolve
   ( ExportSets (..),
     ExternalGuess (..),
@@ -96,6 +81,7 @@ import HaskellReviewer.Core.Resolve
     UnresolvedWhy (..),
     exportSets,
     forceModuleResolution,
+    homeImports,
     isPartial,
     resolveModule,
   )
@@ -107,6 +93,7 @@ import Hedgehog (Gen, Property, annotate, forAll, property, (===))
 import Hedgehog qualified
 import Hedgehog.Gen qualified as Gen
 import Hedgehog.Range qualified as Range
+import IndexSupport (libFile, libProject, modId)
 import ResolveDump
   ( Fixture (..),
     cases,
@@ -131,6 +118,7 @@ tests =
     [ testCase "the warm-up covers every path" warmUpCovers,
       testCase "not ready: a guess on the module, partial; exact once ready" notReadyCase,
       testCase "the memo gets final sets only" finalOnly,
+      testCase "home imports: implicit Prelude, no externals, no repeats" homeImportsCase,
       testCase
         "every free token gets one result; list tokens stay in their import"
         coverage,
@@ -142,6 +130,27 @@ tests =
         (Hedgehog.withTests 100 monotone),
       testProperty "filter laws" (Hedgehog.withTests 100 filterLaws)
     ]
+
+homeImportsCase :: Assertion
+homeImportsCase = do
+  let input =
+        memInput
+          Set.empty
+          [ ("Prelude", "module Prelude where\n"),
+            ("B", "module B where\nx = 1\n"),
+            ("C", "module C where\n"),
+            ("A", "module A where\nimport B\nimport Data.List\nimport B (x)\nimport C\n"),
+            ( "N",
+              "{-# LANGUAGE NoImplicitPrelude #-}\nmodule N where\nimport C\nimport B\n"
+            ),
+            ("P", "module P where\nimport C\nimport Prelude hiding (id)\n")
+          ]
+      home n = case input.state (modId n) of
+        ModuleParsed p -> homeImports input.graph (modId n) p.parsed
+        _ -> error "not parsed"
+  home "A" @?= map modId ["Prelude", "B", "C"]
+  home "N" @?= map modId ["C", "B"]
+  home "P" @?= map modId ["C", "Prelude"]
 
 -- * In-memory projects
 
@@ -155,49 +164,13 @@ memInput pending mods =
       memo = Map.empty
     }
   where
-    rel p = fromMaybe (error "bad path") (relPathFromSegments (Text.splitOn "/" p))
-    file n = rel ("src/" <> Text.replace "." "/" n <> ".hs")
-    fl = mkFileList FromDisk 0 [(file n, EntryFile) | (n, _) <- mods]
-    idx = buildModuleIndex project fl
-    project =
-      Project
-        { source = ProjectFile [],
-          withCompiler = Nothing,
-          ghc = DetectedGhc {version = parserGhcVersion, source = GhcFromParser},
-          packages =
-            [ Package
-                { name = PackageName "p",
-                  version = "1",
-                  cabalFile = rel "p.cabal",
-                  flags = [],
-                  components =
-                    [ Component
-                        { name = Lib,
-                          buildable = True,
-                          sourceDirs =
-                            [fromMaybe (error "bad dir") (relDirFromSegments ["src"])],
-                          language = GHC2021,
-                          extensions = [],
-                          buildDepends = [],
-                          libraryDepends = [],
-                          mainIs = Nothing,
-                          modules = [exposed n | (n, _) <- mods],
-                          ghcOptions = [],
-                          cppOptions = [],
-                          includeDirs = []
-                        }
-                    ]
-                }
-            ],
-          brokenPackages = [],
-          warnings = []
-        }
+    fl = mkFileList FromDisk 0 [(libFile n, EntryFile) | (n, _) <- mods]
+    idx = buildModuleIndex (libProject (map fst mods)) fl
     states =
       Map.fromList
         [ (modId n, if Set.member n pending then ModuleNotReady else parsed (modId n) src)
         | (n, src) <- mods
         ]
-    exposed n = ListedModule {name = ModuleName n, kind = Exposed, autogen = False}
     parsed i src = case findModule idx i of
       Just found
         | HaskellSource f <- found.source ->
@@ -205,9 +178,6 @@ memInput pending mods =
               Parsed m -> ModuleParsed ParsedInput {text = src, parsed = m}
               TextOnly _ -> ModuleNotParsed
       _ -> ModuleNotParsed
-
-modId :: Text -> ModuleId
-modId n = ComponentModule (PackageName "p") Lib (ModuleName n)
 
 -- | Each free token of a module: its text and result, in order.
 results :: ResolveInput -> Text -> [(Text, Resolved)]

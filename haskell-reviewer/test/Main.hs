@@ -63,7 +63,7 @@ import HaskellReviewer.Effects.FileSystemTest qualified
 import HaskellReviewer.Effects.GitTest qualified
 import HaskellReviewer.Effects.HelperTest qualified
 import HaskellReviewer.Effects.LogTest qualified
-import HaskellReviewer.Effects.Parser (warmUpParser, warmUpResolve)
+import HaskellReviewer.Effects.Parser (warmUpParser)
 import HaskellReviewer.Effects.Spawn (prepareSpawning)
 import HaskellReviewer.Effects.SpawnTest qualified
 import HaskellReviewer.Effects.TraceTest qualified
@@ -82,6 +82,8 @@ import HaskellReviewer.Server.Wire.Page (warmUpPages)
 import HaskellReviewer.Session.ClientsTest qualified
 import HaskellReviewer.Session.IndexTest qualified
 import HaskellReviewer.Session.PrefsTest qualified
+import HaskellReviewer.Session.Resolve (warmUpResolve)
+import HaskellReviewer.Session.ResolveTest qualified
 import HaskellReviewer.Session.SnapshotTest qualified
 import Test.Tasty (defaultMain, testGroup, withResource)
 import TestSupport (warmUpTempDirs)
@@ -204,6 +206,7 @@ main = do
                 HaskellReviewer.Core.RichTextGoldenTest.tests,
                 HaskellReviewer.Core.SourceTextTest.tests,
                 HaskellReviewer.Session.IndexTest.parsingTests,
+                HaskellReviewer.Session.ResolveTest.tests,
                 -- Both share the API fixtures: built once, here. And the
                 -- prefs route runs in parallel: warmed up like the server.
                 withResource (forceFixtures >> warmUpPrefs) (const (pure ())) $ \_ ->

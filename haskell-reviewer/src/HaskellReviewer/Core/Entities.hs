@@ -44,6 +44,7 @@ module HaskellReviewer.Core.Entities
     withoutOpen,
     setNames,
     forceExportSet,
+    forceExportSets,
 
     -- * Helpers
     groupOn,
@@ -390,6 +391,10 @@ withoutOpen k m s =
 setNames :: Names -> ExportSet -> ExportSet
 setNames ns s =
   ExportSet {names = ns, openHome = s.openHome, openExternal = s.openExternal}
+
+-- | Force every set of a container. See 'forceExportSet'.
+forceExportSets :: (Foldable f) => f ExportSet -> ()
+forceExportSets = foldr (\s r -> forceExportSet s `seq` r) ()
 
 -- | Walk every map, set, list and entity, so a set holds no thunk.
 forceExportSet :: ExportSet -> ()

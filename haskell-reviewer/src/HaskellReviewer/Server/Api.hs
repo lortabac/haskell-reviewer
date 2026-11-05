@@ -77,6 +77,7 @@ import HaskellReviewer.Session.Index
     newIndex,
     readProgress,
   )
+import HaskellReviewer.Session.Resolve (newResolver)
 import HaskellReviewer.Session.Snapshot (Snapshot (..), firstGeneration)
 import Network.HTTP.Types
   ( Status,
@@ -105,17 +106,18 @@ data FilesApi = FilesApi
 On GHC 9.12 and 9.14, threads that force the same thunk at once can
 livelock the RTS (Q-RTS-BLACKHOLE). Request threads and parse workers
 all read the same snapshot. So 'newSnapshot' builds it fully
-('forceSnapshot', 'newIndex', the search's module list) before the
-listing thread fills the slot: the other threads then find no thunk to
-force.
+('forceSnapshot', 'newIndex', the search's module list, the resolver's
+module graph) before the listing thread fills the slot: the other
+threads then find no thunk to force.
 
 The listing thread also warms up before the fill: it runs the parser
 (warmUpParser), so the workers find the parser's shared values built,
-and encodes some pages (Note [Page warm-up] in
-"HaskellReviewer.Server.Wire.Page"). 'newSnapshot' encodes a file view
-of each kind ('cborWarmUp'), so the shared values of cborg and of our
-CBOR code are built before request threads race on them. The gzip
-path gets the same before warp listens (Note [Compression] in
+resolves a small project (warmUpResolve in
+"HaskellReviewer.Session.Resolve"), and encodes some pages (Note [Page
+warm-up] in "HaskellReviewer.Server.Wire.Page"). 'newSnapshot' encodes
+a file view of each kind ('cborWarmUp'), so the shared values of cborg
+and of our CBOR code are built before request threads race on them. The
+gzip path gets the same before warp listens (Note [Compression] in
 "HaskellReviewer.Server.Router"), and so does the search route
 (warmUpSearch in "HaskellReviewer.Server.Search").
 
@@ -123,9 +125,9 @@ What the workers put in the slots is forced before it gets there (Note
 [Indexing] in "HaskellReviewer.Session.Index").
 -}
 
--- | The snapshot of a file list and its project, with the JSON bodies
--- and an index with every module Pending. Fully built before it
--- returns. See Note [Forced snapshot].
+-- | The snapshot of a file list and its project, with the JSON bodies,
+-- an index with every module Pending, and its resolver. Fully built
+-- before it returns. See Note [Forced snapshot].
 newSnapshot :: CanonicalRoot -> FileList -> Project -> IO Snapshot
 newSnapshot root fl project = do
   let modules = buildModuleIndex project fl
@@ -136,6 +138,7 @@ newSnapshot root fl project = do
   _ <- evaluate (forceCandidates searchModules)
   mapM_ (evaluate . LBS.length . encodeFileView firstGeneration) cborWarmUp
   index <- newIndex modules
+  resolver <- newResolver modules index
   pure
     Snapshot
       { generation = firstGeneration,
@@ -145,7 +148,8 @@ newSnapshot root fl project = do
         fileListJson = fileListJson,
         moduleTreeJson = moduleTreeJson,
         searchModules = searchModules,
-        index = index
+        index = index,
+        resolver = resolver
       }
 
 -- | Force both JSON bodies, the module index (strict fields), every

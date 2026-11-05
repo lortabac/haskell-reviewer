@@ -16,8 +16,7 @@ import Control.Concurrent.MVar
     tryPutMVar,
   )
 import Control.Concurrent.STM
-  ( STM,
-    TVar,
+  ( TVar,
     atomically,
     check,
     modifyTVar',
@@ -72,9 +71,9 @@ import HaskellReviewer.Session.Index
     runWorkers,
     slotState,
   )
-import System.Timeout (timeout)
+import IndexSupport (isParsing, isReady, waitDone, waitState, within)
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 tests :: TestTree
 tests =
@@ -84,7 +83,7 @@ tests =
         fake <- newFake ["A"]
         index <- indexOf ["A", "B", "C", "D"]
         withAsync (runWorkers fake.deps 1 index) $ \_ -> do
-          waitState index "A" isParsing
+          waitState index (m "A") isParsing
           atomically (requestModule index (m "D"))
           release fake "A"
           waitDone index
@@ -94,7 +93,7 @@ tests =
         index <- indexOf ["A", "B"]
         withAsync (runWorkers fake.deps 1 index) $ \_ ->
           withAsync (awaitModule index (m "A")) $ \request -> do
-            waitState index "A" isParsing
+            waitState index (m "A") isParsing
             -- Can't be done: A's parse is still held.
             poll request >>= assertBool "answered before the parse" . isNothing
             release fake "A"
@@ -179,13 +178,13 @@ tests =
         index <- indexOf ["A", "B", "C", "D"]
         let progress = atomically (readProgress index)
         withAsync (runWorkers deps 1 index) $ \workers -> do
-          waitState index "A" isParsing
+          waitState index (m "A") isParsing
           progress >>= (@?= Progress {total = 4, ready = 0, failed = 0})
           release fake "A"
-          waitState index "B" isParsing
+          waitState index (m "B") isParsing
           progress >>= (@?= Progress {total = 4, ready = 1, failed = 0})
           release fake "B"
-          waitState index "C" isParsing
+          waitState index (m "C") isParsing
           progress >>= (@?= Progress {total = 4, ready = 2, failed = 0})
           release fake "C"
           -- The workers exit once every module is done.
@@ -206,7 +205,7 @@ tests =
         fake <- newFake ["A"]
         index <- indexOf ["A", "B"]
         withAsync (runWorkers fake.deps 1 index) $ \workers -> do
-          waitState index "A" isParsing
+          waitState index (m "A") isParsing
           cancel workers
           r <- within (waitCatch workers)
           case r of
@@ -226,7 +225,7 @@ tests =
                 }
         index <- indexOf ["A", "B", "C", "D"]
         withAsync (runWorkers deps 1 index) $ \workers -> do
-          waitState index "A" isParsing
+          waitState index (m "A") isParsing
           -- C first, then B: B is never parsed.
           atomically (requestModule index (m "C") >> requestModule index (m "B"))
           withAsync (awaitModule index (m "B")) $ \waiting -> do
@@ -277,10 +276,10 @@ tests =
           -- One big file parses; the other worker skips the other big
           -- one and takes the small ones.
           within bigRunning
-          waitState index "E" isParsing
+          waitState index (m "E") isParsing
           withAsync (awaitModule index (m "D")) $ \requested -> do
             release fake "E"
-            waitState index "F" isReady
+            waitState index (m "F") isReady
             readTVarIO fake.bigRunning >>= (@?= 1)
             release fake (big "C")
             release fake (big "D")
@@ -316,14 +315,14 @@ tests =
           let (running, waiting)
                 | big "A" `elem` started = ("A", "B")
                 | otherwise = ("B", "A")
-          waitState index waiting (== Pending)
+          waitState index (m waiting) (== Pending)
           atomically (requestModule index (m "C"))
           putMVar cGate ()
-          waitState index "C" (== Pending)
+          waitState index (m "C") (== Pending)
           -- The lock frees: C goes first. Without its priority the
           -- other big one would, and wait in its parse for ever.
           release fake (big running)
-          waitState index "C" isReady
+          waitState index (m "C") isReady
           release fake (big waiting)
           waitDone index
     ]
@@ -348,7 +347,7 @@ parsingTests =
                 }
         index <- indexOf ["A", "B"]
         withAsync (runWorkers deps 1 index) $ \_ -> do
-          waitState index "B" isParsing
+          waitState index (m "B") isParsing
           names <- atomically (readNames index)
           fmap (map (\e -> (e.name, e.exported))) names
             @?= Map.fromList [(m "A", [("T", False), ("K", False), ("a", True)])]
@@ -466,35 +465,3 @@ m n = LooseModule (path (n <> ".hs"))
 
 path :: Text -> RelPath
 path p = fromMaybe (error ("bad path " <> show p)) (relPathFromSegments [p])
-
-isParsing :: SlotState -> Bool
-isParsing = \case
-  Parsing -> True
-  _ -> False
-
-isReady :: SlotState -> Bool
-isReady = \case
-  Ready _ -> True
-  _ -> False
-
--- | Wait until the module's slot is in this state.
-waitState :: Index -> Text -> (SlotState -> Bool) -> Assertion
-waitState index n ok =
-  within . atomically $
-    slotState index (m n) >>= check . maybe False ok
-
--- | Wait until no slot is Pending or Parsing.
-waitDone :: Index -> Assertion
-waitDone index = within (atomically (done index >>= check))
-
-done :: Index -> STM Bool
-done index = do
-  p <- readProgress index
-  pure (p.ready + p.failed == p.total)
-
--- | 5 s, a safety net.
-within :: IO a -> IO a
-within action =
-  timeout 5_000_000 action >>= \case
-    Just a -> pure a
-    Nothing -> assertFailure "not within 5 s"
