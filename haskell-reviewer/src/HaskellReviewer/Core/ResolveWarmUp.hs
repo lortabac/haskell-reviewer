@@ -223,6 +223,47 @@ files =
           "c = b unknown"
         ]
     ),
+    -- A pattern synonym bundled with an imported type, then imported
+    -- and exported alone, hidden, and put back under its type.
+    ( "w/src/Bun.hs",
+      Text.unlines
+        [ "{-# LANGUAGE PatternSynonyms #-}",
+          "module Bun (Nat (.., PZ)) where",
+          "import Defs (Nat (..))",
+          "pattern PZ :: Nat",
+          "pattern PZ = Z"
+        ]
+    ),
+    ( "w/src/Bun2.hs",
+      Text.unlines
+        [ "{-# LANGUAGE PatternSynonyms #-}",
+          "module Bun2 (module Bun, Nat (..), pattern PZ) where",
+          "import Bun (Nat)",
+          "import Bun (pattern PZ)",
+          "import Bun hiding (pattern PZ)"
+        ]
+    ),
+    ( "w/src/Bun3.hs",
+      "{-# LANGUAGE PatternSynonyms #-}\nmodule Bun3 (pattern PZ) where\nimport Bun\n"
+    ),
+    -- PZ found through a hiding import before a whole one.
+    ( "w/src/Bun4.hs",
+      Text.unlines
+        [ "{-# LANGUAGE PatternSynonyms #-}",
+          "module Bun4 (pattern PZ) where",
+          "import Bun hiding (S)",
+          "import Bun"
+        ]
+    ),
+    -- A qualified-only module export: only PZ is in scope unqualified.
+    ( "w/src/Bun5.hs",
+      Text.unlines
+        [ "{-# LANGUAGE PatternSynonyms #-}",
+          "module Bun5 (module Bun) where",
+          "import qualified Bun",
+          "import Bun (pattern PZ)"
+        ]
+    ),
     ("w/src/Pending.hs", "module Pending (pend) where\npend = 1\n"),
     ("w/src/Broken.hs", "module Broken (x) where\nx = = 1\n"),
     ("w/src/Unlisted.hs", "module Unlisted (unl) where\nunl = 1\n"),

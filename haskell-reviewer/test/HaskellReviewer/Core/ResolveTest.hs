@@ -89,7 +89,7 @@ import HaskellReviewer.Core.ResolveWarmUp (resolveWarmUpInput, resolveWarmUpModu
 import HaskellReviewer.Core.SourceText (sliceSpan, sourceLines)
 import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
 import HaskellReviewer.Core.Tokens (tokenIndexFrom, tokenSpanAt)
-import Hedgehog (Gen, Property, annotate, forAll, property, (===))
+import Hedgehog (Gen, Property, PropertyT, annotate, forAll, property, (===))
 import Hedgehog qualified
 import Hedgehog.Gen qualified as Gen
 import Hedgehog.Range qualified as Range
@@ -123,6 +123,10 @@ tests =
         "every free token gets one result; list tokens stay in their import"
         coverage,
       testProperty "same results as a naive model" (Hedgehog.withTests 300 differential),
+      testCase "found once: T(.., P) with an ambiguous T bundles per type" $
+        regression differentialFor ambiguousBundle,
+      testCase "found once: pattern P from a list keeps its type" $
+        regression filterLawsFor loneBundle,
       testProperty "the memo doesn't depend on request order" $
         Hedgehog.withTests 100 orderIndependent,
       testProperty
@@ -246,6 +250,28 @@ warmUpCovers = do
         ]
   nubOrd (sort [filterTag input m i | (m, i) <- imports])
     @?= sort [(h, l) | h <- ["external", "home"], l <- ["hiding", "none", "only"]]
+  -- Bundled pattern synonyms: lone in some sets, back under the type
+  -- in another.
+  let loneIn n =
+        or
+          [ c.kind == PatSynKind
+          | (ComponentModule _ _ (ModuleName n'), s) <- Map.toList sets,
+            n' == n,
+            cs <- Map.elems s.names.lone,
+            c <- Set.toList cs
+          ]
+  assertBool "a lone bundled pattern synonym (export item)" (loneIn "Bun3")
+  assertBool "a lone bundled pattern synonym (through a hider)" (loneIn "Bun4")
+  assertBool "a lone bundled pattern synonym (qualified module export)" (loneIn "Bun5")
+  assertBool
+    "a bundled pattern synonym put back under its type by a union"
+    ( or
+        [ c.kind == PatSynKind
+        | (ComponentModule _ _ (ModuleName "Bun2"), s) <- Map.toList sets,
+          a <- Map.findWithDefault [] "Nat" s.names.types,
+          c <- Set.toList a.children
+        ]
+    )
   assertBool "a partial result" (any isPartial rs)
   assertBool "new final sets" (any (not . Map.null . (.newFinal)) rs)
   where
@@ -706,12 +732,14 @@ instance Semigroup MSet where
 instance Monoid MSet where
   mempty = MSet Set.empty Set.empty
 
--- | Just these entities, with the bundles that stay whole.
+-- | Just these entities, with their bundles. A pattern synonym keeps
+-- its bundle without the type (GHC's trimAvail): a union with the type
+-- puts it back under it.
 restrict :: Set MEnt -> MSet -> MSet
 restrict es s =
   MSet
     (Set.intersection es s.ents)
-    (Set.filter (\(t, q) -> Set.member t es && Set.member q es) s.bundles)
+    (Set.filter (\(_, q) -> Set.member q es) s.bundles)
 
 -- | The model: every module's export set, and each child's parent.
 data Model = Model
@@ -752,7 +780,10 @@ named x ks = Set.filter (\(MEnt _ n k) -> n == x && k `elem` ks)
 withSubs :: Model -> GSubs -> Set MEnt -> MSet -> MSet
 withSubs md s ts set
   | Set.null ts = mempty
-  | otherwise = restrict (ts <> kids) set
+  | otherwise =
+      -- Kids come under these types only.
+      let r = restrict (ts <> kids) set
+       in MSet r.ents (Set.filter (\(t, _) -> Set.member t ts) r.bundles)
   where
     kids = case s of
       SNone -> Set.empty
@@ -817,19 +848,22 @@ exportsOf md i m = case (m.kind, m.exports) of
                 let v = visibleVia imp
               ]
     -- @T(.., P)@: pattern synonyms named in the subs, here or in scope,
-    -- go under T.
+    -- go under T. Per type: a sub that is a child of another T of that
+    -- name (an ambiguous T) still bundles with this one.
     bundled ts s kids = case s of
-      SSome ns ->
-        let ps =
-              Set.unions
-                [ if Set.null here' then named x [MP] unqualified.ents else here'
-                | x <- ns,
-                  not (any (\(MEnt _ n _) -> n == x) (Set.toList kids.ents)),
-                  -- One here wins over those in scope.
-                  let here' = named x [MP] locals.ents
-                ]
-         in MSet ps (Set.fromList [(t, q) | t <- Set.toList ts, q <- Set.toList ps])
+      SSome ns -> mconcat (map (bundle ns kids) (Set.toList ts))
       _ -> mempty
+    bundle ns kids t =
+      let own = childrenIn md (Set.singleton t) kids
+          ps =
+            Set.unions
+              [ if Set.null here' then named x [MP] unqualified.ents else here'
+              | x <- ns,
+                not (any (\(MEnt _ n _) -> n == x) (Set.toList own)),
+                -- One here wins over those in scope.
+                let here' = named x [MP] locals.ents
+              ]
+       in MSet ps (Set.fromList [(t, q) | q <- Set.toList ps])
 
 -- | An import qualifies for this qualifier.
 matches :: Maybe Text -> GImport -> Bool
@@ -923,8 +957,11 @@ openIn sets prog m =
         ]
 
 differential :: Property
-differential = property $ do
-  prog <- forAll (genProgram DownOnly)
+differential = property (forAll (genProgram DownOnly) >>= differentialFor)
+
+-- | The differential check on one program.
+differentialFor :: Program -> PropertyT IO ()
+differentialFor prog = do
   let (mods, lines') = render prog
       input = memInput Set.empty mods
       n = length prog.mods
@@ -1046,8 +1083,11 @@ monotone = property $ do
 -- | @hiding ()@ is no list; after @hiding (x)@ x is gone; a list of
 -- every exported name is no list.
 filterLaws :: Property
-filterLaws = property $ do
-  prog <- forAll (genProgram DownOnly)
+filterLaws = property (forAll (genProgram DownOnly) >>= filterLawsFor)
+
+-- | The filter laws on one program's last module.
+filterLawsFor :: Program -> PropertyT IO ()
+filterLawsFor prog = do
   let (mods, _) = render prog
       n = length prog.mods
       target = "M" <> tshow (n - 1)
@@ -1096,8 +1136,57 @@ filterLaws = property $ do
     norm ns =
       ( Map.map Set.fromList ns.values,
         Map.map (Set.fromList . map (\a -> (a.entity, a.children))) ns.types,
-        ns.lone
+        ns.lone,
+        ns.bundles
       )
+
+-- | A check on one program, as a test case.
+regression :: (Program -> PropertyT IO ()) -> Program -> Assertion
+regression f prog = do
+  ok <- Hedgehog.check (Hedgehog.withTests 1 (property (f prog)))
+  assertBool "the check fails" ok
+
+-- | Shrunk from a failure: M2 exports @F1 (P0)@, F1 coming from two
+-- imports. P0 is a child of one F1 and bundles with the other.
+ambiguousBundle :: Program
+ambiguousBundle =
+  Program
+    { mods =
+        [ plainMod [GClass 1] Nothing [],
+          plainMod [GClass 1, GPat 0] (Just [EType Nothing "F1" (SSome ["P0"])]) [],
+          plainMod
+            []
+            (Just [EType Nothing "F1" (SSome ["P0"])])
+            [plainImport 1 (Just "B") Nothing, plainImport 0 (Just "B") Nothing]
+        ],
+      user = [],
+      uses = [GUse Nothing "v0" UVal]
+    }
+
+-- | Shrunk from a failure: M3 re-exports M1 hiding D0, so P0 is lone
+-- under D0; @import M3 (pattern P0)@ must keep that.
+loneBundle :: Program
+loneBundle =
+  Program
+    { mods =
+        [ plainMod [] Nothing [],
+          plainMod [GTypeData 0, GPat 0] (Just [EType Nothing "D0" (SSome ["P0"])]) [],
+          plainMod [] Nothing [],
+          plainMod
+            []
+            (Just [EModule "M1"])
+            [plainImport 1 Nothing (Just (Hiding, [IType "D0" SNone]))]
+        ],
+      user = [],
+      uses = [GUse Nothing "v0" UVal]
+    }
+
+plainMod :: [GDecl] -> Maybe [GExport] -> [GImport] -> GMod
+plainMod ds es is = GMod {kind = ModNormal, decls = ds, exports = es, imports = is}
+
+plainImport :: Int -> Maybe Text -> Maybe (ListKind, [GItem]) -> GImport
+plainImport t a l =
+  GImport {target = t, qual = False, alias = a, list = l, source = False}
 
 -- * Linear time
 
@@ -1191,6 +1280,36 @@ linearTests =
               modSrc "L2" (Just ["T (..)"]) ["A (T)", "L"] [],
               modSrc "U" Nothing ["L2"] [use i (f i) | i <- [1 .. k]]
             ],
+        testCase "many bundled pattern synonyms, imported and hidden one by one" $
+          linear EveryModule 600 $ \k ->
+            map
+              withPatterns
+              [ modSrc
+                  "A"
+                  (Just ["T (.., " <> Text.intercalate ", " (pats k) <> ")"])
+                  []
+                  ( "data T = T"
+                      : concat [[p <> " :: T", p <> " = T"] | p <- patDecls k]
+                  ),
+                modSrc
+                  "B"
+                  (Just (patDecls k))
+                  ["A (pattern " <> p <> ")" | p <- pats k]
+                  [],
+                modSrc
+                  "H"
+                  (Just ["T (..)"])
+                  ["A hiding (pattern " <> p <> ")" | p <- pats k]
+                  [],
+                modSrc "C" (Just ["module B", "T"]) ["B", "A (T)"] [],
+                modSrc
+                  "U"
+                  (Just ["T (..)"])
+                  ["A (T)", "B", "qualified C", "qualified H"]
+                  [ use i (p <> " C." <> p <> " H." <> p)
+                  | (i, p) <- zip [1 :: Int ..] (pats k)
+                  ]
+              ],
         testCase "a SOURCE cycle of n" $
           linear OnlyU 150 $ \k ->
             let next i = m ((i + 1) `mod` k)
@@ -1248,6 +1367,9 @@ linearTests =
     -- Each x, and a y nothing has.
     uses k = [use i (x i <> " y" <> tshow i) | i <- [1 .. k]]
     cons k = ["C" <> tshow i | i <- [1 .. k]]
+    pats k = ["P" <> tshow i | i <- [1 .. k]]
+    patDecls k = ["pattern " <> p | p <- pats k]
+    withPatterns (n, t) = (n, "{-# LANGUAGE PatternSynonyms #-}\n" <> t)
 
 -- | A module: name, export list, imports (after @import@), body lines.
 modSrc :: Text -> Maybe [Text] -> [Text] -> [Text] -> (Text, Text)

@@ -130,6 +130,8 @@ cases =
     "contexts",
     -- Top-level splices and CPP imports.
     "th-cpp",
+    -- Bundled pattern synonyms through lists, hiding and export items.
+    "bundles",
     -- Modules that don't parse; the order of guesses; names nothing has.
     "partial",
     -- No project: loose files.
@@ -367,7 +369,8 @@ never run GHC; a stale hash fails the test.
 
 -- | The fixture cases GHC compiles.
 oracleCases :: [FilePath]
-oracleCases = ["scope", "reexports", "reexports2", "prelude", "contexts", "th-cpp"]
+oracleCases =
+  ["scope", "reexports", "reexports2", "prelude", "contexts", "th-cpp", "bundles"]
 
 -- | A case's oracle file.
 data OracleFile = OracleFile

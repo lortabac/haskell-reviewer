@@ -1,0 +1,29 @@
+-- source-hash: b79c7661cf7cde9b
+-- module: bundles:lib:A
+-- module: bundles:lib:Bund
+import A ( T(..) )
+import Syn ( Q )
+-- module: bundles:lib:H2
+import Bund ( T(P) )
+-- module: bundles:lib:Hid
+import A ( T(P) )
+-- module: bundles:lib:Re
+import Bund ( T(Q, P) )
+-- module: bundles:lib:Syn
+import A ( T(..) )
+-- module: bundles:lib:U1
+import A ( T, pattern P )
+-- module: bundles:lib:U2
+import A ( T )
+import Hid ( pattern P )
+-- module: bundles:lib:U3
+import A ( T )
+import Re ( pattern P, pattern Q )
+-- module: bundles:lib:U4
+import Bund ( T, pattern Q )
+-- module: bundles:lib:Use
+import qualified H2 ( T(P) )
+import qualified U1 ( T(..) )
+import qualified U2 ( T(P) )
+import qualified U3 ( T(Q, P) )
+import qualified U4 ( T(Q) )

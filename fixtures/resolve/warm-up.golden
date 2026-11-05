@@ -20,6 +20,43 @@ exports:
   4:5-4:12 "nothing" var use -> external Ext (only open import)
   5:9-5:16 "nofield" field use -> unresolved (no candidate)
 == w:lib:Broken (not parsed)
+== w:lib:Bun
+exports:
+  type:Nat @w:lib:Defs (PZ, S, Z)
+  pat:PZ @w:lib:Bun
+  con:S @w:lib:Defs
+  con:Z @w:lib:Defs
+  2:13-2:16 "Nat" type export -> exact w:lib:Defs type:Nat
+  3:14-3:17 "Nat" type import -> exact w:lib:Defs type:Nat
+  4:15-4:18 "Nat" type use -> exact w:lib:Defs type:Nat
+  5:14-5:15 "Z" con use -> exact w:lib:Defs con:Z
+== w:lib:Bun2
+exports:
+  type:Nat @w:lib:Defs (PZ, S, Z)
+  pat:PZ @w:lib:Bun
+  con:S @w:lib:Defs
+  con:Z @w:lib:Defs
+  2:26-2:29 "Nat" type export -> exact w:lib:Defs type:Nat
+  2:44-2:46 "PZ" con export -> exact w:lib:Bun pat:PZ
+  3:13-3:16 "Nat" type import -> exact w:lib:Defs type:Nat
+  4:21-4:23 "PZ" con import -> exact w:lib:Bun pat:PZ
+  5:28-5:30 "PZ" con import -> exact w:lib:Bun pat:PZ
+== w:lib:Bun3
+exports:
+  pat:PZ @w:lib:Bun
+  lone:Nat PZ
+  2:22-2:24 "PZ" con export -> exact w:lib:Bun pat:PZ
+== w:lib:Bun4
+exports:
+  pat:PZ @w:lib:Bun
+  lone:Nat PZ
+  2:22-2:24 "PZ" con export -> exact w:lib:Bun pat:PZ
+  3:20-3:21 "S" type import -> exact w:lib:Defs con:S
+== w:lib:Bun5
+exports:
+  pat:PZ @w:lib:Bun
+  lone:Nat PZ
+  4:21-4:23 "PZ" con import -> exact w:lib:Bun pat:PZ
 == w:lib:Cpp
 exports:
   val:c @w:lib:Cpp
