@@ -74,7 +74,7 @@ names nothing has 0.
 Bits, from the lowest:
 
   0-3   resolution kind: none, local, top-level, built-in, not a name,
-        and five kinds of free (one per FreeContext)
+        and six kinds of free (one per FreeContext)
   4-6   namespace
   7-9   role
   10    heuristic (a top-level guess)
@@ -196,6 +196,9 @@ data FreeContext
     MaybeWildcardOf TokenIx
   | -- | The quoter of a quasi-quote.
     QuasiQuoter
+  | -- | A record dot field (@r.f@, @(.f)@) with no field of that name
+    -- here. HasField doesn't need it in scope, so it's always a guess.
+    FieldOfDot
   deriving (Eq, Show)
 
 -- | Why an identifier token names nothing.
@@ -247,6 +250,7 @@ data Kind
   | KindFieldOf
   | KindWildcard
   | KindQuoter
+  | KindDot
   deriving (Eq, Enum, Bounded)
 
 -- | Where each part of a word is. See Note [Occurrence table].
@@ -288,6 +292,7 @@ encode ns role ref splice pun =
         FieldOfCon (TokenIx t) -> (KindFieldOf, t + 1, False)
         MaybeWildcardOf (TokenIx t) -> (KindWildcard, t + 1, False)
         QuasiQuoter -> (KindQuoter, 0, False)
+        FieldOfDot -> (KindDot, 0, False)
       BuiltInR -> (KindBuiltIn, 0, False)
       NotANameR k -> (KindNotAName, fromEnum k, False)
 
@@ -327,6 +332,7 @@ resolutionOf occs w = case kindOf w of
   KindFieldOf -> FreeRef (FieldOfCon (TokenIx (p - 1)))
   KindWildcard -> FreeRef (MaybeWildcardOf (TokenIx (p - 1)))
   KindQuoter -> FreeRef QuasiQuoter
+  KindDot -> FreeRef FieldOfDot
   KindFree -> FreeRef Plain
   -- decode never asks.
   KindNone -> FreeRef Plain

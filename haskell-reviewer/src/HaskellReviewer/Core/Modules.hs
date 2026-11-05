@@ -73,6 +73,8 @@ import HaskellReviewer.Core.Project
     Extension (..),
     GhcVersion (..),
     Language (..),
+    LibraryDep (..),
+    LibraryName (..),
     ListedModule (..),
     ModuleKind (..),
     ModuleName (..),
@@ -204,7 +206,10 @@ data ComponentSettings = ComponentSettings
     extensions :: [Extension],
     ghcOptions :: [Text],
     cppOptions :: [Text],
-    buildDepends :: [PackageName]
+    -- | Packages, for CPP's @MIN_VERSION_x@.
+    buildDepends :: [PackageName],
+    -- | Libraries, for imports.
+    libraryDepends :: [LibraryDep]
   }
   deriving (Eq, Show)
 
@@ -391,7 +396,8 @@ looseSettings =
       extensions = [],
       ghcOptions = [],
       cppOptions = [],
-      buildDepends = []
+      buildDepends = [],
+      libraryDepends = []
     }
 
 -- | Force the settings fully. They come from the project, which is
@@ -403,8 +409,13 @@ forceSettings s =
     each (\e -> e.name `seq` e.enabled `seq` ()) s.extensions `seq`
       each (`seq` ()) s.ghcOptions `seq`
         each (`seq` ()) s.cppOptions `seq`
-          each (\(PackageName n) -> n `seq` ()) s.buildDepends
+          each (\(PackageName n) -> n `seq` ()) s.buildDepends `seq`
+            each library s.libraryDepends
   where
+    library (LibraryDep (PackageName p) l) =
+      p `seq` case l of
+        MainLibrary -> ()
+        SubLibrary n -> n `seq` ()
     language = \case
       UnknownLanguage t -> t `seq` ()
       l -> l `seq` ()
@@ -577,7 +588,8 @@ componentModules fl pkg c =
             extensions = c.extensions,
             ghcOptions = c.ghcOptions,
             cppOptions = c.cppOptions,
-            buildDepends = c.buildDepends
+            buildDepends = c.buildDepends,
+            libraryDepends = c.libraryDepends
           },
       modules = sortOn (.name) (mains <> filter notMain listed)
     }

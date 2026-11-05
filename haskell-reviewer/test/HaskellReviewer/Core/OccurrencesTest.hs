@@ -216,7 +216,8 @@ genEntry n nTargets nBinders =
           MethodOfClass <$> tok,
           FieldOfCon <$> tok,
           MaybeWildcardOf <$> tok,
-          pure QuasiQuoter
+          pure QuasiQuoter,
+          pure FieldOfDot
         ]
     tok = TokenIx <$> Gen.int (Range.linear 0 100000)
 
@@ -895,6 +896,7 @@ warmUpCovers = case parseSource defaultParseSettings occurrencesWarmUp of
           "free-field",
           "free-wildcard",
           "free-quasiquoter",
+          "free-dot",
           "builtin",
           "not-a-name module",
           "not-a-name label",
@@ -930,6 +932,7 @@ warmUpCovers = case parseSource defaultParseSettings occurrencesWarmUp of
       FreeRef (FieldOfCon _) -> "free-field"
       FreeRef (MaybeWildcardOf _) -> "free-wildcard"
       FreeRef QuasiQuoter -> "free-quasiquoter"
+      FreeRef FieldOfDot -> "free-dot"
       BuiltInRef -> "builtin"
       NotAName ModuleWord -> "not-a-name module"
       NotAName LabelWord -> "not-a-name label"

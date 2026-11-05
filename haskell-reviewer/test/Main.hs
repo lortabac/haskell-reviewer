@@ -48,6 +48,8 @@ import HaskellReviewer.Core.ProjectGoldenTest qualified
 import HaskellReviewer.Core.ProjectLoadTest qualified
 import HaskellReviewer.Core.ProjectTest qualified
 import HaskellReviewer.Core.RelPathTest qualified
+import HaskellReviewer.Core.ResolveGoldenTest qualified
+import HaskellReviewer.Core.ResolveTest qualified
 import HaskellReviewer.Core.RichTextGoldenTest qualified
 import HaskellReviewer.Core.RootTest qualified
 import HaskellReviewer.Core.SearchTest qualified
@@ -61,7 +63,7 @@ import HaskellReviewer.Effects.FileSystemTest qualified
 import HaskellReviewer.Effects.GitTest qualified
 import HaskellReviewer.Effects.HelperTest qualified
 import HaskellReviewer.Effects.LogTest qualified
-import HaskellReviewer.Effects.Parser (warmUpParser)
+import HaskellReviewer.Effects.Parser (warmUpParser, warmUpResolve)
 import HaskellReviewer.Effects.Spawn (prepareSpawning)
 import HaskellReviewer.Effects.SpawnTest qualified
 import HaskellReviewer.Effects.TraceTest qualified
@@ -164,48 +166,54 @@ main = do
         -- still hung once in 300 runs on 9.12. The API tests parse too,
         -- and encode pages (Note [Page warm-up] in
         -- "HaskellReviewer.Server.Wire.Page").
-        withResource (warmUpParser >> warmUpPages) (const (pure ())) $ \_ ->
-          testGroup
-            "Parsing"
-            [ HaskellReviewer.Core.CodeTest.tests,
-              HaskellReviewer.Core.CppGoldenTest.tests,
-              HaskellReviewer.Core.CppTest.tests,
-              HaskellReviewer.Core.DeclsGoldenTest.tests,
-              HaskellReviewer.Core.DeclsTest.tests,
-              HaskellReviewer.Core.DeclsTest.linearTests,
-              HaskellReviewer.Core.DocLinksTest.tests,
-              HaskellReviewer.Core.HaddockTest.tests,
-              HaskellReviewer.Core.HaddockTest.linearTests,
-              HaskellReviewer.Core.HighlightGoldenTest.tests,
-              HaskellReviewer.Core.HighlightTest.tests,
-              HaskellReviewer.Core.HighlightTest.linearTests,
-              HaskellReviewer.Core.InstanceKeyTest.tests,
-              -- The library is a test-only oracle: its shared values
-              -- too, built once (Q-RTS-BLACKHOLE).
-              withResource
-                HaskellReviewer.Core.MarkdownUnlitTest.warmUpOracle
-                (const (pure ()))
-                (const HaskellReviewer.Core.MarkdownUnlitTest.tests),
-              HaskellReviewer.Core.MarkdownUnlitTest.linearTests,
-              HaskellReviewer.Core.NameTableTest.tests,
-              HaskellReviewer.Core.OccurrencesGoldenTest.tests,
-              HaskellReviewer.Core.OccurrencesTest.tests,
-              HaskellReviewer.Core.OccurrencesTest.linearTests,
-              HaskellReviewer.Core.ParseGoldenTest.tests,
-              HaskellReviewer.Core.ParserTest.tests,
-              HaskellReviewer.Core.RichTextGoldenTest.tests,
-              HaskellReviewer.Core.SourceTextTest.tests,
-              HaskellReviewer.Session.IndexTest.parsingTests,
-              -- Both share the API fixtures: built once, here. And the
-              -- prefs route runs in parallel: warmed up like the server.
-              withResource (forceFixtures >> warmUpPrefs) (const (pure ())) $ \_ ->
-                testGroup
-                  "API"
-                  [ HaskellReviewer.Server.ApiGoldenTest.tests,
-                    HaskellReviewer.Server.ApiTest.tests
-                  ],
-              HaskellReviewer.Server.PageTest.tests
-            ],
+        withResource
+          (warmUpParser >> warmUpResolve >> warmUpPages)
+          (const (pure ()))
+          $ \_ ->
+            testGroup
+              "Parsing"
+              [ HaskellReviewer.Core.CodeTest.tests,
+                HaskellReviewer.Core.CppGoldenTest.tests,
+                HaskellReviewer.Core.CppTest.tests,
+                HaskellReviewer.Core.DeclsGoldenTest.tests,
+                HaskellReviewer.Core.DeclsTest.tests,
+                HaskellReviewer.Core.DeclsTest.linearTests,
+                HaskellReviewer.Core.DocLinksTest.tests,
+                HaskellReviewer.Core.HaddockTest.tests,
+                HaskellReviewer.Core.HaddockTest.linearTests,
+                HaskellReviewer.Core.HighlightGoldenTest.tests,
+                HaskellReviewer.Core.HighlightTest.tests,
+                HaskellReviewer.Core.HighlightTest.linearTests,
+                HaskellReviewer.Core.InstanceKeyTest.tests,
+                -- The library is a test-only oracle: its shared values
+                -- too, built once (Q-RTS-BLACKHOLE).
+                withResource
+                  HaskellReviewer.Core.MarkdownUnlitTest.warmUpOracle
+                  (const (pure ()))
+                  (const HaskellReviewer.Core.MarkdownUnlitTest.tests),
+                HaskellReviewer.Core.MarkdownUnlitTest.linearTests,
+                HaskellReviewer.Core.NameTableTest.tests,
+                HaskellReviewer.Core.OccurrencesGoldenTest.tests,
+                HaskellReviewer.Core.OccurrencesTest.tests,
+                HaskellReviewer.Core.OccurrencesTest.linearTests,
+                HaskellReviewer.Core.ParseGoldenTest.tests,
+                HaskellReviewer.Core.ParserTest.tests,
+                HaskellReviewer.Core.ResolveGoldenTest.tests,
+                HaskellReviewer.Core.ResolveTest.tests,
+                HaskellReviewer.Core.ResolveTest.linearTests,
+                HaskellReviewer.Core.RichTextGoldenTest.tests,
+                HaskellReviewer.Core.SourceTextTest.tests,
+                HaskellReviewer.Session.IndexTest.parsingTests,
+                -- Both share the API fixtures: built once, here. And the
+                -- prefs route runs in parallel: warmed up like the server.
+                withResource (forceFixtures >> warmUpPrefs) (const (pure ())) $ \_ ->
+                  testGroup
+                    "API"
+                    [ HaskellReviewer.Server.ApiGoldenTest.tests,
+                      HaskellReviewer.Server.ApiTest.tests
+                    ],
+                HaskellReviewer.Server.PageTest.tests
+              ],
         HaskellReviewer.Server.AssetsTest.tests,
         HaskellReviewer.Server.CborTest.tests,
         HaskellReviewer.Server.EventsTest.tests,

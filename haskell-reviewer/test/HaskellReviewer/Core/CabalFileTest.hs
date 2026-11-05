@@ -18,6 +18,8 @@ import HaskellReviewer.Core.Project
     FlagsField (..),
     GhcVersion (..),
     Language (..),
+    LibraryDep (..),
+    LibraryName (..),
     Loc (..),
     Package (..),
     PackageName (..),
@@ -66,6 +68,32 @@ tests =
               "    main-is: C.hs"
             ]
         map (.mainIs) pkg.components @?= [Just "B.hs"],
+      testCase "libraries in build-depends: main, sub, several, old-style internal" $ do
+        pkg <-
+          ok
+            linux
+            []
+            [ "library",
+              "  exposed-modules: A",
+              "  build-depends: base, q:sub, r:{r, x, y}, internal",
+              "library internal",
+              "  exposed-modules: I"
+            ]
+        let dep p s =
+              LibraryDep
+                { package = PackageName p,
+                  library = maybe MainLibrary SubLibrary s
+                }
+        map (.libraryDepends) (take 1 pkg.components)
+          @?= [ [ dep "base" Nothing,
+                  dep "q" (Just "sub"),
+                  dep "r" Nothing,
+                  dep "r" (Just "x"),
+                  dep "r" (Just "y"),
+                  -- Cabal names an old-style internal library for us.
+                  dep "p" (Just "internal")
+                ]
+              ],
       testCase "no default-language: Haskell98; source dir: package dir" $ do
         pkg <- ok linux [] ["library", "  exposed-modules: A"]
         map (.language) pkg.components @?= [Haskell98]

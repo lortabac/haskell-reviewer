@@ -12,7 +12,7 @@ BENCH_RTS ?=
 # Any other bench flags, e.g. BENCH_ARGS="--steady-runs 1 --nav-idle 10".
 BENCH_ARGS ?=
 
-.PHONY: build test install freeze web e2e bench bench-smoke cpp-check cbor-json
+.PHONY: build test install freeze web e2e bench bench-smoke cpp-check resolve-check cbor-json
 
 build:
 	$(CABAL) build all
@@ -55,6 +55,20 @@ bench-smoke: build
 cpp-check:
 	$(CABAL) build lib:haskell-reviewer
 	$(CABAL) exec -v0 -- runghc dev/CppCheck.hs fixtures/cpp bench/projects $(CPP_CHECK_DIRS)
+
+# Dev only, not in CI: the GHC oracle for resolution. Compiles the
+# fixtures/resolve cases GHC can compile, with -ddump-minimal-imports,
+# and writes fixtures/resolve/<case>.imports (commit them). Tests read
+# those files and fail when a case changed since. Needs ghc-9.14.1 (or
+# RESOLVE_CHECK_GHC) with its boot packages.
+# The -X flags: the extensions the cabal file turns on for the whole
+# project; runghc doesn't read them, and the script and ResolveDump use
+# them.
+resolve-check:
+	$(CABAL) build lib:haskell-reviewer
+	$(CABAL) exec -v0 -- runghc --ghc-arg=-XGHC2024 --ghc-arg=-XDuplicateRecordFields \
+	    --ghc-arg=-XNoFieldSelectors --ghc-arg=-XOverloadedRecordDot --ghc-arg=-XOverloadedStrings \
+	    --ghc-arg=-ihaskell-reviewer/test dev/ResolveCheck.hs fixtures/resolve
 
 # Dev only: CBOR on stdin, JSON on stdout. For a CBOR answer of the
 # API, e.g. curl -s <url>/api/file/tree/a.hs | make -s cbor-json

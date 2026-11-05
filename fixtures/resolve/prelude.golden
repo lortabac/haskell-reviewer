@@ -1,0 +1,43 @@
+== prelude:lib:Hiding
+exports:
+  val:map @prelude:lib:Hiding
+  3:24-3:27 "map" var import -> external "base" Prelude (only open import)
+  5:8-5:11 "Int" type use -> external "base" Prelude (only open import)
+  6:7-6:11 "myId" var use -> exact prelude:lib:Prelude val:myId
+== prelude:lib:NoPre
+exports:
+  val:y @prelude:lib:NoPre
+  4:23-4:25 "id" var import -> external Data.Function (listed)
+  7:5-7:7 "id" var use -> external Data.Function (listed)
+== prelude:lib:Prelude
+exports:
+  val:myId @prelude:lib:Prelude
+  open: external "base" Prelude
+== prelude:lib:QualPre
+exports:
+  val:z @prelude:lib:QualPre
+  5:6-5:11 "P.Int" type use -> external "base" Prelude (only open import)
+  6:5-6:11 "P.myId" var use -> exact prelude:lib:Prelude val:myId
+== prelude:lib:UsesHome
+exports:
+  val:x @prelude:lib:UsesHome
+  3:6-3:9 "Int" type use -> external "base" Prelude (only open import)
+  4:5-4:9 "myId" var use -> exact prelude:lib:Prelude val:myId
+== prelude:lib:UsesUtil
+exports:
+  val:t @prelude:lib:UsesUtil
+  3:14-3:19 "twice" var import -> exact prelude:lib:Util val:twice
+  5:6-5:9 "Int" type use -> external "base" Prelude (only open import)
+  6:5-6:10 "twice" var use -> exact prelude:lib:Util val:twice
+== prelude:lib:Util
+exports:
+  val:twice @prelude:lib:Util
+  3:10-3:13 "Int" type use -> external "base" Prelude (only open import)
+  3:17-3:20 "Int" type use -> external "base" Prelude (only open import)
+  4:13-4:14 "+" var use -> external "base" Prelude (only open import)
+== prelude:exe:app:Main
+exports:
+  val:main @prelude:exe:app:Main
+  3:9-3:11 "IO" type use -> external "base" Prelude (only open import)
+  4:8-4:13 "print" var use -> external "base" Prelude (only open import)
+  4:15-4:19 "myId" var use -> exact prelude:lib:Prelude val:myId

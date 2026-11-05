@@ -1,0 +1,160 @@
+== reexports2:lib:A
+exports:
+  type:C @reexports2:lib:A (F, m)
+  type:F @reexports2:lib:A
+  type:R @reexports2:lib:A (R, fld)
+  type:T @reexports2:lib:A (MkT, T)
+  type:TA @reexports2:lib:A
+  type:TB @reexports2:lib:A
+  type:TD @reexports2:lib:A (TA, TB)
+  con:MkT @reexports2:lib:A
+  pat:P @reexports2:lib:A
+  con:R @reexports2:lib:A
+  con:T @reexports2:lib:A
+  field:fld @reexports2:lib:A
+  method:m @reexports2:lib:A
+  8:16-8:18 "TA" type def -> exact reexports2:lib:A con:TA
+  8:21-8:23 "TB" type def -> exact reexports2:lib:A con:TB
+  10:14-10:17 "Int" type use -> external Prelude (only open import)
+  15:20-15:23 "Int" type use -> external Prelude (only open import)
+== reexports2:lib:B
+exports:
+  type:C @reexports2:lib:A (F, m)
+  type:F @reexports2:lib:A
+  type:R @reexports2:lib:A (R, fld)
+  type:T @reexports2:lib:A (MkT, T)
+  type:TA @reexports2:lib:A
+  type:TB @reexports2:lib:A
+  type:TD @reexports2:lib:A (TA, TB)
+  con:MkT @reexports2:lib:A
+  pat:P @reexports2:lib:A
+  con:R @reexports2:lib:A
+  con:T @reexports2:lib:A
+  field:fld @reexports2:lib:A
+  method:m @reexports2:lib:A
+== reexports2:lib:B2
+exports:
+  type:C @reexports2:lib:A (F, m)
+  type:F @reexports2:lib:A
+  type:TA @reexports2:lib:A
+  type:TB @reexports2:lib:A
+  type:TD @reexports2:lib:A (TA, TB)
+  method:m @reexports2:lib:A
+  3:11-3:12 "C" type import -> exact reexports2:lib:A class:C
+  3:19-3:21 "TD" type import -> exact reexports2:lib:A type:TD
+== reexports2:lib:Bund
+exports:
+  type:T @reexports2:lib:A (MkT, T, Q)
+  con:MkT @reexports2:lib:A
+  pat:Q @reexports2:lib:Syn
+  con:T @reexports2:lib:A
+  2:14-2:15 "T" type export -> exact reexports2:lib:A type:T
+  2:21-2:22 "Q" type export -> exact reexports2:lib:Syn pat:Q
+  4:11-4:12 "T" type import -> exact reexports2:lib:A type:T
+== reexports2:lib:D
+exports:
+  type:T @reexports2:lib:A (MkT, T)
+  con:MkT @reexports2:lib:A
+  con:T @reexports2:lib:A
+  1:11-1:12 "T" type export -> exact reexports2:lib:A type:T
+  3:11-3:12 "T" type import -> exact reexports2:lib:A type:T
+  4:26-4:27 "T" type import -> exact reexports2:lib:A type:T
+== reexports2:lib:H5
+exports:
+  val:z @reexports2:lib:H5
+  3:18-3:21 "MkT" type import -> exact reexports2:lib:A con:MkT
+  5:6-5:7 "T" type use -> exact reexports2:lib:A type:T
+  6:5-6:6 "T" con use -> exact reexports2:lib:A con:T
+== reexports2:lib:L
+exports:
+  field:fld @reexports2:lib:A
+  lone:R fld
+  1:11-1:14 "fld" var export -> exact reexports2:lib:A field:R.fld
+== reexports2:lib:L2
+exports:
+  type:R @reexports2:lib:A (fld)
+  field:fld @reexports2:lib:A
+  1:12-1:13 "R" type export -> exact reexports2:lib:A type:R
+  3:11-3:12 "R" type import -> exact reexports2:lib:A type:R
+== reexports2:lib:M3
+exports:
+  open: external Data.Maybe
+== reexports2:lib:OtherT
+exports:
+  type:T @reexports2:lib:OtherT (T)
+  con:T @reexports2:lib:OtherT
+== reexports2:lib:Syn
+exports:
+  pat:Q @reexports2:lib:Syn
+  6:14-6:15 "T" type use -> exact reexports2:lib:A type:T
+  7:13-7:16 "MkT" con use -> exact reexports2:lib:A con:MkT
+== reexports2:lib:Use1
+exports:
+  type:G @reexports2:lib:Use1
+  type:H @reexports2:lib:Use1
+  4:11-4:12 "C" type import -> exact reexports2:lib:A class:C
+  4:19-4:21 "TD" type import -> exact reexports2:lib:A type:TD
+  6:10-6:11 "F" type use -> exact reexports2:lib:A type:F
+  6:12-6:15 "Int" type use -> external Prelude (only open import)
+  8:10-8:12 "TA" type use -> exact reexports2:lib:A con:TA
+== reexports2:lib:Use1b
+exports:
+  type:G @reexports2:lib:Use1b
+  type:H @reexports2:lib:Use1b
+  4:12-4:13 "C" type import -> exact reexports2:lib:A class:C
+  4:20-4:22 "TD" type import -> exact reexports2:lib:A type:TD
+  6:10-6:11 "F" type use -> exact reexports2:lib:A type:F
+  6:12-6:15 "Int" type use -> external Prelude (only open import)
+  8:10-8:12 "TA" type use -> exact reexports2:lib:A con:TA
+== reexports2:lib:Use1c
+exports:
+  val:t @reexports2:lib:Use1c
+  6:6-6:7 "T" type use -> exact reexports2:lib:OtherT type:T
+  7:5-7:6 "T" con use -> exact reexports2:lib:OtherT con:T
+== reexports2:lib:Use2
+exports:
+  val:x @reexports2:lib:Use2
+  3:11-3:12 "T" type import -> exact reexports2:lib:A type:T
+  5:6-5:7 "T" type use -> exact reexports2:lib:A type:T
+  6:5-6:8 "MkT" con use -> exact reexports2:lib:A con:MkT
+== reexports2:lib:Use3
+exports:
+  val:y @reexports2:lib:Use3
+  3:12-3:21 "fromMaybe" var import -> external Data.Maybe (only open import)
+  5:6-5:9 "Int" type use -> external Prelude (only open import)
+  6:5-6:14 "fromMaybe" var use -> external Data.Maybe (one of 2)
+  6:17-6:24 "Nothing" con use -> external Prelude (only open import)
+== reexports2:lib:Use4
+exports:
+  val:q @reexports2:lib:Use4
+  3:14-3:15 "T" type import -> exact reexports2:lib:A type:T
+  5:6-5:7 "T" type use -> exact reexports2:lib:A type:T
+  6:5-6:6 "Q" con use -> exact reexports2:lib:Syn pat:Q
+== reexports2:lib:Use5
+exports:
+  val:z @reexports2:lib:Use5
+  3:12-3:13 "R" type import -> exact reexports2:lib:A type:R
+  5:6-5:7 "R" type use -> exact reexports2:lib:A type:R
+  5:11-5:14 "Int" type use -> external Prelude (only open import)
+  6:5-6:8 "fld" var use -> exact reexports2:lib:A field:R.fld
+== reexports2:lib:X
+exports:
+  val:x @reexports2:lib:X
+  5:6-5:9 "Int" type use -> external Prelude (only open import)
+  6:5-6:6 "y" var use -> exact reexports2:lib:Y val:y
+  6:7-6:8 "+" var use -> external Prelude (only open import)
+  6:9-6:15 "length" var use -> external Prelude (only open import)
+== reexports2:lib:Y
+exports:
+  val:x @reexports2:lib:X
+  val:y @reexports2:lib:Y
+  5:6-5:9 "Int" type use -> external Prelude (only open import)
+== reexports2:lib:Z
+exports:
+  val:z @reexports2:lib:Z
+  5:6-5:9 "Int" type use -> external Prelude (only open import)
+  6:5-6:6 "x" var use -> exact reexports2:lib:X val:x
+  6:7-6:8 "+" var use -> external Prelude (only open import)
+  6:9-6:10 "y" var use -> exact reexports2:lib:Y val:y
+  6:11-6:12 "+" var use -> external Prelude (only open import)
+  6:13-6:19 "length" var use -> external Prelude (only open import)

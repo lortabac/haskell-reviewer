@@ -42,6 +42,8 @@ module HaskellReviewer.Core.Project
     FlagSource (..),
     Component (..),
     ComponentName (..),
+    LibraryDep (..),
+    LibraryName (..),
     renderComponentName,
     ListedModule (..),
     ModuleName (..),
@@ -353,6 +355,9 @@ data Component = Component
     extensions :: [Extension],
     -- | Package names, no duplicates, first one first.
     buildDepends :: [PackageName],
+    -- | The libraries build-depends names (@pkg@, @pkg:sub@,
+    -- @pkg:{a,b}@), no duplicates, first one first.
+    libraryDepends :: [LibraryDep],
     -- | As written: relative to one of the source dirs.
     mainIs :: Maybe Text,
     modules :: [ListedModule],
@@ -363,6 +368,17 @@ data Component = Component
     includeDirs :: [RelDir]
   }
   deriving (Eq, Show)
+
+-- | A library in build-depends: @pkg@ or @pkg:sub@.
+data LibraryDep = LibraryDep
+  { package :: PackageName,
+    library :: LibraryName
+  }
+  deriving (Eq, Ord, Show)
+
+-- | Which library of a package.
+data LibraryName = MainLibrary | SubLibrary Text
+  deriving (Eq, Ord, Show)
 
 -- | Component names, as in D-44.
 data ComponentName

@@ -736,13 +736,14 @@ updateFieldRef ctx env f
       Just (t :| _) -> TopLevelR t Heuristic
       Nothing -> FreeR Plain
 
--- | A record dot field: the one field of that name here, a guess.
+-- | A record dot field: the one field of that name here, a guess. Else
+-- free, marked as a dot field (it need not be in scope).
 dotFieldRef :: Ctx s -> Env -> FastString -> Ref
 dotFieldRef ctx env f
-  | env.splice = FreeR Plain
+  | env.splice = FreeR FieldOfDot
   | otherwise = case lookupOccEnv ctx.top.fields (mkVarOccFS f) of
       Just (t :| []) -> TopLevelR t Heuristic
-      _ -> FreeR Plain
+      _ -> FreeR FieldOfDot
 
 putDotField :: Ctx s -> Env -> DotFieldOcc GhcPs -> ST s ()
 putDotField ctx env = \case

@@ -1,0 +1,66 @@
+-- source-hash: 135508fae4928b27
+-- module: reexports2:lib:A
+-- module: reexports2:lib:B
+import A ( R(..), T(..), TD(..), C(..), P )
+import qualified A as X ( R(..), T(..), TD(..), C(..), P )
+-- module: reexports2:lib:B2
+import A ( C(..), TD(..) )
+import qualified A as X ( TD(..), C(..) )
+-- module: reexports2:lib:Bund
+import A ( T(..) )
+import Syn ( Q )
+-- module: reexports2:lib:D
+import A ( T )
+import qualified A as Q ()
+-- module: reexports2:lib:H5
+import A ( T(T) )
+-- module: reexports2:lib:L
+import A ( R(fld) )
+-- module: reexports2:lib:L2
+import A ( R )
+import L ( fld )
+-- module: reexports2:lib:M3
+import Data.Maybe
+    ( catMaybes,
+      fromJust,
+      fromMaybe,
+      isJust,
+      isNothing,
+      listToMaybe,
+      mapMaybe,
+      maybeToList )
+import qualified Data.Maybe as X
+    ( Maybe(..),
+      maybe,
+      catMaybes,
+      fromJust,
+      fromMaybe,
+      isJust,
+      isNothing,
+      listToMaybe,
+      mapMaybe,
+      maybeToList )
+-- module: reexports2:lib:OtherT
+-- module: reexports2:lib:Syn
+import A ( T(MkT) )
+-- module: reexports2:lib:Use1
+import B ( C(..), TD(..) )
+-- module: reexports2:lib:Use1b
+import B2 ( C(..), TD(..) )
+-- module: reexports2:lib:Use1c
+import B2 ()
+import OtherT ( T(..) )
+-- module: reexports2:lib:Use2
+import D ( T(..) )
+-- module: reexports2:lib:Use3
+import M3 ( fromMaybe )
+-- module: reexports2:lib:Use4
+import Bund ( T(..) )
+-- module: reexports2:lib:Use5
+import L2 ( R(..) )
+-- module: reexports2:lib:X
+import Y ( x, y )
+-- module: reexports2:lib:Y
+import {-# SOURCE #-} X ( x )
+-- module: reexports2:lib:Z
+import Y ( x, y )

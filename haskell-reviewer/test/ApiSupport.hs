@@ -337,6 +337,7 @@ component name src =
       language = Haskell2010,
       extensions = [],
       buildDepends = [],
+      libraryDepends = [],
       mainIs = Nothing,
       modules = [],
       ghcOptions = [],

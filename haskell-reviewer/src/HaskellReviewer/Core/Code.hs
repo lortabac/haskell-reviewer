@@ -15,6 +15,7 @@ module HaskellReviewer.Core.Code
     codeOf,
     codeOfSpans,
     plainCode,
+    nameRef,
 
     -- * Heads
     typeHead,

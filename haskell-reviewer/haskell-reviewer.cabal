@@ -50,13 +50,17 @@ library
     HaskellReviewer.Core.Cpp.Warning
     HaskellReviewer.Core.Decls
     HaskellReviewer.Core.DocLinks
+    HaskellReviewer.Core.Entities
     HaskellReviewer.Core.Exported
+    HaskellReviewer.Core.Exports
     HaskellReviewer.Core.FileContent
     HaskellReviewer.Core.FileList
     HaskellReviewer.Core.Highlight
+    HaskellReviewer.Core.ImportScope
     HaskellReviewer.Core.Git
     HaskellReviewer.Core.IndexQueue
     HaskellReviewer.Core.LineRegions
+    HaskellReviewer.Core.ModuleGraph
     HaskellReviewer.Core.ModuleModel
     HaskellReviewer.Core.Modules
     HaskellReviewer.Core.Names
@@ -77,6 +81,8 @@ library
     HaskellReviewer.Core.ProjectFile
     HaskellReviewer.Core.ProjectLoad
     HaskellReviewer.Core.RelPath
+    HaskellReviewer.Core.Resolve
+    HaskellReviewer.Core.ResolveWarmUp
     HaskellReviewer.Core.RichText
     HaskellReviewer.Core.Root
     HaskellReviewer.Core.Search
@@ -245,6 +251,8 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.ProjectLoadTest
     HaskellReviewer.Core.ProjectTest
     HaskellReviewer.Core.RelPathTest
+    HaskellReviewer.Core.ResolveGoldenTest
+    HaskellReviewer.Core.ResolveTest
     HaskellReviewer.Core.RichTextGoldenTest
     HaskellReviewer.Core.RootTest
     HaskellReviewer.Core.SearchTest
@@ -276,6 +284,7 @@ test-suite haskell-reviewer-test
     OccurrencesDump
     ParseDump
     ProjectDump
+    ResolveDump
     RichDump
     TestSupport
 

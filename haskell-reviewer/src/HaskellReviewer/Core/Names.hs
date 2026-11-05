@@ -8,6 +8,8 @@ module HaskellReviewer.Core.Names
     Namespace (..),
     NameKey (..),
     ModuleRef (..),
+    ExternalModule (..),
+    forceExternalModule,
 
     -- * Declaration ids
     DeclNs (..),
@@ -49,8 +51,20 @@ data NameKey = NameKey
 -- | The module a name lives in: one of ours, or one of a dependency.
 data ModuleRef
   = Home ModuleId
-  | External PackageName ModuleName
+  | External ExternalModule
   deriving (Eq, Ord, Show)
+
+-- | A module of a dependency we don't have: its name, and the package
+-- when a package import names it (we know it from nothing else).
+data ExternalModule = ExternalModule
+  { package :: Maybe PackageName,
+    name :: ModuleName
+  }
+  deriving (Eq, Ord, Show)
+
+-- | Force it fully.
+forceExternalModule :: ExternalModule -> ()
+forceExternalModule x = maybe () (`seq` ()) x.package `seq` x.name `seq` ()
 
 -- * Declaration ids
 

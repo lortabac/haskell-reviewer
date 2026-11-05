@@ -3,6 +3,8 @@
 -- | Which declarations the export list exports (SPEC §4.2, D-10).
 module HaskellReviewer.Core.Exported
   ( markExported,
+    nameOf,
+    typeLike,
   )
 where
 
@@ -52,6 +54,7 @@ import HaskellReviewer.Core.Project (ModuleName)
 - A header with no export list: everything.
 - @module M@ for this module: everything.
 - @x@: values, class methods and fields named x.
+- @C@ (or @type C@) for a constructor of a @type data@: that constructor.
 - @T@ (or @type T@): the type or class only.
 - @T(..)@: and its constructors, fields, methods, associated types.
 - @T(A, b)@, @T(.., A)@: and the ones listed. A listed name can be a
@@ -148,10 +151,12 @@ export self e w = case e of
                       someOf = Map.insertWith Set.union n listed w.someOf,
                       listedSubs = Set.union listed w.listedSubs
                     }
-    -- @T@, @:+:@: a type or class. @x@, @+@: a value.
-    typeLike n = case Text.uncons n of
-      Just (c, _) -> isUpper c || c == ':'
-      Nothing -> False
+
+-- | @T@, @:+:@: a type or class. @x@, @+@: a value.
+typeLike :: Text -> Bool
+typeLike n = case Text.uncons n of
+  Just (c, _) -> isUpper c || c == ':'
+  Nothing -> False
 
 -- | Mark a declaration and the ones inside it. The records are built
 -- again by hand: their field names are shared, so a record update would
@@ -249,7 +254,11 @@ typeDecl w exported t =
       roles = t.roles,
       form = case t.form of
         DataType b -> DataType (dataBody w parent b)
-        TypeData b -> TypeData (dataBody w parent b)
+        -- Its constructors are at the type level: @T@ in the list names
+        -- one too.
+        TypeData b ->
+          TypeData
+            (dataBody w {patterns = Set.union w.patterns w.types} parent b)
         Newtype b -> Newtype (newtypeBody w parent b)
         other -> other,
       fixity = t.fixity
@@ -299,6 +308,7 @@ bundled w n = Set.member n w.listedSubs
 mark :: Wanted -> Bool -> DeclInfo -> DeclInfo
 mark w b i = i {exported = w.everything || b}
 
+-- | The name a declaration brings; an instance's class.
 nameOf :: DeclInfo -> Text
 nameOf i = case i.id of
   Named _ n -> n

@@ -1,0 +1,57 @@
+== th-cpp:lib:Gen
+exports:
+  val:helper @th-cpp:lib:Gen
+  val:made @splice th-cpp:lib:Gen
+  2:13-2:17 "made" var export -> external Prelude (one of 2)
+  6:11-6:14 "Int" type use -> external Prelude (one of 2)
+  9:11-9:15 "funD" var use [splice] -> external Prelude (one of 2)
+  9:17-9:23 "mkName" var use [splice] -> external Prelude (one of 2)
+  9:33-9:39 "clause" var use [splice] -> external Prelude (one of 2)
+  9:44-9:51 "normalB" var use [splice] -> external Prelude (one of 2)
+  9:59-9:62 "Int" type use -> external Prelude (one of 2)
+  9:71-9:75 "pure" var use [splice] -> external Prelude (one of 2)
+== th-cpp:lib:GenNoList
+exports:
+  val:plain @th-cpp:lib:GenNoList
+  open: splices th-cpp:lib:GenNoList
+  6:10-6:13 "Int" type use -> external Prelude (one of 2)
+  9:11-9:15 "funD" var use [splice] -> external Prelude (one of 2)
+  9:17-9:23 "mkName" var use [splice] -> external Prelude (one of 2)
+  9:39-9:45 "clause" var use [splice] -> external Prelude (one of 2)
+  9:50-9:57 "normalB" var use [splice] -> external Prelude (one of 2)
+  9:65-9:68 "Int" type use -> external Prelude (one of 2)
+  9:77-9:81 "pure" var use [splice] -> external Prelude (one of 2)
+== th-cpp:lib:Plain
+exports:
+  val:base @th-cpp:lib:Plain
+  3:9-3:12 "Int" type use -> external Prelude (only open import)
+== th-cpp:lib:Use
+exports:
+  val:u @th-cpp:lib:Use
+  val:v @th-cpp:lib:Use
+  5:13-5:17 "made" var import -> heuristic[made by splice, cpp import] th-cpp:lib:Gen
+  9:13-9:19 "helper" var import -> exact th-cpp:lib:Gen val:helper
+  11:29-11:32 "Exp" type import -> external Language.Haskell.TH (listed)
+  11:34-11:38 "VarE" type import -> external Language.Haskell.TH (listed)
+  13:6-13:9 "Int" type use -> external Prelude (only open import)
+  14:5-14:9 "made" var use -> heuristic[made by splice, cpp import] th-cpp:lib:Gen
+  14:10-14:11 "+" var use -> external Prelude (only open import)
+  14:12-14:18 "helper" var use -> exact th-cpp:lib:Gen val:helper
+  14:19-14:20 "+" var use -> external Prelude (only open import)
+  14:21-14:31 "fromSplice" var use -> external Prelude (only open import)
+  14:32-14:33 "+" var use -> external Prelude (only open import)
+  14:34-14:39 "plain" var use -> exact th-cpp:lib:GenNoList val:plain
+  16:6-16:9 "Int" type use -> external Prelude (only open import)
+  17:7-17:11 "pure" var use [splice] -> external Prelude (only open import)
+  17:13-17:17 "VarE" con use [splice] -> external Language.Haskell.TH (listed)
+  17:19-17:25 "helper" var use -> exact th-cpp:lib:Gen val:helper
+== th-cpp:lib:UsePlain
+exports:
+  val:p @th-cpp:lib:UsePlain
+  3:15-3:19 "base" var import -> exact th-cpp:lib:Plain val:base
+  5:6-5:9 "Int" type use -> external Prelude (only open import)
+  6:5-6:9 "base" var use -> exact th-cpp:lib:Plain val:base
+== th-cpp:lib:UseSplice
+exports:
+  val:w @th-cpp:lib:UseSplice
+  6:5-6:15 "fromSplice" var use -> heuristic[made by splice] th-cpp:lib:GenNoList

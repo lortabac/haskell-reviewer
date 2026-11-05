@@ -1,0 +1,9 @@
+cabal-version: 3.0
+name: th-cpp
+version: 1
+
+library
+  hs-source-dirs: src
+  exposed-modules: Gen GenNoList Use UseSplice Plain UsePlain
+  build-depends: base, template-haskell
+  default-language: GHC2021

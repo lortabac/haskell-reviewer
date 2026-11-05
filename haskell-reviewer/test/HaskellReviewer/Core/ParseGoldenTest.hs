@@ -207,7 +207,8 @@ cases =
             Modules.extensions = [],
             Modules.ghcOptions = ghcOpts,
             Modules.cppOptions = cppOpts,
-            Modules.buildDepends = []
+            Modules.buildDepends = [],
+            Modules.libraryDepends = []
           }
         Modules.HaskellFile {Modules.path = file, Modules.literate = NotLiterate}
     file = fromMaybe (error "bad path") (relPathFromSegments ["M.hs"])

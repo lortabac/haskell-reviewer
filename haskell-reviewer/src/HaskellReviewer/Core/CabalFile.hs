@@ -9,6 +9,7 @@ module HaskellReviewer.Core.CabalFile
   )
 where
 
+import Data.Containers.ListUtils (nubOrd)
 import Data.Foldable (toList)
 import Data.List (nub)
 import Data.Map.Strict (Map)
@@ -30,12 +31,13 @@ import Distribution.Types.BuildInfo (BuildInfo (..))
 import Distribution.Types.CondTree (CondBranch (..), CondTree (..))
 import Distribution.Types.Condition (Condition (..))
 import Distribution.Types.ConfVar (ConfVar (..))
-import Distribution.Types.Dependency (depPkgName)
+import Distribution.Types.Dependency (depLibraries, depPkgName)
 import Distribution.Types.Executable (Executable (..))
 import Distribution.Types.Flag (PackageFlag (..), unFlagName)
 import Distribution.Types.Flag qualified as Cabal (FlagName)
 import Distribution.Types.GenericPackageDescription (GenericPackageDescription (..))
 import Distribution.Types.Library (Library (..))
+import Distribution.Types.LibraryName (LibraryName (..))
 import Distribution.Types.PackageDescription (PackageDescription (..))
 import Distribution.Types.PackageId (PackageIdentifier (..))
 import Distribution.Types.PackageName (unPackageName)
@@ -65,6 +67,8 @@ import HaskellReviewer.Core.Project
     FlagsField (..),
     GhcVersion (..),
     Language (..),
+    LibraryDep (..),
+    LibraryName (..),
     ListedModule (..),
     Loc (..),
     ModuleKind (..),
@@ -266,6 +270,19 @@ fromGpd settings projectFlags path gpd =
                   [ PackageName (Text.pack (unPackageName (depPkgName d)))
                   | bi <- bis,
                     d <- bi.targetBuildDepends
+                  ],
+              libraryDepends =
+                nubOrd
+                  [ LibraryDep
+                      { package = PackageName (Text.pack (unPackageName (depPkgName d))),
+                        library = case l of
+                          LMainLibName -> MainLibrary
+                          LSubLibName n ->
+                            SubLibrary (Text.pack (unUnqualComponentName n))
+                      }
+                  | bi <- bis,
+                    d <- bi.targetBuildDepends,
+                    l <- toList (depLibraries d)
                   ],
               mainIs = Text.pack <$> mainIs,
               modules =

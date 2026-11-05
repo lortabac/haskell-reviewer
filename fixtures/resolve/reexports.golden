@@ -1,0 +1,83 @@
+== reexports:lib:Base
+exports:
+  type:Base @reexports:lib:Base (Base, bf)
+  type:Ext @reexports:lib:Base
+  con:Base @reexports:lib:Base
+  val:base @reexports:lib:Base
+  field:bf @reexports:lib:Base
+  3:18-3:21 "Map" type import -> external Data.Map (listed)
+  5:12-5:15 "Map" type use -> external Data.Map (listed)
+  5:16-5:19 "Int" type use -> external Prelude (only open import)
+  5:20-5:23 "Int" type use -> external Prelude (only open import)
+  7:25-7:28 "Int" type use -> external Prelude (only open import)
+  9:9-9:12 "Int" type use -> external Prelude (only open import)
+== reexports:lib:CycA
+exports:
+  type:A @reexports:lib:CycA (A, AB)
+  type:B @reexports:lib:CycB (B)
+  con:A @reexports:lib:CycA
+  con:AB @reexports:lib:CycA
+  con:B @reexports:lib:CycB
+  5:17-5:18 "B" type use -> exact reexports:lib:CycB type:B
+== reexports:lib:CycB
+exports:
+  type:A @reexports:lib:CycA
+  type:B @reexports:lib:CycB (B)
+  con:B @reexports:lib:CycB
+  open: cycle reexports:lib:CycA
+  3:29-3:30 "A" type import -> exact reexports:lib:CycA type:A
+  5:12-5:13 "A" type use -> exact reexports:lib:CycA type:A
+== reexports:lib:Mid
+exports:
+  type:Base @reexports:lib:Base (Base, bf)
+  type:Ext @reexports:lib:Base
+  type:Map @external Data.Map
+  con:Base @reexports:lib:Base
+  val:base @reexports:lib:Base
+  field:bf @reexports:lib:Base
+  val:chr @external Data.Char
+  val:mid @reexports:lib:Mid
+  val:ord @external Data.Char
+  1:48-1:51 "Map" type export -> external Data.Map (listed)
+  4:24-4:27 "chr" var import -> external Data.Char (listed)
+  4:29-4:32 "ord" var import -> external Data.Char (listed)
+  5:18-5:21 "Map" type import -> external Data.Map (listed)
+  7:8-7:11 "Int" type use -> external Prelude (only open import)
+== reexports:lib:Top
+exports:
+  type:Base @reexports:lib:Base (Base, bf)
+  type:Ext @reexports:lib:Base
+  type:Map @external Data.Map
+  con:Base @reexports:lib:Base
+  val:base @reexports:lib:Base
+  field:bf @reexports:lib:Base
+  val:chr @external Data.Char
+  val:ord @external Data.Char
+  val:top @reexports:lib:Top
+  1:25-1:29 "Base" type export -> exact reexports:lib:Base type:Base
+  3:20-3:23 "mid" var import -> exact reexports:lib:Mid val:mid
+  5:8-5:11 "Int" type use -> external Prelude (only open import)
+== reexports:lib:Use
+exports:
+  val:u @reexports:lib:Use
+  val:v @reexports:lib:Use
+  val:w @reexports:lib:Use
+  val:x @reexports:lib:Use
+  6:6-6:9 "Int" type use -> external Prelude (only open import)
+  7:5-7:8 "top" var use -> exact reexports:lib:Top val:top
+  7:9-7:10 "+" var use -> external Prelude (only open import)
+  7:11-7:15 "base" var use -> exact reexports:lib:Base val:base
+  7:16-7:17 "+" var use -> external Prelude (only open import)
+  7:18-7:20 "bf" var use -> exact reexports:lib:Base field:Base.bf
+  7:22-7:26 "Base" con use -> exact reexports:lib:Base con:Base
+  7:30-7:31 "+" var use -> external Prelude (only open import)
+  7:32-7:35 "ord" var use -> external Data.Char (listed)
+  9:6-9:7 "A" type use -> exact reexports:lib:CycA type:A
+  10:5-10:7 "AB" con use -> exact reexports:lib:CycA con:AB
+  10:9-10:10 "B" con use -> exact reexports:lib:CycB con:B
+  10:11-10:12 "A" con use -> exact reexports:lib:CycA con:A
+  12:6-12:9 "Map" type use -> external Data.Map (listed)
+  12:10-12:13 "Int" type use -> external Prelude (only open import)
+  12:14-12:17 "Int" type use -> external Prelude (only open import)
+  13:5-13:11 "mempty" var use -> external Prelude (only open import)
+  15:6-15:9 "Ext" type use -> exact reexports:lib:Base type:Ext

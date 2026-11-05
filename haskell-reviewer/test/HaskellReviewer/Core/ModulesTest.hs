@@ -492,7 +492,8 @@ findTest = do
             extensions = [Extension "CPP" True],
             ghcOptions = ["-Wall"],
             cppOptions = ["-DX"],
-            buildDepends = [PackageName "base"]
+            buildDepends = [PackageName "base"],
+            libraryDepends = []
           }
   findModule idx (ComponentModule (PackageName "p") Lib (ModuleName "A"))
     @?= Just
@@ -614,6 +615,7 @@ comp name dirs =
       language = Haskell2010,
       extensions = [],
       buildDepends = [],
+      libraryDepends = [],
       mainIs = Nothing,
       P.modules = [],
       ghcOptions = [],

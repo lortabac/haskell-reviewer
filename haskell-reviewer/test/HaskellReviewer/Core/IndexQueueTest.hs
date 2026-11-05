@@ -108,6 +108,7 @@ component name src ms =
       language = Haskell2010,
       extensions = [],
       buildDepends = [],
+      libraryDepends = [],
       mainIs = Nothing,
       modules = map exposed ms,
       ghcOptions = [],

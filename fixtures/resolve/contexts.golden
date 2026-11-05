@@ -1,0 +1,73 @@
+== contexts:lib:Defs
+exports:
+  type:Cls @contexts:lib:Defs (cm)
+  type:Nat @contexts:lib:Defs (S, Z)
+  type:Point @contexts:lib:Defs (Point, px)
+  type:Rec @contexts:lib:Defs (Rec, ra, rb)
+  con:Point @contexts:lib:Defs
+  con:Rec @contexts:lib:Defs
+  con:S @contexts:lib:Defs
+  con:Z @contexts:lib:Defs
+  method:cm @contexts:lib:Defs
+  field:px @contexts:lib:Defs
+  val:qq @contexts:lib:Defs
+  field:ra @contexts:lib:Defs
+  field:rb @contexts:lib:Defs
+  4:35-4:46 "QuasiQuoter" type import -> external Language.Haskell.TH.Quote (listed)
+  6:23-6:26 "Int" type use -> external Prelude (one of 2)
+  6:34-6:37 "Int" type use -> external Prelude (one of 2)
+  9:14-9:17 "Int" type use -> external Prelude (one of 2)
+  10:15-10:18 "Int" type use -> external Prelude (one of 2)
+  13:27-13:30 "Int" type use -> external Prelude (one of 2)
+  13:38-13:41 "Int" type use -> external Prelude (one of 2)
+  17:7-17:18 "QuasiQuoter" type use -> external Language.Haskell.TH.Quote (listed)
+  18:6-18:17 "QuasiQuoter" con use -> external Language.Haskell.TH.Quote (listed)
+  18:19-18:27 "quoteExp" field use -> external Language.Haskell.TH.Quote (listed)
+  18:43-18:51 "quotePat" field use -> external Language.Haskell.TH.Quote (listed)
+  18:54-18:63 "undefined" var use -> external Prelude (one of 2)
+  18:65-18:74 "quoteType" field use -> external Language.Haskell.TH.Quote (listed)
+  18:77-18:86 "undefined" var use -> external Prelude (one of 2)
+  18:88-18:96 "quoteDec" field use -> external Language.Haskell.TH.Quote (listed)
+  18:99-18:108 "undefined" var use -> external Prelude (one of 2)
+== contexts:lib:Use
+exports:
+  val:dot @contexts:lib:Use
+  val:mk @contexts:lib:Use
+  val:prox @contexts:lib:Use
+  val:q @contexts:lib:Use
+  val:upd @contexts:lib:Use
+  val:wild @contexts:lib:Use
+  4:20-4:25 "Proxy" type import -> external Data.Proxy (listed)
+  7:10-7:13 "Cls" type use -> exact contexts:lib:Defs class:Cls
+  7:14-7:18 "Bool" type use -> external Prelude (one of 2)
+  8:3-8:5 "cm" var instance-def -> exact contexts:lib:Defs val:cm
+  10:10-10:14 "Show" type use -> external Prelude (one of 2)
+  10:15-10:18 "Rec" type use -> exact contexts:lib:Defs type:Rec
+  11:3-11:7 "show" var instance-def -> external Prelude (one of 2)
+  11:12-11:16 "show" var use -> external Prelude (one of 2)
+  11:19-11:21 "ra" field use -> heuristic[record dot] contexts:lib:Defs field:Rec.ra
+  13:7-13:10 "Rec" type use -> exact contexts:lib:Defs type:Rec
+  14:6-14:9 "Rec" con use -> exact contexts:lib:Defs con:Rec
+  14:11-14:13 "ra" field use -> exact contexts:lib:Defs field:Rec.ra
+  14:19-14:21 "rb" field use -> exact contexts:lib:Defs field:Rec.rb
+  16:8-16:11 "Rec" type use -> exact contexts:lib:Defs type:Rec
+  16:15-16:18 "Rec" type use -> exact contexts:lib:Defs type:Rec
+  17:12-17:14 "ra" field use -> exact contexts:lib:Defs field:Rec.ra
+  19:8-19:11 "Rec" type use -> exact contexts:lib:Defs type:Rec
+  19:15-19:18 "Int" type use -> external Prelude (one of 2)
+  20:11-20:13 "rb" field use -> heuristic[record dot] contexts:lib:Defs field:Rec.rb
+  20:14-20:15 "+" var use -> external Prelude (one of 2)
+  20:16-20:18 "px" var use -> exact contexts:lib:Defs field:Point.px
+  20:20-20:25 "Point" con use -> exact contexts:lib:Defs con:Point
+  22:9-22:12 "Rec" type use -> exact contexts:lib:Defs type:Rec
+  22:16-22:19 "Int" type use -> external Prelude (one of 2)
+  23:6-23:9 "Rec" con use -> exact contexts:lib:Defs con:Rec
+  23:17-23:19 "ra" var use -> heuristic[wildcard] contexts:lib:Defs field:Rec.ra
+  23:20-23:21 "+" var use -> external Prelude (one of 2)
+  23:22-23:24 "rb" var use -> heuristic[wildcard] contexts:lib:Defs field:Rec.rb
+  25:9-25:14 "Proxy" type use -> external Data.Proxy (listed)
+  25:16-25:17 "S" type use -> heuristic[datakinds] contexts:lib:Defs con:S
+  25:18-25:19 "Z" type use -> heuristic[datakinds] contexts:lib:Defs con:Z
+  26:8-26:13 "Proxy" con use -> external Data.Proxy (listed)
+  28:6-28:12 "String" type use -> external Prelude (one of 2)
+  29:5-29:16 "[qq|hello|]" var use [splice] -> exact contexts:lib:Defs val:qq
