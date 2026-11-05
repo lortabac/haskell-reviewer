@@ -32,7 +32,7 @@ import Control.Exception
     throwIO,
     try,
   )
-import Control.Monad (unless, void, when)
+import Control.Monad (forM_, unless, void, when)
 import Crypto.Random (getRandomBytes)
 import Data.Either (isRight)
 import Data.Map.Strict qualified as Map
@@ -161,6 +161,7 @@ import HaskellReviewer.Session.Index
   )
 import HaskellReviewer.Session.Prefs (newPrefsStore)
 import HaskellReviewer.Session.Project qualified as Session.Project
+import HaskellReviewer.Session.Resolve (warmUpResolve)
 import HaskellReviewer.Session.Snapshot
   ( Snapshot (..),
     SnapshotSlot,
@@ -311,9 +312,10 @@ data Deps = Deps
       Platform ->
       Maybe GhcVersion ->
       IO Project,
-    -- | Build the shared values of the parser and of the page encoder.
+    -- | Build the shared values of the parser, of resolution and of the
+    -- page encoder. Each one runs even if one before it throws.
     -- See Note [Forced snapshot] in "HaskellReviewer.Server.Api".
-    warmUp :: IO (),
+    warmUp :: [IO ()],
     -- | Read one entry of the file list from disk.
     readEntry ::
       CanonicalRoot ->
@@ -353,7 +355,7 @@ newRealDeps spawnSetup = do
         prefsPath = (\env -> prefsFile (`lookup` env)) <$> getEnvironment,
         probeFiles = FileSystem.probeFiles,
         readProject = Session.Project.readProject,
-        warmUp = Parser.warmUpParser >> warmUpPages,
+        warmUp = [Parser.warmUpParser, warmUpResolve, warmUpPages],
         readEntry = FileSystem.readEntry,
         parse = Parser.parseGuarded,
         indexWorkers = getNumCapabilities,
@@ -641,17 +643,18 @@ runListing deps logger tracer lister slot cliGhc = do
     reportWarmUp (Nanoseconds ns) =
       logVerbose logger ("parser warm-up: " <> showText (ns `div` 1_000) <> " us")
 
--- | The deps' 'warmUp', but a crash only logs a line: the snapshot is
--- fine without it.
+-- | The deps' warm-ups, each in its own try: a crash only logs a line,
+-- and the next one still runs. The snapshot is fine without them.
 runWarmUp :: Deps -> Logger -> IO ()
 runWarmUp deps logger =
-  try @SomeException deps.warmUp >>= \case
-    Right () -> pure ()
-    Left e
-      | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
-      | otherwise ->
-          logInfo logger $
-            "haskell-reviewer: parser warm-up failed: " <> exceptionMessage e
+  forM_ deps.warmUp $ \w ->
+    try @SomeException w >>= \case
+      Right () -> pure ()
+      Left e
+        | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
+        | otherwise ->
+            logInfo logger $
+              "haskell-reviewer: parser warm-up failed: " <> exceptionMessage e
 
 -- | Read the project and build the snapshot, all of it. If that
 -- crashes, the snapshot has no project, only a warning. See

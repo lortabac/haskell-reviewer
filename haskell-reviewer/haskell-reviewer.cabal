@@ -111,6 +111,7 @@ library
     HaskellReviewer.Session.Index
     HaskellReviewer.Session.Prefs
     HaskellReviewer.Session.Project
+    HaskellReviewer.Session.Resolve
     HaskellReviewer.Session.Snapshot
 
     -- Server
@@ -278,8 +279,10 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Session.ClientsTest
     HaskellReviewer.Session.IndexTest
     HaskellReviewer.Session.PrefsTest
+    HaskellReviewer.Session.ResolveTest
     HaskellReviewer.Session.SnapshotTest
     HighlightDump
+    IndexSupport
     ModulesDump
     OccurrencesDump
     ParseDump

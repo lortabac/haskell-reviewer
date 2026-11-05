@@ -35,6 +35,7 @@ import HaskellReviewer.Core.Root (CanonicalRoot)
 import HaskellReviewer.Core.Search (ModuleCandidate)
 import HaskellReviewer.Effects.FileSystem (ListError)
 import HaskellReviewer.Session.Index (Index, Progress, readProgress)
+import HaskellReviewer.Session.Resolve (Resolver)
 
 -- | Which snapshot a response comes from. Goes up on reload (later); the
 -- client caches by it (SPEC §11.6.2).
@@ -63,7 +64,10 @@ data Snapshot = Snapshot
     searchModules :: Map ModuleId ModuleCandidate,
     -- | The modules' slots. See Note [Indexing] in
     -- "HaskellReviewer.Session.Index".
-    index :: Index
+    index :: Index,
+    -- | Resolution over the index. See Note [Session resolution] in
+    -- "HaskellReviewer.Session.Resolve".
+    resolver :: Resolver
   }
 
 -- | Where the snapshot goes once listed. Requests wait on it: the list

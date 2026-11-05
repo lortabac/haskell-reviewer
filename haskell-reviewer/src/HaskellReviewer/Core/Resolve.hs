@@ -29,13 +29,14 @@ module HaskellReviewer.Core.Resolve
     -- * Running
     resolveModule,
     exportSets,
+    homeImports,
   )
 where
 
 import Control.Monad (forM)
 import Control.Monad.ST (ST, runST)
 import Data.Char (isSpace)
-import Data.Containers.ListUtils (nubOrdOn)
+import Data.Containers.ListUtils (nubOrd, nubOrdOn)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IntMap
 import Data.List.NonEmpty (NonEmpty (..))
@@ -58,7 +59,7 @@ import HaskellReviewer.Core.Entities
     OpenKind (..),
     Origin (..),
     Space (..),
-    forceExportSet,
+    forceExportSets,
     itemSpace,
     minimumOn,
     namesLookup,
@@ -355,7 +356,7 @@ forceModuleResolution r =
   foldr (\x acc -> forceResolved x `seq` acc) () r.names `seq`
     foldr (\x acc -> forceResolved x `seq` acc) () r.punFields `seq`
       foldr seq () r.notReady `seq`
-        foldr (\s acc -> forceExportSet s `seq` acc) () r.newFinal
+        forceExportSets r.newFinal
 
 -- * Running
 
@@ -517,6 +518,16 @@ scopeFor env stack m p blocks = do
             c <- setOf env stack target
             pure (ScopeEntry c.final (si guesses (TargetHome target c.set)))
           ExternalImport x -> pure (ScopeEntry True (si [] (TargetExternal x)))
+
+-- | Our modules a module imports directly, the implicit Prelude too, in
+-- import order, no repeats. What a request waits for (D-252).
+homeImports :: ModuleGraph -> ModuleId -> ParsedModule -> [ModuleId]
+homeImports g m p =
+  nubOrd
+    [ t
+    | i <- implicitPrelude p <> p.imports,
+      HomeModule t _ <- [mapImport g m i.package i.name.value]
+    ]
 
 -- | @import Prelude@, when it's implicit.
 implicitPrelude :: ParsedModule -> [Model.Import]
