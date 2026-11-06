@@ -20,6 +20,7 @@ import ApiSupport
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (poll, wait, withAsync)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar)
+import Control.Monad (forM_)
 import Data.Aeson qualified as Aeson
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString.Lazy qualified as LBS
@@ -55,7 +56,7 @@ tests :: TestTree
 tests =
   testGroup
     "Source API"
-    [ testCase "warm-up: every kind, reason, how, class, region, outline" coverage,
+    [ testCase "warm-up: every kind, reason, how, class, region, outline, sig" coverage,
       testCase "text only: lexed if it has tokens or regions, else plain" textOnlyCase,
       testGroup "route" routeTests
     ]
@@ -100,8 +101,36 @@ coverage = do
   Set.fromList outline
     @?= Set.fromList (map outlineKindName [minBound .. maxBound :: OutlineKind])
   assertBool "a link" (any (\k -> runAt k 5 /= 0) [0 .. nRuns - 1])
+  -- Every shape of sig, a cut one and none.
+  let sigs = [t !! 7 | t <- map arr targets, str (head' t) == "decl"]
+      texts = Set.fromList [str g | g <- sigs, not (isNull g)]
+  forM_ sigShapes $ \g -> assertBool (show g) (Set.member g texts)
+  assertBool "a cut sig" (any (Text.isSuffixOf "\x2026") texts)
+  assertBool "a null sig" (any isNull sigs)
   -- Every link is in the table.
   assertBool "links in range" (all (\k -> runAt k 5 <= length targets) [0 .. nRuns - 1])
+
+-- | One sig of each shape, from the warm-up's sigs module.
+sigShapes :: [Text]
+sigShapes =
+  [ "v :: Int -> Int",
+    "pattern P :: Int",
+    "m :: a -> Int",
+    "K a",
+    "L {fld :: Int}",
+    "fld :: Int",
+    "DI Int",
+    "data T a",
+    "newtype N",
+    "type S = Int",
+    "class C a",
+    "type E a",
+    "type family F a",
+    "type family G a",
+    "data GA a",
+    "GK :: a -> GA a",
+    "data family D a"
+  ]
 
 textOnlyCase :: Assertion
 textOnlyCase = do
@@ -129,6 +158,9 @@ routeTests =
           decls = [(str (t !! 1), str (t !! 4)) | t <- targets, str (head' t) == "decl"]
       assertBool (show decls) (("A", "val:area") `elem` decls)
       assertBool (show decls) (("A", "type:Shape") `elem` decls)
+      -- Sigs: from A's text, through the states resolution read.
+      [str (t !! 7) | t <- targets, str (head' t) == "decl", str (t !! 4) == "val:area"]
+        @?= ["area :: Shape -> Double"]
       -- The outline.
       [str (arr e !! 1) | e <- arr (field "outline" v)] @?= ["val:sorted"],
     testCase "the file of two components: the first in tree order" $ do

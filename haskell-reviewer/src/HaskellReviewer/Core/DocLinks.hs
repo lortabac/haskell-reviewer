@@ -8,6 +8,7 @@
 module HaskellReviewer.Core.DocLinks
   ( LocalNames,
     localNames,
+    noLocalNames,
     resolveLocal,
   )
 where
@@ -66,6 +67,11 @@ localNames name decls =
     entries = concatMap namedDecls decls
     -- Keep the first.
     table is = Map.fromListWith (\_ old -> old) [(k, i) | i <- is, Just k <- [declName i]]
+
+-- | No names: for code that needs no links.
+noLocalNames :: LocalNames
+noLocalNames =
+  LocalNames {self = ModuleName "Main", types = Map.empty, values = Map.empty}
 
 -- | The local declaration a name in a comment means, if any.
 resolveLocal :: LocalNames -> NameRef -> Maybe DeclId

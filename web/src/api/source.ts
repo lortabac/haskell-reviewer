@@ -75,7 +75,8 @@ export const regionKinds = ["directives", "excluded", "prose"] as const;
 export type LocalTarget = ["local", line: number, col: number];
 
 // A declaration of ours. line: of its name; reasons empty when exact;
-// candidates 1 unless ambiguous.
+// candidates 1 unless ambiguous; sig: its code as plain text, for the
+// hover (cut at 300 code points plus "…"), null when it has none.
 export type DeclTarget = [
   "decl",
   ref: string,
@@ -84,6 +85,7 @@ export type DeclTarget = [
   id: string,
   reasons: ReasonCode[],
   candidates: number,
+  sig: string | null,
 ];
 
 // A module of ours, the declaration unknown.
@@ -235,7 +237,7 @@ function decodeTarget(value: unknown, path: string): Target {
       return [kind, nat(t[1], at(1)), nat(t[2], at(2))];
     }
     case "decl": {
-      const t = tuple(value, path, 7);
+      const t = tuple(value, path, 8);
       return [
         kind,
         str(t[1], at(1)),
@@ -244,6 +246,7 @@ function decodeTarget(value: unknown, path: string): Target {
         str(t[4], at(4)),
         reasons(t[5], at(5)),
         positive(t[6], at(6)),
+        nullable(str)(t[7], at(7)),
       ];
     }
     case "module": {

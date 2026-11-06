@@ -43,6 +43,8 @@ import HaskellReviewer.Core.Code
     codeEnv,
     codeOf,
     codeOfSpans,
+    conFields,
+    conSpan,
     famInstHead,
     instanceHead,
     plainCode,
@@ -732,18 +734,6 @@ sentOnce env self piece first enc = case Map.lookup piece env.senders of
   Just o
     | o /= handleOf env.objects self -> Cbor.obj (first <> [("sharedWith", Cbor.int o)])
   _ -> enc
-
--- | A constructor's own line: its first head part.
-conSpan :: ConDecl -> [Span]
-conSpan c =
-  take 1 [p.span | p <- NonEmpty.toList c.info.extent.parts, p.role == HeadPart]
-
--- | A constructor's record fields.
-conFields :: ConDecl -> [FieldDecl]
-conFields c = case c.args of
-  RecordArgs fs -> fs
-  GadtRecordArgs fs -> fs
-  _ -> []
 
 header :: Env -> ModuleHeader -> Encoding
 header env h =
