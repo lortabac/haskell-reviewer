@@ -58,6 +58,7 @@ import Bench.Run
     SessionConfig (..),
     StatsFile (..),
     Timed (..),
+    awaitDone,
     failWith,
     getApi,
     renderRunError,
@@ -450,8 +451,9 @@ projectWarnings expected parsed doneLines diffs =
     showT :: (Show a) => a -> Text
     showT = Text.pack . show
 
--- | Read the module list: spawn, one request, stop. Indexing is
--- stopped half way, which is fine (D-162).
+-- | Read the module list: spawn, one request, stop. Waits for the done
+-- line first, so the stop reaches an idle server: on macOS a busy one
+-- can miss it (Note [Second SIGTERM] in "Bench.Run").
 listModules :: SessionConfig -> IO (Either RunError [ModuleItem])
 listModules cfg = fmap fst <$> withSession cfg steps
   where
@@ -459,7 +461,10 @@ listModules cfg = fmap fst <$> withSession cfg steps
       t <- getApi s Gzip "api/modules/tree"
       unless (t.response.status == 200) $
         failWith ("modules: expected 200, got " <> show t.response.status)
-      either (failWith . ("modules: " <>) . show) pure (parseModuleList t.response.body)
+      items <-
+        either (failWith . ("modules: " <>) . show) pure (parseModuleList t.response.body)
+      _ <- awaitDone s
+      pure items
 
 -- | 'Nothing' if we can't read it.
 fileSize :: FilePath -> IO (Maybe Integer)

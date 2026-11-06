@@ -35,6 +35,7 @@ import Bench.Run
     failWith,
     getApi,
     procMemory,
+    requireRts,
     withSession,
   )
 import Bench.SearchDuring (QueryTime, timeQuery)
@@ -106,11 +107,11 @@ data SteadyRun = SteadyRun
 
 -- | One run over the listed modules (tree order).
 runSteady :: SessionConfig -> [ModuleItem] -> SteadyPlan -> IO (Either RunError SteadyRun)
-runSteady cfg items plan = fmap finish <$> withSession cfg (steps items plan)
+runSteady cfg items plan = (>>= finish) <$> withSession cfg (steps items plan)
   where
-    finish (build, ended) = build ended
+    finish (build, ended) = build ended <$> requireRts ended
 
-steps :: [ModuleItem] -> SteadyPlan -> Session -> IO (Ended -> SteadyRun)
+steps :: [ModuleItem] -> SteadyPlan -> Session -> IO (Ended -> RtsStats -> SteadyRun)
 steps items plan s = do
   doneAt <- awaitDone s
 
@@ -134,7 +135,7 @@ steps items plan s = do
 
   mem <- procMemory s
   load <- getLoadAvg
-  pure $ \ended ->
+  pure $ \ended rts ->
     SteadyRun
       { doneUs = doneAt.atUs,
         done = doneAt.line,
@@ -143,7 +144,7 @@ steps items plan s = do
         searchTimes = searched,
         census = census,
         gc = ended.gc,
-        rts = ended.rts,
+        rts = rts,
         rssBytes = mem.rssBytes,
         hwmBytes = mem.hwmBytes,
         loadAvg = load
