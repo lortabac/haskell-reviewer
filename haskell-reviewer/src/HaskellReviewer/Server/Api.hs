@@ -12,6 +12,7 @@ module HaskellReviewer.Server.Api
     fileApp,
     modulesApp,
     moduleApp,
+    sourceApp,
     indexingApp,
 
     -- * Internal, for tests
@@ -41,6 +42,7 @@ import HaskellReviewer.Core.Modules
     FoundModule (..),
     GeneratedFile (..),
     HaskellFile (..),
+    ModuleId,
     ModuleIndex (..),
     ModuleSource (..),
     PackageModules (..),
@@ -48,17 +50,21 @@ import HaskellReviewer.Core.Modules
     buildModuleIndex,
     findModule,
     forceSettings,
+    moduleAtPath,
     resolveModuleRef,
   )
 import HaskellReviewer.Core.Project (GhcVersion (..), Project)
 import HaskellReviewer.Core.RelPath (RelPath, relPathFromSegments, relPathText)
+import HaskellReviewer.Core.Resolve (ModuleState (..), ParsedInput (..), isPartial)
 import HaskellReviewer.Core.Root (CanonicalRoot)
 import HaskellReviewer.Core.Search (forceCandidates, moduleCandidates)
+import HaskellReviewer.Core.SourceLinks (linksOf)
 import HaskellReviewer.Effects.FileSystem (ListError, ReadError (..))
 import HaskellReviewer.Effects.Log (Logger, logInfo)
 import HaskellReviewer.Server.Security (methodNotAllowed, notFound)
 import HaskellReviewer.Server.Wire
   ( encodeFileList,
+    encodeFileNotFound,
     encodeFileView,
     encodeIndexing,
     encodeModuleNotFound,
@@ -70,14 +76,28 @@ import HaskellReviewer.Server.Wire.Page
     NotParsed (..),
     encodeModulePage,
   )
+import HaskellReviewer.Server.Wire.Source
+  ( LexedSource,
+    SourceBody (..),
+    SourceView (..),
+    encodeSource,
+    parsedSource,
+    textOnlySource,
+  )
 import HaskellReviewer.Session.Index
   ( IndexFailure (..),
     Indexed (..),
+    ParsedSource (..),
     awaitModule,
     newIndex,
     readProgress,
   )
-import HaskellReviewer.Session.Resolve (newResolver)
+import HaskellReviewer.Session.Resolve
+  ( awaitImports,
+    importWait,
+    newResolver,
+    resolveModuleWith,
+  )
 import HaskellReviewer.Session.Snapshot (Snapshot (..), firstGeneration)
 import Network.HTTP.Types
   ( Status,
@@ -161,6 +181,7 @@ forceSnapshot idx fileListJson moduleTreeJson = do
   mapM_ (mapM_ evaluate) (Map.elems idx.ownedByName)
   mapM_ (mapM_ evaluate) (Map.elems idx.looseByName)
   void (evaluate (Set.size idx.ids))
+  void (evaluate (Map.size idx.paths))
   let GhcVersion ghc = idx.ghc
   mapM_ evaluate ghc
   mapM_
@@ -248,7 +269,6 @@ moduleApp api side segs req respond
     view snap v = respond (cbor (encodeModulePage snap.generation snap.modules v))
     answer snap i path r =
       view snap ModuleView {moduleId = i, path = path, answer = NotParsed r}
-    -- The worker logged read errors and crashes already.
     fromIndex snap i path =
       awaitModule snap.index i >>= \case
         Just (Right (IndexedParsed p)) ->
@@ -259,11 +279,68 @@ moduleApp api side segs req respond
           answer snap i (Just path) (NotTextModule size)
         Just (Right (IndexedTooLarge info)) ->
           answer snap i (Just path) (TooLargeModule info)
-        Just (Left SourceGone) -> respond (missing snap)
-        Just (Left (SourceUnreadable _)) -> respond (serverError "cannot read file")
-        Just (Left (IndexCrashed _)) -> respond (serverError "cannot index module")
+        Just (Left e) -> respond (indexFailed (missing snap) e)
         -- Every Haskell source has a slot.
         Nothing -> respond (missing snap)
+
+-- | @GET api\/source\/\<side>\/\<path segments>@: one file of the list
+-- as the source view, as CBOR ('encodeSource'). See Note [Source view]
+-- in "HaskellReviewer.Server.Wire.Source".
+--
+-- The module at that path ('moduleAtPath'): if we parse it, we wait
+-- for its slot and its imports, as for the page, then resolve it and
+-- link its tokens. Text only: highlighted, no links. Anything else is
+-- plain, and nothing is read.
+--
+-- A path not in the list (a @%2F@ in a segment too), or a file gone, is
+-- a 404 with a JSON body ('encodeFileNotFound'). A bad side is a plain
+-- 404. Exceptions from resolution are not caught: a 500.
+sourceApp :: FilesApi -> Text -> [Text] -> Application
+sourceApp api side segs req respond
+  | req.requestMethod /= methodGet = respond (methodNotAllowed "GET")
+  | side /= "tree" = respond notFound
+  | otherwise =
+      api.snapshot >>= \case
+        Left _ -> respond cannotList
+        Right snap -> case relPathFromSegments segs of
+          Just path
+            | Map.member path snap.files.entries -> answer snap path
+          _ -> respond (missing snap)
+  where
+    missing snap = jsonWith status404 (encodeFileNotFound snap.generation)
+    view snap v = respond (cbor (encodeSource snap.generation snap.modules v))
+    plain path i = viewOf path i False PlainBody
+    viewOf path i partial b =
+      SourceView {path = path, moduleId = i, partial = partial, body = b}
+    answer snap path = case moduleAtPath snap.modules path of
+      Nothing -> view snap (plain path Nothing)
+      Just i -> case (.source) <$> findModule snap.modules i of
+        Just (HaskellSource _) -> do
+          awaitImports snap.resolver importWait i
+          fromIndex snap path i
+        _ -> view snap (plain path (Just i))
+    fromIndex snap path i =
+      awaitModule snap.index i >>= \case
+        Just (Right (IndexedParsed s)) -> do
+          (lexed, partial) <- linked snap i s
+          view snap (viewOf path (Just i) partial (LexedBody lexed))
+        Just (Right (IndexedTextOnly t)) ->
+          view snap (viewOf path (Just i) False (textOnlySource t))
+        Just (Right (IndexedNotText _)) -> view snap (plain path (Just i))
+        Just (Right (IndexedTooLarge _)) -> view snap (plain path (Just i))
+        Just (Left e) -> respond (indexFailed (missing snap) e)
+        -- Every Haskell source has a slot.
+        Nothing -> respond (missing snap)
+
+-- | A parsed module's lexed view, resolved, and whether it's partial.
+linked :: Snapshot -> ModuleId -> ParsedSource -> IO (LexedSource, Bool)
+linked snap i s = do
+  resolved <- resolveModuleWith snap.resolver i
+  let res = fst <$> resolved
+      state = maybe (const ModuleNotParsed) snd resolved
+      p = ParsedInput {text = s.text, parsed = s.parsed}
+      links = linksOf snap.modules state i p res
+  pure (parsedSource s.parsed links, maybe False isPartial res)
 
 -- | @GET api\/indexing\/\<side>@: how far indexing is. The only side is
 -- @tree@. The same body as the @indexing@ event.
@@ -331,6 +408,14 @@ readFailed api path why = do
   logInfo api.logger $
     "haskell-reviewer: cannot read " <> relPathText path <> ": " <> why
   pure (serverError "cannot read file")
+
+-- | A slot with no answer: the route's 404 if the file is gone, else a
+-- 500. The worker logged read errors and crashes already.
+indexFailed :: Response -> IndexFailure -> Response
+indexFailed gone = \case
+  SourceGone -> gone
+  SourceUnreadable _ -> serverError "cannot read file"
+  IndexCrashed _ -> serverError "cannot index module"
 
 -- | The listing failed. The reason is on stderr.
 cannotList :: Response

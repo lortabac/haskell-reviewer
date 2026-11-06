@@ -27,6 +27,7 @@ import HaskellReviewer.Server.Api
     indexingApp,
     moduleApp,
     modulesApp,
+    sourceApp,
   )
 import HaskellReviewer.Server.Assets (Asset (..), lookupAsset, shellFor)
 import HaskellReviewer.Server.Events (EventStream, eventsApp)
@@ -85,7 +86,10 @@ Paths below are what the router sees, after the token.
   (Note [Module page] in "HaskellReviewer.Server.Wire.Page"). The ref's
   segments are joined with /, so a loose module's path works; an
   unknown ref, or a module whose file is gone, is a 404 with a JSON
-  body. api/indexing/<side>: how far indexing is, as JSON. The only
+  body. api/source/<side>/<path...>: one file as the source view, as
+  CBOR (Note [Source view] in "HaskellReviewer.Server.Wire.Source"); a
+  path not in the list, or a file gone, is a 404 with a JSON body.
+  api/indexing/<side>: how far indexing is, as JSON. The only
   side is tree; another one is a plain 404. GET only (405 otherwise,
   HEAD too).
 - api/search/<side>?q=<text>: modules and names that match, as JSON
@@ -202,6 +206,7 @@ router shell routes req respond = case req.pathInfo of
   "api" : "file" : side : path -> fileApp routes.files side path req respond
   ["api", "modules", side] -> modulesApp routes.files side req respond
   "api" : "module" : side : ref -> moduleApp routes.files side ref req respond
+  "api" : "source" : side : path -> sourceApp routes.files side path req respond
   ["api", "indexing", side] -> indexingApp routes.files side req respond
   ["api", "search", side] -> searchApp routes.files side req respond
   ["api", "prefs"] -> prefsApp routes.prefs req respond

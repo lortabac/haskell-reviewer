@@ -15,6 +15,9 @@ module HaskellReviewer.Server.Wire.Page
 
     -- * Code
     tokenClassName,
+
+    -- * Shared
+    syntacticTier,
   )
 where
 
@@ -278,6 +281,11 @@ attached false: the page shows it in a block of its own at the end.
 
 -- * Bodies
 
+-- | The tier of every module for now: syntactic, as there are no HIE
+-- files.
+syntacticTier :: Encoding
+syntacticTier = Cbor.obj [("kind", Cbor.text "syntactic"), ("reason", Cbor.text "no-hie")]
+
 -- | GET api\/module\/\<side>\/\<ref>. See Note [Module page].
 encodeModulePage :: Generation -> ModuleIndex -> ModuleView -> LBS.ByteString
 encodeModulePage (Generation g) idx v =
@@ -288,8 +296,7 @@ encodeModulePage (Generation g) idx v =
       ("path", Cbor.nullable (Cbor.text . relPathText) v.path),
       ("package", Cbor.nullable package owner),
       ("component", Cbor.nullable (Cbor.text . renderComponentName . snd) owner),
-      -- Always syntactic: no HIE files.
-      ("tier", Cbor.obj [kind "syntactic", ("reason", Cbor.text "no-hie")]),
+      ("tier", syntacticTier),
       ("parse", answer v.answer)
     ]
   where

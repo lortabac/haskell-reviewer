@@ -8,6 +8,9 @@ module ApiSupport
     implicitApi,
     pageApi,
     searchApi,
+    sourceApi,
+    sourceTexts,
+    gatedOn,
     forceFixtures,
     indexed,
     indexAll,
@@ -25,19 +28,32 @@ module ApiSupport
     goodOrigin,
     callApp,
     apiToken,
+
+    -- * Bodies as JSON
+    cborValue,
+    field,
+    str,
+    arr,
+    bool,
+    int,
   )
 where
 
 import Control.Concurrent.Async (withAsync)
+import Control.Concurrent.MVar (MVar, readMVar)
 import Control.Exception (evaluate)
-import Control.Monad (forM_, void)
+import Control.Monad (forM_, void, when)
+import Data.Aeson qualified as Aeson
+import Data.Aeson.Key qualified as Key
+import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Builder qualified as Builder
 import Data.ByteString.Lazy qualified as LBS
+import Data.Foldable (toList)
 import Data.IORef (atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (mapMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
@@ -56,7 +72,11 @@ import HaskellReviewer.Core.FileList
     FileList (..),
     ListSource (..),
   )
-import HaskellReviewer.Core.ModuleModel (ModuleParse)
+import HaskellReviewer.Core.ModuleModel
+  ( ModuleParse (..),
+    TextOnlyReason (..),
+    textOnlyModule,
+  )
 import HaskellReviewer.Core.Parser (ParseSettings)
 import HaskellReviewer.Core.Prefs (effective, noPrefs)
 import HaskellReviewer.Core.Project
@@ -94,6 +114,7 @@ import HaskellReviewer.Effects.FileSystem (ListError, ReadError (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), Logger, newLogger)
 import HaskellReviewer.Effects.Parser (parseGuarded)
 import HaskellReviewer.Server.Api (FilesApi (..), newSnapshot)
+import HaskellReviewer.Server.CborJson (cborToJson)
 import HaskellReviewer.Server.Events (EventStream (..))
 import HaskellReviewer.Server.Router (Routes (..), application)
 import HaskellReviewer.Session.Clients (newClients)
@@ -156,12 +177,87 @@ pageApi = apiFor pageSnapshot
 searchApi :: TestApi
 searchApi = apiFor searchSnapshot
 
+-- | A project for the source view: a module linking into another, CPP,
+-- a parse error, and a file of each plain kind. The library's dir is a
+-- test suite's too. A module whose text starts with @-- slow@ is too
+-- slow to parse.
+sourceApi :: TestApi
+sourceApi =
+  (apiFor sourceSnapshot)
+    { parse = \settings t ->
+        if "-- slow" `Text.isPrefixOf` t
+          then pure (TextOnly (textOnlyModule TooSlow []))
+          else parseGuarded settings t,
+      -- workers is here so GHC knows the record type: IndexDeps has a
+      -- parse field too.
+      workers = 1
+    }
+
+-- | 'sourceApi', with the parse of this file (a path of 'sourceTexts')
+-- held until the gate is full. Each request gets a fresh snapshot, so
+-- each parses it again.
+gatedOn :: Text -> MVar () -> TestApi
+gatedOn path gate =
+  sourceApi
+    { parse = \settings t -> do
+        when (Just t == lookup path sourceTexts) (readMVar gate)
+        sourceApi.parse settings t,
+      -- As in sourceApi: names the record type.
+      workers = sourceApi.workers
+    }
+
+-- | The texts of 'sourceApi''s modules, by path: tests gate on them.
+sourceTexts :: [(Text, Text)]
+sourceTexts =
+  [ ( "s/src/A.hs",
+      "module A (Shape (..), area) where\n\
+      \\n\
+      \-- | A shape.\n\
+      \data Shape = Circle Double | Square Double\n\
+      \\n\
+      \area :: Shape -> Double\n\
+      \area (Circle r) = 3 * r * r\n\
+      \area (Square s) = s * s\n"
+    ),
+    ( "s/src/B.hs",
+      "{-# LANGUAGE NoImplicitPrelude #-}\n\
+      \module B (sorted) where\n\
+      \\n\
+      \import A\n\
+      \import Data.List (sortOn)\n\
+      \\n\
+      \sorted :: [Shape] -> [Shape]\n\
+      \sorted shapes = sortOn area shapes\n"
+    ),
+    ( "s/src/Cpp.hs",
+      "{-# LANGUAGE CPP #-}\n\
+      \module Cpp (x) where\n\
+      \#if 0\n\
+      \import Gone\n\
+      \#endif\n\
+      \x :: Int\n\
+      \x = 1 {- one -}\n"
+    ),
+    ("s/src/Bad.hs", "module Bad where\nx = = 1\n"),
+    ("s/src/Slow.hs", "-- slow\nmodule Slow where\n"),
+    ("s/src/Tool.hs", "{-# OPTIONS_GHC -F -pgmF hspec-discover #-}\n"),
+    ("s/src/Lexer.x", "{ module Lexer where }\n"),
+    ("s/src/A.hs-boot", "module A where\n"),
+    ("s/notes.txt", "notes\n")
+  ]
+
 -- | Build the shared inputs, before parallel tests use them. See
 -- Note [Shared values in tests] in HaskellReviewer.Core.PackageGlobTest.
 forceFixtures :: IO ()
 forceFixtures = do
   forM_
-    [fixtureSnapshot, projectSnapshot, implicitSnapshot, pageSnapshot, searchSnapshot]
+    [ fixtureSnapshot,
+      projectSnapshot,
+      implicitSnapshot,
+      pageSnapshot,
+      searchSnapshot,
+      sourceSnapshot
+    ]
     void
   forM_ contents $ \(p, c) -> evaluate p >> evaluate (forceContent c)
   where
@@ -361,6 +457,57 @@ implicitSnapshot =
     )
     noProject
 
+sourceSnapshot :: IO Snapshot
+sourceSnapshot =
+  newSnapshot
+    fixtureRoot
+    ( fileList $
+        [(Text.Encoding.encodeUtf8 p, EntryFile) | (p, _) <- sourceTexts]
+          <> [ ("s/s.cabal", EntryFile),
+               ("s/src/Bin.hs", EntryFile),
+               ("s/src/Big.hs", EntryFile),
+               ("s/src/Link.hs", EntrySymlink),
+               ("s/vendor", EntrySubmodule commit)
+             ]
+    )
+    Project
+      { source = ProjectFile [],
+        withCompiler = Nothing,
+        ghc = fixtureGhc,
+        packages =
+          [ Package
+              { name = PackageName "s",
+                version = "1",
+                cabalFile = relPath "s/s.cabal",
+                flags = [],
+                components =
+                  [ (component Lib "s/src")
+                      { modules =
+                          map
+                            listed
+                            [ "A",
+                              "B",
+                              "Cpp",
+                              "Bad",
+                              "Slow",
+                              "Tool",
+                              "Lexer",
+                              "Bin",
+                              "Big",
+                              "Link"
+                            ]
+                      },
+                    -- The same dir: B is the library's.
+                    (component (Test "t") "s/src") {modules = [listed "B"]}
+                  ]
+              }
+          ],
+        brokenPackages = [],
+        warnings = []
+      }
+  where
+    listed n = ListedModule {name = ModuleName n, kind = Exposed, autogen = False}
+
 pageSnapshot :: IO Snapshot
 pageSnapshot =
   newSnapshot
@@ -487,12 +634,18 @@ contents =
         \a <+> b = a\n\
         \mapHelper = 1\n"
     ),
+    -- Modules of the source fixture.
+    ("s/src/Bin.hs", Binary (FileSize 10)),
+    ( "s/src/Big.hs",
+      TooLarge TooLargeInfo {size = FileSize 2_000_000, limit = textLimit}
+    ),
     -- Modules of the implicit fixture.
     ("Main.hs", Binary (FileSize 10)),
     ( "src/Data/Deep/Mod.hs",
       TooLarge TooLargeInfo {size = FileSize 2_000_000, limit = textLimit}
     )
   ]
+    <> [(p, TextContent t) | (p, t) <- sourceTexts]
   where
     link p t =
       Link
@@ -859,3 +1012,41 @@ callAppBody app method headers reqBody query host path = do
 -- | The token of 'getApi'.
 apiToken :: Token
 apiToken = tokenFromBytes "0123456789abcdefghijklmn"
+
+-- * Bodies as JSON
+
+-- | A CBOR body as a JSON value. Fails the test if it isn't one.
+cborValue :: LBS.ByteString -> IO Aeson.Value
+cborValue body = case cborToJson body of
+  Left e -> assertFailure (show e)
+  Right j -> maybe (assertFailure "not JSON") pure (Aeson.decode j)
+
+-- | A field of an object; null if missing or not an object.
+field :: Text -> Aeson.Value -> Aeson.Value
+field k = \case
+  Aeson.Object o -> fromMaybe Aeson.Null (KeyMap.lookup (Key.fromText k) o)
+  _ -> Aeson.Null
+
+-- | A string, or @?@.
+str :: Aeson.Value -> Text
+str = \case
+  Aeson.String t -> t
+  _ -> "?"
+
+-- | The items of an array; none if not an array.
+arr :: Aeson.Value -> [Aeson.Value]
+arr = \case
+  Aeson.Array xs -> toList xs
+  _ -> []
+
+-- | A boolean; false if not one.
+bool :: Aeson.Value -> Bool
+bool = \case
+  Aeson.Bool b -> b
+  _ -> False
+
+-- | A whole number; -1 if not one.
+int :: Aeson.Value -> Int
+int = \case
+  Aeson.Number n -> floor n
+  _ -> -1

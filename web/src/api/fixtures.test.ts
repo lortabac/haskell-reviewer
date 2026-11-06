@@ -49,6 +49,17 @@ import {
 } from "./search";
 import { blockKinds, inlineKinds } from "./richtext";
 import {
+  decodeSourceNotFound,
+  decodeSourceView,
+  displayClasses,
+  expandRuns,
+  guessHows,
+  outlineKinds,
+  reasonCodes,
+  regionKinds,
+  targetKinds,
+} from "./source";
+import {
   cbor,
   cborFixture,
   cborFixtures,
@@ -88,13 +99,21 @@ const decoders: Record<string, (value: unknown) => unknown> = {
   search: decodeSearch,
   "search-qualified": decodeSearch,
   "search-partial": decodeSearch,
+  "source-parsed": decodeSourceView,
+  "source-cpp": decodeSourceView,
+  "source-partial": decodeSourceView,
+  "source-text-only": decodeSourceView,
+  "source-plain": decodeSourceView,
+  "source-warm-up": decodeSourceView,
+  "source-not-found": decodeSourceNotFound,
 };
 
 // The fixtures that are CBOR (D-51), with a JSON dump next to them.
 const cborNames = Object.keys(decoders).filter(
   (n) =>
     n.startsWith("file-") ||
-    (n.startsWith("module-") && n !== "module-not-found"),
+    (n.startsWith("module-") && n !== "module-not-found") ||
+    (n.startsWith("source-") && n !== "source-not-found"),
 );
 
 const sorted = (xs: Iterable<string>) => [...new Set(xs)].sort();
@@ -293,6 +312,44 @@ describe("API fixtures", () => {
       "Data.Map",
       "Data.IntMap",
     ]);
+  });
+
+  it("the source fixtures cover every value", () => {
+    const views = [...fixtures.keys()]
+      .filter((n) => n.startsWith("source-") && n !== "source-not-found")
+      .map((n) => decodeSourceView(fixture(n)));
+    expect(sorted(views.map((v) => v.highlight))).toEqual(["lexed", "plain"]);
+    expect(sorted(views.map((v) => String(v.partial)))).toEqual([
+      "false",
+      "true",
+    ]);
+    expect(views.some((v) => v.ref === null)).toBe(true);
+    const cover = decodeSourceView(fixture("source-warm-up"));
+    if (cover.highlight !== "lexed") throw new Error("not lexed");
+    const ts = cover.targets;
+    expect(sorted(ts.map((t) => t[0]))).toEqual(sorted(targetKinds));
+    const reasons = ts.flatMap((t) =>
+      t[0] === "decl" ? t[5] : t[0] === "module" ? t[3] : [],
+    );
+    expect(sorted(reasons)).toEqual(sorted(reasonCodes));
+    const externals = ts.flatMap((t) => (t[0] === "external" ? [t] : []));
+    expect(sorted(externals.map((t) => t[3]))).toEqual(sorted(guessHows));
+    expect(sorted(externals.map((t) => String(t[2] === null)))).toEqual([
+      "false",
+      "true",
+    ]);
+    const runs = expandRuns(cover.runs);
+    expect(sorted(runs.map((r) => String(r.cls)))).toEqual(
+      sorted(displayClasses.map((_, i) => String(i))),
+    );
+    expect(runs.some((r) => r.link !== 0)).toBe(true);
+    const kinds = cover.regions.filter((_, i) => i % 3 === 0);
+    expect(sorted(kinds.map(String))).toEqual(
+      sorted(regionKinds.map((_, i) => String(i))),
+    );
+    expect(sorted(cover.outline.map((e) => e[0]))).toEqual(
+      sorted(outlineKinds),
+    );
   });
 
   it("text comes through as is", () => {

@@ -19,6 +19,7 @@ module HaskellReviewer.Effects.Parser
     cppWarmUp,
     cppLimitsWarmUp,
     markdownWarmUp,
+    highlightWarmUp,
   )
 where
 

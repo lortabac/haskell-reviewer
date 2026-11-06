@@ -1,0 +1,61 @@
+== partial:lib:Ext
+#1 decl Ext src/Ext.hs:6 val:e
+#2 external A.Missing only-open 1 "fromMissing +module:A.Missing"
+#3 external A.Missing only-open 1 "nowhere +module:A.Missing"
+6:1-6:2 "e" -> #1
+6:5-6:16 "fromMissing" -> #2
+6:17-6:24 "nowhere" -> #3
+outline OutlineValue val:e 6 6-6
+
+== partial:lib:NoCandidate
+#1 decl NoCandidate src/NoCandidate.hs:4 val:n
+4:1-4:2 "n" -> #1
+outline OutlineValue val:n 4 4-4
+
+== partial:lib:OrderUse
+#1 decl OrderUse src/OrderUse.hs:6 val:u
+#2 module Broken src/Broken.hs not-parsed
+6:1-6:2 "u" -> #1
+6:5-6:8 "foo" -> #2
+outline OutlineValue val:u 6 6-6
+
+== partial:lib:QualOpen
+
+== partial:lib:QualOpenUse
+#1 decl QualOpenUse src/QualOpenUse.hs:6 val:c
+#2 module QualOpen src/QualOpen.hs not-parsed
+6:1-6:2 "c" -> #1
+6:5-6:6 "a" -> #2
+outline OutlineValue val:c 6 6-6
+
+== partial:lib:Splicy
+#1 external Prelude only-open 1 "pure +module:Prelude"
+4:3-4:7 "pure" -> #1
+
+== partial:lib:Use
+#1 module Broken src/Broken.hs not-parsed,listed-not-found
+#2 decl Use src/Use.hs:10 val:u
+#3 module Broken src/Broken.hs not-parsed
+#4 decl Use src/Use.hs:12 val:v
+#5 decl Use src/Use.hs:14 type:R
+#6 decl Use src/Use.hs:14 con:R
+#7 decl Use src/Use.hs:14 field:R.f
+#8 decl Use src/Use.hs:16 val:g
+#9 local 16:3
+4:16-4:17 "x" -> #1
+10:1-10:2 "u" -> #2
+10:5-10:6 "x" -> #1
+10:7-10:10 "B.y" -> #3
+12:1-12:2 "v" -> #4
+14:6-14:7 "R" -> #5
+14:10-14:11 "R" -> #6
+14:13-14:14 "f" -> #7
+14:18-14:19 "R" -> #5
+16:1-16:2 "g" -> #8
+16:3-16:4 "r" -> #9
+16:7-16:8 "r" -> #9
+outline OutlineValue val:u 10 10-10
+outline OutlineValue val:v 12 12-12
+outline OutlineType type:R 14 14-14
+outline OutlineValue val:g 16 16-16
+

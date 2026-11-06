@@ -12,6 +12,7 @@ module HaskellReviewer.Session.Resolve
 
     -- * Requests
     resolveModule,
+    resolveModuleWith,
     awaitImports,
     importWait,
 
@@ -130,11 +131,18 @@ newResolver idx index = do
 -- the new final sets. 'Nothing' if it has no slot, or didn't parse, or
 -- failed. The result is fully forced. See Note [Session resolution].
 resolveModule :: Resolver -> ModuleId -> IO (Maybe ModuleResolution)
-resolveModule r i =
+resolveModule r i = fmap fst <$> resolveModuleWith r i
+
+-- | Like 'resolveModule', with every module's state as resolution saw
+-- it: from the same transaction, so they agree.
+resolveModuleWith ::
+  Resolver -> ModuleId -> IO (Maybe (ModuleResolution, ModuleId -> ModuleState))
+resolveModuleWith r i =
   awaitModule r.index i >>= \case
     Just (Right (IndexedParsed _)) -> do
       (states, memo) <- atomically $ (,) <$> readStates r.index <*> readTVar r.memo
-      let input = ResolveInput {graph = r.graph, state = moduleState states, memo = memo}
+      let state = moduleState states
+          input = ResolveInput {graph = r.graph, state = state, memo = memo}
       case Core.resolveModule input i of
         Nothing -> pure Nothing
         Just res -> do
@@ -142,7 +150,7 @@ resolveModule r i =
           -- What's in the memo already wins.
           unless (Map.null res.newFinal) $
             atomically (modifyTVar' r.memo (`Map.union` res.newFinal))
-          pure (Just res)
+          pure (Just (res, state))
     _ -> pure Nothing
 
 -- | Wait for the module, move its direct imports of ours to the front

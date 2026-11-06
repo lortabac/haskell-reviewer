@@ -8,6 +8,7 @@ import ApiSupport
   ( ApiResult (..),
     TestApi (..),
     fixtureApi,
+    gatedOn,
     getApi,
     getApiQuery,
     implicitApi,
@@ -15,7 +16,9 @@ import ApiSupport
     pageApi,
     projectApi,
     searchApi,
+    sourceApi,
   )
+import Control.Concurrent.MVar (newEmptyMVar)
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as LBS
 import Data.List (sort)
@@ -27,10 +30,12 @@ import HaskellReviewer.Core.ModuleModel
     TextOnlyReason (..),
     textOnlyModule,
   )
+import HaskellReviewer.Core.ResolveWarmUp (resolveWarmUpIndex)
 import HaskellReviewer.Core.Xdg (XdgProblem (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), newLogger)
 import HaskellReviewer.Server.CborJson (cborToJson, renderCborJsonError)
 import HaskellReviewer.Server.Wire (encodeIndexing, helloPayload)
+import HaskellReviewer.Server.Wire.Source (coveringView, encodeSource)
 import HaskellReviewer.Session.Index (Progress (..))
 import HaskellReviewer.Session.Prefs (newPrefsStore)
 import HaskellReviewer.Session.Snapshot (Generation (..))
@@ -107,6 +112,20 @@ cases =
     cbor "module-page-sections" (okCbor pageApi (modulePath "Sections")),
     json "module-not-found" (notFoundJson projectApi (modulePath "Nope")),
     json "prefs-defaults" (okJson fixtureApi ["api", "prefs"]),
+    -- The source view: linked, CPP, partial (an import that never gets
+    -- parsed), text only, plain, not found, and the warm-up's covering
+    -- view (every value).
+    cbor "source-parsed" (okCbor (indexed sourceApi) (source ["s", "src", "B.hs"])),
+    cbor "source-cpp" (okCbor (indexed sourceApi) (source ["s", "src", "Cpp.hs"])),
+    cbor "source-partial" $ do
+      gate <- newEmptyMVar
+      okCbor (gatedOn "s/src/A.hs" gate) {workers = 2} (source ["s", "src", "B.hs"]),
+    cbor "source-text-only" (okCbor (indexed sourceApi) (source ["s", "src", "Bad.hs"])),
+    cbor "source-plain" (okCbor sourceApi {workers = 0} (source ["s", "notes.txt"])),
+    json "source-not-found" $
+      notFoundJson sourceApi {workers = 0} (source ["s", "nope.hs"]),
+    cbor "source-warm-up" $
+      pure (encodeSource (Generation 1) resolveWarmUpIndex coveringView),
     -- Every kind of name, a private one and a field.
     json "search" (okSearch (indexed searchApi) "?q=map"),
     json "search-qualified" (okSearch (indexed searchApi) "?q=Data.Map.insert"),
@@ -120,6 +139,7 @@ cases =
     cbor n body = Case {name = n, fixture = Cbor body}
     file p = ["api", "file", "tree"] <> p
     modulePath ref = ["api", "module", "tree", ref]
+    source p = ["api", "source", "tree"] <> p
     crashingApi = answering (ParserCrashed "boom")
     slowApi = answering TooSlow
     halfway = Progress {total = 358, ready = 120, failed = 2}

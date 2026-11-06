@@ -2,6 +2,7 @@
 -- flags. The fixtures (module-page*) show the whole shape.
 module HaskellReviewer.Server.PageTest (tests) where
 
+import ApiSupport (arr, cborValue, field)
 import Data.Aeson (Value (..))
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Key qualified as Key
@@ -25,7 +26,6 @@ import HaskellReviewer.Core.Project
     parserGhcVersion,
   )
 import HaskellReviewer.Core.RelPath (RelPath, relPathFromSegments)
-import HaskellReviewer.Server.CborJson (cborToJson)
 import HaskellReviewer.Server.Wire.Page
   ( ModuleAnswer (..),
     ModuleView (..),
@@ -96,9 +96,9 @@ tests =
           field "names" (field "signature" (decl p "val:f"))
             @?= Aeson.toJSON ["f", "g" :: Text]
           field "signature" (decl p "val:g") @?= shared "val:f"
-          [field "sharedWith" d | d <- list (field "docs" (decl p "val:g"))]
+          [field "sharedWith" d | d <- arr (field "docs" (decl p "val:g"))]
             @?= [String "val:f"]
-          [field "sharedWith" x | x <- list (field "source" (decl p "val:g"))]
+          [field "sharedWith" x | x <- arr (field "source" (decl p "val:g"))]
             @?= [String "val:f", String "val:f", Null],
       testCase "no self links in kind signatures, roles, equations"
         $ withPage
@@ -113,7 +113,7 @@ tests =
         $ \p -> do
           linksIn (field "kindSig" (decl p "type:K")) @?= []
           linksIn (field "roles" (decl p "type:K")) @?= []
-          concatMap linksIn (list (field "equations" (decl p "type:Q"))) @?= [],
+          concatMap linksIn (arr (field "equations" (decl p "type:Q"))) @?= [],
       testCase "strictness marks don't link to a local (!); pragmas don't link"
         $ withPage
           "module M where\n\
@@ -123,9 +123,9 @@ tests =
           \(~) = (+)\n\
           \{-# RULES \"r\" forall x. x ! x = T `seq` x #-}\n"
         $ \p -> do
-          [linksIn (field "code" c) | c <- list (field "constructors" (decl p "type:T"))]
+          [linksIn (field "code" c) | c <- arr (field "constructors" (decl p "type:T"))]
             @?= [[]]
-          [linksIn (field "code" x) | x <- list (field "pragmas" (field "parse" p))]
+          [linksIn (field "code" x) | x <- arr (field "pragmas" (field "parse" p))]
             @?= [[]],
       testCase "list numbers and @since past 2^63: null, the page still decodes"
         $ withPage
@@ -134,7 +134,7 @@ tests =
         $ \p -> do
           let d = field "doc" (field "haddock" (field "header" (field "parse" p)))
           field "since" d @?= Null
-          [field "number" i | b <- list (field "blocks" d), i <- list (field "items" b)]
+          [field "number" i | b <- arr (field "blocks" d), i <- arr (field "items" b)]
             @?= [Null],
       testCase "instance handles: a page grows linearly with derived classes" $ do
         -- A type with k parameters and k derived classes: each instance
@@ -198,9 +198,9 @@ tests =
               byN n = [o | o <- objs, field "n" o == n]
               named t = [o | o <- objs, field "name" o == String t]
           -- h's doc points to B's f, which sends it.
-          [hDoc] <- pure [d | h <- named "h", d <- list (field "docs" h)]
+          [hDoc] <- pure [d | h <- named "h", d <- arr (field "docs" h)]
           [sender] <- pure (byN (field "sharedWith" hDoc))
-          [field "doc" d /= Null | d <- list (field "docs" sender)] @?= [True]
+          [field "doc" d /= Null | d <- arr (field "docs" sender)] @?= [True]
           -- Two f, two handles; the second (B's) sends the doc.
           [_, fB] <- pure (named "f")
           length (nub (map (field "n") (named "f"))) @?= 2
@@ -340,9 +340,7 @@ warmUpTest =
         ("keyword", ["type", "pattern", "data", "default"]),
         ("reason", ["autogen", "missing"])
       ]
-    jsonOf bytes = case cborToJson bytes of
-      Left e -> assertFailure (show e)
-      Right j -> maybe (assertFailure "not JSON") pure (Aeson.decode j)
+    jsonOf = cborValue
 
 -- * Helpers
 
@@ -387,11 +385,6 @@ pageSize src = case parseSource defaultParseSettings src of
 shared :: Text -> Value
 shared i = Aeson.object ["sharedWith" Aeson..= i]
 
-list :: Value -> [Value]
-list = \case
-  Array a -> toList a
-  _ -> []
-
 -- | The page of a module, as JSON, with handles and ids as id text
 -- ('resolved').
 withPage :: Text -> (Value -> Assertion) -> Assertion
@@ -400,10 +393,7 @@ withPage src k = withRawPage src (k . resolved)
 -- | The page of a module, as JSON, as sent.
 withRawPage :: Text -> (Value -> Assertion) -> Assertion
 withRawPage src k = case parseSource defaultParseSettings src of
-  Parsed m ->
-    case cborToJson (encodeModulePage (Generation 1) index (viewOf src m)) of
-      Left e -> assertFailure (show e)
-      Right j -> maybe (assertFailure "not JSON") k (Aeson.decode j)
+  Parsed m -> k =<< cborValue (encodeModulePage (Generation 1) index (viewOf src m))
   other -> assertFailure (take 300 (show other))
 
 -- | Ids as text, and every handle (sharedWith, instances, instance,
@@ -412,7 +402,7 @@ withRawPage src k = case parseSource defaultParseSettings src of
 resolved :: Value -> Value
 resolved p = go p
   where
-    parts = [t | String t <- list (field "idParts" (field "parse" p))]
+    parts = [t | String t <- arr (field "idParts" (field "parse" p))]
     idText = \case
       String t -> t
       Object o
@@ -443,9 +433,9 @@ resolved p = go p
     field1 k v
       | k == "id" = String (idText v)
       | k `elem` ["sharedWith", "instance", "onType", "target"] = ref v
-      | k == "instances" = Array (fmap ref (arr v))
+      | k == "instances" = Array (fmap ref (items v))
       | otherwise = go v
-    arr = \case
+    items = \case
       Array a -> a
       _ -> mempty
     -- A code token's link.
@@ -483,11 +473,6 @@ index =
         warnings = []
       }
     (mkFileList FromDisk 0 [(file, EntryFile)])
-
-field :: Text -> Value -> Value
-field k = \case
-  Object o -> fromMaybe Null (KeyMap.lookup (Key.fromText k) o)
-  _ -> Null
 
 decls :: Value -> [Value]
 decls p = case field "declarations" (field "parse" p) of

@@ -37,9 +37,8 @@ import HaskellReviewer.Core.Entities
     openParts,
     withKeys,
   )
-import HaskellReviewer.Core.FileList (EntryKind (..), ListSource (..), mkFileList)
 import HaskellReviewer.Core.ImportScope (ScopeImport (..), ScopeTarget (..), scopeImport)
-import HaskellReviewer.Core.ModuleGraph (ImportTarget (..), buildModuleGraph, mapImport)
+import HaskellReviewer.Core.ModuleGraph (ImportTarget (..), mapImport)
 import HaskellReviewer.Core.ModuleModel
   ( ImportList (..),
     ListKind (..),
@@ -50,12 +49,7 @@ import HaskellReviewer.Core.ModuleModel
   )
 import HaskellReviewer.Core.ModuleModel qualified as Model (Import (..))
 import HaskellReviewer.Core.Modules
-  ( FoundModule (..),
-    ModuleId (..),
-    ModuleIndex (..),
-    ModuleSource (..),
-    buildModuleIndex,
-    findModule,
+  ( ModuleId (..),
   )
 import HaskellReviewer.Core.Names (DeclId (..), DeclNs (..))
 import HaskellReviewer.Core.Occurrences
@@ -66,7 +60,6 @@ import HaskellReviewer.Core.Occurrences
     TokenIx (..),
     occurrenceList,
   )
-import HaskellReviewer.Core.Parser (moduleParseSettings, parseSource)
 import HaskellReviewer.Core.Project (ModuleName (..))
 import HaskellReviewer.Core.Resolve
   ( ExportSets (..),
@@ -93,7 +86,7 @@ import Hedgehog (Gen, Property, PropertyT, annotate, forAll, property, (===))
 import Hedgehog qualified
 import Hedgehog.Gen qualified as Gen
 import Hedgehog.Range qualified as Range
-import IndexSupport (libFile, libProject, modId)
+import IndexSupport (memInput, modId)
 import ResolveDump
   ( Fixture (..),
     cases,
@@ -157,31 +150,6 @@ homeImportsCase = do
   home "P" @?= map modId ["C", "Prelude"]
 
 -- * In-memory projects
-
--- | One library in @src@, every module exposed: (module name, text).
--- These are not ready yet.
-memInput :: Set Text -> [(Text, Text)] -> ResolveInput
-memInput pending mods =
-  ResolveInput
-    { graph = buildModuleGraph idx,
-      state = \i -> Map.findWithDefault ModuleNotParsed i states,
-      memo = Map.empty
-    }
-  where
-    fl = mkFileList FromDisk 0 [(libFile n, EntryFile) | (n, _) <- mods]
-    idx = buildModuleIndex (libProject (map fst mods)) fl
-    states =
-      Map.fromList
-        [ (modId n, if Set.member n pending then ModuleNotReady else parsed (modId n) src)
-        | (n, src) <- mods
-        ]
-    parsed i src = case findModule idx i of
-      Just found
-        | HaskellSource f <- found.source ->
-            case parseSource (moduleParseSettings idx.ghc found.settings f) src of
-              Parsed m -> ModuleParsed ParsedInput {text = src, parsed = m}
-              TextOnly _ -> ModuleNotParsed
-      _ -> ModuleNotParsed
 
 -- | Each free token of a module: its text and result, in order.
 results :: ResolveInput -> Text -> [(Text, Resolved)]

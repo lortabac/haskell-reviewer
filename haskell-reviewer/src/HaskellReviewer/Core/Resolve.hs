@@ -30,6 +30,9 @@ module HaskellReviewer.Core.Resolve
     resolveModule,
     exportSets,
     homeImports,
+
+    -- * Names
+    quoter,
   )
 where
 

@@ -237,6 +237,7 @@ tests =
             ["api", "modules"],
             ["api", "modules", "tree", "x"],
             ["api", "module"],
+            ["api", "source"],
             ["index.html"]
           ]
     ]

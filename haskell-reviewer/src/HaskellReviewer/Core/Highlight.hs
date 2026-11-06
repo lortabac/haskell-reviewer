@@ -8,10 +8,12 @@ module HaskellReviewer.Core.Highlight
     Runs,
     Run (..),
     DisplayClass (..),
+    LinkedRuns,
 
     -- * Highlighting
     highlight,
     highlightModule,
+    highlightLinked,
     displayClass,
     noRuns,
 
@@ -19,6 +21,13 @@ module HaskellReviewer.Core.Highlight
     runCount,
     runList,
     runsWords,
+    linkedRunCount,
+    linkedRunList,
+    linkedRunsWords,
+    linkedRunWidth,
+
+    -- * Building
+    linkedRunsFromList,
   )
 where
 
@@ -65,6 +74,11 @@ call's tokens) is pragma. Haddock is comment. Directive lines get their
 own class (the client gives them the pragma colour); excluded lines are
 greyed; prose is comment.
 
+'highlightLinked' gives the same runs with a sixth word: the link of the
+token the run comes from (0 for regions and tokens with none). Both
+pieces of a token cut by a region keep its link. For the source view
+(Note [Source view] in "HaskellReviewer.Server.Wire.Source").
+
 Built per request, not stored: it's linear in tokens + regions (a few
 ms for 100k tokens) and storing runs would cost about 20 bytes a token
 on every module.
@@ -100,9 +114,18 @@ data DisplayClass
     DirectiveClass
   deriving (Eq, Ord, Show, Enum, Bounded)
 
+-- | Like 'Runs', 6 words a run: the 5 of 'Runs', then the link. See
+-- Note [Highlight runs].
+newtype LinkedRuns = LinkedRuns (Vector.Vector Word32)
+  deriving (Eq, Show)
+
 -- | Words per run.
 width :: Int
 width = 5
+
+-- | Words per linked run: the 5 of a run, then the link.
+linkedRunWidth :: Int
+linkedRunWidth = 6
 
 -- | None. Shared.
 noRuns :: Runs
@@ -139,13 +162,31 @@ highlightModule = \case
 -- | Merge tokens (sorted by start) and regions. See Note [Highlight
 -- runs].
 highlight :: Maybe Tokens -> LineRegions -> Runs
-highlight tokens regions = case go (Pos 0 0) coloured (lineRegionList regions) of
+highlight tokens regions = case merge (const 0) tokens regions of
   [] -> noRuns
-  rs -> Runs (Vector.fromList (concatMap pack rs))
+  ps -> Runs (Vector.fromList (concatMap pack ps))
+  where
+    pack p =
+      let (Pos l1 c1, Pos l2 c2) = (p.from, p.to)
+       in [l1, c1, l2, c2, fromIntegral (fromEnum p.display)]
+
+-- | Like 'highlight', with each run's link: the function gives a
+-- token's link word by its index. See Note [Highlight runs].
+highlightLinked :: (Int -> Word32) -> Maybe Tokens -> LineRegions -> LinkedRuns
+highlightLinked linkOf tokens regions =
+  LinkedRuns (Vector.fromList (concatMap pack (merge linkOf tokens regions)))
+  where
+    pack p =
+      let (Pos l1 c1, Pos l2 c2) = (p.from, p.to)
+       in [l1, c1, l2, c2, fromIntegral (fromEnum p.display), p.link]
+
+-- | The pieces of the runs, in order.
+merge :: (Int -> Word32) -> Maybe Tokens -> LineRegions -> [Piece]
+merge linkOf tokens regions = go (Pos 0 0) coloured (lineRegionList regions)
   where
     coloured =
-      [ Piece {from = start t.span, to = end t.span, display = d}
-      | t <- maybe [] tokenList tokens,
+      [ Piece {from = start t.span, to = end t.span, display = d, link = linkOf i}
+      | (i, t) <- zip [0 ..] (maybe [] tokenList tokens),
         Just d <- [displayClass t.kind]
       ]
     -- prev: where the last run ended.
@@ -167,7 +208,7 @@ highlight tokens regions = case go (Pos 0 0) coloured (lineRegionList regions) o
     headOf = \case
       p : _ -> Just p
       [] -> Nothing
-    piece from to d = Piece {from = from, to = to, display = d}
+    piece from to d = Piece {from = from, to = to, display = d, link = 0}
     -- Clamped to prev; dropped if empty.
     emit prev p rest
       | from' < p.to = p {from = from'} : rest
@@ -182,9 +223,6 @@ highlight tokens regions = case go (Pos 0 0) coloured (lineRegionList regions) o
       Prose -> CommentClass
     start s = let (Line l, Col c) = (s.startLine, s.startCol) in Pos l c
     end s = let (Line l, Col c) = (s.endLine, s.endCol) in Pos l c
-    pack p =
-      let (Pos l1 c1, Pos l2 c2) = (p.from, p.to)
-       in [l1, c1, l2, c2, fromIntegral (fromEnum p.display)]
 
 -- | A place: line and column.
 data Pos = Pos Word32 Word32
@@ -194,7 +232,9 @@ data Pos = Pos Word32 Word32
 data Piece = Piece
   { from :: Pos,
     to :: Pos,
-    display :: DisplayClass
+    display :: DisplayClass,
+    -- | 0 when not linked.
+    link :: Word32
   }
 
 -- | How many.
@@ -211,12 +251,45 @@ runList r@(Runs v) = map at [0 .. runCount r - 1]
           display = toClass (w i 4)
         }
     w i k = v Vector.! (i * width + k)
-    -- Only highlight writes the class word.
-    toClass n
-      | n <= fromIntegral (fromEnum (maxBound :: DisplayClass)) = toEnum (fromIntegral n)
-      | otherwise = error ("Highlight: bad class word " <> show n)
+
+-- | A class word back. Only highlight writes them.
+toClass :: Word32 -> DisplayClass
+toClass n
+  | n <= fromIntegral (fromEnum (maxBound :: DisplayClass)) = toEnum (fromIntegral n)
+  | otherwise = error ("Highlight: bad class word " <> show n)
 
 -- | The flat array: 5 words a run (start line, start column, end line,
 -- end column, class).
 runsWords :: Runs -> Vector.Vector Word32
 runsWords (Runs v) = v
+
+-- | How many.
+linkedRunCount :: LinkedRuns -> Int
+linkedRunCount (LinkedRuns v) = Vector.length v `div` linkedRunWidth
+
+-- | All of them, in order, each with its link.
+linkedRunList :: LinkedRuns -> [(Run, Word32)]
+linkedRunList r@(LinkedRuns v) = map at [0 .. linkedRunCount r - 1]
+  where
+    at i =
+      ( Run
+          { span = Span (Line (w i 0)) (Col (w i 1)) (Line (w i 2)) (Col (w i 3)),
+            display = toClass (w i 4)
+          },
+        w i 5
+      )
+    w i k = v Vector.! (i * linkedRunWidth + k)
+
+-- | The flat array: 6 words a run (start line, start column, end line,
+-- end column, class, link).
+linkedRunsWords :: LinkedRuns -> Vector.Vector Word32
+linkedRunsWords (LinkedRuns v) = v
+
+-- | Back from 'linkedRunList'. The runs should be sorted and not
+-- overlap. Classes and links as given.
+linkedRunsFromList :: [(Run, Word32)] -> LinkedRuns
+linkedRunsFromList rs = LinkedRuns (Vector.fromList (concatMap words6 rs))
+  where
+    words6 (r, link) =
+      let Span (Line l1) (Col c1) (Line l2) (Col c2) = r.span
+       in [l1, c1, l2, c2, fromIntegral (fromEnum r.display), link]

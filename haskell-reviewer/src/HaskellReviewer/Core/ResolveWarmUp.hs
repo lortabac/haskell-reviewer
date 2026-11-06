@@ -6,6 +6,7 @@
 module HaskellReviewer.Core.ResolveWarmUp
   ( resolveWarmUpInput,
     resolveWarmUpModules,
+    resolveWarmUpIndex,
   )
 where
 
@@ -61,6 +62,10 @@ resolveWarmUpInput =
       state = \i -> fromMaybe ModuleNotParsed (lookup i states),
       memo = Map.empty
     }
+
+-- | The warm-up project's module index.
+resolveWarmUpIndex :: ModuleIndex
+resolveWarmUpIndex = index
 
 index :: ModuleIndex
 index =
@@ -329,6 +334,16 @@ files =
         ]
     ),
     ("w/src/Shared.hs", "module Shared (sh) where\nsh = 1\n"),
+    -- A package import.
+    ( "w/src/Pkg.hs",
+      Text.unlines
+        [ "{-# LANGUAGE PackageImports #-}",
+          "module Pkg where",
+          "import \"base\" Data.Word (Word8)",
+          "w :: Word8",
+          "w = 1"
+        ]
+    ),
     ( "w/src/Bare.hs",
       Text.unlines
         [ "{-# LANGUAGE DuplicateRecordFields, NoFieldSelectors, OverloadedRecordDot #-}",
