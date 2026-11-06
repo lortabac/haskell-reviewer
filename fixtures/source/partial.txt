@@ -37,9 +37,9 @@ outline OutlineValue val:c 6 6-6
 #2 decl Use src/Use.hs:10 val:u
 #3 module Broken src/Broken.hs not-parsed
 #4 decl Use src/Use.hs:12 val:v
-#5 decl Use src/Use.hs:14 type:R
-#6 decl Use src/Use.hs:14 con:R
-#7 decl Use src/Use.hs:14 field:R.f
+#5 decl Use src/Use.hs:14 type:R | data R
+#6 decl Use src/Use.hs:14 con:R | R {f :: R}
+#7 decl Use src/Use.hs:14 field:R.f | f :: R
 #8 decl Use src/Use.hs:16 val:g
 #9 local 16:3
 4:16-4:17 "x" -> #1

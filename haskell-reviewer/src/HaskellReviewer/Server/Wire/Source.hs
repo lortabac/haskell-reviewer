@@ -120,12 +120,13 @@ only with nothing to show) or "lexed", which adds:
   1 excluded by CPP, 2 literate prose), first line, last line.
 - targets, each an array, kind first:
     ["local", line, col]
-    ["decl", ref, path, line | null, id, reasons, candidates]
+    ["decl", ref, path, line | null, id, reasons, candidates, sig | null]
     ["module", ref, path | null, reasons, candidates]
     ["external", module, package | null, how, count, query]
   reasons are text codes ('reasonName'), empty when exact; how is
-  listed, only-open or one-of ('howName'). See Note [Source links] in
-  "HaskellReviewer.Core.SourceLinks".
+  listed, only-open or one-of ('howName'); sig is the declaration's
+  code for the hover, plain text. See Note [Source links] and Note
+  [Hover signatures] in "HaskellReviewer.Core.SourceLinks".
 - outline: [kind, id, name | null, line, firstLine, lastLine] per
   top-level declaration with an id, in source order.
 
@@ -135,7 +136,13 @@ project's modules with their links, the parser's declaration and
 highlighting modules, a text-only and a plain view, and one view made
 of all of them stacked ('coveringView'), and both not-found bodies. A
 test checks the covering view has every target kind, reason, how,
-display class, region kind and outline kind.
+display class, region kind and outline kind, every shape of sig (Note
+[Hover signatures] in "HaskellReviewer.Core.SourceLinks"), a cut one
+and a null one. The sig shapes come from @w/src/Sigs.hs@ of the
+resolution warm-up project. The parser's modules (@warm-up/M1.hs@...)
+are encoded with that project's index ('resolveWarmUpIndex'), where
+they have no file: their names link to module targets, never to
+declarations, so they can't carry sigs.
 -}
 
 -- * Types
@@ -248,7 +255,8 @@ target =
         Cbor.nullable line d.line,
         Cbor.text (renderDeclId d.id),
         reasons d.reasons,
-        Cbor.int d.candidates
+        Cbor.int d.candidates,
+        Cbor.nullable Cbor.text d.sig
       ]
     ToModule m ->
       [ Cbor.text "module",

@@ -1,22 +1,22 @@
 == contexts:lib:Defs
-#1 decl Defs src/Defs.hs:6 type:Rec
-#2 decl Defs src/Defs.hs:8 class:Cls
-#3 decl Defs src/Defs.hs:9 val:cm
-#4 decl Defs src/Defs.hs:13 type:Point
-#5 decl Defs src/Defs.hs:13 field:Point.px
-#6 decl Defs src/Defs.hs:17 val:qq
-#7 decl Defs src/Defs.hs:15 type:Nat
+#1 decl Defs src/Defs.hs:6 type:Rec | data Rec
+#2 decl Defs src/Defs.hs:8 class:Cls | class Cls a
+#3 decl Defs src/Defs.hs:9 val:cm | cm :: a -> Int
+#4 decl Defs src/Defs.hs:13 type:Point | data Point
+#5 decl Defs src/Defs.hs:13 field:Point.px | px :: Int
+#6 decl Defs src/Defs.hs:17 val:qq | qq :: QuasiQuoter
+#7 decl Defs src/Defs.hs:15 type:Nat | data Nat
 #8 external Language.Haskell.TH.Quote listed 1 "QuasiQuoter +module:Language.Haskell.TH.Quote"
-#9 decl Defs src/Defs.hs:6 con:Rec
-#10 decl Defs src/Defs.hs:6 field:Rec.ra
+#9 decl Defs src/Defs.hs:6 con:Rec | Rec {ra :: Int, rb :: Int}
+#10 decl Defs src/Defs.hs:6 field:Rec.ra | ra :: Int
 #11 external Prelude one-of 2 "Int"
-#12 decl Defs src/Defs.hs:6 field:Rec.rb
+#12 decl Defs src/Defs.hs:6 field:Rec.rb | rb :: Int
 #13 local 8:11
-#14 decl Defs src/Defs.hs:10 val:cm2
-#15 decl Defs src/Defs.hs:13 con:Point
-#16 decl Defs src/Defs.hs:13 field:Point.py
-#17 decl Defs src/Defs.hs:15 con:Z
-#18 decl Defs src/Defs.hs:15 con:S
+#14 decl Defs src/Defs.hs:10 val:cm2 | cm2 :: a -> Int
+#15 decl Defs src/Defs.hs:13 con:Point | Point {px :: Int, py :: Int}
+#16 decl Defs src/Defs.hs:13 field:Point.py | py :: Int
+#17 decl Defs src/Defs.hs:15 con:Z | Z
+#18 decl Defs src/Defs.hs:15 con:S | S Nat
 #19 external Language.Haskell.TH.Quote listed 1 "quoteExp +module:Language.Haskell.TH.Quote"
 #20 local 18:31
 #21 external Language.Haskell.TH.Quote listed 1 "quotePat +module:Language.Haskell.TH.Quote"
@@ -78,36 +78,36 @@ outline OutlineValue val:qq 17 17-18
 
 == contexts:lib:Use
 #1 external Data.Proxy listed 1 "Proxy +module:Data.Proxy"
-#2 decl Defs src/Defs.hs:8 class:Cls
+#2 decl Defs src/Defs.hs:8 class:Cls | class Cls a
 #3 external Prelude one-of 2 "Bool"
-#4 decl Defs src/Defs.hs:9 val:cm
+#4 decl Defs src/Defs.hs:9 val:cm | cm :: a -> Int
 #5 external Prelude one-of 2 "Show"
-#6 decl Defs src/Defs.hs:6 type:Rec
+#6 decl Defs src/Defs.hs:6 type:Rec | data Rec
 #7 external Prelude one-of 2 "show"
 #8 local 11:8
-#9 decl Defs src/Defs.hs:6 field:Rec.ra record-dot
-#10 decl Use src/Use.hs:13 val:mk
-#11 decl Defs src/Defs.hs:6 con:Rec
-#12 decl Defs src/Defs.hs:6 field:Rec.ra
-#13 decl Defs src/Defs.hs:6 field:Rec.rb
-#14 decl Use src/Use.hs:16 val:upd
+#9 decl Defs src/Defs.hs:6 field:Rec.ra record-dot | ra :: Int
+#10 decl Use src/Use.hs:13 val:mk | mk :: Rec
+#11 decl Defs src/Defs.hs:6 con:Rec | Rec {ra :: Int, rb :: Int}
+#12 decl Defs src/Defs.hs:6 field:Rec.ra | ra :: Int
+#13 decl Defs src/Defs.hs:6 field:Rec.rb | rb :: Int
+#14 decl Use src/Use.hs:16 val:upd | upd :: Rec -> Rec
 #15 local 17:5
-#16 decl Use src/Use.hs:19 val:dot
+#16 decl Use src/Use.hs:19 val:dot | dot :: Rec -> Int
 #17 external Prelude one-of 2 "Int"
 #18 local 20:5
-#19 decl Defs src/Defs.hs:6 field:Rec.rb record-dot
+#19 decl Defs src/Defs.hs:6 field:Rec.rb record-dot | rb :: Int
 #20 external Prelude one-of 2 "+"
-#21 decl Defs src/Defs.hs:13 field:Point.px
-#22 decl Defs src/Defs.hs:13 con:Point
-#23 decl Use src/Use.hs:22 val:wild
-#24 decl Defs src/Defs.hs:6 field:Rec.ra wildcard
-#25 decl Defs src/Defs.hs:6 field:Rec.rb wildcard
-#26 decl Use src/Use.hs:25 val:prox
-#27 decl Defs src/Defs.hs:15 con:S data-kinds
-#28 decl Defs src/Defs.hs:15 con:Z data-kinds
-#29 decl Use src/Use.hs:28 val:q
+#21 decl Defs src/Defs.hs:13 field:Point.px | px :: Int
+#22 decl Defs src/Defs.hs:13 con:Point | Point {px :: Int, py :: Int}
+#23 decl Use src/Use.hs:22 val:wild | wild :: Rec -> Int
+#24 decl Defs src/Defs.hs:6 field:Rec.ra wildcard | ra :: Int
+#25 decl Defs src/Defs.hs:6 field:Rec.rb wildcard | rb :: Int
+#26 decl Use src/Use.hs:25 val:prox | prox :: Proxy (S Z)
+#27 decl Defs src/Defs.hs:15 con:S data-kinds | S Nat
+#28 decl Defs src/Defs.hs:15 con:Z data-kinds | Z
+#29 decl Use src/Use.hs:28 val:q | q :: String
 #30 external Prelude one-of 2 "String"
-#31 decl Defs src/Defs.hs:17 val:qq
+#31 decl Defs src/Defs.hs:17 val:qq | qq :: QuasiQuoter
 4:20-4:25 "Proxy" -> #1
 7:10-7:13 "Cls" -> #2
 7:14-7:18 "Bool" -> #3

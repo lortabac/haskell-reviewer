@@ -334,6 +334,41 @@ files =
         ]
     ),
     ("w/src/Shared.hs", "module Shared (sh) where\nsh = 1\n"),
+    -- Every hover sig shape, plus a long one and a missing one. u and
+    -- U use them so they get links. See Note [Hover signatures] in
+    -- "HaskellReviewer.Core.SourceLinks".
+    ( "w/src/Sigs.hs",
+      Text.unlines
+        [ "{-# LANGUAGE PatternSynonyms, TypeFamilies #-}",
+          "module Sigs where",
+          "v :: Int",
+          "  -> Int",
+          "v = id",
+          "w = 1",
+          "pattern P :: Int",
+          "pattern P = 1",
+          "pattern Q {q} = Just q",
+          "class C a where",
+          "  type E a",
+          "  m :: a -> Int",
+          "data T a = K a | L {fld :: Int}",
+          "data GA a where",
+          "  GK :: a -> GA a",
+          "newtype N = N Int",
+          "type S = Int",
+          "type family F a",
+          "type family G a where",
+          "  G a = a",
+          "data family D a",
+          "data instance D Int = DI Int",
+          "long :: " <> Text.intercalate " -> " (replicate 80 "Int"),
+          "long = undefined",
+          "u = (v, w, P, Q, q, m, K, L, fld, N, DI, GK, long)",
+          "type U = (T S, N, F Int, G Int, D Int, E Int, GA Int)",
+          "f :: C a => a -> Int",
+          "f = m"
+        ]
+    ),
     -- A package import.
     ( "w/src/Pkg.hs",
       Text.unlines

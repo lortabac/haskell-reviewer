@@ -26,6 +26,9 @@ module HaskellReviewer.Core.SourceLinks
 
     -- * Reading
     linkAt,
+
+    -- * Hover
+    declSigs,
   )
 where
 
@@ -36,18 +39,45 @@ import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Text (Text)
+import Data.Text qualified as Text
 import Data.Vector.Unboxed qualified as Vector
 import Data.Word (Word32)
-import HaskellReviewer.Core.Code (nameRef)
+import HaskellReviewer.Core.Code
+  ( Code,
+    CodeClass (..),
+    CodeEnv (..),
+    CodeToken (..),
+    classHead,
+    codeText,
+    conFields,
+    conSpan,
+    nameRef,
+    plainCode,
+    typeHead,
+  )
 import HaskellReviewer.Core.Decls
-  ( Decl (..),
+  ( ArgType (..),
+    ClassDecl (..),
+    ConDecl (..),
+    Decl (..),
     DeclInfo (..),
     Extent (..),
-    NamedDecl (..),
+    FamInstDecl (..),
+    FieldDecl (..),
+    InstanceBody (..),
+    InstanceDecl (..),
+    InstanceForm (..),
+    MethodDecl (..),
     Part (..),
+    PatSynDecl (..),
+    Signature (..),
+    TypeDecl (..),
+    ValueDecl (..),
     declInfo,
-    namedDecls,
+    famInstConstructors,
+    formConstructors,
   )
+import HaskellReviewer.Core.DocLinks (noLocalNames)
 import HaskellReviewer.Core.ModuleGraph (MappingGuess (..))
 import HaskellReviewer.Core.ModuleModel (ParsedModule (..))
 import HaskellReviewer.Core.Modules (ModuleId, ModuleIndex, modulePath, moduleRef)
@@ -84,7 +114,7 @@ import HaskellReviewer.Core.RichText (NameRef (..))
 import HaskellReviewer.Core.RichText qualified as Rich (RefNamespace (..))
 import HaskellReviewer.Core.SourceText (SourceLines, sliceSpan, sourceLines)
 import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
-import HaskellReviewer.Core.Tokens (tokenCount, tokenSpanAt)
+import HaskellReviewer.Core.Tokens (TokenClass (..), tokenCount, tokenSpanAt)
 
 {- Note [Source links]
 
@@ -120,11 +150,40 @@ only.
 The line of a declaration of another module comes from that module's
 declarations, through the same module states resolution read: each
 target module's names are read once. Its ref and file too, once per
-module, not per target (a file is a map lookup, 'modulePath'). Linear
-in tokens, plus the declarations of the modules linked to.
+module, not per target (a file is a map lookup, 'modulePath'). So is
+its hover code (Note [Hover signatures]). Linear in tokens, plus the
+declarations of the modules linked to.
 
 The outline is the top-level declarations with an id, in source order:
 kind, id, the line of the name and the lines the declaration spans.
+-}
+
+{- Note [Hover signatures]
+
+A declaration target has a sig: what the docs page shows as the
+declaration's code, as plain text, for the hover.
+
+- values, pattern synonyms and methods: the signature (null without
+  one);
+- constructors: the constructor's line;
+- record fields: @f :: T@;
+- types, classes and families: the head (Note [Declaration heads] in
+  "HaskellReviewer.Core.Code"), without a last @where@ (a GADT, a
+  closed family); a synonym's head is all of it.
+
+Pattern synonym fields have no type of their own: null. The code comes
+from "HaskellReviewer.Core.Code", with the target module's text and
+tokens, and no links. Code already has one space for each gap between
+tokens (Note [Code tokens] there); a newline inside a token (a string
+gap, a CPP call) becomes a space too, so the hover is one line. Other
+spaces inside a token stay. Past 'sigCap' code points it's cut (spaces
+at the end dropped), plus @…@. Empty: null.
+
+Each target module's 'CodeEnv' (its lines) is built once, and only if
+one of its targets has code. This module's reuses the lines the links
+already read. Each sig is built once, however many
+targets share the declaration. A module not parsed (in the states
+resolution read): no line, no sig.
 -}
 
 -- * Input
@@ -183,7 +242,9 @@ data DeclLink = DeclLink
     -- | Empty when exact.
     reasons :: [LinkReason],
     -- | 1 unless ambiguous.
-    candidates :: Int
+    candidates :: Int,
+    -- | For the hover. See Note [Hover signatures].
+    sig :: Maybe Text
   }
   deriving (Eq, Show)
 
@@ -302,10 +363,10 @@ sourceLinks input =
         Just k <- [keyOf input ls i o]
       ]
     done = foldl' assign (Assigned Map.empty 0 [] []) keyed
-    -- Each decl target module's names, read once.
+    -- Each decl target module's names and code, read once.
     lines' =
       Map.fromList
-        [(m, declLines input m) | m <- nubOrd [m | KeyDecl m _ _ _ <- done.new]]
+        [(m, declFacts input ls m) | m <- nubOrd [m | KeyDecl m _ _ _ <- done.new]]
     -- Each target module's ref and file, found once.
     places =
       Map.fromList
@@ -326,10 +387,12 @@ forceSourceLinks s =
   where
     forceTarget = \case
       ToLocal l -> l `seq` ()
-      ToDecl d -> d.ref `seq` d.line `seq` forceDeclId d.id `seq` reasons d.reasons
+      ToDecl d ->
+        d.ref `seq` d.line `seq` forceDeclId d.id `seq` sig d.sig `seq` reasons d.reasons
       ToModule m -> m.ref `seq` m.path `seq` reasons m.reasons
       ToExternal x -> forceExternalModule x.module_ `seq` x.query `seq` ()
     reasons = foldr seq ()
+    sig = maybe () (`seq` ())
     entry e = forceDeclId e.id `seq` ()
 
 -- * Reading
@@ -442,23 +505,25 @@ reasonOf = \case
 -- finds declarations in parsed modules) is a module target.
 targetOf ::
   Map ModuleId (Text, Maybe RelPath) ->
-  Map ModuleId (Map DeclId Line) ->
+  Map ModuleId (Map DeclId DeclFacts) ->
   Key ->
   LinkTarget
-targetOf places lineMaps = \case
+targetOf places factMaps = \case
   KeyLocal l c -> ToLocal LocalLink {line = l, col = c}
   KeyDecl m d rs k -> case place m of
     (ref, Just p) ->
-      ToDecl
-        DeclLink
-          { module_ = m,
-            ref = ref,
-            path = p,
-            line = Map.lookup d =<< Map.lookup m lineMaps,
-            id = d,
-            reasons = rs,
-            candidates = k
-          }
+      let facts = Map.lookup d =<< Map.lookup m factMaps
+       in ToDecl
+            DeclLink
+              { module_ = m,
+                ref = ref,
+                path = p,
+                line = (.line) <$> facts,
+                id = d,
+                reasons = rs,
+                candidates = k,
+                sig = (.sig) =<< facts
+              }
     (ref, Nothing) -> moduleLink m ref Nothing rs k
   KeyModule m rs k -> let (ref, p) = place m in moduleLink m ref p rs k
   KeyExternal x how k q ->
@@ -476,21 +541,91 @@ targetOf places lineMaps = \case
             candidates = k
           }
 
--- | The line of each named declaration of a module (the first one, if
--- an id is there twice). Empty if the module isn't parsed.
-declLines :: LinksInput -> ModuleId -> Map DeclId Line
-declLines input m = case decls of
-  Just ds ->
-    Map.fromListWith
-      (\_ old -> old)
-      [(nd.info.id, nd.info.nameSpan.startLine) | d <- ds, nd <- namedDecls d]
+-- | What a declaration target shows of its declaration.
+data DeclFacts = DeclFacts
+  { -- | Of its name.
+    line :: Line,
+    -- | Lazy: built only for declarations linked to, once each.
+    sig :: ~(Maybe Text)
+  }
+
+-- | The facts of each named declaration of a module (the first one, if
+-- an id is there twice), with this module's lines. Empty if the module
+-- isn't parsed. See Note [Hover signatures].
+declFacts :: LinksInput -> SourceLines -> ModuleId -> Map DeclId DeclFacts
+declFacts input selfLines m = case source of
+  Just (ls, parsed) ->
+    -- Lazy: built on the first sig asked for, once.
+    let env = CodeEnv {source = ls, tokens = parsed.tokens, names = noLocalNames}
+     in Map.fromListWith
+          (\_ old -> old)
+          [ (info.id, DeclFacts {line = info.nameSpan.startLine, sig = sigText =<< code})
+          | d <- parsed.declarations,
+            (info, code) <- declSigs env d
+          ]
   Nothing -> Map.empty
   where
-    decls
-      | m == input.self = Just input.parsed.declarations
+    source
+      | m == input.self = Just (selfLines, input.parsed)
       | otherwise = case input.state m of
-          ModuleParsed p -> Just p.parsed.declarations
+          ModuleParsed p -> Just (sourceLines p.text, p.parsed)
           _ -> Nothing
+
+-- * Hover
+
+-- | The named declarations in a top-level one, each with its hover
+-- code, in 'HaskellReviewer.Core.Decls.namedDecls' order (the test
+-- "declSigs names what namedDecls names, in order" keeps them in
+-- step). Not cut yet. See Note [Hover signatures].
+declSigs :: CodeEnv -> Decl -> [(DeclInfo, Maybe Text)]
+declSigs env = \case
+  TypeD t -> typeSigs t
+  ClassD c ->
+    (c.info, Just (headText (classHead env c)))
+      : concatMap typeSigs c.associated
+        <> [(m.info, Just (plain m.signature.span)) | m <- c.methods]
+  ValueD v -> [(v.info, plain . (.span) <$> v.signature)]
+  PatSynD p ->
+    (p.info, plain . (.span) <$> p.signature) : [(f, Nothing) | f <- p.fields]
+  InstanceD i -> case i.form of
+    ExplicitInstance b -> concatMap famInst b.associated
+    _ -> []
+  FamInstD f -> famInst f
+  SpliceD _ -> []
+  where
+    typeSigs t =
+      (t.info, Just (headText (typeHead env t)))
+        : concatMap con (formConstructors t.form)
+    famInst f = concatMap con (famInstConstructors f.form)
+    con c =
+      (c.info, Just (codeText (concatMap (plainCode env) (conSpan c))))
+        : map field (conFields c)
+    field f =
+      (f.info, Just (plain f.info.nameSpan <> " :: " <> plain f.type_.type_))
+    plain s = codeText (plainCode env s)
+
+-- | A head's text, without a last @where@. See Note [Hover signatures].
+headText :: Code -> Text
+headText = codeText . reverse . dropWhere . reverse
+  where
+    dropWhere = \case
+      CodeToken {kind = Tok Keyword, text = "where"} : rest -> dropWhile isSpace rest
+      ts -> ts
+    isSpace t = t.kind == Space
+
+-- | How many code points a sig keeps.
+sigCap :: Int
+sigCap = 300
+
+-- | One line, cut at 'sigCap' code points plus @…@; empty is 'Nothing'.
+-- See Note [Hover signatures].
+sigText :: Text -> Maybe Text
+sigText t
+  | Text.null c = Nothing
+  | Text.compareLength c sigCap == GT = Just (Text.stripEnd (Text.take sigCap c) <> "…")
+  | otherwise = Just c
+  where
+    c = Text.map (\ch -> if ch == '\n' then ' ' else ch) t
 
 -- | A top-level declaration's outline entry. Splices have none.
 outlineEntry :: Decl -> Maybe OutlineEntry

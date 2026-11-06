@@ -15,6 +15,7 @@ module HaskellReviewer.Core.Code
     codeOf,
     codeOfSpans,
     plainCode,
+    codeText,
     nameRef,
 
     -- * Heads
@@ -22,6 +23,10 @@ module HaskellReviewer.Core.Code
     classHead,
     instanceHead,
     famInstHead,
+
+    -- * Constructors
+    conSpan,
+    conFields,
   )
 where
 
@@ -32,6 +37,7 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import HaskellReviewer.Core.Decls
   ( ClassDecl (..),
+    ConArgs (..),
     ConDecl (..),
     DataBody (..),
     DeclInfo (..),
@@ -39,6 +45,7 @@ import HaskellReviewer.Core.Decls
     Extent (..),
     FamInstDecl (..),
     FamInstForm (..),
+    FieldDecl (..),
     InstanceDecl (..),
     InstanceForm (..),
     NewtypeBody (..),
@@ -135,6 +142,10 @@ codeOfSpans env self ss =
 plainCode :: CodeEnv -> Span -> Code
 plainCode env s = renderWith NoLinks env (tokensBefore env (spanEnd s) s)
 
+-- | The text of code, links dropped.
+codeText :: Code -> Text
+codeText = Text.concat . map (.text)
+
 {- Note [Declaration heads]
 
 The head is what the page shows as the declaration's title line. It
@@ -189,6 +200,19 @@ famInstHead env f = case f.form of
   where
     main = mainSpan f.info
     dataHead stops = render env [] (dataTokens env main stops)
+
+-- * Constructors
+
+-- | A constructor's own line: its first head part.
+conSpan :: ConDecl -> [Span]
+conSpan c = take 1 (headSpans c.info)
+
+-- | A constructor's record fields.
+conFields :: ConDecl -> [FieldDecl]
+conFields c = case c.args of
+  RecordArgs fs -> fs
+  GadtRecordArgs fs -> fs
+  _ -> []
 
 -- * Internal
 
