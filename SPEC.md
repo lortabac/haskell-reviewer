@@ -1463,12 +1463,16 @@ a framework would cost more than it saves.
   search results, threads, prefs) are JSON. **Token-heavy** payloads (docs
   pages with their inline source, full source, diff, expanded diff) are
   **CBOR** (D-51), with only what JSON has (text-keyed maps, arrays, text,
-  ints, bools, null). Each route has one encoding (D-165). Search is
+  ints, bools, null). Each route has one encoding (D-165). The
+  full-source view reads `GET api/source/<side>/<path>` (D-265):
+  display-class runs with links into a targets table, line regions and
+  an outline; the file's text comes from `api/file`. Search is
   `GET api/search/<side>?q=` (D-207). Every response
   carries its snapshot generation id, and the client caches by
   *(generation, resource)*. Preferences (`api/prefs`) are the exception:
   they don't belong to a snapshot, so they have no generation (D-197). A
-  module that doesn't exist is a 404 with a small JSON body (D-166);
+  module or source file that doesn't exist is a 404 with a small JSON
+  body (D-166, D-265);
   other errors are plain text.
 - **Actions** (ask, stop, reload, set preference, …) are `POST` requests
   with JSON bodies.

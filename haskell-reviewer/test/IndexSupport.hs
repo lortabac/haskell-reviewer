@@ -6,6 +6,9 @@ module IndexSupport
     libFile,
     modId,
     rel,
+    MemProject (..),
+    memProject,
+    memInput,
 
     -- * Waiting on slots
     within,
@@ -17,10 +20,24 @@ module IndexSupport
 where
 
 import Control.Concurrent.STM (atomically, check)
+import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
+import Data.Set (Set)
+import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
-import HaskellReviewer.Core.Modules (ModuleId (..))
+import HaskellReviewer.Core.FileList (EntryKind (..), ListSource (..), mkFileList)
+import HaskellReviewer.Core.ModuleGraph (buildModuleGraph)
+import HaskellReviewer.Core.ModuleModel (ModuleParse (..))
+import HaskellReviewer.Core.Modules
+  ( FoundModule (..),
+    ModuleId (..),
+    ModuleIndex (..),
+    ModuleSource (..),
+    buildModuleIndex,
+    findModule,
+  )
+import HaskellReviewer.Core.Parser (moduleParseSettings, parseSource)
 import HaskellReviewer.Core.Project
   ( Component (..),
     ComponentName (..),
@@ -37,6 +54,11 @@ import HaskellReviewer.Core.Project
     parserGhcVersion,
   )
 import HaskellReviewer.Core.RelPath (RelPath, relDirFromSegments, relPathFromSegments)
+import HaskellReviewer.Core.Resolve
+  ( ModuleState (..),
+    ParsedInput (..),
+    ResolveInput (..),
+  )
 import HaskellReviewer.Session.Index
   ( Index,
     Progress (..),
@@ -99,6 +121,42 @@ modId n = ComponentModule (PackageName "p") Lib (ModuleName n)
 rel :: Text -> RelPath
 rel p =
   fromMaybe (error ("bad path " <> show p)) (relPathFromSegments (Text.splitOn "/" p))
+
+-- | A 'libProject' in memory: its index, and what resolution reads.
+data MemProject = MemProject
+  { index :: ModuleIndex,
+    input :: ResolveInput
+  }
+
+-- | A 'libProject' of these modules (name, text), every module parsed.
+-- The ones in the set are not ready yet.
+memProject :: Set Text -> [(Text, Text)] -> MemProject
+memProject pending mods = MemProject {index = idx, input = input}
+  where
+    fl = mkFileList FromDisk 0 [(libFile n, EntryFile) | (n, _) <- mods]
+    idx = buildModuleIndex (libProject (map fst mods)) fl
+    input =
+      ResolveInput
+        { graph = buildModuleGraph idx,
+          state = \i -> Map.findWithDefault ModuleNotParsed i states,
+          memo = Map.empty
+        }
+    states =
+      Map.fromList
+        [ (modId n, if Set.member n pending then ModuleNotReady else parsed (modId n) src)
+        | (n, src) <- mods
+        ]
+    parsed i src = case findModule idx i of
+      Just found
+        | HaskellSource f <- found.source ->
+            case parseSource (moduleParseSettings idx.ghc found.settings f) src of
+              Parsed m -> ModuleParsed ParsedInput {text = src, parsed = m}
+              TextOnly _ -> ModuleNotParsed
+      _ -> ModuleNotParsed
+
+-- | The resolution input of 'memProject'.
+memInput :: Set Text -> [(Text, Text)] -> ResolveInput
+memInput pending mods = (memProject pending mods).input
 
 -- * Waiting on slots
 

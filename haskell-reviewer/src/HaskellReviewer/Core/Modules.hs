@@ -37,6 +37,8 @@ module HaskellReviewer.Core.Modules
     FoundModule (..),
     findModule,
     looseModule,
+    moduleAtPath,
+    modulePath,
 
     -- * Identity
     ModuleId (..),
@@ -177,6 +179,8 @@ data ModuleIndex = ModuleIndex
     looseByName :: Map ModuleName [RelPath],
     -- | Every module id.
     ids :: Set ModuleId,
+    -- | The file of each module that has one ('modulePath').
+    paths :: Map ModuleId RelPath,
     -- | The project's GHC (SPEC §7.1), for CPP.
     ghc :: GhcVersion
   }
@@ -343,6 +347,19 @@ buildModuleIndex project fl =
       ownedByName = groupByName owned,
       looseByName = groupByName [(n, f.path) | f <- loose, Just n <- [f.name]],
       ids = Set.fromList (map snd owned <> [LooseModule f.path | f <- loose]),
+      -- Ids are unique (packages, components and listed modules are
+      -- deduplicated), so this is what findModule finds.
+      paths =
+        Map.fromListWith
+          (\_ old -> old)
+          ( [ (ComponentModule pkg.name c.name m.name, p)
+            | pkg <- packages,
+              c <- pkg.components,
+              m <- c.modules,
+              Just p <- [sourcePath m.source]
+            ]
+              <> [(LooseModule f.path, f.path) | f <- loose]
+          ),
       ghc = project.ghc.version
     }
   where
@@ -458,6 +475,27 @@ looseModule path =
     loosen (HaskellSource f@HaskellFile {literate = BirdOrLatex}) =
       HaskellSource f {literate = LooseLiterate}
     loosen s = s
+
+-- | The module whose source is this file: the first one in tree order
+-- (packages, components, modules by name), else the loose module. A
+-- boot file, a symlink or a file no module has: 'Nothing'. The same
+-- rule as the client's @indexSources@ (web/src/modules/store.tsx).
+-- A linear scan.
+moduleAtPath :: ModuleIndex -> RelPath -> Maybe ModuleId
+moduleAtPath idx path = listToMaybe (owned <> loose)
+  where
+    owned =
+      [ ComponentModule p.name c.name m.name
+      | p <- idx.packages,
+        c <- p.components,
+        m <- c.modules,
+        sourcePath m.source == Just path
+      ]
+    loose = [LooseModule f.path | OtherModule f <- idx.other, f.path == path]
+
+-- | The file of a module, if it has one. A map lookup.
+modulePath :: ModuleIndex -> ModuleId -> Maybe RelPath
+modulePath idx i = Map.lookup i idx.paths
 
 -- * Identity
 

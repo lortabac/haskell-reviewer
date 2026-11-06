@@ -86,6 +86,7 @@ library
     HaskellReviewer.Core.RichText
     HaskellReviewer.Core.Root
     HaskellReviewer.Core.Search
+    HaskellReviewer.Core.SourceLinks
     HaskellReviewer.Core.SourceText
     HaskellReviewer.Core.Span
     HaskellReviewer.Core.Tokens
@@ -127,6 +128,7 @@ library
     HaskellReviewer.Server.Security
     HaskellReviewer.Server.Wire
     HaskellReviewer.Server.Wire.Page
+    HaskellReviewer.Server.Wire.Source
 
     -- App
     HaskellReviewer.App.Cli
@@ -257,6 +259,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.RichTextGoldenTest
     HaskellReviewer.Core.RootTest
     HaskellReviewer.Core.SearchTest
+    HaskellReviewer.Core.SourceLinksTest
     HaskellReviewer.Core.SourceTextTest
     HaskellReviewer.Core.TokensTest
     HaskellReviewer.Core.XdgTest
@@ -276,6 +279,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Server.EventsTest
     HaskellReviewer.Server.ListenTest
     HaskellReviewer.Server.RouterTest
+    HaskellReviewer.Server.SourceTest
     HaskellReviewer.Session.ClientsTest
     HaskellReviewer.Session.IndexTest
     HaskellReviewer.Session.PrefsTest

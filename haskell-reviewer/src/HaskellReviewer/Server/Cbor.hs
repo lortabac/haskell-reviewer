@@ -2,10 +2,12 @@
 -- "HaskellReviewer.Server.Wire". See Note [CBOR bodies].
 module HaskellReviewer.Server.Cbor
   ( -- * Values
+    Encoding,
     obj,
     list,
     text,
     int,
+    word32,
     word64,
     bool,
     null_,
@@ -21,7 +23,7 @@ import Codec.CBOR.Encoding qualified as Cbor
 import Codec.CBOR.Write qualified as Cbor
 import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
-import Data.Word (Word64)
+import Data.Word (Word32, Word64)
 
 {- Note [CBOR bodies]
 
@@ -54,6 +56,10 @@ text = Cbor.encodeString
 -- | An int, as small as CBOR allows.
 int :: Int -> Encoding
 int = Cbor.encodeInt
+
+-- | Like 'int', for positions and other packed words.
+word32 :: Word32 -> Encoding
+word32 = Cbor.encodeWord32
 
 -- | Like 'int', for the generation.
 word64 :: Word64 -> Encoding

@@ -10,6 +10,7 @@ module HaskellReviewer.Server.Wire
     encodeFileView,
     encodeModuleTree,
     encodeModuleNotFound,
+    encodeFileNotFound,
     encodeIndexing,
     encodePrefs,
     encodeSearch,
@@ -248,6 +249,13 @@ encodeModuleNotFound :: Generation -> LBS.ByteString
 encodeModuleNotFound (Generation g) =
   Encoding.encodingToLazyByteString . Aeson.pairs $
     ("generation" .= g) <> kindIs "not-found" <> ("what" .= ("module" :: Text))
+
+-- | The 404 of the source route: @{"generation":1,"kind":"not-found","what":"file"}@.
+-- A path not in the list, or a file gone.
+encodeFileNotFound :: Generation -> LBS.ByteString
+encodeFileNotFound (Generation g) =
+  Encoding.encodingToLazyByteString . Aeson.pairs $
+    ("generation" .= g) <> kindIs "not-found" <> ("what" .= ("file" :: Text))
 
 -- | The data of the @hello@ event: @{}@.
 helloPayload :: ByteString

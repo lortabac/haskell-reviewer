@@ -5,6 +5,7 @@ import ApiSupport
   ( ApiResult (..),
     RequestBody (..),
     TestApi (..),
+    cborValue,
     fixtureApi,
     getApi,
     getApiQuery,
@@ -374,8 +375,7 @@ searchTests =
         assertBool "a field" (any (("field:" `Text.isPrefixOf`) . snd) decls)
         ids <- forM (nub (map fst decls)) $ \ref -> do
           r <- getApi pageApi ["api", "module", "tree", ref]
-          json <- either (assertFailure . show) pure (cborToJson r.body)
-          v <- maybe (assertFailure "bad page JSON") pure (Aeson.decode json)
+          v <- cborValue r.body
           pure (ref, pageIds v)
         forM_ decls $ \(ref, a) ->
           assertBool (show (ref, a)) (a `elem` concat (lookup ref ids)),

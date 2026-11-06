@@ -53,6 +53,7 @@ import HaskellReviewer.Core.ResolveTest qualified
 import HaskellReviewer.Core.RichTextGoldenTest qualified
 import HaskellReviewer.Core.RootTest qualified
 import HaskellReviewer.Core.SearchTest qualified
+import HaskellReviewer.Core.SourceLinksTest qualified
 import HaskellReviewer.Core.SourceTextTest qualified
 import HaskellReviewer.Core.TokensTest qualified
 import HaskellReviewer.Core.XdgTest qualified
@@ -78,7 +79,9 @@ import HaskellReviewer.Server.Prefs (warmUpPrefs)
 import HaskellReviewer.Server.Router (warmUpGzip)
 import HaskellReviewer.Server.RouterTest qualified
 import HaskellReviewer.Server.Search (warmUpSearch)
+import HaskellReviewer.Server.SourceTest qualified
 import HaskellReviewer.Server.Wire.Page (warmUpPages)
+import HaskellReviewer.Server.Wire.Source (warmUpSource)
 import HaskellReviewer.Session.ClientsTest qualified
 import HaskellReviewer.Session.IndexTest qualified
 import HaskellReviewer.Session.PrefsTest qualified
@@ -167,9 +170,10 @@ main = do
         -- use them in parallel (Q-RTS-BLACKHOLE). A smaller warm-up
         -- still hung once in 300 runs on 9.12. The API tests parse too,
         -- and encode pages (Note [Page warm-up] in
-        -- "HaskellReviewer.Server.Wire.Page").
+        -- "HaskellReviewer.Server.Wire.Page") and source views (Note
+        -- [Source view] in "HaskellReviewer.Server.Wire.Source").
         withResource
-          (warmUpParser >> warmUpResolve >> warmUpPages)
+          (warmUpParser >> warmUpResolve >> warmUpPages >> warmUpSource)
           (const (pure ()))
           $ \_ ->
             testGroup
@@ -204,6 +208,8 @@ main = do
                 HaskellReviewer.Core.ResolveTest.tests,
                 HaskellReviewer.Core.ResolveTest.linearTests,
                 HaskellReviewer.Core.RichTextGoldenTest.tests,
+                HaskellReviewer.Core.SourceLinksTest.tests,
+                HaskellReviewer.Core.SourceLinksTest.linearTests,
                 HaskellReviewer.Core.SourceTextTest.tests,
                 HaskellReviewer.Session.IndexTest.parsingTests,
                 HaskellReviewer.Session.ResolveTest.tests,
@@ -213,7 +219,8 @@ main = do
                   testGroup
                     "API"
                     [ HaskellReviewer.Server.ApiGoldenTest.tests,
-                      HaskellReviewer.Server.ApiTest.tests
+                      HaskellReviewer.Server.ApiTest.tests,
+                      HaskellReviewer.Server.SourceTest.tests
                     ],
                 HaskellReviewer.Server.PageTest.tests
               ],

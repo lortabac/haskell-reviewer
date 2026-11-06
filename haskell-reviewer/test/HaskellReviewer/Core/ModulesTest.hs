@@ -37,7 +37,9 @@ import HaskellReviewer.Core.Modules
     buildModuleIndex,
     findModule,
     looseSettings,
+    moduleAtPath,
     moduleNameFromPath,
+    modulePath,
     moduleRef,
     renderModuleId,
     resolveModuleRef,
@@ -399,7 +401,69 @@ identityTests =
             "../z/Alone.hs",
             ""
           ]
-          @?= replicate 12 Nothing
+          @?= replicate 12 Nothing,
+      testCase "moduleAtPath: first in tree order, else loose; boot files none" $ do
+        let idx =
+              onePackage
+                [ "p/src/A.hs",
+                  "p/src/Lexer.x",
+                  "p/src/Lexer.hs",
+                  "p/src/A.hs-boot",
+                  "w/L.hs",
+                  "w/x.txt"
+                ]
+                [ (lib ["p/src"])
+                    { P.modules =
+                        [ exposed "A",
+                          exposed "Lexer",
+                          -- No file: missing, and made at build time.
+                          exposed "Gone",
+                          ListedModule
+                            { name = ModuleName "Gen",
+                              kind = Other,
+                              autogen = True
+                            }
+                        ]
+                    },
+                  -- The same file in a test suite: the library wins.
+                  (comp (Test "t") ["p/src"]) {P.modules = [other "A"]}
+                ]
+            at = fmap renderModuleId . moduleAtPath idx . path
+        map
+          at
+          [ "p/src/A.hs",
+            "p/src/Lexer.x",
+            "w/L.hs",
+            "p/src/A.hs-boot",
+            "w/x.txt",
+            -- Lexer.x's output, claimed by no one: a loose module.
+            "p/src/Lexer.hs"
+          ]
+          @?= [ Just "p:lib:A",
+                Just "p:lib:Lexer",
+                Just "w/L.hs",
+                Nothing,
+                Nothing,
+                Just "p/src/Lexer.hs"
+              ]
+        -- Back: the module's file.
+        map
+          (modulePath idx)
+          [ ComponentModule (PackageName "p") Lib (ModuleName "Lexer"),
+            ComponentModule (PackageName "p") (Test "t") (ModuleName "A"),
+            ComponentModule (PackageName "p") Lib (ModuleName "Gone"),
+            ComponentModule (PackageName "p") Lib (ModuleName "Gen")
+          ]
+          @?= [Just (path "p/src/Lexer.x"), Just (path "p/src/A.hs"), Nothing, Nothing]
+        -- The same as findModule says, for every module.
+        let fileOf found = case found.source of
+              HaskellSource f -> Just f.path
+              GeneratedSource f -> Just f.path
+              PreprocessedSource f -> Just f.path
+              NoSource _ -> Nothing
+        mapM_
+          (\i -> (i, modulePath idx i) @?= (i, fileOf =<< findModule idx i))
+          (Set.toList idx.ids)
     ]
 
 -- | Two exe Mains, a name in two libs, two loose Tool, loose files

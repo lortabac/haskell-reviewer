@@ -39,6 +39,7 @@ import Bench.Run
     getApi,
     getPath,
     procMemory,
+    requireRts,
     traceSpans,
     withSession,
   )
@@ -133,9 +134,9 @@ data FileSource = FromGit | FromDisk
 
 -- | One run. The sample is the module page to ask for while indexing.
 runStartup :: SessionConfig -> Maybe Sample -> IO (Either RunError StartupRun)
-runStartup cfg sample = fmap finish <$> withSession cfg (steps sample)
+runStartup cfg sample = (>>= finish) <$> withSession cfg (steps sample)
   where
-    finish (build, ended) = build ended
+    finish (build, ended) = build ended <$> requireRts ended
 
 -- | What the API part of "UI usable" got back.
 data ApiAnswers = ApiAnswers
@@ -147,7 +148,7 @@ data ApiAnswers = ApiAnswers
     files :: Timed
   }
 
-steps :: Maybe Sample -> Session -> IO (Ended -> StartupRun)
+steps :: Maybe Sample -> Session -> IO (Ended -> RtsStats -> StartupRun)
 steps sample s = do
   shell <- getApi s Gzip ""
   ok "/" shell
@@ -218,7 +219,7 @@ steps sample s = do
   mem <- procMemory s
   load <- getLoadAvg
 
-  pure $ \ended ->
+  pure $ \ended rts ->
     StartupRun
       { urlUs = s.urlUs,
         serveUs = shell.endUs,
@@ -237,7 +238,7 @@ steps sample s = do
         hwmBytes = mem.hwmBytes,
         loadAvg = load,
         stopUs = ended.stopUs,
-        rts = ended.rts,
+        rts = rts,
         files = fileList
       }
   where

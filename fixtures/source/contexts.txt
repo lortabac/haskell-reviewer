@@ -1,0 +1,171 @@
+== contexts:lib:Defs
+#1 decl Defs src/Defs.hs:6 type:Rec
+#2 decl Defs src/Defs.hs:8 class:Cls
+#3 decl Defs src/Defs.hs:9 val:cm
+#4 decl Defs src/Defs.hs:13 type:Point
+#5 decl Defs src/Defs.hs:13 field:Point.px
+#6 decl Defs src/Defs.hs:17 val:qq
+#7 decl Defs src/Defs.hs:15 type:Nat
+#8 external Language.Haskell.TH.Quote listed 1 "QuasiQuoter +module:Language.Haskell.TH.Quote"
+#9 decl Defs src/Defs.hs:6 con:Rec
+#10 decl Defs src/Defs.hs:6 field:Rec.ra
+#11 external Prelude one-of 2 "Int"
+#12 decl Defs src/Defs.hs:6 field:Rec.rb
+#13 local 8:11
+#14 decl Defs src/Defs.hs:10 val:cm2
+#15 decl Defs src/Defs.hs:13 con:Point
+#16 decl Defs src/Defs.hs:13 field:Point.py
+#17 decl Defs src/Defs.hs:15 con:Z
+#18 decl Defs src/Defs.hs:15 con:S
+#19 external Language.Haskell.TH.Quote listed 1 "quoteExp +module:Language.Haskell.TH.Quote"
+#20 local 18:31
+#21 external Language.Haskell.TH.Quote listed 1 "quotePat +module:Language.Haskell.TH.Quote"
+#22 external Prelude one-of 2 "undefined"
+#23 external Language.Haskell.TH.Quote listed 1 "quoteType +module:Language.Haskell.TH.Quote"
+#24 external Language.Haskell.TH.Quote listed 1 "quoteDec +module:Language.Haskell.TH.Quote"
+2:14-2:17 "Rec" -> #1
+2:24-2:27 "Cls" -> #2
+2:29-2:31 "cm" -> #3
+2:34-2:39 "Point" -> #4
+2:41-2:46 "Point" -> #4
+2:49-2:51 "px" -> #5
+2:53-2:55 "qq" -> #6
+2:57-2:60 "Nat" -> #7
+4:35-4:46 "QuasiQuoter" -> #8
+6:6-6:9 "Rec" -> #1
+6:12-6:15 "Rec" -> #9
+6:17-6:19 "ra" -> #10
+6:23-6:26 "Int" -> #11
+6:28-6:30 "rb" -> #12
+6:34-6:37 "Int" -> #11
+8:7-8:10 "Cls" -> #2
+8:11-8:12 "a" -> #13
+9:3-9:5 "cm" -> #3
+9:9-9:10 "a" -> #13
+9:14-9:17 "Int" -> #11
+10:3-10:6 "cm2" -> #14
+10:10-10:11 "a" -> #13
+10:15-10:18 "Int" -> #11
+11:3-11:6 "cm2" -> #14
+13:6-13:11 "Point" -> #4
+13:14-13:19 "Point" -> #15
+13:21-13:23 "px" -> #5
+13:27-13:30 "Int" -> #11
+13:32-13:34 "py" -> #16
+13:38-13:41 "Int" -> #11
+15:6-15:9 "Nat" -> #7
+15:12-15:13 "Z" -> #17
+15:16-15:17 "S" -> #18
+15:18-15:21 "Nat" -> #7
+17:1-17:3 "qq" -> #6
+17:7-17:18 "QuasiQuoter" -> #8
+18:1-18:3 "qq" -> #6
+18:6-18:17 "QuasiQuoter" -> #8
+18:19-18:27 "quoteExp" -> #19
+18:31-18:32 "s" -> #20
+18:38-18:39 "s" -> #20
+18:43-18:51 "quotePat" -> #21
+18:54-18:63 "undefined" -> #22
+18:65-18:74 "quoteType" -> #23
+18:77-18:86 "undefined" -> #22
+18:88-18:96 "quoteDec" -> #24
+18:99-18:108 "undefined" -> #22
+outline OutlineType type:Rec 6 6-6
+outline OutlineClass class:Cls 8 8-11
+outline OutlineType type:Point 13 13-13
+outline OutlineType type:Nat 15 15-15
+outline OutlineValue val:qq 17 17-18
+
+== contexts:lib:Use
+#1 external Data.Proxy listed 1 "Proxy +module:Data.Proxy"
+#2 decl Defs src/Defs.hs:8 class:Cls
+#3 external Prelude one-of 2 "Bool"
+#4 decl Defs src/Defs.hs:9 val:cm
+#5 external Prelude one-of 2 "Show"
+#6 decl Defs src/Defs.hs:6 type:Rec
+#7 external Prelude one-of 2 "show"
+#8 local 11:8
+#9 decl Defs src/Defs.hs:6 field:Rec.ra record-dot
+#10 decl Use src/Use.hs:13 val:mk
+#11 decl Defs src/Defs.hs:6 con:Rec
+#12 decl Defs src/Defs.hs:6 field:Rec.ra
+#13 decl Defs src/Defs.hs:6 field:Rec.rb
+#14 decl Use src/Use.hs:16 val:upd
+#15 local 17:5
+#16 decl Use src/Use.hs:19 val:dot
+#17 external Prelude one-of 2 "Int"
+#18 local 20:5
+#19 decl Defs src/Defs.hs:6 field:Rec.rb record-dot
+#20 external Prelude one-of 2 "+"
+#21 decl Defs src/Defs.hs:13 field:Point.px
+#22 decl Defs src/Defs.hs:13 con:Point
+#23 decl Use src/Use.hs:22 val:wild
+#24 decl Defs src/Defs.hs:6 field:Rec.ra wildcard
+#25 decl Defs src/Defs.hs:6 field:Rec.rb wildcard
+#26 decl Use src/Use.hs:25 val:prox
+#27 decl Defs src/Defs.hs:15 con:S data-kinds
+#28 decl Defs src/Defs.hs:15 con:Z data-kinds
+#29 decl Use src/Use.hs:28 val:q
+#30 external Prelude one-of 2 "String"
+#31 decl Defs src/Defs.hs:17 val:qq
+4:20-4:25 "Proxy" -> #1
+7:10-7:13 "Cls" -> #2
+7:14-7:18 "Bool" -> #3
+8:3-8:5 "cm" -> #4
+10:10-10:14 "Show" -> #5
+10:15-10:18 "Rec" -> #6
+11:3-11:7 "show" -> #7
+11:8-11:9 "r" -> #8
+11:12-11:16 "show" -> #7
+11:17-11:18 "r" -> #8
+11:19-11:21 "ra" -> #9
+13:1-13:3 "mk" -> #10
+13:7-13:10 "Rec" -> #6
+14:1-14:3 "mk" -> #10
+14:6-14:9 "Rec" -> #11
+14:11-14:13 "ra" -> #12
+14:19-14:21 "rb" -> #13
+16:1-16:4 "upd" -> #14
+16:8-16:11 "Rec" -> #6
+16:15-16:18 "Rec" -> #6
+17:1-17:4 "upd" -> #14
+17:5-17:6 "r" -> #15
+17:9-17:10 "r" -> #15
+17:12-17:14 "ra" -> #12
+19:1-19:4 "dot" -> #16
+19:8-19:11 "Rec" -> #6
+19:15-19:18 "Int" -> #17
+20:1-20:4 "dot" -> #16
+20:5-20:6 "r" -> #18
+20:9-20:10 "r" -> #18
+20:11-20:13 "rb" -> #19
+20:14-20:15 "+" -> #20
+20:16-20:18 "px" -> #21
+20:20-20:25 "Point" -> #22
+22:1-22:5 "wild" -> #23
+22:9-22:12 "Rec" -> #6
+22:16-22:19 "Int" -> #17
+23:1-23:5 "wild" -> #23
+23:6-23:9 "Rec" -> #11
+23:17-23:19 "ra" -> #24
+23:20-23:21 "+" -> #20
+23:22-23:24 "rb" -> #25
+25:1-25:5 "prox" -> #26
+25:9-25:14 "Proxy" -> #1
+25:16-25:17 "S" -> #27
+25:18-25:19 "Z" -> #28
+26:1-26:5 "prox" -> #26
+26:8-26:13 "Proxy" -> #1
+28:1-28:2 "q" -> #29
+28:6-28:12 "String" -> #30
+29:1-29:2 "q" -> #29
+29:5-29:16 "[qq|hello|]" -> #31
+outline OutlineInstance inst:Cls:Bool 7 7-8
+outline OutlineInstance inst:Show:Rec 10 10-11
+outline OutlineValue val:mk 13 13-14
+outline OutlineValue val:upd 16 16-17
+outline OutlineValue val:dot 19 19-20
+outline OutlineValue val:wild 22 22-23
+outline OutlineValue val:prox 25 25-26
+outline OutlineValue val:q 28 28-29
+

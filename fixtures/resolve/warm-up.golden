@@ -122,6 +122,11 @@ exports:
   val:amb @w:lib:Other
   2:8-2:11 "Int" type use -> external Prelude (only open import)
 == w:lib:Pending (not ready)
+== w:lib:Pkg
+exports:
+  val:w @w:lib:Pkg
+  3:26-3:31 "Word8" type import -> external "base" Data.Word (listed)
+  4:6-4:11 "Word8" type use -> external "base" Data.Word (listed)
 == w:lib:Re
 exports:
   type::+ @w:lib:Defs

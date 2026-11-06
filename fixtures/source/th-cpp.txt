@@ -1,0 +1,109 @@
+== th-cpp:lib:Gen
+#1 external Prelude one-of 2 "made"
+#2 decl Gen src/Gen.hs:6 val:helper
+#3 external Prelude one-of 2 "Int"
+#4 local 9:6
+#5 external Prelude one-of 2 "funD"
+#6 external Prelude one-of 2 "mkName"
+#7 external Prelude one-of 2 "clause"
+#8 external Prelude one-of 2 "normalB"
+#9 external Prelude one-of 2 "pure"
+2:13-2:17 "made" -> #1
+2:19-2:25 "helper" -> #2
+6:1-6:7 "helper" -> #2
+6:11-6:14 "Int" -> #3
+7:1-7:7 "helper" -> #2
+9:6-9:7 "d" -> #4
+9:11-9:15 "funD" -> #5
+9:17-9:23 "mkName" -> #6
+9:33-9:39 "clause" -> #7
+9:44-9:51 "normalB" -> #8
+9:59-9:62 "Int" -> #3
+9:71-9:75 "pure" -> #9
+9:77-9:78 "d" -> #4
+outline OutlineValue val:helper 6 6-7
+
+== th-cpp:lib:GenNoList
+#1 decl GenNoList src/GenNoList.hs:6 val:plain
+#2 external Prelude one-of 2 "Int"
+#3 local 9:6
+#4 external Prelude one-of 2 "funD"
+#5 external Prelude one-of 2 "mkName"
+#6 external Prelude one-of 2 "clause"
+#7 external Prelude one-of 2 "normalB"
+#8 external Prelude one-of 2 "pure"
+6:1-6:6 "plain" -> #1
+6:10-6:13 "Int" -> #2
+7:1-7:6 "plain" -> #1
+9:6-9:7 "d" -> #3
+9:11-9:15 "funD" -> #4
+9:17-9:23 "mkName" -> #5
+9:39-9:45 "clause" -> #6
+9:50-9:57 "normalB" -> #7
+9:65-9:68 "Int" -> #2
+9:77-9:81 "pure" -> #8
+9:83-9:84 "d" -> #3
+outline OutlineValue val:plain 6 6-7
+
+== th-cpp:lib:Plain
+#1 decl Plain src/Plain.hs:3 val:base
+#2 external Prelude only-open 1 "Int +module:Prelude"
+1:15-1:19 "base" -> #1
+3:1-3:5 "base" -> #1
+3:9-3:12 "Int" -> #2
+4:1-4:5 "base" -> #1
+outline OutlineValue val:base 3 3-4
+
+== th-cpp:lib:Use
+#1 module Gen src/Gen.hs made-by-splice,cpp-import
+#2 decl Gen src/Gen.hs:6 val:helper
+#3 external Language.Haskell.TH listed 1 "Exp +module:Language.Haskell.TH"
+#4 external Language.Haskell.TH listed 1 "VarE +module:Language.Haskell.TH"
+#5 decl Use src/Use.hs:13 val:u
+#6 external Prelude only-open 1 "Int +module:Prelude"
+#7 external Prelude only-open 1 "+ +module:Prelude"
+#8 external Prelude only-open 1 "fromSplice +module:Prelude"
+#9 decl GenNoList src/GenNoList.hs:6 val:plain
+#10 decl Use src/Use.hs:16 val:v
+#11 external Prelude only-open 1 "pure +module:Prelude"
+5:13-5:17 "made" -> #1
+9:13-9:19 "helper" -> #2
+11:29-11:32 "Exp" -> #3
+11:34-11:38 "VarE" -> #4
+13:1-13:2 "u" -> #5
+13:6-13:9 "Int" -> #6
+14:1-14:2 "u" -> #5
+14:5-14:9 "made" -> #1
+14:10-14:11 "+" -> #7
+14:12-14:18 "helper" -> #2
+14:19-14:20 "+" -> #7
+14:21-14:31 "fromSplice" -> #8
+14:32-14:33 "+" -> #7
+14:34-14:39 "plain" -> #9
+16:1-16:2 "v" -> #10
+16:6-16:9 "Int" -> #6
+17:1-17:2 "v" -> #10
+17:7-17:11 "pure" -> #11
+17:13-17:17 "VarE" -> #4
+17:19-17:25 "helper" -> #2
+outline OutlineValue val:u 13 13-14
+outline OutlineValue val:v 16 16-17
+
+== th-cpp:lib:UsePlain
+#1 decl Plain src/Plain.hs:3 val:base
+#2 decl UsePlain src/UsePlain.hs:5 val:p
+#3 external Prelude only-open 1 "Int +module:Prelude"
+3:15-3:19 "base" -> #1
+5:1-5:2 "p" -> #2
+5:6-5:9 "Int" -> #3
+6:1-6:2 "p" -> #2
+6:5-6:9 "base" -> #1
+outline OutlineValue val:p 5 5-6
+
+== th-cpp:lib:UseSplice
+#1 decl UseSplice src/UseSplice.hs:6 val:w
+#2 module GenNoList src/GenNoList.hs made-by-splice
+6:1-6:2 "w" -> #1
+6:5-6:15 "fromSplice" -> #2
+outline OutlineValue val:w 6 6-6
+

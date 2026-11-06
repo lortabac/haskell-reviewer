@@ -11,6 +11,7 @@ module Bench.Run
     Ended (..),
     RunError (..),
     renderRunError,
+    requireRts,
     Timed (..),
     ProcMemory (..),
 
@@ -58,6 +59,7 @@ import Data.Aeson qualified as Aeson
 import Data.Aeson.Types qualified as Aeson.Types
 import Data.ByteString.Char8 qualified as Char8
 import Data.Char (isDigit)
+import Data.Either (isRight)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.List (isPrefixOf)
 import Data.Text (Text)
@@ -135,13 +137,33 @@ data Session = Session
 
 -- | What we learn once the server stopped.
 data Ended = Ended
-  { -- | From the stop signal to exit.
+  { -- | From the first stop signal to exit. With 'resent', that's at
+    -- least 3 s: the wait before the second signal.
     stopUs :: Integer,
-    rts :: RtsStats,
-    -- | 'Nothing' without 'GcStats'. A file with no GC line is kept as
-    -- its error: a warning in the report, not a broken run.
+    -- | The stop needed a second SIGTERM. See Note [Second SIGTERM].
+    resent :: Bool,
+    -- | 'Left' (the parse error) only if 'resent': the product then
+    -- exits at once, without writing them. Runs that report them use
+    -- 'requireRts'.
+    rts :: Either String RtsStats,
+    -- | 'Nothing' without 'GcStats' (or without 'rts'). A file with no
+    -- GC line is kept as its error: a warning in the report, not a
+    -- broken run.
     gc :: Maybe (Either GcLogError GcLog)
   }
+
+-- | The RTS stats, or why the run has none.
+requireRts :: Ended -> Either RunError RtsStats
+requireRts ended = case ended.rts of
+  Right r -> Right r
+  Left e ->
+    Left
+      ( RunError
+          ( "no RTS stats after a second SIGTERM, which exits without them \
+            \(Note [Second SIGTERM] in Bench.Run, D-139): "
+              <> e
+          )
+      )
 
 -- | The done line, and when it came.
 data DoneAt = DoneAt
@@ -438,9 +460,16 @@ steps t0 cfg action out err ph = do
   tSignal <- getMonotonicTimeNSec
   stillThere <- getPid ph
   maybe (failWith "process already gone before stop") (signalProcess sigTERM) stillThere
-  exitC <- waitForExit ph
+  (exitC, resent) <- waitForExit tSignal ph
   tExit <- getMonotonicTimeNSec
 
+  when resent $
+    hPutStrLn
+      stderr
+      ( "haskell-reviewer-bench: warning: "
+          <> cfg.tag
+          <> ": no exit within 3 s of SIGTERM, sent a second one (D-139)"
+      )
   unless (exitC == 0) $ failWith ("exit code " <> show exitC)
 
   -- The process has exited, so drainStdout's hGetContents' should
@@ -451,19 +480,29 @@ steps t0 cfg action out err ph = do
       =<< timeout 5000000 (takeMVar stdoutVar)
   unless (null leftoverOut) $ failWith ("stdout not empty: " <> show leftoverOut)
 
+  -- After a second signal the file has the command line only.
+  let readStats parse raw = case parse raw of
+        Right r -> pure (Right r)
+        Left e | resent -> pure (Left (renderRtsStatsError e))
+        Left e -> failWith (renderRtsStatsError e)
   (rts, gc) <- case cfg.stats of
     GcStats -> do
       raw <- readFile' (gcFile cfg)
-      r <- either (failWith . renderRtsStatsError) pure (parseRtsSummary raw)
-      pure (r, Just (parseGcLog raw))
+      r <- readStats parseRtsSummary raw
+      pure (r, if isRight r then Just (parseGcLog raw) else Nothing)
     TStats -> do
       raw <- readFile' (rtsFile cfg)
-      r <- either (failWith . renderRtsStatsError) pure (parseRtsStats raw)
+      r <- readStats parseRtsStats raw
       pure (r, Nothing)
 
   pure
     ( result,
-      Ended {stopUs = microsSince tSignal tExit, rts = rts, gc = gc}
+      Ended
+        { stopUs = microsSince tSignal tExit,
+          resent = resent,
+          rts = rts,
+          gc = gc
+        }
     )
 
 -- | Reads stderr, line by line, for as long as the handle stays open.
@@ -577,29 +616,67 @@ same control flow this module uses, so we're treating it as
 sufficient rather than chasing an unrelated sandbox quirk further.
 -}
 
--- | Wait up to 10 s for the process to exit after the stop signal. See
--- Note [Polling for exit, not waitForProcess].
+{- Note [Second SIGTERM]
+
+On macOS a signal that comes while the product is busy can sit in the
+RTS's pipe until the timer manager wakes up for something else (D-139,
+a GHC bug, not worked around in the product). A busy server can then
+miss our stop for longer than the 10 s bound.
+
+So sessions stop an idle server: they all wait for the done line
+('awaitDone') first. And as a safety net, 'waitForExit' sends SIGTERM
+again if there's no exit after 3 s.
+Another signal wakes the timer manager, and the product exits at once
+on a second signal (Note [Shutdown] in "HaskellReviewer.App.Run").
+
+That exit skips the RTS's own exit, so no RTS stats get written: runs
+that report them fail ('requireRts'), others go on. We print a warning
+either way, so a stuck stop stays visible. 'stopUs' is still from the
+first signal, so it's at least 3 s then.
+-}
+
+-- | Wait up to 10 s for the process to exit after the stop signal sent
+-- at @t0@ (monotonic ns): its exit code, and whether we sent a second
+-- SIGTERM (after 3 s; not if the process was already gone). See Note
+-- [Polling for exit, not waitForProcess] and Note [Second SIGTERM].
 --
 -- Polls every 0.5 ms for the first 50 ms, then every 5 ms: most
 -- products exit within a few ms of SIGTERM, and 'stopUs' is a number
 -- we report, so its resolution matters while it's small. No point
 -- keeping that resolution for the rest of the 10 s bound, which only
 -- ever gets used by a product that's stuck.
-waitForExit :: ProcessHandle -> IO Int
-waitForExit ph = fastPoll (100 :: Int)
+waitForExit :: Word64 -> ProcessHandle -> IO (Int, Bool)
+waitForExit t0 ph = do
+  first <- pollUntil 3
+  case first of
+    Just code -> pure (code, False)
+    Nothing -> do
+      -- Gone in between: then the poll below finds its exit code.
+      sent <-
+        getPid ph >>= \case
+          Nothing -> pure False
+          Just pid -> isRight <$> try @IOException (signalProcess sigTERM pid)
+      second <- pollUntil 10
+      case second of
+        Just code -> pure (code, sent)
+        Nothing ->
+          failWith
+            ( "no exit within 10 s of SIGTERM"
+                <> (if sent then " (sent twice)" else " (second one not sent)")
+            )
   where
-    fastPoll 0 = slowPoll (1900 :: Int)
-    fastPoll n = do
+    pollUntil :: Word64 -> IO (Maybe Int)
+    pollUntil secs = do
       found <- getProcessExitCode ph
+      now <- getMonotonicTimeNSec
+      let since = now - t0
       case found of
-        Just code -> pure (exitInt code)
-        Nothing -> threadDelay 500 >> fastPoll (n - 1)
-    slowPoll 0 = failWith "no exit within 10 s of SIGTERM"
-    slowPoll n = do
-      found <- getProcessExitCode ph
-      case found of
-        Just code -> pure (exitInt code)
-        Nothing -> threadDelay 5000 >> slowPoll (n - 1)
+        Just code -> pure (Just (exitInt code))
+        Nothing
+          | since >= secs * 1_000_000_000 -> pure Nothing
+          | otherwise -> do
+              threadDelay (if since < 50_000_000 then 500 else 5000)
+              pollUntil secs
     exitInt ExitSuccess = 0
     exitInt (ExitFailure c) = c
 
