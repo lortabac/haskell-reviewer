@@ -1,0 +1,9 @@
+cabal-version: 3.0
+name: bundles
+version: 1
+
+library
+  hs-source-dirs: src
+  exposed-modules: A Syn Bund Hid Re U1 U2 U3 U4 H2 Use
+  build-depends: base
+  default-language: GHC2021

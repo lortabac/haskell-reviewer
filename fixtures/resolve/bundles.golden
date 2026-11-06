@@ -1,0 +1,74 @@
+== bundles:lib:A
+exports:
+  type:T @bundles:lib:A (P)
+  pat:P @bundles:lib:A
+  4:14-4:17 "Int" type use -> external Prelude (only open import)
+== bundles:lib:Bund
+exports:
+  type:T @bundles:lib:A (P, Q)
+  pat:P @bundles:lib:A
+  pat:Q @bundles:lib:Syn
+  3:14-3:15 "T" type export -> exact bundles:lib:A type:T
+  3:17-3:18 "P" type export -> exact bundles:lib:A pat:P
+  3:20-3:21 "Q" type export -> exact bundles:lib:Syn pat:Q
+== bundles:lib:H2
+exports:
+  type:T @bundles:lib:A (P)
+  pat:P @bundles:lib:A
+  3:12-3:13 "T" type export -> exact bundles:lib:A type:T
+  5:29-5:30 "Q" con import -> exact bundles:lib:Syn pat:Q
+== bundles:lib:Hid
+exports:
+  pat:P @bundles:lib:A
+  lone:T P
+  4:18-4:19 "T" type import -> exact bundles:lib:A type:T
+== bundles:lib:Re
+exports:
+  pat:P @bundles:lib:A
+  pat:Q @bundles:lib:Syn
+  lone:T P Q
+  3:20-3:21 "P" con export -> exact bundles:lib:A pat:P
+  3:31-3:32 "Q" con export -> exact bundles:lib:Syn pat:Q
+== bundles:lib:Syn
+exports:
+  pat:Q @bundles:lib:Syn
+  6:14-6:15 "T" type use -> exact bundles:lib:A type:T
+  7:13-7:14 "P" con use -> exact bundles:lib:A pat:P
+== bundles:lib:U1
+exports:
+  type:T @bundles:lib:A (P)
+  pat:P @bundles:lib:A
+  3:12-3:13 "T" type export -> exact bundles:lib:A type:T
+  5:11-5:12 "T" type import -> exact bundles:lib:A type:T
+  6:19-6:20 "P" con import -> exact bundles:lib:A pat:P
+== bundles:lib:U2
+exports:
+  type:T @bundles:lib:A (P)
+  pat:P @bundles:lib:A
+  2:12-2:13 "T" type export -> exact bundles:lib:A type:T
+  4:11-4:12 "T" type import -> exact bundles:lib:A type:T
+  5:21-5:22 "P" con import -> exact bundles:lib:A pat:P
+== bundles:lib:U3
+exports:
+  type:T @bundles:lib:A (P, Q)
+  pat:P @bundles:lib:A
+  pat:Q @bundles:lib:Syn
+  1:12-1:13 "T" type export -> exact bundles:lib:A type:T
+  3:11-3:12 "T" type import -> exact bundles:lib:A type:T
+== bundles:lib:U4
+exports:
+  type:T @bundles:lib:A (Q)
+  pat:Q @bundles:lib:Syn
+  2:12-2:13 "T" type export -> exact bundles:lib:A type:T
+  4:14-4:15 "T" type import -> exact bundles:lib:A type:T
+  5:22-5:23 "Q" con import -> exact bundles:lib:Syn pat:Q
+== bundles:lib:Use
+exports:
+  val:xs @bundles:lib:Use
+  9:8-9:12 "U1.T" type use -> exact bundles:lib:A type:T
+  10:7-10:11 "U1.P" con use -> exact bundles:lib:A pat:P
+  10:13-10:17 "U2.P" con use -> exact bundles:lib:A pat:P
+  10:19-10:23 "U3.P" con use -> exact bundles:lib:A pat:P
+  10:25-10:29 "U3.Q" con use -> exact bundles:lib:Syn pat:Q
+  10:31-10:35 "U4.Q" con use -> exact bundles:lib:Syn pat:Q
+  10:37-10:41 "H2.P" con use -> exact bundles:lib:A pat:P

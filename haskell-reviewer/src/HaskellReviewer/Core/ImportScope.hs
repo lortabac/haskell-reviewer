@@ -55,6 +55,8 @@ import HaskellReviewer.Core.Entities
     Origin (..),
     Space (..),
     availWith,
+    belongsTo,
+    bundlesOf,
     groupOn,
     guessKind,
     inSpace,
@@ -65,10 +67,10 @@ import HaskellReviewer.Core.Entities
     namesKeys,
     namesLookup,
     noNames,
-    samePlace,
     subKids,
     unionNames,
     unlessEmpty,
+    valuesWith,
     withKeys,
   )
 import HaskellReviewer.Core.Exported (typeLike)
@@ -98,7 +100,8 @@ A module's scope is its imports, each with what it brings ('visible'):
   values, fields and methods named x; @T@ the type or class only;
   @T(..)@ and its children; @T(A, f)@ and those; @pattern P@ pattern
   synonyms and constructors; @type@ the type level only; @data x@ any
-  value;
+  value. A bundled pattern synonym remembers its type even when the
+  type isn't imported (GHC's trimAvail);
 - @hiding (...)@: the same names, minus, each item against the whole
   set. @hiding (C)@ hides type C and constructor C too (Haskell Report
   5.3.4); a hidden child leaves its parent's avail; children of a
@@ -252,7 +255,7 @@ only ns = foldl' (\acc i -> unionNames acc (one i)) noNames
               (availNames i.subs)
               (Map.findWithDefault [] i.name.occ ns.types)
           )
-      sp -> mkNames (namesLookup sp i.name.occ ns) []
+      sp -> valuesWith (bundlesOf ns) (namesLookup sp i.name.occ ns)
 
 -- | @import M hiding (...)@.
 hiding :: Names -> [Item] -> Names
@@ -264,7 +267,8 @@ hiding ns items = withOrphans (foldl' remove ns (concatMap gone items))
       Names
         { values = r.values,
           types = r.types,
-          lone = foldl' (orphans r) r.lone dropped
+          lone = foldl' (orphans r) r.lone dropped,
+          bundles = r.bundles
         }
     orphans r l p =
       let kids =
@@ -295,33 +299,21 @@ hiding ns items = withOrphans (foldl' remove ns (concatMap gone items))
           dropTypes = [e | n `elem` droppedType i, e <- namesLookup TypeSpace n ns]
        in [e | sp <- dropValues, e <- namesLookup sp n ns] <> dropTypes <> kids
     remove acc e =
-      Names
-        { values = Map.update (unlessEmpty . filter (/= e)) e.occ acc.values,
-          types =
-            let ts
-                  | inSpace TypeSpace e.kind =
-                      Map.update
-                        (unlessEmpty . filter ((/= e) . (.entity)))
-                        e.occ
-                        acc.types
-                  | otherwise = acc.types
-             in case e.parent of
-                  Just p ->
-                    Map.adjust
-                      (map (\a -> Avail a.entity (Set.delete e a.children)))
-                      p
-                      ts
-                  -- A pattern synonym has no parent but may be bundled
-                  -- anywhere. Rare in a hiding list: every avail is fine.
-                  Nothing
-                    | e.kind == PatSynKind ->
-                        Map.map (map (\a -> Avail a.entity (Set.delete e a.children))) ts
-                    | otherwise -> ts,
-          lone = case e.parent of
-            Just p ->
-              Map.update (unlessEmpty . Set.delete e) p acc.lone
-            Nothing -> acc.lone
-        }
+      let -- Where e sits as a child: its parent, or for a pattern
+          -- synonym the types it is bundled with.
+          keys = maybe (map (.occ) (Set.toList (bundlesOf acc e))) pure e.parent
+          dropKid = map (\a -> Avail a.entity (Set.delete e a.children))
+          dropLone = unlessEmpty . Set.delete e
+          ts
+            | inSpace TypeSpace e.kind =
+                Map.update (unlessEmpty . filter ((/= e) . (.entity))) e.occ acc.types
+            | otherwise = acc.types
+       in Names
+            { values = Map.update (unlessEmpty . filter (/= e)) e.occ acc.values,
+              types = foldl' (flip (Map.adjust dropKid)) ts keys,
+              lone = foldl' (flip (Map.update dropLone)) acc.lone keys,
+              bundles = Map.delete e acc.bundles
+            }
 
 -- | The names an external import lists.
 externalNames :: ExternalModule -> [Item] -> Names
@@ -528,6 +520,10 @@ data Hit = Hit
   { entity :: Entity,
     -- | The avail, for a type-level name.
     avail :: Maybe Avail,
+    -- | For a pattern synonym: the types it is bundled with, in what
+    -- the import brings. Empty from 'lookupChildren' and
+    -- 'lookupImportItem': those only give token results, not sets.
+    bundledWith :: Set Entity,
     -- | The first import of its module that brings it.
     via :: ScopeImport,
     -- | Every import of that module that brings it is inside a CPP
@@ -603,6 +599,7 @@ lookupChildren scope q parent occs = case lookupScope scope q parent TypeSpace o
                 [ Hit
                     { entity = c,
                       avail = Nothing,
+                      bundledWith = Set.empty,
                       via = h.via,
                       conditional = h.conditional
                     }
@@ -636,7 +633,7 @@ childrenInScope scope e = Set.unions (fromSources <> fromLists <> fromLone)
       ]
     fromLists = [a.children | src <- srcs, si <- src.lists, a <- mine si.visible]
     fromLone =
-      [ Set.filter (samePlace e) cs
+      [ Set.filter (belongsTo si.visible.bundles e) cs
       | si <- Map.findWithDefault [] e.occ g.loneBy,
         cs <- maybeToList (Map.lookup e.occ si.visible.lone)
       ]
@@ -674,7 +671,8 @@ unqualifiedPart scope si
             Map.unionWith
               Set.union
               (Map.mapMaybe (unlessEmpty . Set.filter inScope) si.visible.lone)
-              orphans
+              orphans,
+          bundles = Map.filterWithKey (\e _ -> inScope e) si.visible.bundles
         }
   where
     -- Children in scope whose parent isn't: lone now.
@@ -701,7 +699,14 @@ lookupImportItem :: ScopeImport -> Maybe ItemName -> ItemName -> Lookup
 lookupImportItem si parent n = case si.target of
   TargetExternal _ -> Missing noneMissing
   TargetHome m s ->
-    let hit e av = Hit {entity = e, avail = av, via = si, conditional = si.conditional}
+    let hit e av =
+          Hit
+            { entity = e,
+              avail = av,
+              bundledWith = Set.empty,
+              via = si,
+              conditional = si.conditional
+            }
         found = case parent of
           Nothing -> case itemSpace n of
             TypeSpace
@@ -758,6 +763,7 @@ lookSource key pick src =
        in Hit
             { entity = f.entity,
               avail = unionAvail a.avail b.avail,
+              bundledWith = Set.union a.bundledWith b.bundledWith,
               via = f.via,
               conditional = a.conditional && b.conditional
             }
@@ -769,7 +775,13 @@ lookSource key pick src =
       | null src.whole && null src.hiders = []
       | otherwise = [h | (e, av) <- pick src.setNames, Just h <- [admit pick src e av]]
     fromLists =
-      [ Hit {entity = e, avail = av, via = si, conditional = si.conditional}
+      [ Hit
+          { entity = e,
+            avail = av,
+            bundledWith = bundlesOf si.visible e,
+            via = si,
+            conditional = si.conditional
+          }
       | si <- Map.findWithDefault [] key src.listIndex,
         (e, av) <- pick si.visible
       ]
@@ -784,8 +796,8 @@ admit ::
   Maybe Avail ->
   Maybe Hit
 admit pick src e av = case firstHider of
-  Just h -> Just (hit h (join (lookup e (pick h.visible))))
-  Nothing -> (\w -> hit w av) <$> firstWhole
+  Just h -> Just (hit h (join (lookup e (pick h.visible))) (bundlesOf h.visible e))
+  Nothing -> (\w -> hit w av (bundlesOf src.setNames e)) <$> firstWhole
   where
     firstWhole = listToMaybe src.whole
     before si = maybe True (\w -> si.index < w.index) firstWhole
@@ -794,7 +806,14 @@ admit pick src e av = case firstHider of
     unconditional =
       any (not . (.conditional)) src.whole
         || any (\si -> not si.conditional && has si) src.hiders
-    hit v a = Hit {entity = e, avail = a, via = v, conditional = not unconditional}
+    hit v a bs =
+      Hit
+        { entity = e,
+          avail = a,
+          bundledWith = bs,
+          via = v,
+          conditional = not unconditional
+        }
 
 -- | What may have a name nothing has. See Note [Lookup cost].
 missingIn :: Group -> Listed -> Misses

@@ -61,6 +61,7 @@ import HaskellReviewer.Core.Entities
     setNames,
     subKids,
     unionNames,
+    valuesWith,
     withOpen,
   )
 import HaskellReviewer.Core.Exported (nameOf)
@@ -112,11 +113,13 @@ the values too (associated types in the types).
 - An item that names no local name is looked up in the module's own
   scope: a hit is exported with its origin. @T(..)@ brings T's children
   in scope through any import, @T(A, f)@ the named ones, and a named
-  pattern synonym goes under T (bundling). With no hit, in the order of
-  Note [Resolution] in "HaskellReviewer.Core.Resolve": a name made by a
-  splice ('SpliceMade') if the module has top-level splices; the open
-  parts of an import of ours that may have it; that name from the first
-  open external import; the open parts of an import open only by its
+  pattern synonym goes under T (bundling). A bundled pattern synonym
+  remembers its type even when the type isn't exported (GHC's
+  availFromGRE). With no hit, in the order of Note [Resolution] in
+  "HaskellReviewer.Core.Resolve": a name made by a splice
+  ('SpliceMade') if the module has top-level splices; the open parts of
+  an import of ours that may have it; that name from the first open
+  external import; the open parts of an import open only by its
   splices; else nothing.
 - @module N@ (N not this module): what the imports with alias N bring,
   kept only if also in scope unqualified (GHC's pickGREsModExp), with
@@ -138,7 +141,9 @@ most of the bigger map, so a chain of n modules stays about n log n.
 A child can come without its parent's avail (@import M (f)@, or
 @module M (f)@). It is kept "lone", by its parent's name; when a union
 brings the parent, it goes under it, as GHC merges avails. The union
-looks this up from its smaller side only.
+looks this up from its smaller side only. A bundled pattern synonym has
+no parent of its own: the set's 'bundles' says which types it goes
+under (@import M (pattern P)@ keeps them, as GHC does).
 -}
 
 -- * Local names
@@ -396,7 +401,7 @@ exportSet t m scope = case (t.name, m.exports) of
     -- A found name; a type with its children in scope, and the pattern
     -- synonyms its subs bundle.
     hitNames sc i h = case h.avail of
-      Nothing -> mkNames [h.entity] []
+      Nothing -> valuesWith (const h.bundledWith) [h.entity]
       Just _ ->
         let kids = subKids i.subs (childrenInScope sc h.entity)
             known = Set.map (.occ) kids
