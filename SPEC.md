@@ -1416,6 +1416,9 @@ Target: ≤ 30 ms median server time on a large indexed project (D-208).
   per core, `-threaded`). The priorities are: modules a request is waiting
   for, then changed modules in diff mode, then the rest. A request for a
   module that isn't ready raises its priority and waits for it.
+  A request computing (resolve, links, encode) parks one worker until
+  it ends, never the last one, so its compute gets a core. Waits for
+  slots don't count.
 - **Reload** (§5.2) builds a new generation and swaps it in atomically.
   Unchanged blobs hit the shared parse results (§11.4.4), so a reload
   re-parses only what changed.

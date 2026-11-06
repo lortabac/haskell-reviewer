@@ -24,8 +24,8 @@ import Control.Concurrent.STM
     readTVar,
     readTVarIO,
   )
-import Control.Exception (AsyncException (..), fromException, throwIO)
-import Control.Monad (when)
+import Control.Exception (AsyncException (..), IOException, fromException, throwIO, try)
+import Control.Monad (void, when)
 import Data.List (sort)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, isNothing)
@@ -67,9 +67,11 @@ import HaskellReviewer.Session.Index
     readNames,
     readProgress,
     readStates,
+    requestCount,
     requestModule,
     runWorkers,
     slotState,
+    withRequest,
   )
 import IndexSupport (isParsing, isReady, waitDone, waitState, within)
 import Test.Tasty (TestTree, testGroup)
@@ -79,7 +81,8 @@ tests :: TestTree
 tests =
   testGroup
     "Index"
-    [ testCase "a request jumps the queue" $ do
+    [ gateTests,
+      testCase "a request jumps the queue" $ do
         fake <- newFake ["A"]
         index <- indexOf ["A", "B", "C", "D"]
         withAsync (runWorkers fake.deps 1 index) $ \_ -> do
@@ -328,6 +331,93 @@ tests =
     ]
   where
     crashed = IndexCrashed "heap overflow"
+
+-- | Workers make room for requests. See Note [Indexing].
+gateTests :: TestTree
+gateTests =
+  testGroup
+    "gate"
+    [ testCase "a request computing parks one of two workers" $ do
+        fake <- newFake ["A", "B", "C"]
+        index <- indexOf ["A", "B", "C", "D"]
+        withHeldRequest index $ \done ->
+          withAsync (runWorkers fake.deps 2 index) $ \_ -> do
+            waitState index (m "A") isParsing
+            release fake "A"
+            waitState index (m "B") isParsing
+            -- One at a time while the request runs.
+            readTVarIO fake.most >>= (@?= 1)
+            -- It ends: the parked worker takes C next to B.
+            done
+            -- B and C held: both in their parse.
+            within (atomically (readTVar fake.running >>= check . (== 2)))
+            release fake "B"
+            release fake "C"
+            waitDone index,
+      testCase "one worker never parks" $ do
+        fake <- newFake []
+        index <- indexOf ["A", "B"]
+        withHeldRequest index $ \_ -> within (runWorkers fake.deps 1 index)
+        readTVarIO fake.parsed >>= (@?= ["A", "B"]),
+      testCase "a throw or a cancel gives the gate back" $ do
+        fake <- newFake ["B", "C"]
+        index <- indexOf ["B", "C"]
+        r <- try @IOException (withRequest index (ioError (userError "boom") :: IO ()))
+        r @?= Left (userError "boom")
+        atomically (requestCount index) >>= (@?= 0)
+        entered <- newEmptyMVar
+        never <- newEmptyMVar
+        withAsync (withRequest index (putMVar entered () >> takeMVar never)) $ \req -> do
+          within (takeMVar entered)
+          atomically (requestCount index) >>= (@?= 1)
+          cancel req
+          void (within (waitCatch req))
+        atomically (requestCount index) >>= (@?= 0)
+        -- So both workers run.
+        withAsync (runWorkers fake.deps 2 index) $ \_ -> do
+          waitState index (m "B") isParsing
+          waitState index (m "C") isParsing
+          release fake "B"
+          release fake "C"
+          waitDone index,
+      testCase "a big file put back gives its place back" $ do
+        -- A and B are big and wait in their parse: one runs, the other
+        -- is put back. The worker that put it back takes C.
+        let FileSize limit = bigFileSize
+            big n = n <> Text.replicate limit "x"
+        fake <- newFake [big "A", big "B", "C"]
+        let deps =
+              fake.deps
+                { readModule = \p -> case relPathText p of
+                    "C.hs" -> pure (Right (TextContent "C"))
+                    other -> pure (Right (TextContent (big (Text.dropEnd 3 other))))
+                }
+        index <- indexOf ["A", "B", "C"]
+        withAsync (runWorkers deps 2 index) $ \_ -> do
+          within (atomically (readTVar fake.bigRunning >>= check . (>= 1)))
+          waitState index (m "C") isParsing
+          readTVarIO fake.bigRunning >>= (@?= 1)
+          started <- readTVarIO fake.parsed
+          let (running, waiting)
+                | big "A" `elem` started = (big "A", big "B")
+                | otherwise = (big "B", big "A")
+          release fake "C"
+          release fake running
+          release fake waiting
+          waitDone index
+    ]
+
+-- | Hold a request in 'withRequest'. The action gets a way to end it;
+-- it ends anyway on return.
+withHeldRequest :: Index -> (IO () -> IO a) -> IO a
+withHeldRequest index act = do
+  entered <- newEmptyMVar
+  done <- newEmptyMVar
+  withAsync (withRequest index (putMVar entered () >> readMVar done)) $ \req -> do
+    within (takeMVar entered)
+    act $ do
+      _ <- tryPutMVar done ()
+      void (within (waitCatch req))
 
 -- | With the real parser: in the "Parsing" group (Q-RTS-BLACKHOLE).
 parsingTests :: TestTree

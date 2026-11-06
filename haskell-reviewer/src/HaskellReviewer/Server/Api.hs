@@ -17,6 +17,7 @@ module HaskellReviewer.Server.Api
 
     -- * Internal, for tests
     cborWarmUp,
+    computed,
   )
 where
 
@@ -91,6 +92,7 @@ import HaskellReviewer.Session.Index
     awaitModule,
     newIndex,
     readProgress,
+    withRequest,
   )
 import HaskellReviewer.Session.Resolve
   ( awaitImports,
@@ -266,7 +268,8 @@ moduleApp api side segs req respond
       m <- findModule snap.modules i
       Just (i, m)
     missing snap = jsonWith status404 (encodeModuleNotFound snap.generation)
-    view snap v = respond (cbor (encodeModulePage snap.generation snap.modules v))
+    view snap v =
+      computed snap (pure (encodeModulePage snap.generation snap.modules v)) >>= respond
     answer snap i path r =
       view snap ModuleView {moduleId = i, path = path, answer = NotParsed r}
     fromIndex snap i path =
@@ -308,7 +311,9 @@ sourceApp api side segs req respond
           _ -> respond (missing snap)
   where
     missing snap = jsonWith status404 (encodeFileNotFound snap.generation)
-    view snap v = respond (cbor (encodeSource snap.generation snap.modules v))
+    view snap v = viewWith snap (pure v)
+    viewWith snap mk =
+      computed snap (encodeSource snap.generation snap.modules <$> mk) >>= respond
     plain path i = viewOf path i False PlainBody
     viewOf path i partial b =
       SourceView {path = path, moduleId = i, partial = partial, body = b}
@@ -321,9 +326,9 @@ sourceApp api side segs req respond
         _ -> view snap (plain path (Just i))
     fromIndex snap path i =
       awaitModule snap.index i >>= \case
-        Just (Right (IndexedParsed s)) -> do
+        Just (Right (IndexedParsed s)) -> viewWith snap $ do
           (lexed, partial) <- linked snap i s
-          view snap (viewOf path (Just i) partial (LexedBody lexed))
+          pure (viewOf path (Just i) partial (LexedBody lexed))
         Just (Right (IndexedTextOnly t)) ->
           view snap (viewOf path (Just i) False (textOnlySource t))
         Just (Right (IndexedNotText _)) -> view snap (plain path (Just i))
@@ -332,9 +337,19 @@ sourceApp api side segs req respond
         -- Every Haskell source has a slot.
         Nothing -> respond (missing snap)
 
+-- | Build and force a CBOR body inside 'withRequest'. No slot waits in
+-- here (Note [Indexing] in "HaskellReviewer.Session.Index").
+computed :: Snapshot -> IO LBS.ByteString -> IO Response
+computed snap mk =
+  withRequest snap.index $ do
+    body <- mk
+    _ <- evaluate (LBS.length body)
+    pure (cbor body)
+
 -- | A parsed module's lexed view, resolved, and whether it's partial.
 linked :: Snapshot -> ModuleId -> ParsedSource -> IO (LexedSource, Bool)
 linked snap i s = do
+  -- i is Ready: resolveModuleWith doesn't wait.
   resolved <- resolveModuleWith snap.resolver i
   let res = fst <$> resolved
       state = maybe (const ModuleNotParsed) snd resolved

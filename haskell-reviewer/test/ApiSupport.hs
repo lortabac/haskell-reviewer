@@ -14,6 +14,7 @@ module ApiSupport
     forceFixtures,
     indexed,
     indexAll,
+    indexDeps,
     fixedPrefs,
 
     -- * Calling the app
