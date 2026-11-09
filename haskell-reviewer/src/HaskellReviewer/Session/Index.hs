@@ -23,6 +23,7 @@ module HaskellReviewer.Session.Index
 
     -- * Workers
     runWorkers,
+    withRequest,
     failUnfinished,
     bigFileSize,
 
@@ -31,6 +32,10 @@ module HaskellReviewer.Session.Index
     readNames,
     readStates,
     slotState,
+
+    -- * Internal, for tests
+    requestCount,
+    isRequested,
   )
 where
 
@@ -48,6 +53,7 @@ import Control.Concurrent.STM
 import Control.Exception
   ( SomeAsyncException,
     SomeException,
+    bracket_,
     catch,
     evaluate,
     finally,
@@ -132,8 +138,20 @@ a big module put back also goes in at Requested if it's marked, so a
 request that came during the first read keeps its priority. A big file
 is read twice; there are few of them.
 
+Requests: a request's compute (resolve, links, encode) needs a core
+too. 'withRequest' counts the requests computing now, and 'claimNext'
+lets at most @max 1 (workers - requests)@ workers hold a module. So
+each request parks a worker when its parse ends, never the last one. A
+parked worker waits in 'retry', so its core is free. Don't put
+'withRequest' around a wait for a slot: the slot may need the parked
+worker. The in-flight count goes down in the same 'finally' as the
+big-file lock, so a big file put back gives its place back. The counts
+use modifyTVar'. Trade-off (accepted): under steady requests with 2
+workers, one big file can delay a Requested module.
+
 Q-RTS-BLACKHOLE: request threads read what workers write, and workers
-share the queue. So nothing shared holds a thunk. The parse result is
+share the queue. So nothing shared holds a thunk. The two counts are
+strict Ints, written with modifyTVar'. The parse result is
 fully forced by parseGuarded (the text is strict, read already), the
 names by 'forceNames', both before the transaction that publishes
 them. The queue is a strict map with strict fields, written with '$!'.
@@ -152,7 +170,11 @@ data Index = Index
     progress :: TVar Progress,
     names :: TVar (Map ModuleId [NameEntry]),
     -- | A big file is being parsed. See Note [Indexing].
-    bigBusy :: TVar Bool
+    bigBusy :: TVar Bool,
+    -- | Requests computing now ('withRequest').
+    requests :: TVar Int,
+    -- | Workers holding a module now.
+    inFlight :: TVar Int
   }
 
 -- | One module to index.
@@ -251,6 +273,8 @@ newIndex idx = do
   progress <- newTVarIO Progress {total = Map.size slots, ready = 0, failed = 0}
   names <- newTVarIO Map.empty
   bigBusy <- newTVarIO False
+  requests <- newTVarIO 0
+  inFlight <- newTVarIO 0
   ghc <- evaluate idx.ghc
   pure
     Index
@@ -259,7 +283,9 @@ newIndex idx = do
         queue = queue,
         progress = progress,
         names = names,
-        bigBusy = bigBusy
+        bigBusy = bigBusy,
+        requests = requests,
+        inFlight = inFlight
       }
 
 -- * Requests
@@ -300,13 +326,23 @@ bigFileSize = FileSize 262_144
 -- bug, or a heap overflow) or are stopped, every module not done yet
 -- fails, then the exception goes on. See Note [Indexing].
 runWorkers :: IndexDeps -> Int -> Index -> IO ()
-runWorkers deps n index =
-  replicateConcurrently_ (max 1 n) (worker deps index) `catch` \e -> do
+runWorkers deps n0 index =
+  replicateConcurrently_ n (worker deps n index) `catch` \e -> do
     why <- case fromException e of
       Just AsyncCancelled -> pure "indexing was stopped"
       Nothing -> safeMessage e
     failUnfinished index (IndexCrashed why)
     throwIO (e :: SomeException)
+  where
+    n = max 1 n0
+
+-- | Run a request's compute. A worker parks meanwhile. Not around a wait
+-- for a slot. See Note [Indexing].
+withRequest :: Index -> IO a -> IO a
+withRequest index =
+  bracket_
+    (atomically (modifyTVar' index.requests (+ 1)))
+    (atomically (modifyTVar' index.requests (subtract 1)))
 
 -- | Every slot not done yet fails with this. For when the workers are
 -- gone: no request may wait for ever.
@@ -342,6 +378,17 @@ readStates index = traverse (\slot -> readTVar slot.state) index.slots
 slotState :: Index -> ModuleId -> STM (Maybe SlotState)
 slotState index i = traverse (\slot -> readTVar slot.state) (Map.lookup i index.slots)
 
+-- * Internal, for tests
+
+-- | Requests in 'withRequest' now.
+requestCount :: Index -> STM Int
+requestCount index = readTVar index.requests
+
+-- | A request asked for this module. False if it has no slot.
+isRequested :: Index -> ModuleId -> STM Bool
+isRequested index i =
+  maybe (pure False) (\slot -> readTVar slot.requested) (Map.lookup i index.slots)
+
 -- * Internal
 
 -- | A module a worker took.
@@ -353,26 +400,29 @@ data Claim = Claim
     holdsBig :: Bool
   }
 
--- | Take modules until none is left. The big-file lock is given back
--- however the module ends.
-worker :: IndexDeps -> Index -> IO ()
-worker deps index = loop
+-- | Take modules until none is left. The big-file lock and the
+-- in-flight count are given back however the module ends.
+worker :: IndexDeps -> Int -> Index -> IO ()
+worker deps n index = loop
   where
     loop = do
       more <- mask $ \restore ->
-        atomically (claimNext index) >>= \case
+        atomically (claimNext n index) >>= \case
           Nothing -> pure False
           Just c -> do
             restore (indexClaim deps index c) `finally` release c
             pure True
       when more loop
-    release c = when c.holdsBig (atomically (writeTVar index.bigBusy False))
+    release c = atomically $ do
+      modifyTVar' index.inFlight (subtract 1)
+      when c.holdsBig (writeTVar index.bigBusy False)
 
 -- | The next Pending module, set to Parsing. Drops ids that are taken
 -- already; skips big modules while the lock is busy; waits if only
--- those are left. See Note [Indexing].
-claimNext :: Index -> STM (Maybe Claim)
-claimNext index = do
+-- those are left, or if this worker must park for a request. There
+-- are @n@ workers. See Note [Indexing].
+claimNext :: Int -> Index -> STM (Maybe Claim)
+claimNext n index = do
   q <- readTVar index.queue
   busy <- readTVar index.bigBusy
   go busy q (Queue.entries q)
@@ -392,11 +442,18 @@ claimNext index = do
               if big && busy
                 then go busy q rest
                 else do
+                  waitIfParked
                   writeTVar index.queue $! Queue.remove t q
+                  modifyTVar' index.inFlight (+ 1)
                   writeTVar slot.state Parsing
                   when big (writeTVar index.bigBusy True)
                   pure (Just Claim {id = i, ticket = t, slot = slot, holdsBig = big})
             _ -> go busy (Queue.remove t q) rest
+    -- Each request parks a worker, never the last.
+    waitIfParked = do
+      holding <- readTVar index.inFlight
+      r <- readTVar index.requests
+      when (holding >= max 1 (n - r)) retry
 
 -- | How reading and parsing one module ended.
 data Outcome

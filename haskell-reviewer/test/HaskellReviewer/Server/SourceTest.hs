@@ -11,20 +11,24 @@ import ApiSupport
     field,
     gatedOn,
     getApi,
+    indexDeps,
     indexed,
     int,
     requestApi,
     sourceApi,
+    sourceTexts,
     str,
   )
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (poll, wait, withAsync)
-import Control.Concurrent.MVar (newEmptyMVar, putMVar)
-import Control.Monad (forM_)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, readMVar, takeMVar)
+import Control.Concurrent.STM (atomically, check)
+import Control.Monad (forM_, void, when)
 import Data.Aeson qualified as Aeson
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString.Lazy qualified as LBS
 import Data.List (sort)
+import Data.Maybe (fromMaybe)
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -35,9 +39,11 @@ import HaskellReviewer.Core.ModuleModel
     TextOnlyReason (..),
     textOnlyModule,
   )
+import HaskellReviewer.Core.Modules (moduleAtPath)
 import HaskellReviewer.Core.ResolveWarmUp (resolveWarmUpIndex)
 import HaskellReviewer.Core.SourceLinks (GuessHow, LinkReason, OutlineKind)
 import HaskellReviewer.Effects.FileSystem (ListError (..), ReadError (..))
+import HaskellReviewer.Server.Api (computed)
 import HaskellReviewer.Server.Wire.Source
   ( SourceBody (..),
     coveringView,
@@ -48,7 +54,15 @@ import HaskellReviewer.Server.Wire.Source
     sourceWarmUp,
     textOnlySource,
   )
-import HaskellReviewer.Session.Snapshot (Generation (..))
+import HaskellReviewer.Session.Index
+  ( SlotState (..),
+    isRequested,
+    requestCount,
+    runWorkers,
+    slotState,
+  )
+import HaskellReviewer.Session.Snapshot (Generation (..), Snapshot (..))
+import IndexSupport (isParsing, rel, waitState, within)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 
@@ -258,8 +272,55 @@ routeTests =
       -- A parsed: a new snapshot, indexed before the request.
       putMVar gate ()
       second <- okSource (indexed api) "s/src/B.hs"
-      bool (field "partial" second) @?= False
+      bool (field "partial" second) @?= False,
+    testCase "gate on: answered while indexing, from Pending" gateCase,
+    testCase "the body is built inside the gate" $ do
+      snap <- sourceApi.snapshot >>= either (assertFailure . show) pure
+      entered <- newEmptyMVar
+      go <- newEmptyMVar
+      let mk = putMVar entered () >> takeMVar go >> pure "body"
+      withAsync (computed snap mk) $ \c -> do
+        within (takeMVar entered)
+        atomically (requestCount snap.index) >>= (@?= 1)
+        putMVar go ()
+        void (within (wait c))
+      atomically (requestCount snap.index) >>= (@?= 0)
   ]
+
+-- | Two workers, held on A and B. Cpp is Pending when asked for. B goes,
+-- a worker parses Cpp, then parks while the request computes. A is
+-- still held, so indexing goes on. With the gate around the wait for
+-- Cpp, this hangs.
+gateCase :: Assertion
+gateCase = do
+  snap <- sourceApi.snapshot >>= either (assertFailure . show) pure
+  holdA <- newEmptyMVar
+  holdB <- newEmptyMVar
+  let held p gate t = when (Just t == lookup p sourceTexts) (readMVar gate)
+      -- Our own workers: the request must come once they are busy.
+      api =
+        sourceApi
+          { snapshot = pure (Right snap),
+            parse = \settings t -> do
+              held "s/src/A.hs" holdA t
+              held "s/src/B.hs" holdB t
+              sourceApi.parse settings t,
+            workers = 0
+          }
+      idOf p = fromMaybe (error (show p)) (moduleAtPath snap.modules (rel p))
+      a = idOf "s/src/A.hs"
+      cpp = idOf "s/src/Cpp.hs"
+  withAsync (runWorkers (indexDeps api snap) 2 snap.index) $ \_ -> do
+    waitState snap.index a isParsing
+    waitState snap.index (idOf "s/src/B.hs") isParsing
+    withAsync (okSource api "s/src/Cpp.hs") $ \pending -> do
+      within (atomically (isRequested snap.index cpp >>= check))
+      atomically (slotState snap.index cpp) >>= (@?= Just Pending)
+      putMVar holdB ()
+      v <- within (wait pending)
+      str (field "highlight" v) @?= "lexed"
+      atomically (slotState snap.index a) >>= (@?= Just Parsing)
+      putMVar holdA ()
 
 -- | The 404 body of the source route.
 fileNotFound :: LBS.ByteString

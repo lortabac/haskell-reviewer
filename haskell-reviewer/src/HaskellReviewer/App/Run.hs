@@ -271,6 +271,7 @@ snapshot] in "HaskellReviewer.Server.Api").
 
 Once the slot is filled, the same thread runs the parse workers, one
 per capability (Note [Indexing] in "HaskellReviewer.Session.Index").
+A request computing parks one of them, never the last.
 So parsing never delays the URL either. Not when the listing failed:
 there is nothing to index. However the thread ends after the fill (a
 crash, or a cancel at shutdown), the modules not done are set Failed,
