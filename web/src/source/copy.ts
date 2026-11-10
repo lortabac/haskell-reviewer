@@ -41,6 +41,8 @@ export interface Copy {
   // Call after rows were mounted or removed: keeps the mounted rows
   // selected while select-all is on.
   afterMount: () => void;
+  // Select-all is off now (a click that will change the selection).
+  endSelectAll: () => void;
 }
 
 export function createCopy(opts: {
@@ -118,6 +120,9 @@ export function createCopy(opts: {
       } else {
         allSelected = undefined;
       }
+    },
+    endSelectAll: () => {
+      allSelected = undefined;
     },
   };
 }

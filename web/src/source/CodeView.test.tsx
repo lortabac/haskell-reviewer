@@ -1,6 +1,7 @@
-import { createSignal } from "solid-js";
+import { createEffect, createRoot, createSignal } from "solid-js";
 import { render } from "solid-js/web";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { webkitFocus } from "../../test/focus";
 import { fakeLayout } from "../../test/layout";
 import { lineIndex } from "./lines";
 import {
@@ -170,7 +171,8 @@ describe("CodeView", () => {
   });
 
   it("a row that stays is never moved, so it keeps focus", async () => {
-    const { root } = mount(lines(20000));
+    const { root, api } = mount(lines(20000));
+    api.setCursor(20);
     const c = cell(root, 20);
     c.focus();
     const rows = root.querySelector(".code-rows");
@@ -226,10 +228,151 @@ describe("CodeView", () => {
     expect(api.cursor().line).toBe(1);
   });
 
-  it("a focused line becomes the cursor", () => {
+  it("only the cursor's line is focusable", () => {
     const { root, api } = mount(lines(10));
-    cell(root, 4).focus();
-    expect(api.cursor().line).toBe(4);
+    expect(cell(root, 1).getAttribute("tabindex")).toBe("0");
+    expect(cell(root, 2).hasAttribute("tabindex")).toBe(false);
+    api.setCursor(2);
+    expect(cell(root, 1).hasAttribute("tabindex")).toBe(false);
+    expect(cell(root, 2).getAttribute("tabindex")).toBe("0");
+  });
+
+  it("focusLine from an effect waits for the tabindex", () => {
+    const { root, api } = mount(lines(10));
+    const done = createRoot((d) => {
+      createEffect(() => api.focusLine(5));
+      return d;
+    });
+    expect(document.activeElement).toBe(cell(root, 5));
+    done();
+  });
+
+  // A mousedown on a row (on the cell, or on el); the browser focuses
+  // the view. Then the selection.
+  function press(
+    root: HTMLElement,
+    n: number,
+    sel: () => void,
+    opts: { button?: number; on?: Element } = {},
+  ): void {
+    (opts.on ?? cell(root, n)).dispatchEvent(
+      new MouseEvent("mousedown", { bubbles: true, button: opts.button ?? 0 }),
+    );
+    view(root).focus();
+    sel();
+  }
+  // The mouseup (on the document: drags can end outside), then the task
+  // after it.
+  const release = () =>
+    document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  async function mouseUp(): Promise<void> {
+    release();
+    await new Promise((done) => setTimeout(done, 0));
+  }
+  async function click(
+    root: HTMLElement,
+    n: number,
+    sel: () => void,
+    opts: { button?: number; on?: Element } = {},
+  ): Promise<void> {
+    press(root, n, sel, opts);
+    await mouseUp();
+  }
+  const textAt = (root: HTMLElement, n: number) =>
+    cell(root, n).firstChild as Node;
+  const key = (key: string) =>
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", { key, bubbles: true }),
+    );
+  const caret = (t: Node, i: number) => () =>
+    getSelection()?.setBaseAndExtent(t, i, t, i);
+
+  it("a click moves the cursor there and focuses the line", async () => {
+    const { root, api } = mount(lines(10));
+    await click(root, 6, caret(textAt(root, 6), 3));
+    expect(api.cursor()).toEqual({ line: 6, col: 3 });
+    expect(document.activeElement).toBe(cell(root, 6));
+    // Keys work from there.
+    key("ArrowDown");
+    expect(document.activeElement).toBe(cell(root, 7));
+  });
+
+  it("a key right after a click is not undone by its late check", async () => {
+    const { root } = mount(lines(10));
+    press(root, 6, caret(textAt(root, 6), 0));
+    release();
+    expect(document.activeElement).toBe(cell(root, 6));
+    key("ArrowDown");
+    await new Promise((done) => setTimeout(done, 0));
+    expect(document.activeElement).toBe(cell(root, 7));
+  });
+
+  it("a click in the gutter: that line, column 0", async () => {
+    const { root, api } = mount(lines(10));
+    const num = root.querySelector('.code-row[data-line="3"] .code-num');
+    if (num === null) throw new Error("no gutter");
+    await click(root, 3, () => getSelection()?.removeAllRanges(), { on: num });
+    expect(api.cursor()).toEqual({ line: 3, col: 0 });
+    expect(document.activeElement).toBe(cell(root, 3));
+  });
+
+  it("a right or middle click moves the cursor too", async () => {
+    const { root, api } = mount(lines(10));
+    await click(root, 6, caret(textAt(root, 6), 2), { button: 2 });
+    expect(api.cursor()).toEqual({ line: 6, col: 2 });
+    expect(document.activeElement).toBe(cell(root, 6));
+    await click(root, 8, caret(textAt(root, 8), 0), { button: 1 });
+    expect(document.activeElement).toBe(cell(root, 8));
+  });
+
+  it("a drag: the cursor at the selection's end, which WebKit keeps", async () => {
+    webkitFocus();
+    const { root, api } = mount(lines(10));
+    const a = textAt(root, 2);
+    // The end of row 5: the line's end.
+    const b = cell(root, 5).parentElement as Node;
+    await click(root, 2, () => getSelection()?.setBaseAndExtent(a, 1, b, 2));
+    expect(api.cursor()).toEqual({ line: 5, col: "line 5".length });
+    expect(document.activeElement).toBe(cell(root, 5));
+    const sel = getSelection();
+    expect([sel?.anchorNode, sel?.anchorOffset]).toEqual([a, 1]);
+    expect(sel?.focusNode).toBe(b);
+    // An arrow keeps it too.
+    key("ArrowDown");
+    expect(document.activeElement).toBe(cell(root, 6));
+    expect(getSelection()?.anchorNode).toBe(a);
+    expect(getSelection()?.focusNode).toBe(b);
+  });
+
+  it("a triple click: the cursor on that line, not the next", async () => {
+    const { root, api } = mount(lines(10));
+    const sel = () =>
+      getSelection()?.setBaseAndExtent(textAt(root, 4), 0, textAt(root, 5), 0);
+    await click(root, 4, sel);
+    expect(api.cursor()).toEqual({ line: 4, col: "line 4".length });
+    // Backwards to a line's start: that line.
+    const back = () =>
+      getSelection()?.setBaseAndExtent(textAt(root, 8), 2, textAt(root, 6), 0);
+    await click(root, 8, back);
+    expect(api.cursor()).toEqual({ line: 6, col: 0 });
+  });
+
+  it("focus taken elsewhere: no cursor move", async () => {
+    const { root, api } = mount(lines(10));
+    const input = document.createElement("input");
+    document.body.append(input);
+    await click(root, 4, () => input.focus());
+    expect(api.cursor().line).toBe(1);
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("a mouseup with no mousedown on a row does nothing", async () => {
+    const { root, api } = mount(lines(10));
+    press(root, 4, caret(textAt(root, 4), 0));
+    // A mousedown on the view, not on a row (the scrollbar).
+    view(root).dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    await mouseUp();
+    expect(api.cursor().line).toBe(1);
   });
 
   it("marks lines", () => {
@@ -356,6 +499,7 @@ describe("copy", () => {
       document.activeElement?.dispatchEvent(
         new KeyboardEvent("keydown", { key, ctrlKey, bubbles: true }),
       );
+    webkitFocus();
     cell(root, 1).focus();
     key("a", true);
     expect(copy().text).toBe(text.slice(1));
@@ -378,6 +522,36 @@ describe("copy", () => {
     expect(copy().native).toBe(true);
     select([t, 0], [t, 2]);
     expect(copy().text).toBe("li");
+  });
+
+  it("a left click on a line ends Ctrl+A at once; scrollbar, right click don't", async () => {
+    const text = lines(20000);
+    const { root, api } = mount(text);
+    const key = (key: string, ctrlKey = false) =>
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent("keydown", { key, ctrlKey, bubbles: true }),
+      );
+    const down = (el: Element, button = 0) =>
+      el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button }));
+    const up = async () => {
+      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      await new Promise((done) => setTimeout(done, 0));
+    };
+    cell(root, 1).focus();
+    key("a", true);
+    // The scrollbar (the view, no row) and a right click keep it, and
+    // the select-all end is not a line to go to.
+    down(view(root));
+    await up();
+    down(cell(root, 5), 2);
+    await up();
+    expect(copy().text).toBe(text);
+    expect(api.cursor().line).toBe(5);
+    // A left click: off before any selectionchange.
+    down(cell(root, 7));
+    expect(copy().text).not.toBe(text);
+    await up();
+    expect(api.cursor().line).toBe(7);
   });
 
   it("leaves other copies alone", () => {

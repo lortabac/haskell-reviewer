@@ -21,6 +21,7 @@ import { setVar } from "../ui/cssom";
 import { bringOnPage } from "../ui/scroll";
 import { createCopy } from "./copy";
 import { pieces } from "./display";
+import { focusKeepingSelection } from "./focus";
 import { isSelectAll, keyTarget } from "./keys";
 import { type LineIndex, lineText } from "./lines";
 import { domPoint } from "./selection";
@@ -132,15 +133,16 @@ export function CodeView(props: CodeViewProps): JSX.Element {
   const scrollToLine = (n: number, align: "auto" | "center" | "start") => {
     v.scrollToIndex(clamp(n) - 1, { align });
   };
-  // The cursor's row is pinned, so it's mounted once the cursor moves:
-  // at once in an event handler, after the effects inside an effect
-  // (then pendingFocus does it).
+  // The cursor's row is pinned, so it's mounted and its cell focusable
+  // once the cursor moves: at once in an event handler, after the
+  // effects inside an effect (then pendingFocus does it).
   let pendingFocus: number | undefined;
-  const focusRow = (line: number): boolean => {
+  const focusRow = (line: number, page = true): boolean => {
     const r = row(line);
-    if (r === undefined) return false;
-    r.querySelector<HTMLElement>(".code-cell")?.focus({ preventScroll: true });
-    bringOnPage(r);
+    const c = r?.querySelector<HTMLElement>(".code-cell");
+    if (r === undefined || !c?.hasAttribute("tabindex")) return false;
+    focusKeepingSelection(c);
+    if (page) bringOnPage(r);
     return true;
   };
   const focusLine = (n: number) => {
@@ -181,6 +183,8 @@ export function CodeView(props: CodeViewProps): JSX.Element {
   // Keys on a focused line. Left and right stay native (scroll
   // sideways).
   const onKeyDown = (e: KeyboardEvent) => {
+    // A key right after a click wins over the click's late check.
+    clearTimeout(upTimer);
     if (
       !(e.target instanceof Element) ||
       e.target.closest(".code-cell") === null
@@ -207,19 +211,67 @@ export function CodeView(props: CodeViewProps): JSX.Element {
     focusLine(to);
   };
 
-  // A click (or anything else) focused a line: it's the cursor now.
-  const onFocusIn = (e: FocusEvent) => {
-    if (!(e.target instanceof Element)) return;
-    const cell = e.target.closest(".code-cell");
-    if (cell === null) return;
-    const line = Number(cell.parentElement?.getAttribute("data-line"));
-    let col = 0;
+  // Clicks and drags. Only the cursor's cell is focusable, so
+  // mousedown focuses the view, not a cell (WebKit drops the selection
+  // otherwise). On mouseup: cursor to the selection's end (or the
+  // clicked line), focus it. Again a task later: Firefox moves the
+  // selection after mouseup when you click inside it.
+  let downLine: number | undefined;
+  let upTimer: ReturnType<typeof setTimeout> | undefined;
+  const onMouseDown = (e: MouseEvent) => {
+    const r =
+      e.target instanceof Element ? e.target.closest(".code-row") : null;
+    downLine = r === null ? undefined : Number(r.getAttribute("data-line"));
+    // A left click on a line ends select-all at once: its selectionchange
+    // can come after a quick copy. The scrollbar and a right click
+    // (menu Copy) keep it.
+    if (r !== null && e.button === 0) copy.endSelectAll();
+  };
+  const onMouseUp = () => {
+    const down = downLine;
+    downLine = undefined;
+    clearTimeout(upTimer);
+    if (down === undefined) return;
+    afterClick(down);
+    upTimer = setTimeout(() => afterClick(down), 0);
+  };
+  const afterClick = (down: number) => {
+    // Focus went elsewhere meanwhile: leave it.
+    if (!box.contains(document.activeElement)) return;
     const sel = getSelection();
-    if (sel?.isCollapsed === true && sel.anchorNode !== null) {
-      const p = domPoint(box, sel.anchorNode, sel.anchorOffset);
-      if (p.kind === "at" && p.line === line) col = p.col;
+    const end =
+      sel?.focusNode == null
+        ? undefined
+        : domPoint(box, sel.focusNode, sel.focusOffset);
+    let line = down;
+    let col = 0;
+    // The rowgroup itself is select-all's end, not a line the user is on.
+    if (end?.kind === "at" && sel !== null && sel.focusNode !== rowsEl) {
+      if (!sel.isCollapsed) {
+        line = end.line;
+        col = end.col;
+        // A triple click ends at the next line's start: the line before.
+        const start =
+          sel.anchorNode === null
+            ? undefined
+            : domPoint(box, sel.anchorNode, sel.anchorOffset);
+        const from =
+          start?.kind === "at"
+            ? start.line
+            : start?.kind === "before"
+              ? 0
+              : line;
+        if (col === 0 && line > from && line > 1) {
+          line -= 1;
+          col = Infinity;
+        }
+      } else if (end.line === line) {
+        col = end.col;
+      }
     }
+    col = Math.min(col, lineText(props.text, props.index, line).length);
     setCursor({ line, col });
+    pendingFocus = focusRow(line, false) ? undefined : line;
   };
 
   // Focus went elsewhere: a waiting focus must not take it back later.
@@ -231,7 +283,12 @@ export function CodeView(props: CodeViewProps): JSX.Element {
   onMount(() => {
     rowHeight.observe(probe);
     document.addEventListener("focusin", onAnyFocus);
-    onCleanup(() => document.removeEventListener("focusin", onAnyFocus));
+    document.addEventListener("mouseup", onMouseUp);
+    onCleanup(() => {
+      document.removeEventListener("focusin", onAnyFocus);
+      document.removeEventListener("mouseup", onMouseUp);
+      clearTimeout(upTimer);
+    });
   });
 
   // A new row height (the probe's first measure, zoom, fonts): keep the
@@ -279,7 +336,11 @@ export function CodeView(props: CodeViewProps): JSX.Element {
           aria-label={String(n)}
           data-n={n}
         />
-        <div class="code-cell" role="gridcell" tabindex={isCursor(n) ? 0 : -1}>
+        <div
+          class="code-cell"
+          role="gridcell"
+          tabindex={isCursor(n) ? 0 : undefined}
+        >
           {props.renderLine === undefined
             ? plainLine(text)
             : props.renderLine(n, text)}
@@ -290,15 +351,21 @@ export function CodeView(props: CodeViewProps): JSX.Element {
 
   // eslint-disable-next-line solid/reactivity -- mountRows tracks lines
   mountRows(() => rowsEl, lines, lineRow, owner);
-  // After the rows changed: a focus that waited for its row, and still
-  // all selected if it was.
+  // A focus that waited for its row or the cell's tabindex (user
+  // effects run after the DOM ones).
+  const retryFocus = () => {
+    if (pendingFocus !== undefined && focusRow(pendingFocus)) {
+      pendingFocus = undefined;
+    }
+  };
+  createEffect(on(cursor, retryFocus, { defer: true }));
+  // After the rows changed: a waiting focus, and still all selected if
+  // it was.
   createEffect(
     on(
       lines,
       () => {
-        if (pendingFocus !== undefined && focusRow(pendingFocus)) {
-          pendingFocus = undefined;
-        }
+        retryFocus();
         copy.afterMount();
       },
       { defer: true },
@@ -321,7 +388,7 @@ export function CodeView(props: CodeViewProps): JSX.Element {
         aria-rowcount={count()}
         aria-label="File contents"
         onKeyDown={onKeyDown}
-        onFocusIn={onFocusIn}
+        onMouseDown={onMouseDown}
       >
         <div ref={(el) => (rowsEl = el)} class="code-rows" role="rowgroup" />
       </div>

@@ -224,9 +224,51 @@ test("copy with the mouse: click, scroll, Shift+click", async ({
   await page.keyboard.down("Shift");
   await page.mouse.click(box.x + box.width - 2, box.y + box.height / 2);
   await page.keyboard.up("Shift");
+  const want = bigSlice([10, 0], [5010, bigLine(5010).length]);
+  expect(await copy(page)).toBe(want);
+  // The click moved the cursor there; an arrow keeps the selection.
+  await expect(end).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(row(page, 5011).locator(".code-cell")).toBeFocused();
+  expect(await copy(page)).toBe(want);
+  // A Shift+click on the same screen extends it back.
+  const back = await row(page, 5008).locator(".code-cell").boundingBox();
+  if (back === null) throw new Error("no box");
+  await page.keyboard.down("Shift");
+  await page.mouse.click(back.x + back.width - 2, back.y + back.height / 2);
+  await page.keyboard.up("Shift");
   expect(await copy(page)).toBe(
-    bigSlice([10, 0], [5010, bigLine(5010).length]),
+    bigSlice([10, 0], [5008, bigLine(5008).length]),
   );
+});
+
+test("drag across lines, then keys move from the drag's end", async ({
+  page,
+  server,
+}) => {
+  await open(page, server.base + big);
+  await recordCopies(page);
+  const a = await row(page, 3).locator(".code-cell").boundingBox();
+  const b = await row(page, 6).locator(".code-cell").boundingBox();
+  if (a === null || b === null) throw new Error("no box");
+  await page.mouse.move(a.x + 1, a.y + a.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(b.x + b.width - 2, b.y + b.height / 2, { steps: 5 });
+  await page.mouse.up();
+  const want = bigSlice([3, 0], [6, bigLine(6).length]);
+  expect(await copy(page)).toBe(want);
+  await expect(row(page, 6).locator(".code-cell")).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(row(page, 5).locator(".code-cell")).toBeFocused();
+  expect(await copy(page)).toBe(want);
+});
+
+test("a right click moves the cursor too", async ({ page, server }) => {
+  await open(page, server.base + big);
+  await row(page, 6).locator(".code-cell").click({ button: "right" });
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("ArrowDown");
+  await expect(row(page, 7).locator(".code-cell")).toBeFocused();
 });
 
 test("a page selection across the whole view copies the whole file", async ({
@@ -258,18 +300,16 @@ test("Ctrl+A in the view copies the whole file", async ({ page, server }) => {
   await scrollTo(page, "middle");
   await expect(row(page, 10000)).toBeVisible();
   expect(await copy(page)).toBe(bigText);
-  // A drag on the scrollbar (the box's right edge) keeps it too.
+  // The wheel keeps it too. (Headless browsers show no scrollbar: a
+  // press at the box's edge hits a line. Unit tests do the scrollbar.)
   const b = await view(page).boundingBox();
   if (b === null) throw new Error("no box");
-  await page.mouse.move(b.x + b.width - 4, b.y + b.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(b.x + b.width - 4, b.y + b.height / 2 + 60, {
-    steps: 4,
-  });
-  await page.mouse.up();
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+  await page.mouse.wheel(0, 300);
+  await expect(row(page, 10025)).toBeInViewport();
   expect(await copy(page)).toBe(bigText);
   // A click on a line ends it.
-  await row(page, 10000).locator(".code-cell").click();
+  await row(page, 10025).locator(".code-cell").click();
   expect(await copy(page)).toBeNull();
 });
 
@@ -357,8 +397,13 @@ test("keyboard: arrows, pages, Ctrl+End, Ctrl+Home", async ({
   await page.keyboard.press("Control+Home");
   expect(await focusedLine()).toBe("1");
   await expect(row(page, 1)).toBeInViewport();
-  // One Tab stop in the view.
-  await expect(view(page).locator('[tabindex="0"]')).toHaveCount(1);
+  // One Tab stop in the view: the cursor's line, the only one with a
+  // tabindex.
+  await expect(view(page).locator("[tabindex]")).toHaveCount(1);
+  await expect(row(page, 1).locator(".code-cell")).toHaveAttribute(
+    "tabindex",
+    "0",
+  );
 });
 
 test("row headers are named by their numbers", async ({ page, server }) => {
@@ -381,7 +426,10 @@ for (const t of themes) {
     await page.emulateMedia({ colorScheme: t.scheme });
     await open(page, server.base + big + "#L200-L203");
     await expect(row(page, 200)).toBeInViewport();
-    await row(page, 201).locator(".code-cell").focus();
+    // The cursor is on the mark's first line.
+    const c = row(page, 200).locator(".code-cell");
+    await c.focus();
+    await expect(c).toBeFocused();
     await axe(page, `source view, ${t.scheme}`);
   });
 }
