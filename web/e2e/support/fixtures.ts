@@ -40,6 +40,8 @@ declare global {
     __notices: string[];
     __hrCsp?: (entry: CspEntry) => void;
     __pwned?: unknown;
+    // What each copy put on the clipboard (source.spec.ts).
+    __copies: (string | null)[];
   }
 }
 

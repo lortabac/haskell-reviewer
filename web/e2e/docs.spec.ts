@@ -171,6 +171,12 @@ test("inline source: line numbers and gaps", async ({
       "",
     ].join("\n"),
   );
+  // One row per line (the file view's .code-* rules don't reach it).
+  const tops = await op
+    .locator("pre.src .src-row")
+    .evaluateAll((rows) => rows.map((r) => r.getBoundingClientRect().top));
+  expect(tops).toHaveLength(4);
+  expect(new Set(tops.map(Math.round)).size).toBe(4);
   await expect(button).toHaveText("Hide source of <+>");
   await button.click();
   await expect(op.locator("pre.src")).toHaveCount(0);
@@ -282,8 +288,8 @@ test("go to source marks the line", async ({
     .getByRole("link", { name: /Go to source/ })
     .click();
   await expect(page).toHaveURL(server.base + `src/tree/Shapes.hs#L${line}`);
-  const mark = page.locator(".file-gutter .file-line-target");
-  await expect(mark).toHaveText(String(line));
+  const mark = page.locator(".code-row.code-line-target");
+  await expect(mark).toHaveAttribute("aria-rowindex", String(line));
   await expect.poll(() => inViewport(mark)).toBe(true);
   // The module stays current in the sidebar on its file's page.
   await expect(
@@ -333,7 +339,10 @@ test("a module that doesn't parse: banner and View source", async ({
   const view = banner.getByRole("link", { name: "View source" });
   await expect(view).toHaveAttribute("href", /\/src\/tree\/Broken\.hs#L3$/);
   await view.click();
-  await expect(page.locator(".file-line-target")).toHaveText("3");
+  await expect(page.locator(".code-line-target")).toHaveAttribute(
+    "aria-rowindex",
+    "3",
+  );
 });
 
 test("unknown module: not found, search box prefilled", async ({

@@ -1,0 +1,110 @@
+/* The virtual source view (source/CodeView.tsx). Rows are placed by
+   --code-y (set through ui/cssom.ts); all rows have the same height. */
+.code-wrap {
+  position: relative;
+  font-size: 0.9rem;
+}
+
+.code-hint {
+  margin: 0 0 var(--space-1);
+  color: var(--color-muted);
+  font-family: var(--font-sans);
+  font-size: 0.85em;
+}
+
+/* The scroll box: both ways. As tall as the file, but at most the
+   window less the header, the path and the hint (about 12.5rem) and
+   a bit of room below (14rem in all). */
+.code-view {
+  --code-gutter: calc(var(--code-digits, 1) * 1ch + 2 * var(--space-2));
+  max-height: max(12rem, calc(100dvh - 14rem));
+  overflow: auto;
+  overflow-anchor: none;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  font-family: var(--font-mono);
+}
+
+/* As tall as all rows, as wide as the widest line, so the scrollbars
+   don't jump while rows come and go. */
+.code-rows {
+  position: relative;
+  height: var(--code-h, 0);
+  min-width: 100%;
+  width: calc(
+    var(--code-gutter) + var(--code-cols, 0) * 1ch + 2 * var(--space-2) + 1px
+  );
+}
+
+.code-row {
+  position: absolute;
+  top: var(--code-y, 0);
+  left: 0;
+  right: 0;
+  display: flex;
+  height: 1.5em;
+  line-height: 1.5;
+  white-space: pre;
+  tab-size: 8;
+  overflow-y: clip;
+}
+
+.code-probe {
+  visibility: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* The line number comes from CSS, so it's never in the text. */
+.code-num {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  flex: none;
+  width: var(--code-gutter);
+  padding: 0 var(--space-2);
+  text-align: right;
+  color: var(--color-muted);
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  user-select: none;
+}
+
+.code-num::before {
+  content: attr(data-n);
+}
+
+.code-cell {
+  flex: 1 0 auto;
+  padding: 0 var(--space-2);
+}
+
+.code-cell:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* Control characters, drawn as glyphs: muted and boxed, so they don't
+   pass for text. */
+.code-ctrl {
+  color: var(--color-muted);
+  outline: 1px solid var(--color-muted);
+  outline-offset: -1px;
+}
+
+/* Lines of #L<n>[-L<m>]: bold, a bar and a background, not just colour. */
+.code-line-target,
+.code-line-target > .code-num {
+  background: var(--color-mark);
+  color: var(--color-fg);
+  font-weight: 600;
+}
+
+.code-line-target > .code-num {
+  box-shadow: inset 3px 0 0 var(--color-fg);
+}
+
+/* Muted is too faint on the mark colour. */
+.code-line-target .code-ctrl {
+  color: inherit;
+}

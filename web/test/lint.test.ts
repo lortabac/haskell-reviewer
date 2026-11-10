@@ -64,6 +64,14 @@ const banned: [string, string][] = [
   ["new window.DOMParser();", "no-restricted-syntax"],
   ["importScripts('x.js');", "no-restricted-syntax"],
   ["self.importScripts('x.js');", "no-restricted-syntax"],
+  ["document.body.style.color = 'red';", "no-restricted-syntax"],
+  ["document.body.style.setProperty('--x', '1');", "no-restricted-syntax"],
+  ["document.body['style'].color = 'red';", "no-restricted-syntax"],
+  [
+    "Object.assign(document.body.style, { color: 'red' });",
+    "no-restricted-syntax",
+  ],
+  ["document.body.attributeStyleMap.clear();", "no-restricted-syntax"],
 ];
 
 const clean = "export const A = () => <div class='x'>{'text'}</div>;\n";
@@ -92,6 +100,12 @@ describe("lint rules", () => {
       .filter((m) => m.severity === 2)
       .map((m) => m.ruleId);
     expect(rules).toContain(rule);
+  });
+
+  // The one place allowed to write styles, linted as itself.
+  it("accepts src/ui/cssom.ts", async () => {
+    const [result] = await eslint.lintFiles(["src/ui/cssom.ts"]);
+    expect(result?.messages).toEqual([]);
   });
 
   it("accepts clean code", async () => {

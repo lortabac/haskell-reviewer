@@ -74,6 +74,17 @@ const banned = [
   },
 ];
 
+// Inline styles through the CSSOM: only src/ui/cssom.ts may (D-79).
+// Broad on purpose: any `.style` member. A field named style that
+// isn't CSS needs a disable comment with a reason.
+const styleBans = [
+  {
+    selector:
+      "MemberExpression:matches([property.name=/^(style|attributeStyleMap)$/], [computed=true][property.value=/^(style|attributeStyleMap)$/])",
+    message: "No inline styles: use a class, or setVar from src/ui/cssom.ts.",
+  },
+];
+
 export default tseslint.config(
   { ignores: ["dist/", "test-results/", "playwright-report/", "blob-report/"] },
   js.configs.recommended,
@@ -115,8 +126,12 @@ export default tseslint.config(
       "no-implied-eval": "error",
       "no-new-func": "error",
       "no-script-url": "error",
-      "no-restricted-syntax": ["error", ...banned],
+      "no-restricted-syntax": ["error", ...banned, ...styleBans],
     },
+  },
+  {
+    files: ["src/ui/cssom.ts"],
+    rules: { "no-restricted-syntax": ["error", ...banned] },
   },
   {
     files: ["**/*.{js,mjs}"],

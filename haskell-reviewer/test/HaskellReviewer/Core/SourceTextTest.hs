@@ -1,6 +1,10 @@
 module HaskellReviewer.Core.SourceTextTest (tests) where
 
 import Control.Exception (evaluate)
+import Data.Aeson ((.:))
+import Data.Aeson qualified as Aeson
+import Data.ByteString qualified as BS
+import Data.Foldable (for_)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -26,7 +30,14 @@ import Hedgehog.Gen qualified as Gen
 import Hedgehog.Range qualified as Range
 import System.Timeout (timeout)
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (testCase, (@?=))
+import Test.Tasty.HUnit
+  ( Assertion,
+    assertBool,
+    assertEqual,
+    assertFailure,
+    testCase,
+    (@?=),
+  )
 import Test.Tasty.Hedgehog (testProperty)
 
 tests :: TestTree
@@ -173,6 +184,7 @@ tests =
         let w = fromIntegral
             s = spanOf (w l1) (w c1) (w l2) (w c2)
         sliceSpan (sourceLines t) s === reference t (l1, c1, l2, c2),
+      testCase "slicing: lines as the web client cuts them (fixtures/lines)" sharedLines,
       testCase "columns: astral code points count as one" $
         -- GHC counts code points too: nothing to do.
         ghcToSpan (columnMap "\x1D465 = \t1") (range 1 1 1 2) @?= spanOf 1 1 1 2
@@ -210,6 +222,30 @@ tests =
           | otherwise = go inFence ls
     range a b c d = GhcRange {startLine = a, startCol = b, endLine = c, endCol = d}
     spanOf a b c d = Span (Line a) (Col b) (Line c) (Col d)
+
+-- | Each case's lines, cut out one by one, are its @lines@; the line
+-- after the last is empty. The web client's @lineIndex@
+-- (web/src/source/lines.ts) checks the same file, so @#L<n>@ means the
+-- same line on both sides.
+sharedLines :: Assertion
+sharedLines = do
+  bytes <- BS.readFile "../fixtures/lines/cases.json"
+  cases :: [LineCase] <-
+    either (assertFailure . ("cases.json: " <>)) pure (Aeson.eitherDecodeStrict bytes)
+  assertBool "some cases" (length cases > 10)
+  for_ cases $ \c -> do
+    let src = sourceLines c.text
+        n = fromIntegral (length c.lines)
+        line k = sliceSpan src (Span (Line k) (Col 1) (Line k) (Col maxBound))
+    assertEqual c.name c.lines (map line [1 .. n])
+    assertEqual (c.name <> ": past the end") "" (line (n + 1))
+
+-- | One case of fixtures/lines/cases.json.
+data LineCase = LineCase {name :: String, text :: Text, lines :: [Text]}
+
+instance Aeson.FromJSON LineCase where
+  parseJSON = Aeson.withObject "LineCase" $ \o ->
+    LineCase <$> o .: "name" <*> o .: "text" <*> o .: "lines"
 
 -- | The in-place text, if any.
 inPlace :: Maybe MarkdownCode -> Maybe Text

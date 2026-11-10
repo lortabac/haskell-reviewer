@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cborFixture, fixture, stubFetch } from "../test/fixtures";
+import { fakeLayout } from "../test/layout";
 import { mountAppAt, unmountApp } from "../test/mount";
 
 beforeEach(() => {
+  fakeLayout();
   stubFetch({
     "/tok/api/files/tree": [200, fixture("files")],
     "/tok/api/file/tree/a.hs": [200, cborFixture("file-text")],
@@ -12,6 +14,7 @@ beforeEach(() => {
 afterEach(() => {
   unmountApp();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("App routing under the token", () => {
@@ -26,7 +29,7 @@ describe("App routing under the token", () => {
     const main = mountAppAt("/tok/src/tree/a.hs").querySelector("main");
     expect(main?.querySelector("h1")?.textContent).toBe("a.hs");
     await vi.waitFor(() => {
-      expect(main?.querySelector(".file-code")?.textContent).toContain(
+      expect(main?.querySelector(".code-view")?.textContent).toContain(
         "module Main",
       );
     });

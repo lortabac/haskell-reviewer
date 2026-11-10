@@ -13,6 +13,7 @@ import {
 import {
   deepHs,
   evilHs,
+  lines,
   mainHs,
   markupName,
   notices,
@@ -37,9 +38,13 @@ function fileUrl(base: string, path: string): string {
   return base + "src/tree/" + path.split("/").map(encodeURIComponent).join("/");
 }
 
-// The code text, exactly. textContent, never innerHTML.
-function code(page: Page): Promise<string | null> {
-  return page.locator("main .file-code").evaluate((el) => el.textContent);
+// The code text of the mounted rows, one per line, exactly (small
+// files: all rows are mounted). textContent, never innerHTML. Compare
+// with lines().
+function code(page: Page): Promise<string[]> {
+  return page
+    .locator("main .code-rows .code-cell")
+    .evaluateAll((els) => els.map((el) => el.textContent));
 }
 
 test("tree: top level", async ({ page, server }) => {
@@ -91,10 +96,12 @@ test("open a text file", async ({ page, server }) => {
   await expect(page).toHaveURL(server.base + "src/tree/src/Main.hs");
   await expect(page.locator("main h1")).toHaveText("src/Main.hs");
   await expect(page).toHaveTitle(/src\/Main\.hs/);
-  await expect.poll(() => code(page)).toBe(mainHs);
-  expect(
-    await page.locator("main .file-gutter").evaluate((el) => el.textContent),
-  ).toBe("1\n2\n3\n4\n5");
+  await expect.poll(() => code(page)).toEqual(lines(mainHs));
+  for (const n of ["1", "2", "3", "4", "5"]) {
+    await expect(
+      page.getByRole("rowheader", { name: n, exact: true }),
+    ).toHaveCount(1);
+  }
   await expect(fileLink(page, "Main.hs")).toHaveAttribute(
     "aria-current",
     "page",
@@ -103,7 +110,7 @@ test("open a text file", async ({ page, server }) => {
 
 test("markup in a file is text", async ({ page, server }) => {
   await page.goto(fileUrl(server.base, "xss/Evil.hs"));
-  await expect.poll(() => code(page)).toBe(evilHs);
+  await expect.poll(() => code(page)).toEqual(lines(evilHs));
   expect(await page.evaluate(() => window.__pwned)).toBeUndefined();
   await expect(page.locator("main img, main script")).toHaveCount(0);
 });
@@ -129,7 +136,7 @@ test("symlinks", async ({ page, server }) => {
   await target.click();
   await expect(page).toHaveURL(server.base + "src/tree/src/Main.hs");
   await expect(page.locator("main h1")).toBeFocused();
-  await expect.poll(() => code(page)).toBe(mainHs);
+  await expect.poll(() => code(page)).toEqual(lines(mainHs));
 
   await page.goto(fileUrl(server.base, "dangling"));
   await expect(page.locator("main p code")).toHaveText("nowhere");
@@ -145,10 +152,10 @@ for (const [path, text] of Object.entries(oddFiles)) {
     await fileLink(page, name).click();
     await expect(page).toHaveURL(fileUrl(server.base, path));
     await expect(page.locator("main h1")).toHaveText(path);
-    await expect.poll(() => code(page)).toBe(text);
+    await expect.poll(() => code(page)).toEqual(lines(text));
     await page.reload();
     await expect(page.locator("main h1")).toHaveText(path);
-    await expect.poll(() => code(page)).toBe(text);
+    await expect.poll(() => code(page)).toEqual(lines(text));
   });
 }
 
@@ -169,7 +176,7 @@ test("back and forward", async ({ page, server }) => {
   await expect(page.locator("main h1")).toHaveText("src/Main.hs");
   await fileLink(page, "README.md").click();
   await expect(page.locator("main h1")).toHaveText("README.md");
-  await expect.poll(() => code(page)).toBe(readme);
+  await expect.poll(() => code(page)).toEqual(lines(readme));
   await expect(current).toHaveText("README.md");
 
   await page.goBack();
@@ -204,5 +211,5 @@ test("deep link in a new page", async ({ context, server }) => {
   await expect(page.locator("main h1")).toHaveText(
     "src/Data/Deep/Nested/Mod.hs",
   );
-  await expect.poll(() => code(page)).toBe(deepHs);
+  await expect.poll(() => code(page)).toEqual(lines(deepHs));
 });

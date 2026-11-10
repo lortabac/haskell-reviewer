@@ -24,6 +24,10 @@ export const themes = [
 // fixed, not silenced). Empty: nothing needed one yet.
 const disabledRules: Record<string, string> = {};
 
+// Source view line numbers are CSS text (::before), which axe doesn't
+// see (empty-table-header). They show, and have a name (aria-label).
+const excluded = [".code-view .code-num"];
+
 export interface AxeOptions {
   // Extra rules to turn off for this one check, each with its own
   // reason (SPEC §5.4: listed in the task report, not just here).
@@ -37,6 +41,7 @@ export async function expectNoAxeViolations(
 ): Promise<void> {
   const disable = { ...disabledRules, ...(opts?.disable ?? {}) };
   let builder = new AxeBuilder({ page }).withTags(wcagTags);
+  for (const sel of excluded) builder = builder.exclude(sel);
   const ids = Object.keys(disable);
   if (ids.length > 0) builder = builder.disableRules(ids);
   const result = await builder.analyze();

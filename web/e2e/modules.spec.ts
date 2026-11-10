@@ -192,7 +192,7 @@ test.describe("cabal project", () => {
     ];
     for (const [path, text] of cases) {
       await page.goto(server.base + "src/tree/" + path);
-      await expect(page.locator("main .file-code")).toBeVisible();
+      await expect(page.locator("main .code-view")).toBeVisible();
       // Wait for the tree, so a missing banner means no banner.
       await expect(
         sidebar(page).locator('.module-tree [aria-current="page"]'),

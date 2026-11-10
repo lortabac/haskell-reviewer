@@ -206,7 +206,7 @@ test.describe("reflow at 320 px (SPEC §5.4)", () => {
     await sidebarFits(page);
 
     await page.goto(main.base + "src/tree/src/Main.hs");
-    await expect(page.locator(".file-code")).toBeVisible();
+    await expect(page.locator(".code-view")).toBeVisible();
     await noSideways(page);
     await headerFits(page);
     await sidebarFits(page);

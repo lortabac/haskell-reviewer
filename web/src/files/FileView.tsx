@@ -3,7 +3,6 @@ import {
   createEffect,
   createMemo,
   createResource,
-  createSignal,
   type JSX,
   Match,
   on,
@@ -17,8 +16,11 @@ import { bannerText } from "../modules/notices";
 import { useModules } from "../modules/store";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
-import { bytes, limit } from "../ui/format";
+import { type CodeApi, CodeView, type LineMarks } from "../source/CodeView";
+import { lineIndex } from "../source/lines";
 import { createDelay, focusInMain, focusLost } from "../ui/focus";
+import { bytes, limit } from "../ui/format";
+import { bringOnPage } from "../ui/scroll";
 import {
   apiFileUrl,
   hrefFor,
@@ -145,77 +147,64 @@ function Symlink(props: {
   );
 }
 
-// Line numbers as one span per line (for #L<n> marks), code as one
-// text node. Big files are fine like this until the views are
-// virtualised (M2).
+// The text in the source view. #L<n>[-L<m>] marks those lines and
+// scrolls the first one to the middle; again on a hash change, with no
+// refetch. Bad or out of range: nothing. An end past the end is cut.
 function FileText(props: { text: string }): JSX.Element {
   const location = useLocation();
-  const numbers = createMemo(() =>
-    Array.from({ length: lineCount(props.text) }, (_, i) => {
-      const el = document.createElement("span");
-      el.textContent = String(i + 1);
-      return el;
-    }),
+  const index = createMemo(() => lineIndex(props.text));
+  const marks = createMemo((): LineMarks | undefined => {
+    const r = parseLineHash(location.hash);
+    const n = index().count;
+    if (r === undefined || r.from > n) return undefined;
+    return { from: r.from, to: Math.min(r.to, n) };
+  });
+  // Rows off screen aren't in the DOM: say what is marked.
+  const hint = () => {
+    const m = marks();
+    if (m === undefined) return "";
+    return m.to === m.from
+      ? `Line ${m.from} marked.`
+      : `Lines ${m.from}–${m.to} marked.`;
+  };
+  let api: CodeApi | undefined;
+  // Made before the effect below: its effects (the virtualiser's set
+  // up) must run first.
+  const view = (
+    <Show when={index().count > 0} fallback={<p>This file is empty.</p>}>
+      <CodeView
+        text={props.text}
+        index={index()}
+        marks={marks()}
+        ref={(a) => (api = a)}
+      />
+    </Show>
   );
-  // Spans with "\n" between them: the text is the same as one node.
-  const gutter = () =>
-    numbers().flatMap((el, i) => (i === 0 ? [el] : ["\n", el]));
-  // Mark the lines of #L<n>[-L<m>] and scroll the first one to the
-  // middle. Again on a hash change, with no refetch. Bad or out of
-  // range: nothing.
-  let marked: HTMLElement[] = [];
-  // The gutter is hidden from screen readers: say what is marked.
-  const [hint, setHint] = createSignal("");
   createEffect(
-    on([numbers, () => location.hash], ([spans, hash]) => {
-      for (const el of marked) el.classList.remove(lineTarget);
-      marked = [];
-      setHint("");
-      const r = parseLineHash(hash);
-      if (r === undefined || r.from > spans.length) return;
-      marked = spans.slice(r.from - 1, r.to);
-      const to = Math.min(r.to, spans.length);
-      setHint(
-        to === r.from
-          ? `Line ${r.from} marked.`
-          : `Lines ${r.from}–${to} marked.`,
-      );
-      for (const el of marked) el.classList.add(lineTarget);
-      // After the router's own scroll (to the top, as no element has
-      // that id).
-      const first = marked[0];
-      const frame = requestAnimationFrame(() =>
-        first?.scrollIntoView({ block: "center" }),
-      );
+    on(marks, (m) => {
+      const a = api;
+      if (m === undefined || a === undefined) return;
+      // The cursor goes there too, so Tab lands on the line. Focus
+      // stays in the view if it was there (its old row may go away).
+      if (a.hasFocus()) a.focusLine(m.from);
+      else a.setCursor(m.from);
+      a.scrollToLine(m.from, "center");
+      // Then the page, if the view is off screen. After the router's
+      // own scroll to the top.
+      const frame = requestAnimationFrame(() => {
+        const r = a.row(m.from);
+        if (r !== undefined) bringOnPage(r);
+      });
       onCleanup(() => cancelAnimationFrame(frame));
     }),
   );
+  // file-text: a test hook, no style.
   return (
     <div class="file-text">
       <p class="sr-only" role="status">
         {hint()}
       </p>
-      <pre class="file-gutter" aria-hidden="true">
-        {gutter()}
-      </pre>
-      <pre class="file-code" tabindex="0" aria-label="File contents">
-        {props.text}
-      </pre>
+      {view}
     </div>
   );
-}
-
-const lineTarget = "file-line-target";
-
-// Lines as the <pre> shows them: split on "\n", and a final "\n" ends
-// the last line instead of starting a new one. CRLF is one line. Other
-// breaks (lone \r, U+2028/2029, NEL, VT, FF) may make the gutter drift;
-// M2 picks the final line rule, with #L<n>.
-export function lineCount(text: string): number {
-  if (text === "") return 0;
-  let n = 1;
-  for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1)) {
-    n++;
-  }
-  return text.endsWith("\n") ? n - 1 : n;
 }

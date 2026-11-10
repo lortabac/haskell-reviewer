@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@solidjs/router": "1.0.0",
+    "@tanstack/solid-virtual": "3.13.53",
     "cbor-x": "1.6.8",
     "solid-js": "1.9.17"
   },

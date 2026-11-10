@@ -599,7 +599,8 @@ also has a UI control, so nothing is lost with shortcuts off.
 - `prefers-reduced-motion` turns off animated transitions.
 - Virtualised views (§11.7) can't be read top to bottom with a screen
   reader's virtual cursor. Instead, `j`/`k`, `n`/`p` and find in file move
-  focus and scroll, and the focused line is announced.
+  focus and scroll, and the focused line is announced (real focus on the
+  line's cell, D-277).
 - Text scales to 200% without loss of function. Side-by-side diffs fall
   back to unified below a minimum width.
 - Reflows to one column (header, then sidebar, then main) at 320px wide,
@@ -1185,7 +1186,7 @@ The main library splits into layers. Lower layers never import upper ones:
 | Frontend build | Vite; ESLint + Prettier; Vitest | |
 | Styling | Plain CSS with custom properties (themes, design tokens); system font stacks; no CSS framework, no bundled fonts | D-48. |
 | CBOR in the browser | `cbor-x`, **no-eval build** | CSP forbids `eval` (D-51). |
-| Virtual scrolling | A headless virtualiser (TanStack Virtual) | All source and diff views (D-70). |
+| Virtual scrolling | A headless virtualiser (TanStack Virtual, `@tanstack/solid-virtual`, pinned) | All source and diff views (D-70). |
 | Haskell tests | `tasty`, `tasty-hunit`, `hedgehog`, `tasty-golden`, `temporary` | §11.9. |
 | markdown-unlit oracle (tests only) | `markdown-unlit ==0.6.0`, with `base-compat ==0.15.0`, test suite only | The port in `Core.SourceText` is checked against it (D-224). Never a runtime dependency, never run (D-223). |
 | Browser tests | Playwright + axe-core | §11.9. |
@@ -1554,7 +1555,8 @@ a framework would cost more than it saves.
   visible lines (§4.4, §4.5).
 - **Styling**: plain CSS with custom properties. Themes and the WCAG
   contrast pairs (§5.4) are defined once, as design tokens. System font
-  stacks only.
+  stacks only. No inline styles; one helper may set custom properties from
+  code (row positions, D-275).
 - **Preferences** (theme, layout, "exported only", shortcuts) are read from
   and written to the server (D-68). The port changes on every run, so
   `localStorage` would forget them.

@@ -34,6 +34,25 @@ export const oddFiles: Record<string, string> = {
 
 export const bigSize = 1024 * 1024 + 1;
 
+// Line n of bigText: lengths vary, a tab, and an astral character
+// (two UTF-16 units) on every 7th line.
+export function bigLine(n: number): string {
+  const astral = n % 7 === 0 ? " \u{1d465}y" : "";
+  return `${n}\tl${"ab".repeat(n % 9)}${astral}`;
+}
+// 20,000 lines for the virtual view.
+export const bigText =
+  Array.from({ length: 20000 }, (_, i) => bigLine(i + 1)).join("\n") + "\n";
+// CRLF, a lone CR and a long line (sideways scroll).
+export const crlfText =
+  "one\r\ntwo\rhalf\r\n" + "x".repeat(400) + "\r\nend\r\n";
+
+// A text's lines as the source view shows them: split on "\n", no
+// empty line after a final "\n".
+export function lines(text: string): string[] {
+  return text.replace(/\n$/, "").split("\n");
+}
+
 // What the file view says, exactly.
 export const notices = {
   binary: "This file is not UTF-8 text, so it isn't shown (4 bytes).",
@@ -89,6 +108,8 @@ export async function makeProject(): Promise<Project> {
   }
   await put(root, "data/blob.bin", Buffer.from([0x00, 0x01, 0x02, 0xff]));
   await put(root, "data/big.txt", "a".repeat(bigSize));
+  await put(root, "data/lines-20k.txt", bigText);
+  await put(root, "data/crlf.txt", crlfText);
   await symlink("src/Main.hs", join(root, "link-to-main"));
   await symlink("nowhere", join(root, "dangling"));
   await put(root, ".gitignore", "*.log\n");
