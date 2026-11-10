@@ -13,7 +13,8 @@ const css = readFileSync(join(import.meta.dirname, "tokens.css"), "utf-8");
 // Each --color-<name>'s [light, dark] hex value.
 function tokens(): Record<string, [string, string]> {
   const out: Record<string, [string, string]> = {};
-  const re = /--color-(\w+):\s*light-dark\((#[0-9a-f]{6}),\s*(#[0-9a-f]{6})\)/g;
+  const re =
+    /--color-([\w-]+):\s*light-dark\((#[0-9a-f]{6}),\s*(#[0-9a-f]{6})\)/g;
   for (const m of css.matchAll(re)) {
     out[m[1]!] = [m[2]!, m[3]!];
   }
@@ -47,6 +48,21 @@ function ratio(a: string, b: string, theme: 0 | 1): number {
   return contrast(ta[theme], tb[theme]);
 }
 
+// The highlight classes' colours (SPEC §5.6).
+const hl = [
+  "hl-keyword",
+  "hl-type",
+  "hl-variable",
+  "hl-operator",
+  "hl-literal",
+  "hl-comment",
+  "hl-pragma",
+  "hl-excluded",
+];
+
+// Backgrounds behind source view text.
+const codeBgs = ["bg", "surface", "mark", "selection"];
+
 describe("design tokens: contrast (SPEC §5.4, tokens.css header)", () => {
   it("found every token used below", () => {
     for (const name of [
@@ -58,6 +74,8 @@ describe("design tokens: contrast (SPEC §5.4, tokens.css header)", () => {
       "link",
       "focus",
       "mark",
+      "selection",
+      ...hl,
     ]) {
       expect(t[name], `token --color-${name}`).toBeDefined();
     }
@@ -72,6 +90,10 @@ describe("design tokens: contrast (SPEC §5.4, tokens.css header)", () => {
     ["muted", "surface"],
     ["link", "bg"],
     ["link", "surface"],
+    ...["fg", ...hl].flatMap((f) =>
+      codeBgs.map((b): [string, string] => [f, b]),
+    ),
+    ["muted", "selection"],
   ];
 
   it.each(textPairs)("text %s on %s is >= 4.5:1 in both themes", (a, b) => {
@@ -85,6 +107,8 @@ describe("design tokens: contrast (SPEC §5.4, tokens.css header)", () => {
     ["focus", "surface"],
     ["muted", "bg"],
     ["muted", "surface"],
+    // The dashed bar by excluded lines.
+    ["hl-excluded", "surface"],
   ];
 
   it.each(uiPairs)("non-text %s on %s is >= 3:1 in both themes", (a, b) => {

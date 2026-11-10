@@ -13,6 +13,7 @@ import { join } from "node:path";
 import {
   makeCabalProject,
   makeDocsProject,
+  makeHlProject,
   makeProject,
   type Project,
 } from "./project";
@@ -92,6 +93,7 @@ interface WorkerFixtures {
   project: Project;
   cabalProject: Project;
   docsProject: Project;
+  hlProject: Project;
 }
 
 export const test = base.extend<TestFixtures, WorkerFixtures>({
@@ -119,6 +121,16 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     // eslint-disable-next-line no-empty-pattern
     async ({}, use) => {
       const p = await makeDocsProject();
+      await use(p);
+      await p.remove();
+    },
+    { scope: "worker" },
+  ],
+
+  hlProject: [
+    // eslint-disable-next-line no-empty-pattern
+    async ({}, use) => {
+      const p = await makeHlProject();
       await use(p);
       await p.remove();
     },
@@ -221,10 +233,11 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
 
 export { expect };
 
-// Chromium's console line for a 404 from the file API. Only there: a
-// 404 on an asset must fail.
+// Chromium's (and WebKit's) console line for a 404 from the file API,
+// or from api/source, which the file view asks at the same time. Only
+// there: a 404 on an asset must fail.
 export const notFound404 =
-  /Failed to load resource: the server responded with a status of 404.* \[\S*\/api\/file\/tree\//;
+  /Failed to load resource: the server responded with a status of 404.* \[\S*\/api\/(file|source)\/tree\//;
 
 // The same for the module API (an unknown module).
 export const moduleNotFound404 =

@@ -31,10 +31,7 @@ export function domPoint(view: Element, node: Node, offset: number): Point {
   const el = node instanceof Element ? node : node.parentElement;
   const cell = el?.closest(".code-cell");
   if (cell !== null && cell !== undefined) {
-    const r = document.createRange();
-    r.setStart(cell, 0);
-    r.setEnd(node, offset);
-    return { kind: "at", line: lineOf(cell), col: r.toString().length };
+    return { kind: "at", line: lineOf(cell), col: colIn(cell, node, offset) };
   }
   if (el?.classList.contains("code-rows") === true) {
     const rows = el.children;
@@ -53,6 +50,32 @@ export function domPoint(view: Element, node: Node, offset: number): Point {
     return { kind: "at", line: lineOf(row), col: 0 };
   }
   return before;
+}
+
+// The column (UTF-16) of a point inside a cell: the length of the text
+// before it.
+export function colIn(cell: Node, node: Node, offset: number): number {
+  const r = document.createRange();
+  r.setStart(cell, 0);
+  r.setEnd(node, offset);
+  return r.toString().length;
+}
+
+// The other way: the text node and offset at col in cell. At a border
+// between two nodes, the end of the first. Past the end: the end.
+export function nodeAt(cell: Node, col: number): [Node, number] {
+  const w = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+  let left = Math.max(0, col);
+  let last: Text | undefined;
+  for (let t = w.nextNode(); t !== null; t = w.nextNode()) {
+    const len = (t as Text).length;
+    if (left <= len) return [t, left];
+    left -= len;
+    last = t as Text;
+  }
+  return last === undefined
+    ? [cell, cell.childNodes.length]
+    : [last, last.length];
 }
 
 function endOf(line: number): Point {
@@ -146,4 +169,45 @@ export function selectionLines(view: Element, sel: Selection | null): number[] {
     if (p.kind === "at") out.push(p.line);
   }
   return out;
+}
+
+// The largest offset in a node.
+export function size(n: Node): number {
+  return n instanceof CharacterData ? n.length : n.childNodes.length;
+}
+
+// Swap a cell's children (a new highlight) and keep the selection.
+// Ends inside the cell go back to the same columns. Ends elsewhere go
+// back as they were: WebKit moves them too (select-all's ends on the
+// rowgroup become the cell's), and copy.ts tells select-all by them.
+export function replaceKeepingSelection(cell: Element, nodes: Node[]): void {
+  const sel = getSelection();
+  const a = sel?.anchorNode ?? null;
+  const f = sel?.focusNode ?? null;
+  if (sel === null || a === null || f === null) {
+    cell.replaceChildren(...nodes);
+    return;
+  }
+  const ao = sel.anchorOffset;
+  const fo = sel.focusOffset;
+  const aCol = cell.contains(a) ? colIn(cell, a, ao) : undefined;
+  const fCol = cell.contains(f) ? colIn(cell, f, fo) : undefined;
+  cell.replaceChildren(...nodes);
+  const [an, ano] = aCol === undefined ? [a, ao] : nodeAt(cell, aCol);
+  const [fn, fno] = fCol === undefined ? [f, fo] : nodeAt(cell, fCol);
+  if (
+    sel.anchorNode === an &&
+    sel.anchorOffset === ano &&
+    sel.focusNode === fn &&
+    sel.focusOffset === fno
+  ) {
+    return;
+  }
+  if (!an.isConnected || !fn.isConnected) return;
+  sel.setBaseAndExtent(
+    an,
+    Math.min(ano, size(an)),
+    fn,
+    Math.min(fno, size(fn)),
+  );
 }

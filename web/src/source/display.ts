@@ -1,3 +1,6 @@
+import { utf16Cols } from "./columns";
+import type { Seg } from "./highlight";
+
 // How a line is drawn. Control characters would be invisible, break
 // the row or reorder the text (bidi), so they show as a glyph, one
 // UTF-16 unit for one: a column in the DOM is a column in the text,
@@ -37,4 +40,54 @@ export function pieces(line: string): Piece[] {
           },
     )
     .filter((p) => p.text !== "");
+}
+
+// A piece of a highlighted line: cls and link as in Seg.
+export interface StyledPiece {
+  text: string;
+  cls: string | null;
+  link: number;
+  ctrl: boolean;
+}
+
+// More pieces than this on a line: plain (D-279). Each is a DOM node.
+export const maxPieces = 5000;
+
+// The line cut by its segs, control glyphs as in pieces(). Same text
+// as pieces(line), whatever the segs (overlaps and past the end are
+// cut).
+export function styledPieces(
+  line: string,
+  segs: readonly Seg[],
+): StyledPiece[] {
+  if (segs.length > maxPieces) return plainPieces(line);
+  const cps: number[] = [];
+  let last = 1;
+  for (const s of segs) {
+    last = Math.max(last, s.from);
+    cps.push(last);
+    last = Math.max(last, s.to);
+    cps.push(last);
+  }
+  const cols = utf16Cols(line, cps);
+  const out: StyledPiece[] = [];
+  const add = (from: number, to: number, cls: string | null, link: number) => {
+    for (const p of pieces(line.slice(from, to))) {
+      out.push({ text: p.text, cls, link, ctrl: p.ctrl });
+    }
+  };
+  let pos = 0;
+  segs.forEach((s, k) => {
+    const a = cols[2 * k] ?? pos;
+    const b = cols[2 * k + 1] ?? a;
+    if (a > pos) add(pos, a, null, 0);
+    if (b > a) add(a, b, s.cls, s.link);
+    pos = Math.max(pos, b);
+  });
+  if (pos < line.length) add(pos, line.length, null, 0);
+  return out.length > maxPieces ? plainPieces(line) : out;
+}
+
+export function plainPieces(line: string): StyledPiece[] {
+  return pieces(line).map((p) => ({ ...p, cls: null, link: 0 }));
 }

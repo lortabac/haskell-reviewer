@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { lineIndex } from "./lines";
-import { domPoint, type Point, textBetween } from "./selection";
+import {
+  domPoint,
+  type Point,
+  replaceKeepingSelection,
+  textBetween,
+} from "./selection";
 
 const at = (line: number, col: number): Point => ({ kind: "at", line, col });
 const before: Point = { kind: "before" };
@@ -112,5 +117,81 @@ describe("domPoint", () => {
       [document.createTextNode("a"), span, document.createTextNode("bc")],
     ]);
     expect(domPoint(v, span.firstChild as Node, 1)).toEqual(at(1, 2));
+  });
+});
+
+describe("replaceKeepingSelection", () => {
+  afterEach(() => document.body.replaceChildren());
+
+  function cells(): [HTMLElement, HTMLElement] {
+    const a = document.createElement("div");
+    a.textContent = "hello world";
+    const b = document.createElement("div");
+    b.textContent = "second";
+    document.body.append(a, b);
+    return [a, b];
+  }
+  const spans = (...texts: string[]) =>
+    texts.map((t) => {
+      const s = document.createElement("span");
+      s.textContent = t;
+      return s;
+    });
+
+  it("ends in the cell go back to the same columns", () => {
+    const [a, b] = cells();
+    getSelection()?.setBaseAndExtent(b.firstChild!, 2, a.firstChild!, 7);
+    replaceKeepingSelection(a, spans("hello", " ", "world"));
+    const sel = getSelection();
+    expect(a.textContent).toBe("hello world");
+    expect(sel?.anchorNode).toBe(b.firstChild);
+    expect(sel?.anchorOffset).toBe(2);
+    expect(sel?.focusNode).toBe(a.childNodes[2]?.firstChild);
+    expect(sel?.focusOffset).toBe(1);
+  });
+
+  it("both ends in the cell, direction kept", () => {
+    const [a] = cells();
+    getSelection()?.setBaseAndExtent(a.firstChild!, 8, a.firstChild!, 3);
+    replaceKeepingSelection(a, spans("hel", "lo wo", "rld"));
+    const sel = getSelection();
+    expect(sel?.toString()).toBe("lo wo");
+    expect(sel?.anchorNode).toBe(a.childNodes[1]?.firstChild);
+    expect(sel?.anchorOffset).toBe(5);
+    expect(sel?.focusNode).toBe(a.childNodes[0]?.firstChild);
+    expect(sel?.focusOffset).toBe(3);
+  });
+
+  it("no selection in the cell: just swaps", () => {
+    const [a, b] = cells();
+    getSelection()?.setBaseAndExtent(b.firstChild!, 1, b.firstChild!, 4);
+    const range = getSelection()?.getRangeAt(0);
+    replaceKeepingSelection(a, spans("x"));
+    expect(a.textContent).toBe("x");
+    expect(getSelection()?.getRangeAt(0)).toBe(range);
+  });
+
+  it("an empty cell: the end goes to the cell", () => {
+    const [a, b] = cells();
+    getSelection()?.setBaseAndExtent(b.firstChild!, 1, a.firstChild!, 4);
+    replaceKeepingSelection(a, []);
+    expect(getSelection()?.focusNode).toBe(a);
+    expect(getSelection()?.focusOffset).toBe(0);
+  });
+
+  it("ends outside the cell that the swap moved go back (WebKit)", () => {
+    const [a, b] = cells();
+    const box = document.body;
+    // Like select-all: both ends on a parent of the cells.
+    getSelection()?.setBaseAndExtent(box, 0, box, 2);
+    const swap = a.replaceChildren.bind(a);
+    a.replaceChildren = (...nodes: (Node | string)[]) => {
+      swap(...nodes);
+      getSelection()?.setBaseAndExtent(b.firstChild!, 0, a, 0);
+    };
+    replaceKeepingSelection(a, spans("x"));
+    const sel = getSelection();
+    expect([sel?.anchorNode, sel?.anchorOffset]).toEqual([box, 0]);
+    expect([sel?.focusNode, sel?.focusOffset]).toEqual([box, 2]);
   });
 });

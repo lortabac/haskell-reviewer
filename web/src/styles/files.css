@@ -74,3 +74,15 @@
   font-size: 1.25rem;
   overflow-wrap: anywhere;
 }
+
+/* The outline under the source view: collapsed, for the keyboard
+   (the gutter markers are mouse only). Under, so it never moves the
+   view when it comes. */
+.code-outline {
+  margin: var(--space-2) 0 0;
+}
+
+.code-outline ul {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-3);
+}

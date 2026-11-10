@@ -20,6 +20,11 @@ export function apiFileUrl(path: string): string {
   return "/api/file/tree/" + encodePath(path);
 }
 
+// The source view API URL (highlighting, links), relative to the token.
+export function apiSourceUrl(path: string): string {
+  return "/api/source/tree/" + encodePath(path);
+}
+
 // The decoded segments of "/<token>/<prefix…>/<rest…>" after prefix.
 // Undefined if the prefix doesn't match, there is no rest, or a
 // segment is bad: empty, ".", "..", a "/" inside, or broken percent

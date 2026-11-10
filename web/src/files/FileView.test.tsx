@@ -5,22 +5,32 @@ import { fallbackRowHeight as h } from "../source/CodeView";
 import { mountAppAt, unmountApp } from "../../test/mount";
 
 // Mounts the app at /tok/src/tree/<path>, with the API answering
-// status and body for that file. No module tree unless given.
+// status and body for that file. No module tree unless given. No
+// highlighting (api/source 404) unless given.
 async function open(
   path: string,
   status: number,
   body: unknown,
   modules: [number, unknown] = [404, "not found"],
+  source: [number, unknown] = [404, "not found"],
 ): Promise<HTMLElement> {
   const fetch = stubFetch({
     "/tok/api/files/tree": [200, fixture("files")],
     "/tok/api/modules/tree": modules,
     [`/tok/api/file/tree/${path}`]: [status, body],
+    [`/tok/api/source/tree/${path}`]: source,
   });
   const main = mountAppAt(`/tok/src/tree/${path}`).querySelector("main");
   if (main === null) throw new Error("no main");
   await vi.waitFor(() => {
-    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(fetch.mock.calls.map((c) => c[0] as string)).toEqual(
+      expect.arrayContaining([
+        "/tok/api/files/tree",
+        "/tok/api/modules/tree",
+        `/tok/api/file/tree/${path}`,
+        `/tok/api/source/tree/${path}`,
+      ]),
+    );
     expect(main.querySelector("h1, p")).not.toBeNull();
   });
   // Let the resource settle.
@@ -493,3 +503,168 @@ function go(main: HTMLElement, hash: string): void {
   main.append(a);
   a.click();
 }
+
+describe("FileView highlighting", () => {
+  const lexed = (over: Record<string, unknown> = {}) => ({
+    generation: 1,
+    path: "app/Main.hs",
+    ref: "Main",
+    tier: { kind: "syntactic", reason: "no-hie" },
+    partial: false,
+    highlight: "lexed",
+    // module (keyword), Main (typeCon), line 3 excluded (a region run),
+    // the string on line 5 (literal; non-ASCII inside).
+    runs: [
+      1, 1, 0, 7, 0, 0, 0, 8, 0, 12, 1, 0, 2, 1, 1, 1, 7, 0, 2, 17, 0, 35, 4, 0,
+    ],
+    regions: [1, 3, 3],
+    targets: [],
+    outline: [
+      ["value", "val:main", "main", 4, 4, 5],
+      ["instance", "inst:Show:T", null, 5, 5, 5],
+    ],
+    ...over,
+  });
+
+  // Mounts app/Main.hs (file-text fixture); api/source answers when
+  // answer() is called.
+  async function openLate(status: number, body: unknown) {
+    let answer: (() => void) | undefined;
+    const routes = stubFetch({
+      "/tok/api/files/tree": [200, fixture("files")],
+      "/tok/api/file/tree/app/Main.hs": [200, cborFixture("file-text")],
+    });
+    const plain = routes.getMockImplementation()!;
+    routes.mockImplementation((input) => {
+      if (input === "/tok/api/source/tree/app/Main.hs") {
+        return new Promise((resolve) => {
+          answer = () =>
+            resolve(
+              new Response(new Uint8Array(cbor(body)), {
+                status,
+                headers: { "Content-Type": "application/cbor" },
+              }),
+            );
+        });
+      }
+      return plain(input);
+    });
+    const main = mountAppAt("/tok/src/tree/app/Main.hs").querySelector("main");
+    if (main === null) throw new Error("no main");
+    await vi.waitFor(() => {
+      expect(rows(main)).toHaveLength(5);
+      expect(answer).toBeDefined();
+    });
+    return { main, answer: () => answer?.() };
+  }
+
+  const spans = (main: HTMLElement, n: number) =>
+    [
+      ...main.querySelectorAll(`.code-row[data-line="${n}"] .code-cell > span`),
+    ].map((s) => [s.className, s.textContent]);
+  const row = (main: HTMLElement, n: number) =>
+    main.querySelector(`.code-row[data-line="${n}"]`);
+
+  it("plain first, then highlighted, same text", async () => {
+    const { main, answer } = await openLate(200, lexed());
+    const text = rows(main);
+    expect(main.querySelector(".code-cell span")).toBeNull();
+    answer();
+    await vi.waitFor(() => {
+      expect(spans(main, 1)).toEqual([
+        ["hl-keyword", "module"],
+        ["hl-typeCon", "Main"],
+      ]);
+    });
+    expect(spans(main, 5)).toEqual([["hl-literal", '"héllo, wörld → ✓"']]);
+    expect(rows(main)).toEqual(text);
+    // Excluded: a class, a label; the whole line greyed.
+    expect(row(main, 3)?.classList.contains("code-excluded")).toBe(true);
+    expect(
+      row(main, 3)?.querySelector(".code-num")?.getAttribute("aria-label"),
+    ).toBe("3, excluded by CPP");
+    expect(spans(main, 3)).toEqual([
+      ["hl-cppExcluded", "-- <script>alert(1)</script>"],
+    ]);
+    expect(document.querySelector("script")).toBeNull();
+    // Outline markers: docs links, not Tab stops.
+    const mark = row(main, 4)?.querySelector("a.code-outline-mark");
+    expect(mark?.getAttribute("href")).toBe("/tok/docs/tree/Main#val%3Amain");
+    expect(mark?.getAttribute("tabindex")).toBe("-1");
+    expect(mark?.getAttribute("aria-label")).toBe("Docs: main");
+    expect(
+      row(main, 5)?.querySelector("a.code-outline-mark")?.getAttribute("title"),
+    ).toBe("Docs: instance Show T");
+  });
+
+  it("the outline list: docs and line links", async () => {
+    const { main, answer } = await openLate(200, lexed());
+    expect(main.querySelector(".code-outline")).toBeNull();
+    answer();
+    await vi.waitFor(() => {
+      expect(main.querySelector(".code-outline summary")?.textContent).toBe(
+        "Outline (2)",
+      );
+    });
+    const nav = main.querySelector('.code-outline nav[aria-label="Outline"]');
+    expect(
+      [...(nav?.querySelectorAll("a") ?? [])].map((a) => [
+        a.textContent,
+        a.getAttribute("href"),
+      ]),
+    ).toEqual([
+      ["main", "/tok/docs/tree/Main#val%3Amain"],
+      ["line 4", "/tok/src/tree/app/Main.hs#L4"],
+      ["instance Show T", "/tok/docs/tree/Main#inst%3AShow%3AT"],
+      ["line 5", "/tok/src/tree/app/Main.hs#L5"],
+    ]);
+    // After the view: it comes late and must not push the view down.
+    const outline = main.querySelector(".code-outline");
+    const grid = main.querySelector(".code-view");
+    expect(
+      outline !== null &&
+        grid !== null &&
+        outline.compareDocumentPosition(grid) &
+          Node.DOCUMENT_POSITION_PRECEDING,
+    ).toBeTruthy();
+  });
+
+  it("no ref: no docs links, line links stay", async () => {
+    const { main, answer } = await openLate(200, lexed({ ref: null }));
+    answer();
+    await vi.waitFor(() => {
+      expect(main.querySelector(".code-outline")).not.toBeNull();
+    });
+    expect(main.querySelector(".code-outline-mark")).toBeNull();
+    expect(
+      [...main.querySelectorAll(".code-outline a")].map((a) => a.textContent),
+    ).toEqual(["line 4", "line 5"]);
+  });
+
+  it.each([
+    ["another generation", 200, lexed({ generation: 2 })],
+    [
+      "plain",
+      200,
+      {
+        generation: 1,
+        path: "app/Main.hs",
+        ref: "Main",
+        tier: { kind: "syntactic", reason: "no-hie" },
+        partial: false,
+        highlight: "plain",
+      },
+    ],
+    ["not found", 404, { generation: 1, kind: "not-found", what: "file" }],
+    ["a server error", 500, "cannot index module"],
+    ["a bad body", 200, { generation: 1 }],
+  ])("%s: stays plain, no message", async (_, status, body) => {
+    const { main, answer } = await openLate(status, body);
+    const before = main.textContent;
+    answer();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(main.querySelector(".code-cell span")).toBeNull();
+    expect(main.querySelector(".code-outline, .code-excluded")).toBeNull();
+    expect(main.textContent).toBe(before);
+  });
+});
