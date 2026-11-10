@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cbor, cborFixture, fixture, stubFetch } from "../../test/fixtures";
+import { fakeLayout } from "../../test/layout";
+import { fallbackRowHeight as h } from "../source/CodeView";
 import { mountAppAt, unmountApp } from "../../test/mount";
-import { lineCount } from "./FileView";
 
 // Mounts the app at /tok/src/tree/<path>, with the API answering
 // status and body for that file. No module tree unless given.
@@ -29,28 +30,67 @@ async function open(
   return main;
 }
 
+beforeEach(() => fakeLayout());
+
 afterEach(() => {
   unmountApp();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   document.title = "";
 });
+
+// The code of each mounted row.
+const rows = (main: HTMLElement) =>
+  [...main.querySelectorAll(".code-rows .code-cell")].map((c) => c.textContent);
 
 describe("FileView", () => {
   it("shows text as text, with line numbers", async () => {
     const main = await open("app/Main.hs", 200, cborFixture("file-text"));
     expect(main.querySelector("h1")?.textContent).toBe("app/Main.hs");
-    expect(document.title).toBe("app/Main.hs — haskell-reviewer");
-    const code = main.querySelector("pre.file-code");
-    expect(code?.textContent).toContain("<script>alert(1)</script>");
-    expect(code?.textContent).toContain("héllo, wörld → ✓");
-    expect(code?.getAttribute("tabindex")).toBe("0");
-    expect(code?.getAttribute("aria-label")).toBe("File contents");
-    // Text only: no element per line, no script element.
-    expect(code?.children).toHaveLength(0);
+    expect(document.title).toBe("app/Main.hs \u2014 haskell-reviewer");
+    const grid = main.querySelector('[role="grid"]');
+    expect(grid?.getAttribute("aria-label")).toBe("File contents");
+    expect(grid?.getAttribute("aria-rowcount")).toBe("5");
+    // CRLF: not part of the lines.
+    expect(rows(main)).toEqual([
+      "module Main (main) where",
+      "",
+      "-- <script>alert(1)</script>",
+      "main :: IO ()",
+      'main = putStrLn "h\u00e9llo, w\u00f6rld \u2192 \u2713"',
+    ]);
+    expect(
+      [...main.querySelectorAll('[role="row"]')].map((r) =>
+        r.getAttribute("aria-rowindex"),
+      ),
+    ).toEqual(["1", "2", "3", "4", "5"]);
+    expect(
+      [...main.querySelectorAll('[role="rowheader"]')].map((r) =>
+        r.getAttribute("aria-label"),
+      ),
+    ).toEqual(["1", "2", "3", "4", "5"]);
+    // Text only: no script element, and no node with the whole file.
     expect(document.querySelector("script")).toBeNull();
-    const gutter = main.querySelector("pre.file-gutter");
-    expect(gutter?.getAttribute("aria-hidden")).toBe("true");
-    expect(gutter?.textContent).toBe("1\n2\n3\n4\n5");
+    expect(main.querySelector(".code-row .code-cell *")).toBeNull();
+    expect(
+      [...main.querySelectorAll(".code-cell")].some((c) =>
+        c.textContent.includes("\n"),
+      ),
+    ).toBe(false);
+    // One Tab stop: the first line.
+    const stops = main.querySelectorAll('.code-cell[tabindex="0"]');
+    expect(stops).toHaveLength(1);
+    expect(stops[0]?.textContent).toBe("module Main (main) where");
+  });
+
+  it("an empty file", async () => {
+    const main = await open(
+      "empty.txt",
+      200,
+      cbor({ generation: 1, kind: "text", text: "" }),
+    );
+    expect(main.textContent).toContain("This file is empty.");
+    expect(main.querySelector('[role="grid"]')).toBeNull();
   });
 
   it("decodes the path from the URL", async () => {
@@ -157,7 +197,7 @@ describe("FileView", () => {
       modules,
     );
     await vi.waitFor(() => {
-      expect(main.querySelector(".file-code")).not.toBeNull();
+      expect(main.querySelector(".code-view")).not.toBeNull();
     });
     await new Promise((r) => setTimeout(r, 20));
     expect(main.querySelector(".file-banner")).toBeNull();
@@ -221,7 +261,7 @@ describe("FileView navigation", () => {
     await heading(main, "app/Main.hs");
     expect(window.location.pathname).toBe("/tok/src/tree/app/Main.hs");
     await vi.waitFor(() => {
-      expect(main.querySelector(".file-code")).not.toBeNull();
+      expect(main.querySelector(".code-view")).not.toBeNull();
     });
     expect(document.activeElement).toBe(link);
   });
@@ -285,12 +325,12 @@ describe("FileView navigation", () => {
       .querySelector<HTMLElement>('nav a[href="/tok/src/tree/shared/guide.md"]')
       ?.click();
     await vi.waitFor(() => {
-      expect(main.querySelector(".file-code")?.textContent).toBe("new file\n");
+      expect(rows(main)).toEqual(["new file"]);
     });
     late?.(ok(cborFixture("file-text")));
     await new Promise((r) => setTimeout(r, 50));
     expect(main.querySelector("h1")?.textContent).toBe("shared/guide.md");
-    expect(main.querySelector(".file-code")?.textContent).toBe("new file\n");
+    expect(rows(main)).toEqual(["new file"]);
   });
 });
 
@@ -313,108 +353,143 @@ describe("FileView #L<n>", () => {
   }
 
   const marked = (main: HTMLElement) =>
-    [...main.querySelectorAll(".file-gutter .file-line-target")].map(
-      (e) => e.textContent,
+    [...main.querySelectorAll(".code-row.code-line-target")].map((e) =>
+      e.getAttribute("data-line"),
     );
+  const status = (main: HTMLElement) =>
+    main.querySelector('.file-text [role="status"]')?.textContent;
+  const stop = (main: HTMLElement) =>
+    main
+      .querySelector('.code-cell[tabindex="0"]')
+      ?.parentElement?.getAttribute("data-line");
 
-  async function at(hash: string): Promise<HTMLElement> {
-    const fetch = stubFetch({
+  async function at(hash: string, text?: string): Promise<HTMLElement> {
+    stubFetch({
       "/tok/api/files/tree": [200, fixture("files")],
-      "/tok/api/file/tree/app/Main.hs": [200, cborFixture("file-text")],
+      "/tok/api/file/tree/app/Main.hs": [
+        200,
+        text === undefined
+          ? cborFixture("file-text")
+          : cbor({ generation: 1, kind: "text", text }),
+      ],
     });
-    void fetch;
     const main = mountAppAt(`/tok/src/tree/app/Main.hs${hash}`).querySelector(
       "main",
     );
     if (main === null) throw new Error("no main");
     await vi.waitFor(() => {
-      expect(main.querySelector(".file-code")).not.toBeNull();
+      expect(main.querySelector(".code-view")).not.toBeNull();
     });
     return main;
   }
 
-  it("marks the line and scrolls it to the middle", async () => {
-    const scroll = vi
+  const scrollSpy = () =>
+    vi
       .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => undefined);
+
+  it("marks the line, makes it the cursor, page scroll after a frame", async () => {
+    const scroll = vi
+      .spyOn(window, "scrollBy")
       .mockImplementation(() => undefined);
     const main = await at("#L3");
     expect(marked(main)).toEqual(["3"]);
+    expect(stop(main)).toBe("3");
+    expect(status(main)).toBe("Line 3 marked.");
+    // The row is below the window (happy-dom: all rects at 0, so fake it).
+    const row = main.querySelector(".code-row.code-line-target");
+    if (row === null) throw new Error("no row");
+    vi.spyOn(row, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(0, window.innerHeight + 50, 100, h),
+    );
+    expect(scroll).not.toHaveBeenCalled();
     flush();
-    expect(scroll).toHaveBeenCalledWith({ block: "center" });
-    expect(scroll.mock.contexts).toContain(
-      main.querySelector(".file-line-target"),
+    expect(scroll).toHaveBeenCalledWith(0, 50 + h);
+    // No focus moved.
+    expect(document.activeElement?.closest(".code-view")).toBeNull();
+  });
+
+  it("a line far down: mounted, and the view scrolls to it", async () => {
+    const text = Array.from({ length: 20000 }, (_, i) => `l${i + 1}`).join(
+      "\n",
     );
-    expect(main.querySelector('.file-text [role="status"]')?.textContent).toBe(
-      "Line 3 marked.",
-    );
-    // Still one text: gutter numbers, code.
-    expect(main.querySelector(".file-gutter")?.textContent).toBe(
-      "1\n2\n3\n4\n5",
-    );
+    const main = await at("#L12345", text);
+    expect(marked(main)).toEqual(["12345"]);
+    expect(stop(main)).toBe("12345");
+    const view = main.querySelector<HTMLElement>(".code-view");
+    if (view === null) throw new Error("no view");
+    // Row 12345 is inside the 600 px box.
+    const top = 12344 * h;
+    await vi.waitFor(() => {
+      flush();
+      expect(view.scrollTop).toBeLessThanOrEqual(top);
+      expect(view.scrollTop + 600).toBeGreaterThanOrEqual(top + h);
+    });
   });
 
   it("a range; past the end is cut", async () => {
     const main = await at("#L2-L4");
     expect(marked(main)).toEqual(["2", "3", "4"]);
-    expect(main.querySelector('[role="status"]')?.textContent).toBe(
-      "Lines 2–4 marked.",
-    );
+    expect(status(main)).toBe("Lines 2\u20134 marked.");
     unmountApp();
     const cut = await at("#L4-L99");
     expect(marked(cut)).toEqual(["4", "5"]);
-    expect(cut.querySelector('[role="status"]')?.textContent).toBe(
-      "Lines 4–5 marked.",
-    );
+    expect(status(cut)).toBe("Lines 4\u20135 marked.");
   });
 
   // #L0: no line 0; #L6 and #L9: the file has 5 lines.
   it.each(["#L0", "#L6", "#L9", "#L6-L8", "#L4-L2", "#junk"])(
     "%s: nothing marked",
     async (hash) => {
-      const scroll = vi
-        .spyOn(HTMLElement.prototype, "scrollIntoView")
-        .mockImplementation(() => undefined);
+      const scroll = scrollSpy();
       const main = await at(hash);
       flush();
       expect(marked(main)).toEqual([]);
-      // Only the sidebar scrolls (to the current file), not the gutter.
+      expect(stop(main)).toBe("1");
+      // Only the sidebar scrolls (to the current file), not the view.
       expect(
         scroll.mock.contexts.filter(
-          (el) => el instanceof Element && el.closest(".file-gutter") !== null,
+          (el) => el instanceof Element && el.closest(".code-view") !== null,
         ),
       ).toEqual([]);
-      expect(main.querySelector('[role="status"]')?.textContent).toBe("");
+      expect(status(main)).toBe("");
     },
   );
 
   it("a hash change moves the mark, no refetch", async () => {
-    vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(
-      () => undefined,
-    );
     const main = await at("#L1");
     const fetch = vi.mocked(globalThis.fetch);
     const calls = fetch.mock.calls.length;
-    const a = document.createElement("a");
-    a.href = "/tok/src/tree/app/Main.hs#L5";
-    main.append(a);
-    a.click();
+    go(main, "#L5");
     await vi.waitFor(() => {
       expect(marked(main)).toEqual(["5"]);
     });
+    expect(stop(main)).toBe("5");
     expect(fetch.mock.calls.length).toBe(calls);
+  });
+
+  it("a hash change with focus on a line: focus moves to the mark", async () => {
+    const text = Array.from({ length: 20000 }, (_, i) => `l${i + 1}`).join(
+      "\n",
+    );
+    const main = await at("#L1", text);
+    main
+      .querySelector<HTMLElement>('.code-row[data-line="1"] .code-cell')
+      ?.focus();
+    go(main, "#L15000");
+    await vi.waitFor(() => {
+      expect(marked(main)).toEqual(["15000"]);
+    });
+    expect(
+      document.activeElement?.closest(".code-row")?.getAttribute("data-line"),
+    ).toBe("15000");
   });
 });
 
-describe("lineCount", () => {
-  it.each([
-    ["", 0],
-    ["a", 1],
-    ["a\n", 1],
-    ["a\nb", 2],
-    ["a\r\nb\r\n", 2],
-    ["\n", 1],
-    ["\n\n", 2],
-  ])("%j has %i lines", (text, n) => {
-    expect(lineCount(text)).toBe(n);
-  });
-});
+// Follow a link to hash on this page, through the router.
+function go(main: HTMLElement, hash: string): void {
+  const a = document.createElement("a");
+  a.href = `/tok/src/tree/app/Main.hs${hash}`;
+  main.append(a);
+  a.click();
+}

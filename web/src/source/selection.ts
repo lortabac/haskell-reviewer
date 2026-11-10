@@ -1,0 +1,149 @@
+// Copy for the virtual source view (SPEC §5.7). Only the rows on
+// screen are in the DOM, so the copied text comes from the file: each
+// end of the selection is mapped to a line and column, then the file's
+// text between them is copied. Line numbers and page chrome never get
+// in.
+import { type LineIndex, offsetOf } from "./lines";
+
+// Where a selection end is: before the view, after it, or at a column
+// (UTF-16, from 0) of a line (from 1). A column past the line's end
+// means its end.
+export type Point =
+  | { kind: "before" }
+  | { kind: "after" }
+  | { kind: "at"; line: number; col: number };
+
+const before: Point = { kind: "before" };
+const after: Point = { kind: "after" };
+
+// The DOM shape this reads (CodeView.tsx): view > .code-rows >
+// .code-row[data-line] > (.code-num, .code-cell). Rows are in line
+// order.
+export function domPoint(view: Element, node: Node, offset: number): Point {
+  if (!view.contains(node)) {
+    // Compare with the point just before the view.
+    const r = document.createRange();
+    r.setStartBefore(view);
+    r.collapse(true);
+    return r.comparePoint(node, offset) <= 0 ? before : after;
+  }
+  if (node === view) return offset === 0 ? before : after;
+  const el = node instanceof Element ? node : node.parentElement;
+  const cell = el?.closest(".code-cell");
+  if (cell !== null && cell !== undefined) {
+    const r = document.createRange();
+    r.setStart(cell, 0);
+    r.setEnd(node, offset);
+    return { kind: "at", line: lineOf(cell), col: r.toString().length };
+  }
+  if (el?.classList.contains("code-rows") === true) {
+    const rows = el.children;
+    const row = rows[offset];
+    if (row !== undefined) return { kind: "at", line: lineOf(row), col: 0 };
+    const last = rows[rows.length - 1];
+    return last === undefined ? before : endOf(lineOf(last));
+  }
+  const row = el?.closest(".code-row");
+  if (row !== null && row !== undefined) {
+    // At the row's end: the line's end. In the gutter or between the
+    // cells: its start.
+    if (node === row && offset >= row.childNodes.length) {
+      return endOf(lineOf(row));
+    }
+    return { kind: "at", line: lineOf(row), col: 0 };
+  }
+  return before;
+}
+
+function endOf(line: number): Point {
+  return { kind: "at", line, col: Infinity };
+}
+
+function lineOf(el: Element): number {
+  return Number(el.closest(".code-row")?.getAttribute("data-line") ?? 1);
+}
+
+// The file's text between two points, in either order. "before" is the
+// file's start (after a BOM), "after" its end. CRLF is kept. A point
+// inside a surrogate pair takes the whole character.
+export function textBetween(
+  text: string,
+  index: LineIndex,
+  a: Point,
+  b: Point,
+): string {
+  const x = offset(text, index, a);
+  const y = offset(text, index, b);
+  let from = Math.min(x, y);
+  let to = Math.max(x, y);
+  if (from > 0 && low(text, from) && high(text, from - 1)) from--;
+  if (to < text.length && low(text, to) && high(text, to - 1)) to++;
+  return text.slice(from, to);
+}
+
+function offset(text: string, index: LineIndex, p: Point): number {
+  switch (p.kind) {
+    case "before":
+      return index.bom ? 1 : 0;
+    case "after":
+      return text.length;
+    case "at":
+      return offsetOf(index, p.line, p.col);
+  }
+}
+
+function high(text: string, i: number): boolean {
+  const c = text.charCodeAt(i);
+  return c >= 0xd800 && c <= 0xdbff;
+}
+
+function low(text: string, i: number): boolean {
+  const c = text.charCodeAt(i);
+  return c >= 0xdc00 && c <= 0xdfff;
+}
+
+// What a copy of the selection should give, or undefined to leave the
+// copy to the browser (no range meets the view, or all are empty). A
+// range from before the view to after it gives the whole file. Ranges
+// (Firefox can have several) are joined with "\n"; one that doesn't
+// meet the view gives its own text.
+export function copiedText(
+  view: Element,
+  text: string,
+  index: LineIndex,
+  sel: Selection,
+): string | undefined {
+  const parts: string[] = [];
+  let ours = false;
+  for (let i = 0; i < sel.rangeCount; i++) {
+    const r = sel.getRangeAt(i);
+    const a = domPoint(view, r.startContainer, r.startOffset);
+    const b = domPoint(view, r.endContainer, r.endOffset);
+    if (a.kind === "at" || b.kind === "at" || a.kind !== b.kind) {
+      ours = true;
+      parts.push(textBetween(text, index, a, b));
+    } else {
+      parts.push(r.toString());
+    }
+  }
+  if (!ours || parts.every((p) => p === "")) return undefined;
+  return parts.join("\n");
+}
+
+// The lines of the selection's anchor and focus that are in the view.
+// CodeView keeps them mounted: an end in a removed row would move.
+export function selectionLines(view: Element, sel: Selection | null): number[] {
+  if (sel === null || sel.anchorNode === null || sel.focusNode === null) {
+    return [];
+  }
+  const out: number[] = [];
+  for (const [node, off] of [
+    [sel.anchorNode, sel.anchorOffset],
+    [sel.focusNode, sel.focusOffset],
+  ] as const) {
+    if (!view.contains(node)) continue;
+    const p = domPoint(view, node, off);
+    if (p.kind === "at") out.push(p.line);
+  }
+  return out;
+}

@@ -1,0 +1,32 @@
+[
+  { "name": "empty", "text": "", "lines": [] },
+  { "name": "one line, no newline", "text": "a", "lines": ["a"] },
+  { "name": "a final newline ends the line", "text": "a\n", "lines": ["a"] },
+  { "name": "an empty last line", "text": "a\n\n", "lines": ["a", ""] },
+  { "name": "only a newline", "text": "\n", "lines": [""] },
+  { "name": "two lines", "text": "a\nb", "lines": ["a", "b"] },
+  { "name": "CRLF", "text": "a\r\nb\r\n", "lines": ["a", "b"] },
+  { "name": "only one CR before LF goes", "text": "a\r\r\n", "lines": ["a\r"] },
+  { "name": "a lone CR is not a break", "text": "a\rb\nc", "lines": ["a\rb", "c"] },
+  { "name": "a CR at the very end goes", "text": "a\r", "lines": ["a"] },
+  { "name": "BOM", "text": "\ufeffa\nb", "lines": ["a", "b"] },
+  { "name": "BOM only", "text": "\ufeff", "lines": [] },
+  { "name": "BOM and a newline", "text": "\ufeff\n", "lines": [""] },
+  { "name": "a BOM later is text", "text": "a\ufeff", "lines": ["a\ufeff"] },
+  {
+    "name": "U+2028, U+2029, NEL, VT and FF are not breaks",
+    "text": "a\u2028b\u2029c\u0085d\u000be\u000cf\n",
+    "lines": ["a\u2028b\u2029c\u0085d\u000be\u000cf"]
+  },
+  {
+    "name": "astral",
+    "text": "\ud835\udc65 = 1\n\ud835\udc66\n",
+    "lines": ["\ud835\udc65 = 1", "\ud835\udc66"]
+  },
+  {
+    "name": "CJK",
+    "text": "\u6f22\u5b57\n\u304b\u306a",
+    "lines": ["\u6f22\u5b57", "\u304b\u306a"]
+  },
+  { "name": "tabs", "text": "\ta\tb\n", "lines": ["\ta\tb"] }
+]

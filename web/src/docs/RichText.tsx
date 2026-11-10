@@ -203,6 +203,7 @@ function inline(i: Inline, links: Links): JSX.Element {
     case "math":
       // TeX as text.
       return (
+        // eslint-disable-next-line no-restricted-syntax -- a rich-text field, not CSS
         <code class={i.style === "display" ? "doc-math-display" : "doc-math"}>
           {i.tex}
         </code>
