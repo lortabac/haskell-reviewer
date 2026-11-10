@@ -1331,7 +1331,10 @@ a definition target for each free occurrence. Each side keeps only a memo
 of *final* export sets (every module read is done, no import cycle was
 cut), per generation. A result that may change once a module is indexed
 is marked *partial*, and the client asks again as indexing goes on (D-252,
-D-259, D-262). The per-side tables built from the results (name →
+D-259, D-262). Before resolving, a request waits up to about 100 ms
+after the module's own parse for its direct home imports (D-252, D-274);
+a module reached only through re-exports can still make the first answer
+partial. The per-side tables built from the results (name →
 declarations, and a reverse-reference table for find-references and
 "Affected") come later. The reverse table is built in the background, and
 is marked *partial* until it is complete (§10.2).
