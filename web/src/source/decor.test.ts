@@ -1,12 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { highlightDecor, highlightedLine } from "./decor";
+import type { OutlineEntry } from "../api/source";
 import type { Highlight } from "./highlight";
+
+const entry: OutlineEntry = [
+  "instance",
+  "inst:Show:Maybe a",
+  "instance Show (Maybe a)",
+  2,
+  2,
+  2,
+];
 
 const h: Highlight = {
   runs: [[], [{ from: 1, to: 3, cls: "keyword", link: 0 }], []],
   kinds: ["code", "excluded", "directive"],
-  outline: [["instance", "inst:Show:Maybe a", null, 2, 2, 2]],
-  byLine: new Map([[2, ["instance", "inst:Show:Maybe a", null, 2, 2, 2]]]),
+  outline: [entry],
+  byLine: new Map([[2, entry]]),
 };
 
 describe("decor", () => {

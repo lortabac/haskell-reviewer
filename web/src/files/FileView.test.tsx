@@ -521,7 +521,7 @@ describe("FileView highlighting", () => {
     targets: [],
     outline: [
       ["value", "val:main", "main", 4, 4, 5],
-      ["instance", "inst:Show:T", null, 5, 5, 5],
+      ["instance", "inst:Show:T", "instance Show T", 5, 5, 5],
     ],
     ...over,
   });

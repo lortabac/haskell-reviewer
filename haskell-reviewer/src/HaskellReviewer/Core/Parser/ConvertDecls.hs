@@ -100,7 +100,10 @@ import HaskellReviewer.Core.Parser.InstanceKey
     Locals (..),
     binderParams,
     derivable,
+    derivableInstance,
     derivedKey,
+    derivedLabel,
+    headLabel,
     instanceHead,
     instanceKey,
     isOrphan,
@@ -785,7 +788,8 @@ derivingClause spans ty lc@(L _ (Ghc.HsDerivingClause _ strategy tys)) =
       classes =
         [ DerivedClass
             { span = locatedSpan spans t,
-              id = Inst (derivedKey ty (instanceHead t))
+              id = Inst (derivedKey ty (instanceHead t)),
+              label = derivedLabel ty (instanceHead t)
             }
         | t <- case unLoc tys of
             Ghc.DctSingle _ t -> [t]
@@ -1218,6 +1222,7 @@ buildInstance spans at docs i =
             },
       orphan = isOrphan at.locals h.className h.args,
       mentions = localMentions at.locals h.className h.args,
+      label = headLabel "instance" h.className h.args,
       form =
         ExplicitInstance
           InstanceBody
@@ -1258,6 +1263,7 @@ buildDeriving spans at docs d = case d.decl of
                   },
             orphan = isOrphan at.locals h.className h.args,
             mentions = localMentions at.locals h.className h.args,
+            label = headLabel "instance" h.className h.args,
             form = StandaloneDeriving (strategyOf spans strategy)
           }
 
@@ -1283,16 +1289,21 @@ buildFamInst spans at here docs f =
               warning = Nothing
             },
       family = f.familyName.occ,
+      label = headLabel keyword f.familyName f.args,
       form = form,
       orphan = isOrphan at.locals f.familyName f.args
     }
   where
+    keyword = case form of
+      TypeInstance -> "type instance"
+      DataInstance _ -> "data instance"
+      NewtypeInstance _ -> "newtype instance"
     form = case f.rhs of
       TypeRhs -> TypeInstance
       DataRhs defn ->
         let firstCon = safeHead (concatMap conNames (toList (Ghc.dd_cons defn)))
             parent = maybe f.familyName.occ occ firstCon
-            ty = derivable f.familyName.occ f.args
+            ty = derivableInstance f.familyName.occ f.args
          in case dataDefn spans at here ty parent defn of
               NewtypeDefn b -> NewtypeInstance b
               DataDefn b -> DataInstance b
@@ -1331,6 +1342,7 @@ derivedInstances locals = \case
                   },
             orphan = False,
             mentions = derivedMentions c.id tyId,
+            label = c.label,
             form = DerivedInstance Derived {strategy = d.strategy, onType = tyId}
           }
       | d <- ds,

@@ -388,7 +388,9 @@ data DerivedClass = DerivedClass
   { -- | As written (@Show@, @MonadState S@).
     span :: Span,
     -- | The instance's id.
-    id :: DeclId
+    id :: DeclId,
+    -- | The instance's label.
+    label :: Text
   }
   deriving (Eq, Show)
 
@@ -514,6 +516,10 @@ data InstanceDecl = InstanceDecl
     -- the class if it's from here, then the type (or the data family).
     -- The page lists the instance under each.
     mentions :: [Text],
+    -- | For the outline: @instance MonadState s (State s)@. Variables
+    -- as written, see @headLabel@ in
+    -- "HaskellReviewer.Core.Parser.InstanceKey".
+    label :: Text,
     form :: InstanceForm
   }
   deriving (Eq, Show)
@@ -558,6 +564,8 @@ data FamInstDecl = FamInstDecl
   { info :: DeclInfo,
     -- | The family's name.
     family :: Text,
+    -- | For the outline: @type instance F [a]@, @data instance ...@.
+    label :: Text,
     form :: FamInstForm,
     -- | Neither the family nor any type in the head is from this
     -- module.

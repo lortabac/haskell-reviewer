@@ -55,30 +55,6 @@ export function lineKinds(
   return out;
 }
 
-// An outline entry's name. Instances have none: from the id,
-// "inst:Show:Maybe a" gives "instance Show (Maybe a)". Family
-// instances too ("instance D Int"): the wire doesn't say data or type.
-export function outlineLabel(e: OutlineEntry): string {
-  const [, id, name] = e;
-  if (name !== null) return name;
-  const rest = id.replace(/^[a-z]+:/, "");
-  const colon = rest.indexOf(":");
-  if (colon === -1) return rest;
-  const args = rest.slice(colon + 1);
-  return `instance ${rest.slice(0, colon)} ${spaced(args) ? `(${args})` : args}`;
-}
-
-// A space outside brackets: more than one word.
-function spaced(s: string): boolean {
-  let depth = 0;
-  for (const c of s) {
-    if ("([{".includes(c)) depth++;
-    else if (")]}".includes(c)) depth--;
-    else if (c === " " && depth === 0) return true;
-  }
-  return false;
-}
-
 // The first outline entry on each line.
 export function outlineByLine(
   outline: readonly OutlineEntry[],

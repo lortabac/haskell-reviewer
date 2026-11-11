@@ -22,9 +22,12 @@ module HaskellReviewer.Core.Parser.InstanceKey
     instanceKey,
     Derivable,
     derivable,
+    derivableInstance,
     derivedKey,
     derivedArity,
+    derivedLabel,
     renderArgs,
+    headLabel,
 
     -- * Orphans
     Locals (..),
@@ -33,7 +36,7 @@ module HaskellReviewer.Core.Parser.InstanceKey
   )
 where
 
-import Data.Char (isAlpha, isDigit)
+import Data.Char (isAlpha, isControl, isDigit)
 import Data.Containers.ListUtils (nubOrd)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
@@ -101,6 +104,15 @@ quadratic. That's a known limit (such classes are rare): in the page
 and in the index's memory, 1500 such classes on a 1500-parameter type
 turn 20 KB of source into a 9 MB page (the parse time limit caps it
 near 2000 by 2000). T13 looks at it.
+
+The outline shows a label for people ('headLabel'): the keyword, the
+class or family, then every argument in argument position, variables as
+written (not renamed), literals decoded (@0x10@ is @16@, non-ASCII
+kept, control characters escaped). @instance MonadState s
+(State s)@, @type instance F [a]@. A class in a deriving clause shows
+the type's name: @instance Show T@; a data instance shows the family and
+its arguments, cut like the key: @instance Show (F (Maybe a))@. Same printer as the keys,
+so the same limits: operator chains use our grouping.
 -}
 
 {- Note [Orphans]
@@ -135,7 +147,8 @@ data KeyType
     KSum [KeyType]
   | -- | @'[a, b]@.
     KPromotedList [KeyType]
-  | KLit Text
+  | -- | As in a key, and as written (for labels).
+    KLit Text Text
   | KWild
   | KStar
   | KKindSig KeyType KeyType
@@ -194,7 +207,7 @@ children = \case
   KIParam _ x -> [x]
   KVar _ -> []
   KCon _ -> []
-  KLit _ -> []
+  KLit _ _ -> []
   KWild -> []
   KStar -> []
   KSplice -> []
@@ -282,10 +295,11 @@ keyType lt = case spine lt [] of
       Ghc.HsSpliceTy _ _ -> KSplice
       Ghc.HsExplicitListTy _ _ as -> KPromotedList (map keyType as)
       Ghc.HsExplicitTupleTy _ _ as -> KTuple PromotedTuple (map keyType as)
-      Ghc.HsTyLit _ l -> KLit $ case l of
-        Ghc.HsNumTy _ n -> Text.pack (show n)
-        Ghc.HsStrTy _ s -> Text.pack (show (unpackFS s))
-        Ghc.HsCharTy _ c -> Text.pack (show c)
+      Ghc.HsTyLit _ l -> case l of
+        Ghc.HsNumTy _ n -> let d = Text.pack (show n) in KLit d d
+        Ghc.HsStrTy _ s ->
+          KLit (Text.pack (show (unpackFS s))) (written '"' (Text.pack (unpackFS s)))
+        Ghc.HsCharTy _ c -> KLit (Text.pack (show c)) (written '\'' (Text.singleton c))
       Ghc.HsWildCardTy _ -> KWild
       -- Taken off by 'spine'; here for completeness.
       Ghc.HsAppTy _ f x -> KApp (keyType f) [keyType x]
@@ -301,6 +315,16 @@ keyType lt = case spine lt [] of
       Ghc.HsTvb {Ghc.tvb_var = v, Ghc.tvb_kind = k} -> case k of
         Ghc.HsBndrKind _ kind -> KKindSig (bndrVar v) (keyType kind)
         _ -> bndrVar v
+
+-- | A string or char literal for a label: quoted; the quote, the
+-- backslash and control characters escaped, non-ASCII kept.
+written :: Char -> Text -> Text
+written q t = Text.singleton q <> Text.concatMap esc t <> Text.singleton q
+  where
+    esc c
+      | c == q || c == '\\' = Text.pack ['\\', c]
+      | isControl c = Text.dropEnd 1 (Text.drop 1 (Text.pack (show c)))
+      | otherwise = Text.singleton c
 
 -- | A built-in type constructor written prefix.
 data Builtin = FunCon | ListCon | TupleCon TupleSort Int
@@ -395,7 +419,10 @@ data Derivable = Derivable
     plainHeads :: [Text],
     -- | The same, in argument position, for a class whose arguments
     -- have no variables.
-    argHeads :: [Text]
+    argHeads :: [Text],
+    -- | Labels show the parameters too (a data instance), not just the
+    -- name.
+    showsParams :: Bool
   }
 
 -- | See 'Derivable'.
@@ -406,11 +433,17 @@ derivable n ps =
       params = ps,
       count = c,
       plainHeads = [renderArgs [t] | t <- kept],
-      argHeads = [piece (renaming [t]) AppArg t | t <- kept]
+      argHeads = [piece (renaming [t]) AppArg t | t <- kept],
+      showsParams = False
     }
   where
     c = length ps
     kept = [applied n (take (c - d) ps) | d <- [0 .. 2]]
+
+-- | Like 'derivable', for a data instance: the arguments are the
+-- parameters, and labels show them.
+derivableInstance :: Text -> [KeyType] -> Derivable
+derivableInstance n args = (derivable n args) {showsParams = True}
 
 -- | The type applied to these parameters.
 applied :: Text -> [KeyType] -> KeyType
@@ -433,6 +466,16 @@ derivedKey ty cls = InstanceKey {name = cls.className.occ, head = h}
       ([], shared : _, _) -> keyHeadChunks [shared]
       (_, _, shared : _) | null (varsOf cls.args) -> keyHeadChunks [closed, " ", shared]
       _ -> keyHead own
+
+-- | The label of a class in a deriving clause: @instance Show T@. The
+-- type's name only (so n classes on n parameters stay linear), but a
+-- data instance shows the family and its arguments.
+derivedLabel :: Derivable -> Head -> Text
+derivedLabel ty cls = headLabel "instance" cls.className (cls.args <> [shown])
+  where
+    -- Same cut as the key.
+    d = min (derivedArity cls.className.occ) ty.count
+    shown = applied ty.name (if ty.showsParams then take (ty.count - d) ty.params else [])
 
 -- | How many of the type's last parameters a derivable class takes.
 -- Only well-known classes; others take none. See Note [Instance keys].
@@ -503,9 +546,21 @@ renderArgs ts = Text.intercalate " " $ case ts of
   where
     names = renaming ts
 
+-- | A head for people: the keyword, the class (or family) and every
+-- argument in argument position, variables as written. See Note
+-- [Instance keys].
+headLabel :: Text -> KName -> [KeyType] -> Text
+headLabel keyword n as = Text.unwords (keyword : name : map label as)
+  where
+    -- A splice standing for the class has no parens.
+    name
+      | "$(" `Text.isPrefixOf` n.occ = n.occ
+      | otherwise = label (KCon n {qualifier = Nothing, promoted = False})
+    label t = Text.concat (render ForLabel Map.empty AppArg t [])
+
 -- | One type, printed with these names.
 piece :: Map Text Text -> Prec -> KeyType -> Text
-piece names p t = Text.concat (render names p t [])
+piece names p t = Text.concat (render ForKey names p t [])
 
 -- | The variables, in print order, repeats kept.
 varsOf :: [KeyType] -> [Text]
@@ -542,9 +597,14 @@ data Prec
     AppArg
   deriving (Eq, Ord)
 
--- | Print at a precedence.
-render :: Map Text Text -> Prec -> KeyType -> Pieces
-render names = go
+-- | What a printed type is for.
+data Out = ForKey | ForLabel
+  deriving (Eq)
+
+-- | Print at a precedence. For labels, literals are decoded text and
+-- there is no double space in @(# #)@.
+render :: Out -> Map Text Text -> Prec -> KeyType -> Pieces
+render out names = go
   where
     go :: Prec -> KeyType -> Pieces
     go p = \case
@@ -556,11 +616,12 @@ render names = go
       KFun a x y -> parens (p >= FunLeft) (go FunLeft x . arrow a . go Top y)
       KList x -> txt "[" . go Top x . txt "]"
       KTuple Boxed xs -> txt "(" . commas xs . txt ")"
+      KTuple Unboxed [] | out == ForLabel -> txt "(# #)"
       KTuple Unboxed xs -> txt "(# " . commas xs . txt " #)"
       KTuple PromotedTuple xs -> txt "'(" . commas xs . txt ")"
       KSum xs -> txt "(# " . sepBy " | " xs . txt " #)"
       KPromotedList xs -> txt "'[" . commas xs . txt "]"
-      KLit l -> txt l
+      KLit k w -> txt (if out == ForLabel then w else k)
       KWild -> txt "_"
       KStar -> txt "*"
       KKindSig x k -> parens (p >= FunLeft) (go FunLeft x . txt " :: " . go Top k)

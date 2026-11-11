@@ -350,6 +350,10 @@ describe("API fixtures", () => {
     expect(sorted(cover.outline.map((e) => e[0]))).toEqual(
       sorted(outlineKinds),
     );
+    const labels = cover.outline.map((e) => e[2]);
+    expect(labels).toContain("instance C Int Int");
+    expect(labels).toContain("data instance V Int");
+    expect(labels).toContain("instance Show T");
   });
 
   it("text comes through as is", () => {

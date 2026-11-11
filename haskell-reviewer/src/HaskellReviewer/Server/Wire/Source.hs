@@ -57,7 +57,7 @@ import HaskellReviewer.Core.Modules
     modulePath,
     moduleRef,
   )
-import HaskellReviewer.Core.Names (ExternalModule (..), declName, renderDeclId)
+import HaskellReviewer.Core.Names (ExternalModule (..), renderDeclId)
 import HaskellReviewer.Core.Parser (defaultParseSettings, parseSource)
 import HaskellReviewer.Core.Project (ModuleName (..), PackageName (..))
 import HaskellReviewer.Core.RelPath (RelPath, relPathFromSegments, relPathText)
@@ -127,8 +127,9 @@ only with nothing to show) or "lexed", which adds:
   listed, only-open or one-of ('howName'); sig is the declaration's
   code for the hover, plain text. See Note [Source links] and Note
   [Hover signatures] in "HaskellReviewer.Core.SourceLinks".
-- outline: [kind, id, name | null, line, firstLine, lastLine] per
-  top-level declaration with an id, in source order.
+- outline: [kind, id, label, line, firstLine, lastLine] per
+  top-level declaration with an id, in source order. The label is the
+  name, or the instance head: @instance Show T@, @type instance F [a]@.
 
 Q-RTS-BLACKHOLE: request threads encode in parallel. Before the fill,
 the listing thread encodes 'sourceWarmUp': the resolution warm-up
@@ -283,7 +284,7 @@ outlineEntry e =
     id
     [ Cbor.text (outlineKindName e.kind),
       Cbor.text (renderDeclId e.id),
-      Cbor.nullable Cbor.text (declName e.id),
+      Cbor.text e.label,
       line e.line,
       line e.firstLine,
       line e.lastLine
@@ -451,6 +452,7 @@ stack sources =
       OutlineEntry
         { kind = e.kind,
           id = e.id,
+          label = e.label,
           line = plus off e.line,
           firstLine = plus off e.firstLine,
           lastLine = plus off e.lastLine

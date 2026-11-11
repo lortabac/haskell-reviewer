@@ -87,7 +87,8 @@ describe("source view", () => {
       { ...lexed, targets: [["decl", "A", "a", 1, "x", [], 0, null]] },
       { ...lexed, targets: [["external", "M", null, "listed", 0, "q"]] },
       { ...lexed, targets: [["external", "M", null, "maybe", 1, "q"]] },
-      { ...lexed, outline: [["splice", "x", null, 1, 1, 1]] },
+      { ...lexed, outline: [["splice", "x", "x", 1, 1, 1]] },
+      { ...lexed, outline: [["instance", "inst:C:Int", null, 1, 1, 1]] },
       { ...lexed, outline: [["value", "val:x", "x", 1, 1]] },
     ]) {
       expect(() => decodeSourceView(bad), JSON.stringify(bad)).toThrow(

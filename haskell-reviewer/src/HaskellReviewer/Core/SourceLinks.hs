@@ -84,8 +84,10 @@ import HaskellReviewer.Core.Modules (ModuleId, ModuleIndex, modulePath, moduleRe
 import HaskellReviewer.Core.Names
   ( DeclId,
     ExternalModule (..),
+    declName,
     forceDeclId,
     forceExternalModule,
+    renderDeclId,
   )
 import HaskellReviewer.Core.Occurrences
   ( Binder (..),
@@ -155,7 +157,9 @@ its hover code (Note [Hover signatures]). Linear in tokens, plus the
 declarations of the modules linked to.
 
 The outline is the top-level declarations with an id, in source order:
-kind, id, the line of the name and the lines the declaration spans.
+kind, id, label, the line of the name and the lines the declaration
+spans. The label is the name, or for an instance its head (@instance
+Show T@, @type instance F [a]@); the parser builds it ('headLabel').
 -}
 
 {- Note [Hover signatures]
@@ -306,6 +310,8 @@ data GuessHow
 data OutlineEntry = OutlineEntry
   { kind :: OutlineKind,
     id :: DeclId,
+    -- | What the outline shows: the name, or the instance head.
+    label :: Text,
     -- | Of its name.
     line :: Line,
     firstLine :: Line,
@@ -631,13 +637,14 @@ sigText t
 outlineEntry :: Decl -> Maybe OutlineEntry
 outlineEntry d = do
   info <- declInfo d
-  kind <- case d of
-    TypeD _ -> Just OutlineType
-    ClassD _ -> Just OutlineClass
-    ValueD _ -> Just OutlineValue
-    PatSynD _ -> Just OutlinePatSyn
-    InstanceD _ -> Just OutlineInstance
-    FamInstD _ -> Just OutlineFamInst
+  let name = fromMaybe (renderDeclId info.id) (declName info.id)
+  (kind, label) <- case d of
+    TypeD _ -> Just (OutlineType, name)
+    ClassD _ -> Just (OutlineClass, name)
+    ValueD _ -> Just (OutlineValue, name)
+    PatSynD _ -> Just (OutlinePatSyn, name)
+    InstanceD i -> Just (OutlineInstance, i.label)
+    FamInstD f -> Just (OutlineFamInst, f.label)
     SpliceD _ -> Nothing
   let parts = info.extent.parts
       first = (NonEmpty.head parts).span
@@ -646,6 +653,7 @@ outlineEntry d = do
     OutlineEntry
       { kind = kind,
         id = info.id,
+        label = label,
         line = info.nameSpan.startLine,
         firstLine = first.startLine,
         lastLine = lastLineOf final
