@@ -216,6 +216,7 @@ decl w = \case
         { info = mark w True i.info,
           orphan = i.orphan,
           mentions = i.mentions,
+          label = i.label,
           form = case i.form of
             ExplicitInstance b ->
               ExplicitInstance
@@ -235,6 +236,7 @@ famInst w f =
   FamInstDecl
     { info = mark w True f.info,
       family = f.family,
+      label = f.label,
       form = case f.form of
         TypeInstance -> TypeInstance
         DataInstance b -> DataInstance (dataBody fw f.family b)

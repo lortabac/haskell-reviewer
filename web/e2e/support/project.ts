@@ -328,6 +328,9 @@ export const hlHs = [
   "astral :: String",
   'astral = "\u{1d465}" ++\t"y"',
   "",
+  "class C a b",
+  "instance C Maybe (Maybe a)",
+  "",
 ].join("\n");
 
 // The line of the first line starting so in hlHs.

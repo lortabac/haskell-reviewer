@@ -1480,7 +1480,9 @@ a framework would cost more than it saves.
   ints, bools, null). Each route has one encoding (D-165). The
   full-source view reads `GET api/source/<side>/<path>` (D-265):
   display-class runs with links into a targets table, line regions and
-  an outline; the file's text comes from `api/file`. Search is
+  an outline (each entry with a label from the server: the name, or the
+  instance head, `instance C Maybe (Maybe a)`, D-287); the file's text
+  comes from `api/file`. Search is
   `GET api/search/<side>?q=` (D-207). Every response
   carries its snapshot generation id, and the client caches by
   *(generation, resource)*. Preferences (`api/prefs`) are the exception:

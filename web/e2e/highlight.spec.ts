@@ -163,6 +163,20 @@ test("the outline list, by keyboard", async ({
   await expect(page).toHaveURL(server.base + "docs/tree/Hl#val%3Asorted");
 });
 
+test("the outline shows an instance as written", async ({
+  page,
+  startServer,
+  hlProject,
+}) => {
+  const server = await startServer({ root: hlProject.root });
+  await open(page, server.base + "src/tree/Hl.hs");
+  await page.locator(".code-outline summary").click();
+  const nav = page.getByRole("navigation", { name: "Outline" });
+  await expect(
+    nav.getByRole("listitem").filter({ hasText: "instance" }),
+  ).toHaveText(/^instance C Maybe \(Maybe a\) line \d+$/);
+});
+
 test("copy across highlighted lines is the file's text", async ({
   page,
   startServer,

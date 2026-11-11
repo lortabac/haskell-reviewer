@@ -112,7 +112,7 @@ export type Target = LocalTarget | DeclTarget | ModuleTarget | ExternalTarget;
 export type OutlineEntry = [
   kind: OutlineKind,
   id: string,
-  name: string | null,
+  label: string,
   line: number,
   firstLine: number,
   lastLine: number,
@@ -279,7 +279,7 @@ function decodeOutlineEntry(value: unknown, path: string): OutlineEntry {
   return [
     oneOf(outlineKinds)(t[0], at(0)),
     str(t[1], at(1)),
-    nullable(str)(t[2], at(2)),
+    str(t[2], at(2)),
     nat(t[3], at(3)),
     nat(t[4], at(4)),
     nat(t[5], at(5)),

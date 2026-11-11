@@ -12,7 +12,9 @@ import HaskellReviewer.Core.Decls
     DerivingClause (..),
     FamInstDecl (..),
     FamInstForm (..),
+    InstanceBody (..),
     InstanceDecl (..),
+    InstanceForm (..),
     NewtypeBody (..),
     TypeDecl (..),
     TypeForm (..),
@@ -162,6 +164,42 @@ tests =
                 "inst:C:(X Int) [Y] (T a b)",
                 "inst:Functor:T a"
               ],
+      testCase "labels: variables as written, every argument in argument position" $ do
+        labels "instance MonadState s (State s)" @?= ["instance MonadState s (State s)"]
+        labels "instance forall s. Show s => C (Maybe s)" @?= ["instance C (Maybe s)"]
+        labels "instance C [x] (a, b) Int" @?= ["instance C [x] (a, b) Int"]
+        labels "instance (:+:) a b" @?= ["instance (:+:) a b"]
+        labels "instance a :+: b" @?= ["instance (:+:) a b"]
+        labels "instance C" @?= ["instance C"]
+        labels "deriving instance M.C (M.T a)" @?= ["instance C (T a)"]
+        labels "type instance F [a] = a" @?= ["type instance F [a]"]
+        labels "data instance F a = D" @?= ["data instance F a"]
+        labels "newtype instance F a = D a" @?= ["newtype instance F a"],
+      testCase "labels: derived, type name only" $
+        derivedLabels "data T a = T deriving (Show, MonadState S)"
+          @?= ["instance Show T", "instance MonadState S T"],
+      testCase "labels: derived on data instances, family and arguments" $ do
+        derivedLabels "data instance F (Maybe a) = D a deriving (Show, Eq)"
+          @?= ["instance Show (F (Maybe a))", "instance Eq (F (Maybe a))"]
+        derivedLabels "newtype instance F Int = N Int deriving newtype (Num)"
+          @?= ["instance Num (F Int)"]
+        derivedLabels
+          "data instance D (Maybe a) b = D1 a b deriving (Functor, Show)"
+          @?= ["instance Functor (D (Maybe a))", "instance Show (D (Maybe a) b)"]
+        derivedLabels "data instance F a = D deriving (Show)"
+          @?= ["instance Show (F a)"]
+        derivedLabels
+          ( "class K a where\n  data A a\n\
+            \instance K Int where\n  data A Int = B deriving (Eq)"
+          )
+          @?= ["instance Eq (A Int)"],
+      testCase "labels: literals decoded, splice class, empty unboxed tuple" $ do
+        labels "instance C \"\955x\" 'y' 3" @?= ["instance C \"\955x\" 'y' 3"]
+        keys "instance C \"\955x\"" @?= ["inst:C:\"\\955x\""]
+        labels "instance C \"\\t\\SOH\" '\\n' 0x10"
+          @?= ["instance C \"\\t\\SOH\" '\\n' 16"]
+        labels "instance $(t) Int" @?= ["instance $(..) Int"]
+        labels "instance C (# #)" @?= ["instance C (# #)"],
       testCase "orphans: no module line is Main" $
         orphans "data T = T\ninstance Show Main.T\ninstance Show N.T"
           @?= [("inst:Show:T", False), ("inst:Show:T", True)]
@@ -178,7 +216,7 @@ declsOf one bad src =
     extensions =
       "{-# LANGUAGE TypeFamilies, DataKinds, PolyKinds, TypeOperators, MagicHash #-}\n\
       \{-# LANGUAGE UnboxedTuples, DerivingStrategies, TypeApplications #-}\n\
-      \{-# LANGUAGE ExplicitForAll #-}\n"
+      \{-# LANGUAGE ExplicitForAll, TemplateHaskell #-}\n"
 
 -- | The ids of every instance and family instance in a module.
 keys :: Text -> [Text]
@@ -214,3 +252,32 @@ orphans = declsOf one (\t -> (t, False))
       InstanceD i -> [(renderDeclId i.info.id, i.orphan)]
       FamInstD f -> [(renderDeclId f.info.id, f.orphan)]
       _ -> []
+
+-- | The label of every instance and family instance in a module.
+labels :: Text -> [Text]
+labels = declsOf one id
+  where
+    one = \case
+      InstanceD i -> [i.label]
+      FamInstD f -> [f.label]
+      _ -> []
+
+-- | The labels of the deriving clauses of a module's types.
+derivedLabels :: Text -> [Text]
+derivedLabels = declsOf one id
+  where
+    one = \case
+      TypeD t -> case t.form of
+        DataType b -> clauses b.derivings
+        Newtype b -> clauses b.derivings
+        _ -> []
+      FamInstD f -> fam f
+      InstanceD i -> case i.form of
+        ExplicitInstance b -> concatMap fam b.associated
+        _ -> []
+      _ -> []
+    fam f = case f.form of
+      DataInstance b -> clauses b.derivings
+      NewtypeInstance b -> clauses b.derivings
+      TypeInstance -> []
+    clauses ds = [c.label | d <- ds, c <- d.classes]

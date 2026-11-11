@@ -114,6 +114,16 @@ coverage = do
   regionKinds @?= Set.fromList [0, 1, 2]
   Set.fromList outline
     @?= Set.fromList (map outlineKindName [minBound .. maxBound :: OutlineKind])
+  -- Instance labels.
+  let labels = Set.fromList [str (arr e !! 2) | e <- arr (field "outline" cover)]
+  mapM_
+    (\l -> assertBool (Text.unpack l) (Set.member l labels))
+    [ "instance C Int Int",
+      "instance C [a] Int",
+      "type instance O Int",
+      "data instance V Int",
+      "newtype instance V Bool"
+    ]
   assertBool "a link" (any (\k -> runAt k 5 /= 0) [0 .. nRuns - 1])
   -- Every shape of sig, a cut one and none.
   let sigs = [t !! 7 | t <- map arr targets, str (head' t) == "decl"]

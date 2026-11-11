@@ -2,7 +2,7 @@
 // lineDecor (CPP kind, outline marker).
 import type { LineDecor } from "./CodeView";
 import { styledPieces } from "./display";
-import { type Highlight, outlineLabel } from "./highlight";
+import type { Highlight } from "./highlight";
 import { lineNodes } from "./paint";
 
 export function highlightedLine(h: Highlight) {
@@ -26,7 +26,7 @@ export function highlightDecor(
       mark.className = "code-outline-mark";
       mark.href = href;
       mark.tabIndex = -1;
-      mark.title = `Docs: ${outlineLabel(e)}`;
+      mark.title = `Docs: ${e[2]}`;
       mark.setAttribute("aria-label", mark.title);
     }
     if (kind === "excluded" || kind === "directive") return { kind, mark };

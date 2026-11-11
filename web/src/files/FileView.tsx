@@ -25,7 +25,7 @@ import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
 import { type CodeApi, CodeView, type LineMarks } from "../source/CodeView";
 import { highlightDecor, highlightedLine } from "../source/decor";
-import { type Highlight, highlightOf, outlineLabel } from "../source/highlight";
+import { type Highlight, highlightOf } from "../source/highlight";
 import { lineIndex } from "../source/lines";
 import { createDelay, focusInMain, focusLost } from "../ui/focus";
 import { bytes, limit } from "../ui/format";
@@ -292,8 +292,8 @@ function Outline(props: {
           <For each={props.entries}>
             {(e) => (
               <li>
-                <Show when={props.docs(e[1])} fallback={outlineLabel(e)}>
-                  {(href) => <a href={href()}>{outlineLabel(e)}</a>}
+                <Show when={props.docs(e[1])} fallback={e[2]}>
+                  {(href) => <a href={href()}>{e[2]}</a>}
                 </Show>{" "}
                 <a href={props.line(e[3])}>line {e[3]}</a>
               </li>

@@ -365,14 +365,16 @@ outlineCase = do
           ]
       )
       "A"
-  [(e.kind, renderDeclId e.id, e.line, e.firstLine, e.lastLine) | e <- l.links.outline]
-    @?= [ (OutlineType, "type:T", Line 3, Line 3, Line 3),
-          (OutlineClass, "class:C", Line 4, Line 4, Line 5),
-          (OutlineInstance, "inst:C:T", Line 6, Line 6, Line 7),
-          (OutlineValue, "val:f", Line 8, Line 8, Line 9),
-          (OutlinePatSyn, "pat:P", Line 10, Line 10, Line 10),
-          (OutlineType, "type:F", Line 11, Line 11, Line 11),
-          (OutlineFamInst, "inst:F:T", Line 12, Line 12, Line 12)
+  [ (e.kind, renderDeclId e.id, e.label, e.line, e.firstLine, e.lastLine)
+    | e <- l.links.outline
+    ]
+    @?= [ (OutlineType, "type:T", "T", Line 3, Line 3, Line 3),
+          (OutlineClass, "class:C", "C", Line 4, Line 4, Line 5),
+          (OutlineInstance, "inst:C:T", "instance C T", Line 6, Line 6, Line 7),
+          (OutlineValue, "val:f", "f", Line 8, Line 8, Line 9),
+          (OutlinePatSyn, "pat:P", "P", Line 10, Line 10, Line 10),
+          (OutlineType, "type:F", "F", Line 11, Line 11, Line 11),
+          (OutlineFamInst, "inst:F:T", "type instance F T", Line 12, Line 12, Line 12)
         ]
 
 noTableCase :: Assertion

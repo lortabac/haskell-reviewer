@@ -8,13 +8,7 @@ import {
   packRuns,
   type Run,
 } from "../api/source";
-import {
-  highlightOf,
-  lineKinds,
-  lineRuns,
-  outlineByLine,
-  outlineLabel,
-} from "./highlight";
+import { highlightOf, lineKinds, lineRuns, outlineByLine } from "./highlight";
 
 const run = (
   startLine: number,
@@ -82,23 +76,6 @@ describe("lineKinds", () => {
 });
 
 describe("outline", () => {
-  it("names, or a label from an instance's id", () => {
-    const label = (kind: "instance" | "faminst", id: string) =>
-      outlineLabel([kind, id, null, 1, 1, 1]);
-    expect(outlineLabel(["value", "val:sorted", "sorted", 1, 1, 1])).toBe(
-      "sorted",
-    );
-    expect(label("instance", "inst:Show:Rec")).toBe("instance Show Rec");
-    expect(label("instance", "inst:Show:Maybe a")).toBe(
-      "instance Show (Maybe a)",
-    );
-    expect(label("instance", "inst:Show:(a, b)")).toBe("instance Show (a, b)");
-    expect(label("instance", "inst:Show:[Maybe a]")).toBe(
-      "instance Show [Maybe a]",
-    );
-    expect(label("faminst", "inst:D:Int")).toBe("instance D Int");
-  });
-
   it("the first entry per line", () => {
     const m = outlineByLine([
       ["value", "val:a", "a", 3, 3, 3],
