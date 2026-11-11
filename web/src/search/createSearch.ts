@@ -13,15 +13,14 @@ import {
 import { getJson } from "../api/client";
 import { decodeSearch, searchUrl, type SearchResult } from "../api/search";
 import { IndexingContext } from "../events/indexing";
+import { refetchStep } from "../events/partialRefetch";
 
 // Trailing debounce: a keystroke waits this long for a quieter moment
 // before it fetches (plan §4.3). The very first query (e.g. a page
 // prefilled from the URL) fetches at once instead.
 export const debounceMs = 120;
 
-// While the last answer was partial, at most one refetch per this many
-// ms, plus one more as soon as indexing is done (never throttled).
-export const refetchThrottleMs = 1000;
+export { refetchThrottleMs } from "../events/partialRefetch";
 
 export interface SearchState {
   results: () => SearchResult[];
@@ -175,19 +174,8 @@ export function createSearch(
   createEffect(() => {
     const progress = indexingCtx.indexing();
     if (progress === undefined || !partial() || !visible()) return;
-    if (answerSnapshot !== undefined && progress.generation < answerSnapshot) {
-      return;
-    }
-    const newerSnapshot =
-      answerSnapshot !== undefined && progress.generation > answerSnapshot;
-    const done = progress.ready + progress.failed >= progress.total;
-    if (
-      !newerSnapshot &&
-      !done &&
-      Date.now() - lastFetchAt < refetchThrottleMs
-    ) {
-      return;
-    }
+    const step = refetchStep(progress, answerSnapshot, lastFetchAt, Date.now());
+    if (step === "older" || step === "throttled") return;
     // Not tracked: a change in the query is the debounce effect's
     // job, not this one's.
     run(untrack(query));

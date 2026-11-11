@@ -108,6 +108,31 @@ describe("outline", () => {
     expect(h.outline.map((e) => e[1])).toEqual(["val:a"]);
     expect([...h.byLine.keys()]).toEqual([2]);
   });
+  it("a local binder is no link; its uses are", () => {
+    // f x = x: x at col 3 is the binder of target 1.
+    const s: LexedSource = {
+      generation: 1,
+      path: "A.hs",
+      ref: "A",
+      tier: { kind: "syntactic", reason: "no-hie" },
+      partial: false,
+      highlight: "lexed",
+      runs: packRuns([
+        run(1, 1, 1, 2, 2, 2),
+        run(1, 3, 1, 4, 2, 1),
+        run(1, 7, 1, 8, 2, 1),
+      ]),
+      regions: [],
+      targets: [
+        ["local", 1, 3],
+        ["decl", "A", "A.hs", 1, "val:f", [], 1, null, true],
+      ],
+      outline: [],
+    };
+    const h = highlightOf(s, 1);
+    expect(h.runs[1]?.map((g) => g.link)).toEqual([2, 0, 1]);
+    expect(h.links).toEqual([]);
+  });
 });
 
 describe("classes", () => {

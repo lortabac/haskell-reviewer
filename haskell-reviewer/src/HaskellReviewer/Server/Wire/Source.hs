@@ -75,6 +75,7 @@ import HaskellReviewer.Core.ResolveWarmUp
   )
 import HaskellReviewer.Core.SourceLinks
   ( DeclLink (..),
+    DeclRole (..),
     ExternalLink (..),
     GuessHow (..),
     LinkReason (..),
@@ -120,13 +121,16 @@ only with nothing to show) or "lexed", which adds:
   1 excluded by CPP, 2 literate prose), first line, last line.
 - targets, each an array, kind first:
     ["local", line, col]
-    ["decl", ref, path, line | null, id, reasons, candidates, sig | null]
+    ["decl", ref, path, line | null, id, reasons, candidates, sig | null,
+     def]
     ["module", ref, path | null, reasons, candidates]
     ["external", module, package | null, how, count, query]
   reasons are text codes ('reasonName'), empty when exact; how is
   listed, only-open or one-of ('howName'); sig is the declaration's
-  code for the hover, plain text. See Note [Source links] and Note
-  [Hover signatures] in "HaskellReviewer.Core.SourceLinks".
+  code for the hover, plain text; def is true on the declaration
+  itself (an equation, its signature, a fixity declaration or a
+  pragma), false on a use. See Note [Source links] and Note [Hover
+  signatures] in "HaskellReviewer.Core.SourceLinks".
 - outline: [kind, id, label, line, firstLine, lastLine] per
   top-level declaration with an id, in source order. The label is the
   name, or the instance head: @instance Show T@, @type instance F [a]@.
@@ -257,7 +261,8 @@ target =
         Cbor.text (renderDeclId d.id),
         reasons d.reasons,
         Cbor.int d.candidates,
-        Cbor.nullable Cbor.text d.sig
+        Cbor.nullable Cbor.text d.sig,
+        Cbor.bool (d.role == AtDef)
       ]
     ToModule m ->
       [ Cbor.text "module",

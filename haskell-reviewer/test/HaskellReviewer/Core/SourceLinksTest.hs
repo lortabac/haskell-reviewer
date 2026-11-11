@@ -6,6 +6,7 @@ import Control.Exception (evaluate)
 import Control.Monad (forM_, when)
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as LBS
+import Data.Containers.ListUtils (nubOrd)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.IntMap.Strict qualified as IntMap
 import Data.List (sort)
@@ -57,6 +58,7 @@ import HaskellReviewer.Core.ResolveWarmUp
   )
 import HaskellReviewer.Core.SourceLinks
   ( DeclLink (..),
+    DeclRole (..),
     ExternalLink (..),
     GuessHow (..),
     LinkReason (..),
@@ -184,6 +186,32 @@ unitTests =
       length ws @?= 3
       Set.size (Set.fromList ws) @?= 1
       targetsOf l "x" @?= replicate 3 (ToLocal LocalLink {line = Line 2, col = Col 3}),
+    testCase "def bit: signature, each equation, pragma; not a use" $ do
+      l <-
+        linkedOf
+          ( memProject
+              Set.empty
+              [ ( "A",
+                  "module A where\n\
+                  \len :: [a] -> Int\n\
+                  \len [] = 0\n\
+                  \len (_ : xs) = 1 + len xs\n\
+                  \{-# NOINLINE len #-}\n\
+                  \class C a where m :: a\n\
+                  \instance C Int where m = 1\n\
+                  \k = m :: Int\n"
+                )
+              ]
+          )
+          "A"
+      let defOf = \case
+            ToDecl d -> Just (d.role == AtDef)
+            _ -> Nothing
+      map defOf (targetsOf l "len") @?= map Just [True, True, True, False, True]
+      -- The instance's method is a use of the class's.
+      map defOf (targetsOf l "m") @?= map Just [True, False, False]
+      -- Two targets for len: the def and the uses.
+      Set.size (Set.fromList (wordsOf l "len")) @?= 2,
     testCase "a field of two types here: this-module" $ do
       l <-
         linkedOf
@@ -478,9 +506,10 @@ shapes =
   \f :: C a => a -> ()\n\
   \f _ = ()\n"
 
--- | Each decl target's id and sig.
+-- | Each decl target's id and sig, once (a definition and its uses are
+-- two targets).
 sigsOf :: Linked -> [(Text, Maybe Text)]
-sigsOf l = [(renderDeclId d.id, d.sig) | ToDecl d <- l.links.targets]
+sigsOf l = nubOrd [(renderDeclId d.id, d.sig) | ToDecl d <- l.links.targets]
 
 -- | The sig of the decl target with this id.
 sigOf :: Linked -> Text -> IO (Maybe Text)
@@ -724,6 +753,7 @@ renderTarget = \case
         relPathText d.path <> ":" <> maybe "?" lineText d.line,
         renderDeclId d.id
       ]
+        <> ["def" | d.role == AtDef]
         <> reasons d.reasons d.candidates
         <> maybe [] (\sig -> ["|", sig]) d.sig
   ToModule m ->

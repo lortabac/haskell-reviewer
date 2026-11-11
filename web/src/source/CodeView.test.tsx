@@ -1,9 +1,11 @@
-import { createEffect, createRoot, createSignal } from "solid-js";
+import { createEffect, createRoot, createSignal, untrack } from "solid-js";
 import { render } from "solid-js/web";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { webkitFocus } from "../../test/focus";
 import { fakeLayout } from "../../test/layout";
 import { lineIndex } from "./lines";
+import type { LinkInfo } from "./links";
+import { lineNodes } from "./paint";
 import {
   type CodeApi,
   CodeView,
@@ -293,7 +295,7 @@ describe("CodeView", () => {
   it("a click moves the cursor there and focuses the line", async () => {
     const { root, api } = mount(lines(10));
     await click(root, 6, caret(textAt(root, 6), 3));
-    expect(api.cursor()).toEqual({ line: 6, col: 3 });
+    expect(api.cursor()).toEqual({ line: 6, col: 3, link: false });
     expect(document.activeElement).toBe(cell(root, 6));
     // Keys work from there.
     key("ArrowDown");
@@ -315,14 +317,14 @@ describe("CodeView", () => {
     const num = root.querySelector('.code-row[data-line="3"] .code-num');
     if (num === null) throw new Error("no gutter");
     await click(root, 3, () => getSelection()?.removeAllRanges(), { on: num });
-    expect(api.cursor()).toEqual({ line: 3, col: 0 });
+    expect(api.cursor()).toEqual({ line: 3, col: 0, link: false });
     expect(document.activeElement).toBe(cell(root, 3));
   });
 
   it("a right or middle click moves the cursor too", async () => {
     const { root, api } = mount(lines(10));
     await click(root, 6, caret(textAt(root, 6), 2), { button: 2 });
-    expect(api.cursor()).toEqual({ line: 6, col: 2 });
+    expect(api.cursor()).toEqual({ line: 6, col: 2, link: false });
     expect(document.activeElement).toBe(cell(root, 6));
     await click(root, 8, caret(textAt(root, 8), 0), { button: 1 });
     expect(document.activeElement).toBe(cell(root, 8));
@@ -337,7 +339,11 @@ describe("CodeView", () => {
     await click(root, 2, () =>
       getSelection()?.setBaseAndExtent(a, 1, b, b.childNodes.length),
     );
-    expect(api.cursor()).toEqual({ line: 5, col: "line 5".length });
+    expect(api.cursor()).toEqual({
+      line: 5,
+      col: "line 5".length,
+      link: false,
+    });
     expect(document.activeElement).toBe(cell(root, 5));
     const sel = getSelection();
     expect([sel?.anchorNode, sel?.anchorOffset]).toEqual([a, 1]);
@@ -354,12 +360,16 @@ describe("CodeView", () => {
     const sel = () =>
       getSelection()?.setBaseAndExtent(textAt(root, 4), 0, textAt(root, 5), 0);
     await click(root, 4, sel);
-    expect(api.cursor()).toEqual({ line: 4, col: "line 4".length });
+    expect(api.cursor()).toEqual({
+      line: 4,
+      col: "line 4".length,
+      link: false,
+    });
     // Backwards to a line's start: that line.
     const back = () =>
       getSelection()?.setBaseAndExtent(textAt(root, 8), 2, textAt(root, 6), 0);
     await click(root, 8, back);
-    expect(api.cursor()).toEqual({ line: 6, col: 0 });
+    expect(api.cursor()).toEqual({ line: 6, col: 0, link: false });
   });
 
   it("focus taken elsewhere: no cursor move", async () => {
@@ -699,5 +709,286 @@ describe("highlighting and decor", () => {
     expect(row(1).classList.contains("code-excluded")).toBe(false);
     expect(label(1)).toBe("1");
     expect(row(2).querySelector(".code-mark a")).toBeNull();
+  });
+});
+
+describe("token cursor", () => {
+  // Each word "lN" is a link; other text plain.
+  const linkInfo = (k: number): LinkInfo => ({
+    href: `#L${k}`,
+    about: "here",
+    guess: false,
+    external: false,
+    here: true,
+  });
+  const linked = (_n: number, text: string): Node[] =>
+    lineNodes(
+      text
+        .split(/(\s+)/)
+        .filter((w) => w !== "")
+        .map((w) => ({
+          text: w,
+          cls: null,
+          link: /^l\d+$/.test(w) ? Number(w.slice(1)) : 0,
+          ctrl: false,
+        })),
+      linkInfo,
+    );
+
+  function mountLinked(text: string) {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const [renderFn, setRender] = createSignal<
+      ((n: number, t: string) => Node[]) | undefined
+    >(linked);
+    let api: CodeApi | undefined;
+    dispose = render(
+      () => (
+        <CodeView
+          text={text}
+          index={lineIndex(text)}
+          renderLine={renderFn()}
+          ref={(a) => (api = a)}
+        />
+      ),
+      root,
+    );
+    if (api === undefined) throw new Error("no api");
+    return { root, api, setRender };
+  }
+  const press = (key: string, shiftKey = false) =>
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", { key, shiftKey, bubbles: true }),
+    );
+  const link = (root: HTMLElement, n: number, text: string) => {
+    const a = [...cell(root, n).querySelectorAll("a.code-link")].find(
+      (e) => e.textContent === text,
+    );
+    if (!(a instanceof HTMLElement)) throw new Error(`no link ${text}`);
+    return a;
+  };
+  const stops = (root: HTMLElement) =>
+    root.querySelectorAll('.code-view [tabindex="0"]');
+
+  it("→ and ← move between links and the cell; one Tab stop", () => {
+    const { root, api } = mountLinked("ab l1 cd l2\nx\n");
+    cell(root, 1).focus();
+    press("ArrowRight");
+    expect(document.activeElement).toBe(link(root, 1, "l1"));
+    expect(api.cursor()).toEqual({ line: 1, col: 3, link: true });
+    expect(stops(root)).toHaveLength(1);
+    expect(cell(root, 1).getAttribute("tabindex")).toBe("-1");
+    press("ArrowRight");
+    expect(document.activeElement).toBe(link(root, 1, "l2"));
+    expect(link(root, 1, "l1").tabIndex).toBe(-1);
+    expect(stops(root)).toHaveLength(1);
+    // The end: focus stays, the view scrolls.
+    press("ArrowRight");
+    expect(document.activeElement).toBe(link(root, 1, "l2"));
+    expect(view(root).scrollLeft).toBe(40);
+    press("ArrowLeft");
+    press("ArrowLeft");
+    expect(document.activeElement).toBe(cell(root, 1));
+    expect(api.cursor()).toEqual({ line: 1, col: 3, link: false });
+    expect(cell(root, 1).getAttribute("tabindex")).toBe("0");
+    press("ArrowLeft");
+    expect(document.activeElement).toBe(cell(root, 1));
+  });
+
+  it("↑ and ↓ keep the goal column: the link under it, else the cell", () => {
+    const { root } = mountLinked("ab l1\nx\ncd l3 l3\n");
+    cell(root, 1).focus();
+    press("ArrowRight");
+    press("ArrowDown");
+    // "x" is short: the cell.
+    expect(document.activeElement).toBe(cell(root, 2));
+    press("ArrowDown");
+    // Column 3 is in the first l3.
+    expect(document.activeElement).toBe(cell(root, 3).querySelector("a"));
+    press("Home");
+    expect(document.activeElement).toBe(cell(root, 1));
+  });
+
+  it("PageDown to a row not mounted: the link under the goal", () => {
+    const text =
+      Array.from({ length: 300 }, (_, i) => `ab l${i + 1}`).join("\n") + "\n";
+    const { root } = mountLinked(text);
+    cell(root, 1).focus();
+    press("ArrowRight");
+    press("End");
+    press("ArrowRight");
+    expect(document.activeElement).toBe(link(root, 300, "l300"));
+    press("Home");
+    press("ArrowRight");
+    for (let i = 0; i < 5; i++) press("PageDown");
+    const n = 1 + 5 * (Math.floor(600 / h) - 1);
+    expect(document.activeElement).toBe(link(root, n, `l${n}`));
+  });
+
+  it("a redraw keeps focus on the link, or the cell if it went", () => {
+    const { root, api, setRender } = mountLinked("ab l1\n");
+    cell(root, 1).focus();
+    press("ArrowRight");
+    const old = link(root, 1, "l1");
+    setRender(() => (n: number, t: string) => linked(n, t));
+    expect(old.isConnected).toBe(false);
+    expect(document.activeElement).toBe(link(root, 1, "l1"));
+    expect(link(root, 1, "l1").tabIndex).toBe(0);
+    setRender(undefined);
+    expect(document.activeElement).toBe(cell(root, 1));
+    expect(api.cursor().link).toBe(false);
+    expect(cell(root, 1).getAttribute("tabindex")).toBe("0");
+  });
+
+  it("a click in a link focuses it; focusAt lands on a link", async () => {
+    const { root, api } = mountLinked("ab l1\ncd l2\n");
+    const t = link(root, 2, "l2").firstChild as Node;
+    cell(root, 2).dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    view(root).focus();
+    getSelection()?.setBaseAndExtent(t, 1, t, 1);
+    document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    await new Promise((done) => setTimeout(done, 0));
+    expect(document.activeElement).toBe(link(root, 2, "l2"));
+    expect(api.cursor()).toEqual({ line: 2, col: 3, link: true });
+    api.focusAt(1, 4);
+    expect(document.activeElement).toBe(link(root, 1, "l1"));
+    api.focusAt(1, 1);
+    expect(document.activeElement).toBe(cell(root, 1));
+  });
+
+  it("a click on a link with a selection doesn't follow it", () => {
+    const { root } = mountLinked("ab l1\n");
+    const a = link(root, 1, "l1");
+    const t = cell(root, 1).firstChild as Node;
+    getSelection()?.setBaseAndExtent(t, 0, a.firstChild as Node, 1);
+    const click = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      detail: 1,
+    });
+    a.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(true);
+    // Enter (detail 0) follows it.
+    const enter = new MouseEvent("click", { bubbles: true, cancelable: true });
+    a.dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(false);
+  });
+
+  it("Ctrl or Cmd+click, or a selection outside the view: the browser's", () => {
+    const { root } = mountLinked("ab l1\n");
+    const a = link(root, 1, "l1");
+    const t = cell(root, 1).firstChild as Node;
+    getSelection()?.setBaseAndExtent(t, 0, a.firstChild as Node, 1);
+    for (const mod of [
+      { ctrlKey: true },
+      { metaKey: true },
+      { altKey: true },
+    ]) {
+      const click = new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        detail: 1,
+        ...mod,
+      });
+      a.dispatchEvent(click);
+      expect(click.defaultPrevented).toBe(false);
+    }
+    const p = document.createElement("p");
+    p.textContent = "elsewhere";
+    document.body.append(p);
+    getSelection()?.setBaseAndExtent(
+      p.firstChild as Node,
+      0,
+      p.firstChild as Node,
+      4,
+    );
+    const click = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      detail: 1,
+    });
+    a.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(false);
+  });
+
+  it("a click past the middle of a link's last character: that link", async () => {
+    const { root, api } = mountLinked("ab l1 cd\n");
+    const a = link(root, 1, "l1");
+    const t = a.firstChild as Text;
+    a.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    view(root).focus();
+    // The caret at the link's end, as the browser puts it there.
+    getSelection()?.setBaseAndExtent(t, t.length, t, t.length);
+    document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    await new Promise((done) => setTimeout(done, 0));
+    expect(document.activeElement).toBe(a);
+    expect(api.cursor()).toEqual({ line: 1, col: 3, link: true });
+  });
+
+  it("a link drag ends when the window loses focus", async () => {
+    const { root } = mountLinked(
+      Array.from({ length: 300 }, (_, i) => `ab l${i + 1}`).join("\n") + "\n",
+    );
+    const a = link(root, 2, "l2");
+    const t = a.firstChild as Node;
+    // happy-dom has no layout: the point is always in l2.
+    Object.defineProperty(document, "caretPositionFromPoint", {
+      value: () => ({ offsetNode: t, offset: 1 }),
+      configurable: true,
+    });
+    try {
+      a.dispatchEvent(
+        new MouseEvent("mousedown", { bubbles: true, button: 0, detail: 1 }),
+      );
+      // Below the view (its box is empty here): it scrolls.
+      document.dispatchEvent(
+        new MouseEvent("mousemove", { bubbles: true, buttons: 1, clientY: 50 }),
+      );
+      const v = view(root);
+      await vi.waitFor(() => expect(v.scrollTop).toBeGreaterThan(0));
+      window.dispatchEvent(new Event("blur"));
+      const top = v.scrollTop;
+      await new Promise((done) => setTimeout(done, 150));
+      expect(v.scrollTop).toBe(top);
+    } finally {
+      Reflect.deleteProperty(document, "caretPositionFromPoint");
+    }
+  });
+
+  it("focus some other way drops a focus waiting for another line", async () => {
+    const text =
+      Array.from({ length: 300 }, (_, i) => `ab l${i + 1}`).join("\n") + "\n";
+    const { root, api } = mountLinked(text);
+    const l1 = link(root, 1, "l1");
+    const done = createRoot((d) => {
+      createEffect(() =>
+        untrack(() => {
+          // Waits for its row (inside an effect)...
+          api.focusLine(250);
+          // ...then focus goes elsewhere in the view.
+          l1.focus();
+        }),
+      );
+      return d;
+    });
+    // The view scrolled to line 250: its row comes.
+    view(root).dispatchEvent(new Event("scroll"));
+    await vi.waitFor(() => expect(rowLines(root)).toContain(250));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(document.activeElement).toBe(l1);
+    done();
+  });
+
+  it("focus that comes some other way moves the cursor and the Tab stop", () => {
+    const { root, api } = mountLinked("ab l1\ncd l2 l3\n");
+    // A screen reader's browse mode, say.
+    link(root, 2, "l3").focus();
+    expect(api.cursor()).toEqual({ line: 2, col: 6, link: true });
+    expect(stops(root)).toHaveLength(1);
+    expect(link(root, 2, "l3").tabIndex).toBe(0);
+    expect(cell(root, 1).hasAttribute("tabindex")).toBe(false);
+    // Keys go on from there.
+    press("ArrowLeft");
+    expect(document.activeElement).toBe(link(root, 2, "l2"));
   });
 });

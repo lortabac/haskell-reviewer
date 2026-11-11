@@ -39,3 +39,46 @@ export function isSelectAll(key: string, mods: Mods): boolean {
     key.toLowerCase() === "a"
   );
 }
+
+// A link on the cursor's line: its UTF-16 columns, end exclusive.
+export interface Stop {
+  start: number;
+  end: number;
+}
+
+// Where the cursor is on its line: the cell at a column, or a link
+// (by its start).
+export interface Spot {
+  link: boolean;
+  col: number;
+}
+
+// The next (dir 1) or previous (dir −1) spot for → and ←, undefined at
+// the end (scroll sideways). The cell at c sits just before a link
+// starting at c: → from it goes to that link, ← to links before c.
+// ← from the first link goes to the cell at its start. stops in order.
+export function nextStop(
+  stops: readonly Stop[],
+  at: Spot,
+  dir: 1 | -1,
+): Spot | undefined {
+  // The cell at c is c − ½, a link at s is s.
+  const pos = at.link ? at.col : at.col - 0.5;
+  if (dir === 1) {
+    const s = stops.find((s) => s.start > pos);
+    return s === undefined ? undefined : { link: true, col: s.start };
+  }
+  const before = stops.filter((s) => s.start < pos);
+  const s = before[before.length - 1];
+  if (s !== undefined) return { link: true, col: s.start };
+  return at.link ? { link: false, col: at.col } : undefined;
+}
+
+// Where ↑, ↓, Page and Home/End land: the link under the goal column,
+// else the cell at it.
+export function landOn(stops: readonly Stop[], goal: number): Spot {
+  const s = stops.find((s) => s.start <= goal && goal < s.end);
+  return s === undefined
+    ? { link: false, col: goal }
+    : { link: true, col: s.start };
+}

@@ -12,6 +12,7 @@ module HaskellReviewer.Core.SourceLinks
     LinkTarget (..),
     LocalLink (..),
     DeclLink (..),
+    DeclRole (..),
     ModuleLink (..),
     ExternalLink (..),
     LinkReason (..),
@@ -94,6 +95,7 @@ import HaskellReviewer.Core.Occurrences
     FreeContext (..),
     Occurrence (..),
     Resolution (..),
+    Role (Def, Sig),
     TokenIx (..),
     binderAt,
     occurrenceList,
@@ -125,7 +127,9 @@ target in a table where each distinct target is once. A target is:
 
 - a local binder (its start; all uses of the binder share it);
 - a declaration of ours: module, id, the line of its name, why it's a
-  guess and how many candidates there were (1 unless ambiguous);
+  guess, how many candidates there were (1 unless ambiguous), and
+  whether the token is the declaration itself or a use (its role), so
+  one declaration can give two targets;
 - a module of ours, when the declaration is unknown;
 - an external module, with how sure we are and a Hoogle query.
 
@@ -137,7 +141,13 @@ Where links come from:
 - A free name: its resolution (Note [Resolution] in
   "HaskellReviewer.Core.Resolve"). Unresolved: no link.
 - Built-ins and words that aren't names: no link.
-- A definition or signature links to itself.
+- A top-level definition or signature links to itself, with the role
+  'AtDef': the name in each equation, in its signature, a fixity
+  declaration or a pragma. Every other mention is 'AtUse' (export and
+  import lists too), so uses get their own target. The client sends a
+  def to its docs and a use to the def. A method defined in an
+  instance is a use: it links to the class's method. Locals have no
+  role: a local binder is a local target like its uses.
 - A pun (@C {f}@) links the variable only, not the field.
 - A quasi-quote links its quoter over the whole quasi-quote token.
 
@@ -248,9 +258,22 @@ data DeclLink = DeclLink
     -- | 1 unless ambiguous.
     candidates :: Int,
     -- | For the hover. See Note [Hover signatures].
-    sig :: Maybe Text
+    sig :: Maybe Text,
+    -- | The token is the declaration itself (an equation, its
+    -- signature, a fixity declaration or a pragma), or a use. See Note
+    -- [Source links].
+    role :: DeclRole
   }
   deriving (Eq, Show)
+
+-- | What a token of a declaration target is. See Note [Source links].
+data DeclRole
+  = -- | The name in an equation, the signature, a fixity declaration
+    -- or a pragma.
+    AtDef
+  | -- | Any other mention.
+    AtUse
+  deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | One of our modules, the declaration unknown.
 data ModuleLink = ModuleLink
@@ -372,7 +395,7 @@ sourceLinks input =
     -- Each decl target module's names and code, read once.
     lines' =
       Map.fromList
-        [(m, declFacts input ls m) | m <- nubOrd [m | KeyDecl m _ _ _ <- done.new]]
+        [(m, declFacts input ls m) | m <- nubOrd [m | KeyDecl m _ _ _ _ <- done.new]]
     -- Each target module's ref and file, found once.
     places =
       Map.fromList
@@ -380,7 +403,7 @@ sourceLinks input =
         | m <- nubOrd (concatMap keyModule done.new)
         ]
     keyModule = \case
-      KeyDecl m _ _ _ -> [m]
+      KeyDecl m _ _ _ _ -> [m]
       KeyModule m _ _ -> [m]
       _ -> []
 
@@ -394,7 +417,12 @@ forceSourceLinks s =
     forceTarget = \case
       ToLocal l -> l `seq` ()
       ToDecl d ->
-        d.ref `seq` d.line `seq` forceDeclId d.id `seq` sig d.sig `seq` reasons d.reasons
+        d.ref `seq`
+          d.line `seq`
+            forceDeclId d.id `seq`
+              sig d.sig `seq`
+                d.role `seq`
+                  reasons d.reasons
       ToModule m -> m.ref `seq` m.path `seq` reasons m.reasons
       ToExternal x -> forceExternalModule x.module_ `seq` x.query `seq` ()
     reasons = foldr seq ()
@@ -412,7 +440,7 @@ linkAt s i = fromMaybe 0 (s.links Vector.!? i)
 -- | What makes a target distinct. See Note [Source links].
 data Key
   = KeyLocal Line Col
-  | KeyDecl ModuleId DeclId [LinkReason] Int
+  | KeyDecl ModuleId DeclId [LinkReason] Int DeclRole
   | KeyModule ModuleId [LinkReason] Int
   | -- | The query: the name and maybe the module.
     KeyExternal ExternalModule GuessHow Int Text
@@ -446,16 +474,20 @@ keyOf input ls i o = case o.resolution of
   LocalRef b -> do
     binder <- binderAt input.parsed.occurrences b
     Just (KeyLocal binder.span.startLine binder.span.startCol)
-  TopLevelRef d c -> Just (KeyDecl input.self d [ReasonThisModule | c == Occ.Heuristic] 1)
+  TopLevelRef d c ->
+    Just (KeyDecl input.self d [ReasonThisModule | c == Occ.Heuristic] 1 role)
   FreeRef ctx -> do
     res <- input.resolution
     resolved <- IntMap.lookup i res.names
-    fromResolved ls input i ctx resolved
+    fromResolved ls input i ctx role resolved
   BuiltInRef -> Nothing
   NotAName _ -> Nothing
+  where
+    role = if o.role `elem` [Def, Sig] then AtDef else AtUse
 
-fromResolved :: SourceLines -> LinksInput -> Int -> FreeContext -> Resolved -> Maybe Key
-fromResolved ls input i ctx = \case
+fromResolved ::
+  SourceLines -> LinksInput -> Int -> FreeContext -> DeclRole -> Resolved -> Maybe Key
+fromResolved ls input i ctx role = \case
   Exact t -> Just (home t [] 1)
   Heuristic rs t ->
     Just (home t (map reasonOf (NonEmpty.toList rs)) (candidatesOf (NonEmpty.toList rs)))
@@ -463,7 +495,7 @@ fromResolved ls input i ctx = \case
   Unresolved _ -> Nothing
   where
     home t rs k = case t of
-      DeclTarget m d -> KeyDecl m d rs k
+      DeclTarget m d -> KeyDecl m d rs k role
       ModuleTarget m -> KeyModule m rs k
     external g =
       let (how, k) = case g.how of
@@ -516,7 +548,7 @@ targetOf ::
   LinkTarget
 targetOf places factMaps = \case
   KeyLocal l c -> ToLocal LocalLink {line = l, col = c}
-  KeyDecl m d rs k -> case place m of
+  KeyDecl m d rs k role -> case place m of
     (ref, Just p) ->
       let facts = Map.lookup d =<< Map.lookup m factMaps
        in ToDecl
@@ -528,7 +560,8 @@ targetOf places factMaps = \case
                 id = d,
                 reasons = rs,
                 candidates = k,
-                sig = (.sig) =<< facts
+                sig = (.sig) =<< facts,
+                role = role
               }
     (ref, Nothing) -> moduleLink m ref Nothing rs k
   KeyModule m rs k -> let (ref, p) = place m in moduleLink m ref p rs k

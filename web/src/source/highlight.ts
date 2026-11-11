@@ -6,7 +6,9 @@ import {
   type LexedSource,
   type OutlineEntry,
   regionKinds,
+  type Target,
 } from "../api/source";
+import type { LinkInfo } from "./links";
 
 // A run's part on one line. Code point columns from 1, end exclusive;
 // to is Infinity when it goes on to the next line. cls: a display
@@ -64,19 +66,42 @@ export function outlineByLine(
   return out;
 }
 
+// A local binder is no link (D-283): the seg that starts where its own
+// local target points gets link 0.
+export function dropBinderLinks(
+  runs: Seg[][],
+  targets: readonly Target[],
+): void {
+  targets.forEach((t, i) => {
+    if (t[0] !== "local") return;
+    for (const s of runs[t[1]] ?? []) {
+      if (s.link === i + 1 && s.from === t[2]) s.link = 0;
+    }
+  });
+}
+
 // All a view needs from a lexed source.
 export interface Highlight {
   runs: Seg[][];
+  // By link word − 1; undefined: not a link.
+  links: readonly (LinkInfo | undefined)[];
   kinds: LineKind[];
   // Entries on a line of the file only (no dead "line N" links).
   outline: OutlineEntry[];
   byLine: Map<number, OutlineEntry>;
 }
 
-export function highlightOf(s: LexedSource, count: number): Highlight {
+export function highlightOf(
+  s: LexedSource,
+  count: number,
+  links: readonly (LinkInfo | undefined)[] = [],
+): Highlight {
   const outline = s.outline.filter((e) => e[3] >= 1 && e[3] <= count);
+  const runs = lineRuns(s.runs, count);
+  dropBinderLinks(runs, s.targets);
   return {
-    runs: lineRuns(s.runs, count),
+    runs,
+    links,
     kinds: lineKinds(s.regions, count),
     outline,
     byLine: outlineByLine(outline),

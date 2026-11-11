@@ -6,8 +6,9 @@ import type { Highlight } from "./highlight";
 import { lineNodes } from "./paint";
 
 export function highlightedLine(h: Highlight) {
+  const link = (k: number) => h.links[k - 1];
   return (n: number, text: string): Node[] =>
-    lineNodes(styledPieces(text, h.runs[n] ?? []));
+    lineNodes(styledPieces(text, h.runs[n] ?? []), link);
 }
 
 // docs: an id's docs URL, undefined if the file has no docs page. The

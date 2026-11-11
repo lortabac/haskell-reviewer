@@ -76,7 +76,9 @@ export type LocalTarget = ["local", line: number, col: number];
 
 // A declaration of ours. line: of its name; reasons empty when exact;
 // candidates 1 unless ambiguous; sig: its code as plain text, for the
-// hover (cut at 300 code points plus "…"), null when it has none.
+// hover (cut at 300 code points plus "…"), null when it has none. def:
+// the token is the definition itself (an equation, the signature), not
+// a use.
 export type DeclTarget = [
   "decl",
   ref: string,
@@ -86,6 +88,7 @@ export type DeclTarget = [
   reasons: ReasonCode[],
   candidates: number,
   sig: string | null,
+  def: boolean,
 ];
 
 // A module of ours, the declaration unknown.
@@ -237,7 +240,7 @@ function decodeTarget(value: unknown, path: string): Target {
       return [kind, nat(t[1], at(1)), nat(t[2], at(2))];
     }
     case "decl": {
-      const t = tuple(value, path, 8);
+      const t = tuple(value, path, 9);
       return [
         kind,
         str(t[1], at(1)),
@@ -247,6 +250,7 @@ function decodeTarget(value: unknown, path: string): Target {
         reasons(t[5], at(5)),
         positive(t[6], at(6)),
         nullable(str)(t[7], at(7)),
+        bool(t[8], at(8)),
       ];
     }
     case "module": {
@@ -369,4 +373,25 @@ export function decodeSourceNotFound(value: unknown): SourceNotFound {
     kind: field(o, "kind", path, oneOf(["not-found"] as const)),
     what: field(o, "what", path, oneOf(["file"] as const)),
   };
+}
+
+// Same runs, regions, targets and outline: a refetch that changed
+// nothing (no redraw).
+export function sameLexed(
+  a: LexedSource | undefined,
+  b: LexedSource | undefined,
+): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  const same = (x: readonly number[], y: readonly number[]) =>
+    x.length === y.length && x.every((v, i) => v === y[i]);
+  return (
+    a.generation === b.generation &&
+    a.path === b.path &&
+    a.ref === b.ref &&
+    same(a.runs, b.runs) &&
+    same(a.regions, b.regions) &&
+    JSON.stringify(a.targets) === JSON.stringify(b.targets) &&
+    JSON.stringify(a.outline) === JSON.stringify(b.outline)
+  );
 }

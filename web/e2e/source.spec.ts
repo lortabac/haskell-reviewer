@@ -358,9 +358,10 @@ test("row headers are named by their numbers", async ({ page, server }) => {
   await expect(
     rows.nth(2).getByRole("rowheader", { name: "3", exact: true }),
   ).toHaveCount(1);
-  await expect(
-    rows.nth(2).getByRole("gridcell", { name: "main :: IO ()" }),
-  ).toHaveCount(1);
+  // The cell's name comes from its links' names too (D-283): its text.
+  await expect(rows.nth(2).getByRole("gridcell").last()).toHaveText(
+    "main :: IO ()",
+  );
 });
 
 for (const t of themes) {

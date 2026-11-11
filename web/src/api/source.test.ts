@@ -39,8 +39,8 @@ describe("source view", () => {
   it("takes every target shape", () => {
     const targets = [
       ["local", 1, 1],
-      ["decl", "A", "src/A.hs", null, "val:x", ["ambiguous"], 2, null],
-      ["decl", "A", "src/A.hs", 3, "val:y", [], 1, "y :: Int"],
+      ["decl", "A", "src/A.hs", null, "val:x", ["ambiguous"], 2, null, false],
+      ["decl", "A", "src/A.hs", 3, "val:y", [], 1, "y :: Int", true],
       ["module", "B", null, ["not-ready", "this-module"], 1],
       ["external", "Data.List", "base", "listed", 1, "sort +module:Data.List"],
     ];
@@ -78,13 +78,19 @@ describe("source view", () => {
       { ...lexed, regions: [0, 3, 2] },
       { ...lexed, targets: [["local", 1]] },
       { ...lexed, targets: [["global", 1, 1]] },
-      { ...lexed, targets: [["decl", "A", "a", 1, "x", ["guess"], 1, null]] },
+      {
+        ...lexed,
+        targets: [["decl", "A", "a", 1, "x", ["guess"], 1, null, false]],
+      },
       // No sig, or not text.
-      { ...lexed, targets: [["decl", "A", "a", 1, "x", [], 1]] },
-      { ...lexed, targets: [["decl", "A", "a", 1, "x", [], 1, 3]] },
+      { ...lexed, targets: [["decl", "A", "a", 1, "x", [], 1, false]] },
+      { ...lexed, targets: [["decl", "A", "a", 1, "x", [], 1, 3, false]] },
+      // No def, or not a bool.
+      { ...lexed, targets: [["decl", "A", "a", 1, "x", [], 1, null]] },
+      { ...lexed, targets: [["decl", "A", "a", 1, "x", [], 1, null, 1]] },
       { ...lexed, targets: [["module", "A", 1, [], 1]] },
       { ...lexed, targets: [["module", "A", null, [], 0]] },
-      { ...lexed, targets: [["decl", "A", "a", 1, "x", [], 0, null]] },
+      { ...lexed, targets: [["decl", "A", "a", 1, "x", [], 0, null, false]] },
       { ...lexed, targets: [["external", "M", null, "listed", 0, "q"]] },
       { ...lexed, targets: [["external", "M", null, "maybe", 1, "q"]] },
       { ...lexed, outline: [["splice", "x", "x", 1, 1, 1]] },
