@@ -9,6 +9,7 @@ import {
 import {
   createEffect,
   createMemo,
+  createRenderEffect,
   createSelector,
   createSignal,
   getOwner,
@@ -20,11 +21,13 @@ import {
 import { setVar } from "../ui/cssom";
 import { bringOnPage } from "../ui/scroll";
 import { createCopy } from "./copy";
-import { pieces } from "./display";
+import { plainPieces } from "./display";
 import { focusKeepingSelection } from "./focus";
 import { isSelectAll, keyTarget } from "./keys";
+import type { LineKind } from "./highlight";
 import { type LineIndex, lineText } from "./lines";
-import { domPoint } from "./selection";
+import { lineNodes } from "./paint";
+import { domPoint, replaceKeepingSelection } from "./selection";
 import { createRowHeight, mountRows, withPins } from "./virtual";
 
 // Lines from 1, columns in UTF-16 units from 0.
@@ -60,13 +63,29 @@ export interface CodeApi {
   row: (line: number) => HTMLElement | undefined;
 }
 
+// More for a line: its CPP kind (a row class, and words in its
+// number's label), something in the marker column.
+export interface LineDecor {
+  kind?: Exclude<LineKind, "code"> | undefined;
+  mark?: JSX.Element;
+}
+
+const kindLabel: Record<Exclude<LineKind, "code">, string> = {
+  excluded: "excluded by CPP",
+  directive: "CPP directive",
+};
+
 // text and index are read once: a new file needs a new view.
 export interface CodeViewProps {
   text: string;
   index: LineIndex;
   marks?: LineMarks | undefined;
-  // The code of a line; plain text by default.
-  renderLine?: (line: number, text: string) => JSX.Element;
+  // The code of a line, as nodes (paint.ts); undefined: plain text.
+  // Its text must be the line's, 1:1 in UTF-16 (copy reads columns
+  // from the DOM). A new function redraws the mounted rows, keeping
+  // the selection.
+  renderLine?: ((line: number, text: string) => Node[]) | undefined;
+  lineDecor?: ((line: number) => LineDecor | undefined) | undefined;
   ref?: (api: CodeApi) => void;
 }
 
@@ -317,15 +336,29 @@ export function CodeView(props: CodeViewProps): JSX.Element {
   // One row. A row is for one line all its life.
   function lineRow(n: number): Node {
     let el!: HTMLDivElement;
+    let cell!: HTMLDivElement;
     createEffect(() =>
       setVar(el, "--code-y", `${(n - 1) * rowHeight.height()}px`),
     );
     const text = lineText(props.text, props.index, n);
-    return (
+    const decor = createMemo(() => props.lineDecor?.(n));
+    const classes = () => {
+      const kind = decor()?.kind;
+      return {
+        "code-line-target": marked(n),
+        "code-excluded": kind === "excluded",
+        "code-directive": kind === "directive",
+      };
+    };
+    const label = () => {
+      const kind = decor()?.kind;
+      return kind === undefined ? String(n) : `${n}, ${kindLabel[kind]}`;
+    };
+    const row = (
       <div
         ref={(e) => (el = e)}
         class="code-row"
-        classList={{ "code-line-target": marked(n) }}
+        classList={classes()}
         role="row"
         aria-rowindex={n}
         data-line={n}
@@ -333,20 +366,30 @@ export function CodeView(props: CodeViewProps): JSX.Element {
         <div
           class="code-num"
           role="rowheader"
-          aria-label={String(n)}
+          aria-label={label()}
           data-n={n}
         />
+        {/* Markers (outline, CPP), never text: user-select none. */}
+        <div class="code-mark" role="gridcell">
+          {decor()?.mark}
+        </div>
         <div
+          ref={(e) => (cell = e)}
           class="code-cell"
           role="gridcell"
           tabindex={isCursor(n) ? 0 : undefined}
-        >
-          {props.renderLine === undefined
-            ? plainLine(text)
-            : props.renderLine(n, text)}
-        </div>
+        />
       </div>
     ) as Node;
+    // Children by hand: a new renderLine swaps them under a live
+    // selection, which must stay where it was.
+    createRenderEffect(() => {
+      const render = props.renderLine;
+      const nodes =
+        render === undefined ? lineNodes(plainPieces(text)) : render(n, text);
+      replaceKeepingSelection(cell, nodes);
+    });
+    return row;
   }
 
   // eslint-disable-next-line solid/reactivity -- mountRows tracks lines
@@ -400,12 +443,5 @@ export function CodeView(props: CodeViewProps): JSX.Element {
         aria-hidden="true"
       />
     </div>
-  );
-}
-
-// Plain text, with control characters as glyphs (display.ts).
-function plainLine(text: string): JSX.Element {
-  return pieces(text).map((p) =>
-    p.ctrl ? <span class="code-ctrl">{p.text}</span> : p.text,
   );
 }

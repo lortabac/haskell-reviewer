@@ -3,9 +3,11 @@
    tokens.test.ts, both themes.
 
    Pairs we use for text: fg/bg, fg/surface, fg/border, fg/mark,
-   muted/bg, muted/surface, link/bg, link/surface. Pairs for a ring or
-   a border only: focus/bg, focus/surface. Don't put text in
-   muted/border or muted/mark (dark theme): both are under 4.5:1.
+   muted/bg, muted/surface, link/bg, link/surface; in the source view
+   fg and each hl-* on bg, surface, mark and selection, muted on
+   selection. Pairs for a ring or a border only: focus/bg,
+   focus/surface, hl-excluded/surface. Don't put text in muted/border
+   or muted/mark (dark theme): both are under 4.5:1.
 
    light-dark() picks a value from the element's own color-scheme
    (D-203): the root follows the OS (color-scheme: light dark) unless
@@ -22,6 +24,20 @@
   --color-focus: light-dark(#0550ae, #6cb6ff);
   /* Marked lines (#L<n>). */
   --color-mark: light-dark(#fff8c5, #3d3000);
+  /* Selected text in the source view. */
+  --color-selection: light-dark(#ddf4ff, #1d3149);
+
+  /* Highlighting (SPEC §5.6), GitHub-like. Text on bg, surface, mark
+     and selection. Directives use pragma. The excluded colour is also
+     the dashed bar by excluded lines. */
+  --color-hl-keyword: light-dark(#cf222e, #ff7b72);
+  --color-hl-type: light-dark(#6639ba, #d2a8ff);
+  --color-hl-variable: light-dark(#1f2328, #e6edf3);
+  --color-hl-operator: light-dark(#0550ae, #79c0ff);
+  --color-hl-literal: light-dark(#0a3069, #a5d6ff);
+  --color-hl-comment: light-dark(#59636e, #9ea7b3);
+  --color-hl-pragma: light-dark(#953800, #ffa657);
+  --color-hl-excluded: light-dark(#636c76, #979fa9);
 
   --space-1: 0.25rem;
   --space-2: 0.5rem;

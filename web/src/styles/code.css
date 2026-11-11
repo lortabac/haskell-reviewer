@@ -17,6 +17,7 @@
    a bit of room below (14rem in all). */
 .code-view {
   --code-gutter: calc(var(--code-digits, 1) * 1ch + 2 * var(--space-2));
+  --code-mark-width: 1.5ch;
   max-height: max(12rem, calc(100dvh - 14rem));
   overflow: auto;
   overflow-anchor: none;
@@ -32,7 +33,8 @@
   height: var(--code-h, 0);
   min-width: 100%;
   width: calc(
-    var(--code-gutter) + var(--code-cols, 0) * 1ch + 2 * var(--space-2) + 1px
+    var(--code-gutter) + var(--code-mark-width) + var(--code-cols, 0) * 1ch +
+      2 * var(--space-2) + 1px
   );
 }
 
@@ -74,6 +76,43 @@
   content: attr(data-n);
 }
 
+/* Markers between the number and the code: outline links, the CPP
+   bar (later diff signs). Sticks with the gutter. */
+.code-mark {
+  position: sticky;
+  left: var(--code-gutter);
+  z-index: 1;
+  flex: none;
+  width: var(--code-mark-width);
+  background: var(--color-surface);
+  user-select: none;
+}
+
+.code-outline-mark {
+  display: block;
+  height: 100%;
+  color: var(--color-link);
+  text-align: center;
+  text-decoration: none;
+}
+
+.code-outline-mark::before {
+  /* The plain one for Firefox < 128; others hide it from readers. */
+  content: "•";
+  content: "•" / "";
+}
+
+.code-outline-mark:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* Excluded by CPP: greyed, plus a dashed bar (not colour alone; a
+   border, so forced colours keep it). */
+.code-excluded > .code-mark {
+  border-left: 2px dashed var(--color-hl-excluded);
+}
+
 .code-cell {
   flex: 1 0 auto;
   padding: 0 var(--space-2);
@@ -82,6 +121,44 @@
 .code-cell:focus-visible {
   outline: var(--focus-ring);
   outline-offset: -2px;
+}
+
+.code-view ::selection {
+  background: var(--color-selection);
+}
+
+/* Highlighting (SPEC §5.6): colour only, no bold or italics. */
+.hl-keyword {
+  color: var(--color-hl-keyword);
+}
+
+.hl-typeCon {
+  color: var(--color-hl-type);
+}
+
+.hl-variable {
+  color: var(--color-hl-variable);
+}
+
+.hl-operator {
+  color: var(--color-hl-operator);
+}
+
+.hl-literal {
+  color: var(--color-hl-literal);
+}
+
+.hl-comment {
+  color: var(--color-hl-comment);
+}
+
+.hl-pragma,
+.hl-cppDirective {
+  color: var(--color-hl-pragma);
+}
+
+.hl-cppExcluded {
+  color: var(--color-hl-excluded);
 }
 
 /* Control characters, drawn as glyphs: muted and boxed, so they don't
@@ -94,7 +171,8 @@
 
 /* Lines of #L<n>[-L<m>]: bold, a bar and a background, not just colour. */
 .code-line-target,
-.code-line-target > .code-num {
+.code-line-target > .code-num,
+.code-line-target > .code-mark {
   background: var(--color-mark);
   color: var(--color-fg);
   font-weight: 600;

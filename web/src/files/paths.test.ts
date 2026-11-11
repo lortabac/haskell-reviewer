@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   apiFileUrl,
+  apiSourceUrl,
   hrefFor,
   lineHref,
   parseLineHash,
@@ -29,6 +30,7 @@ describe("file paths in URLs", () => {
   it("encodes each segment, keeps the slashes", () => {
     expect(hrefFor("a b/c#d")).toBe("/src/tree/a%20b/c%23d");
     expect(apiFileUrl("x/%y")).toBe("/api/file/tree/x/%25y");
+    expect(apiSourceUrl("x/%y")).toBe("/api/source/tree/x/%25y");
   });
 
   it.each([

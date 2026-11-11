@@ -302,3 +302,57 @@ export async function makeDocsProject(): Promise<Project> {
     remove: () => rm(root, { recursive: true, force: true }),
   };
 }
+
+// A project for highlighting (T07b): every class, CPP, a tab, an
+// astral character, a block comment over lines, and a literate file.
+export const hlHs = [
+  "{-# LANGUAGE CPP #-}",
+  "-- | Every class.",
+  "module Hl (sorted, Box (..), (<+>), astral) where",
+  "",
+  "import Data.List (sort)",
+  "",
+  "#if 0",
+  "hidden = 1",
+  "#endif",
+  "",
+  "data Box = Box Int",
+  "",
+  "sorted :: [Int] -> [Int]",
+  "sorted xs = sort xs",
+  "",
+  "(<+>) :: Int -> Int -> Int",
+  "a <+> b = a + b {- a block",
+  "  comment -}",
+  "",
+  "astral :: String",
+  'astral = "\u{1d465}" ++\t"y"',
+  "",
+].join("\n");
+
+// The line of the first line starting so in hlHs.
+export function hlLine(start: string): number {
+  return hlHs.split("\n").findIndex((l) => l.startsWith(start)) + 1;
+}
+
+export const litLhs = [
+  "Some prose.",
+  "",
+  "> module Lit where",
+  "> x :: Int",
+  "> x = 1",
+  "",
+].join("\n");
+
+export async function makeHlProject(): Promise<Project> {
+  const root = await mkdtemp(join(tmpdir(), "hr-e2e-"));
+  git(root, "init", "-q");
+  await put(root, "Hl.hs", hlHs);
+  await put(root, "Lit.lhs", litLhs);
+  git(root, "add", "-A");
+  git(root, "commit", "-q", "-m", "fixture");
+  return {
+    root,
+    remove: () => rm(root, { recursive: true, force: true }),
+  };
+}

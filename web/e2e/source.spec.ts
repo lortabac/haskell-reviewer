@@ -6,6 +6,13 @@ import {
   noSideways,
   themes,
 } from "./support/a11y";
+import {
+  type At,
+  copy,
+  recordCopies,
+  selectAt,
+  textSlice,
+} from "./support/copy";
 import { expect, tabKey, test } from "./support/fixtures";
 import { bigLine, bigText, crlfText, lines, mainHs } from "./support/project";
 
@@ -34,70 +41,8 @@ async function scrollTo(page: Page, where: "middle" | "end"): Promise<void> {
   }, where);
 }
 
-// Offset in a text of column col (UTF-16) of line n (from 1).
-function offsetIn(text: string, n: number, col: number): number {
-  const ls = lines(text);
-  let off = 0;
-  for (let i = 0; i < n - 1; i++) off += (ls[i]?.length ?? 0) + 1;
-  return off + col;
-}
-
-function bigSlice(a: [number, number], b: [number, number]): string {
-  return bigText.slice(offsetIn(bigText, ...a), offsetIn(bigText, ...b));
-}
-
-// Records what each copy put on the clipboard, after the app's own
-// handler (document) has run: window sees the event last.
-async function recordCopies(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    window.__copies = [];
-    window.addEventListener("copy", (e) => {
-      window.__copies.push(
-        e.defaultPrevented
-          ? (e.clipboardData?.getData("text/plain") ?? null)
-          : null,
-      );
-    });
-  });
-}
-
-async function copy(page: Page): Promise<string | null> {
-  const before = await page.evaluate(() => window.__copies.length);
-  await page.keyboard.press("ControlOrMeta+c");
-  await expect
-    .poll(() => page.evaluate(() => window.__copies.length))
-    .toBe(before + 1);
-  return page.evaluate(
-    () => window.__copies[window.__copies.length - 1] ?? null,
-  );
-}
-
-// Put the selection's anchor ("start") or focus ("extend") at column
-// col of line n (plain text: one text node per cell). Done once the
-// app has seen it, so the row is pinned.
-async function selectAt(
-  page: Page,
-  how: "start" | "extend",
-  n: number,
-  col: number,
-): Promise<void> {
-  await row(page, n)
-    .locator(".code-cell")
-    .evaluate(
-      (el, [h, c]) => {
-        const t = el.firstChild;
-        if (t === null) throw new Error("no text");
-        return new Promise<void>((done) => {
-          document.addEventListener("selectionchange", () => done(), {
-            once: true,
-          });
-          const sel = getSelection();
-          if (h === "start") sel?.setBaseAndExtent(t, c, t, c);
-          else sel?.extend(t, c);
-        });
-      },
-      [how, col] as const,
-    );
+function bigSlice(a: At, b: At): string {
+  return textSlice(bigText, a, b);
 }
 
 // Scroll line n into the view (the view's own scroll), then wait for
@@ -338,7 +283,7 @@ test("line numbers and CRLF: never copied, CRLF kept", async ({
   await open(page, server.base + "src/tree/data/crlf.txt");
   await recordCopies(page);
   const crlf = (a: [number, number], b: [number, number]) =>
-    crlfText.slice(offsetIn(crlfText, ...a), offsetIn(crlfText, ...b));
+    textSlice(crlfText, a, b);
   // From the start of line 1 to past the end of line 2, with the mouse
   // (over the gutter: where a drag into it ends is up to the browser).
   const a = await row(page, 1).locator(".code-cell").boundingBox();

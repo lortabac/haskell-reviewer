@@ -384,7 +384,9 @@ The whole file, syntax-highlighted (§5.6), with line numbers.
   is used. These are exact at the precise tier and textual-but-scoped at the
   syntactic tier, and labelled accordingly.
 - A gutter outline shows the top-level declarations, with a link from each
-  back to the docs view.
+  back to the docs view. The same list, collapsed under the view
+  ("Outline (N)"), is the keyboard way in: each entry links to its docs
+  and its line (D-282).
 - **Find in file** (D-70): `f`, or a toolbar button, opens a find bar that
   searches the whole file, with a match count announced to screen readers.
   Views are virtualised (§11.7), so the browser's own find (Ctrl-F, left
@@ -647,6 +649,11 @@ also has a UI control, so nothing is lost with shortcuts off.
   prose are still shown as such (D-234). A file that lexes but fails to
   parse is still highlighted (§3.1, D-229).
   Non-Haskell files (`.cabal`, `.yaml`, Markdown, …) are always plain text.
+- Each class has its own theme colour, checked ≥ 4.5:1 in both themes on
+  every background code shows on, selection too (D-280). CPP-excluded
+  lines are greyed and also get a dashed bar and a label; directives use
+  the pragma colour (D-281). A line with more than about 5,000 pieces is
+  shown plain (D-279).
 
 ### 5.7 Copying
 
@@ -1545,7 +1552,10 @@ a framework would cost more than it saves.
   shapes.
 - **Rendering**: everything is built from the structured data: token
   streams, declaration models and the rich-text AST. `innerHTML` and its
-  relatives are banned by a lint rule, and checked in CI.
+  relatives are banned by a lint rule, and checked in CI. Highlighted
+  lines are text and spans built from the token runs; when the highlight
+  comes late, only the rows on screen are redrawn, and the selection,
+  focus and layout stay put (D-279).
 - **Virtualisation** (D-70): every source and diff view is virtualised,
   so only the visible lines are in the DOM. Rows carry ARIA row indexes,
   so assistive tech knows where it is in the file. Our own **find in file**

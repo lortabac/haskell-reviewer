@@ -8,6 +8,7 @@ import {
   type CodeApi,
   CodeView,
   fallbackRowHeight as h,
+  type LineDecor,
   type LineMarks,
 } from "./CodeView";
 
@@ -75,7 +76,9 @@ describe("CodeView", () => {
     expect(
       row?.querySelector('[role="rowheader"]')?.getAttribute("aria-label"),
     ).toBe("1");
-    expect(row?.querySelector('[role="gridcell"]')?.textContent).toBe("a");
+    expect(row?.querySelector(".code-cell")?.textContent).toBe("a");
+    // Number, marker column, code.
+    expect(row?.querySelectorAll('[role="gridcell"]')).toHaveLength(2);
     expect(cell(root, 2).textContent).toBe("b\tc");
   });
 
@@ -331,7 +334,9 @@ describe("CodeView", () => {
     const a = textAt(root, 2);
     // The end of row 5: the line's end.
     const b = cell(root, 5).parentElement as Node;
-    await click(root, 2, () => getSelection()?.setBaseAndExtent(a, 1, b, 2));
+    await click(root, 2, () =>
+      getSelection()?.setBaseAndExtent(a, 1, b, b.childNodes.length),
+    );
     expect(api.cursor()).toEqual({ line: 5, col: "line 5".length });
     expect(document.activeElement).toBe(cell(root, 5));
     const sel = getSelection();
@@ -576,5 +581,123 @@ describe("copy", () => {
     taken.preventDefault();
     document.dispatchEvent(taken);
     expect(taken.clipboardData?.getData("text/plain")).toBe("");
+  });
+});
+
+describe("highlighting and decor", () => {
+  // Each word of a line in a span: a new renderLine.
+  const words = (_n: number, text: string): Node[] =>
+    text.split(/(?= )/).map((w) => {
+      const s = document.createElement("span");
+      s.className = "hl-keyword";
+      s.textContent = w;
+      return s;
+    });
+
+  function mountHl(text: string) {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const [renderFn, setRender] = createSignal<
+      ((n: number, t: string) => Node[]) | undefined
+    >(undefined);
+    const [decor, setDecor] = createSignal<
+      ((n: number) => LineDecor | undefined) | undefined
+    >(undefined);
+    let api: CodeApi | undefined;
+    dispose = render(
+      () => (
+        <CodeView
+          text={text}
+          index={lineIndex(text)}
+          renderLine={renderFn()}
+          lineDecor={decor()}
+          ref={(a) => (api = a)}
+        />
+      ),
+      root,
+    );
+    if (api === undefined) throw new Error("no api");
+    return { root, api, setRender, setDecor };
+  }
+
+  function copied(): string | undefined {
+    const data = new DataTransfer();
+    const e = new ClipboardEvent("copy", {
+      clipboardData: data,
+      cancelable: true,
+      bubbles: true,
+    });
+    document.dispatchEvent(e);
+    return e.defaultPrevented ? data.getData("text/plain") : undefined;
+  }
+
+  it("a new renderLine redraws the mounted rows; plain again without", () => {
+    const { root, setRender } = mountHl("one two\nthree\n");
+    expect(cell(root, 1).querySelector("span")).toBeNull();
+    setRender(() => words);
+    expect(
+      [...cell(root, 1).querySelectorAll(".hl-keyword")].map(
+        (s) => s.textContent,
+      ),
+    ).toEqual(["one", " two"]);
+    expect(cell(root, 1).textContent).toBe("one two");
+    setRender(undefined);
+    expect(cell(root, 1).querySelector("span")).toBeNull();
+    expect(cell(root, 1).textContent).toBe("one two");
+  });
+
+  it("the selection and focus stay, copy is the same", () => {
+    const { root, api, setRender } = mountHl("one two\nthree four\nfive\n");
+    api.focusLine(2);
+    const c = cell(root, 2);
+    expect(document.activeElement).toBe(c);
+    // From "two" (line 1, col 4) to "fo|ur" (line 2, col 8).
+    getSelection()?.setBaseAndExtent(
+      cell(root, 1).firstChild!,
+      4,
+      c.firstChild!,
+      8,
+    );
+    const before = copied();
+    expect(before).toBe("two\nthree fo");
+    const shown = getSelection()?.toString();
+    setRender(() => words);
+    expect(c.querySelector("span")).not.toBeNull();
+    expect(document.activeElement).toBe(c);
+    expect(getSelection()?.toString()).toBe(shown);
+    expect(copied()).toBe(before);
+    // The focus end is in the new spans.
+    expect(c.contains(getSelection()?.focusNode ?? null)).toBe(true);
+  });
+
+  it("decor: CPP kind as a row class and label, a marker", () => {
+    const { root, setDecor } = mountHl("a\nb\nc\n");
+    const row = (n: number) => cell(root, n).parentElement!;
+    const label = (n: number) =>
+      row(n).querySelector(".code-num")?.getAttribute("aria-label");
+    setDecor(() => (n: number): LineDecor | undefined => {
+      if (n === 1) return { kind: "excluded" };
+      if (n === 3) return { kind: "directive" };
+      if (n === 2) {
+        const a = document.createElement("a");
+        a.href = "/docs";
+        return { mark: a };
+      }
+      return undefined;
+    });
+    expect(row(1).classList.contains("code-excluded")).toBe(true);
+    expect(label(1)).toBe("1, excluded by CPP");
+    expect(row(2).querySelector(".code-mark a")?.getAttribute("href")).toBe(
+      "/docs",
+    );
+    expect(label(2)).toBe("2");
+    expect(label(3)).toBe("3, CPP directive");
+    expect(row(3).classList.contains("code-directive")).toBe(true);
+    // Markers are not text.
+    expect(view(root).textContent).toBe("abc");
+    setDecor(undefined);
+    expect(row(1).classList.contains("code-excluded")).toBe(false);
+    expect(label(1)).toBe("1");
+    expect(row(2).querySelector(".code-mark a")).toBeNull();
   });
 });
