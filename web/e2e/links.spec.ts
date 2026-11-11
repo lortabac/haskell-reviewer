@@ -441,9 +441,14 @@ test("a drag from a link below the view scrolls it and selects on", async ({
     .boundingBox();
   const v = await view(page).boundingBox();
   if (a === null || v === null) throw new Error("no box");
+  // Below the view but inside the window: Firefox sends no mousemove
+  // outside it, and the view ends near the window's bottom.
+  const h = page.viewportSize()!.height;
+  const below = Math.min(v.y + v.height + 30, h - 2);
+  expect(below).toBeGreaterThan(v.y + v.height + 2);
   await page.mouse.move(a.x + 1, a.y + a.height / 2);
   await page.mouse.down();
-  await page.mouse.move(v.x + 50, v.y + v.height + 30, { steps: 5 });
+  await page.mouse.move(v.x + 50, below, { steps: 5 });
   await expect
     .poll(() => view(page).evaluate((el) => el.scrollTop))
     .toBeGreaterThan(200);
