@@ -210,3 +210,42 @@
 .code-line-target .code-ctrl {
   color: inherit;
 }
+
+/* The hover card (D-285): placed by --card-x/--card-y (createHoverCard
+   through ui/cssom.ts), right under or over the link's row, never on
+   it. Over the sticky gutter (z-index 1), under header popups (10).
+   Hoverable; its text is not selectable (a press would end the card). */
+.code-card {
+  position: absolute;
+  left: var(--card-x, 0);
+  top: var(--card-y, 0);
+  z-index: 2;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: min(60ch, 100%);
+  padding: var(--space-1) var(--space-2);
+  overflow-wrap: anywhere;
+  color: var(--color-fg);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px light-dark(rgb(0 0 0 / 15%), rgb(0 0 0 / 50%));
+  font-family: var(--font-sans);
+  line-height: 1.4;
+  user-select: none;
+  pointer-events: auto;
+}
+
+.code-card[hidden] {
+  display: none;
+}
+
+.code-card p {
+  margin: 0;
+}
+
+.code-card-code {
+  margin-bottom: var(--space-1);
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+}

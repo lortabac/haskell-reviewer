@@ -230,7 +230,7 @@ test("a definition links to its docs, a binder to nothing, a use to its binder",
   );
 });
 
-test("a guess: dotted underline, a title, said in its name", async ({
+test("a guess: dotted underline, said in its name, no title", async ({
   page,
   startServer,
   linksProject,
@@ -241,10 +241,11 @@ test("a guess: dotted underline, a title, said in its name", async ({
     name: "f, defined in Links/Main.hs line 8, resolved heuristically",
   });
   await expect(f).toHaveClass(/code-link-guess/);
-  await expect(f).toHaveAttribute("title", "Resolved heuristically");
+  // The hover card says why (D-285): no title.
+  await expect(f).not.toHaveAttribute("title", /./);
   await expect(f).toHaveCSS("text-decoration-style", "dotted");
   await expect(f).toHaveCSS("text-decoration-line", "underline");
-  // An exact one: no underline at rest, no title.
+  // An exact one: no underline at rest.
   const g = cell(page, line("g r")).getByRole("link", {
     name: "g, documentation",
   });

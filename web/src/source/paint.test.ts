@@ -74,12 +74,12 @@ describe("lineNodes with links", () => {
     expect(a?.hasAttribute("target")).toBe(false);
   });
 
-  it("a guess: a class and a title", () => {
+  it("a guess: a class, no title (the hover card says why)", () => {
     const a = paint([piece("x", null, 1)], {
       1: info({ guess: true }),
     }).querySelector("a");
     expect(a?.className).toBe("code-link code-link-guess");
-    expect(a?.title).toBe("Resolved heuristically");
+    expect(a?.hasAttribute("title")).toBe(false);
     expect(a?.getAttribute("aria-label")).toBe(
       "x, defined in B.hs line 3, resolved heuristically",
     );
