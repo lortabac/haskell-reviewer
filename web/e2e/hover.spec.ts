@@ -71,6 +71,8 @@ async function besideRow(page: Page, n: number): Promise<void> {
 
 // Mouse to the middle of l, in steps.
 async function hover(page: Page, l: Locator): Promise<void> {
+  // The view's height depends on the window: bring the link in first.
+  await l.scrollIntoViewIfNeeded();
   const b = await boxOf(l);
   await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 3 });
 }

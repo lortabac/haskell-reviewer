@@ -140,22 +140,25 @@ test("the current hit has an outline box on it, none on the others", async ({
 });
 
 for (const height of [600, 800]) {
-  test(`1280x${height}: the open bar keeps the page from scrolling`, async ({
+  test(`1280x${height}: opening the bar doesn't make the page taller`, async ({
     page,
     server,
   }) => {
+    // Fonts differ between machines, so the page may already scroll a
+    // bit: compare closed and open, not the page with the window.
     await page.setViewportSize({ width: 1280, height });
     await open(page, server.base + big);
+    const toolbar = page.locator("main .code-toolbar");
+    const pageHeight = () =>
+      page.evaluate(() => document.documentElement.scrollHeight);
+    const closed = await pageHeight();
+    const before = (await toolbar.boundingBox())?.height ?? 0;
     await find(page, "l");
     await expect(live(page)).toHaveText("Match 1 of 20000, line 1");
-    const r = await page.evaluate(() => ({
-      scroll: document.documentElement.scrollHeight,
-      client: document.documentElement.clientHeight,
-    }));
-    expect(r.scroll).toBeLessThanOrEqual(r.client);
-    // One row: the bar is beside the button.
-    const tb = await page.locator("main .code-toolbar").boundingBox();
-    expect(tb?.height ?? 999).toBeLessThan(50);
+    expect(await pageHeight()).toBeLessThanOrEqual(closed);
+    // The bar fits beside the button: no new row.
+    const after = (await toolbar.boundingBox())?.height ?? 999;
+    expect(after).toBeLessThanOrEqual(before + 1);
   });
 }
 

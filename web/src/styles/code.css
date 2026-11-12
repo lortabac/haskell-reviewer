@@ -16,9 +16,10 @@
   font-size: 0.85rem;
 }
 
-/* Takes what the bar leaves; wraps if it must. */
+/* Its own line under the button and the bar, so opening the bar
+   doesn't change the toolbar's height. */
 .code-hint {
-  flex: 1 1 14rem;
+  flex: 1 1 100%;
   min-width: 0;
   color: var(--color-muted);
 }
@@ -63,13 +64,14 @@
 }
 
 /* The scroll box: both ways. As tall as the file, but at most the
-   window less the header, the path and the toolbar (about 13rem, the
-   bar open on one line too) and a bit of room below (14.5rem in all). */
+   window less the header, the path and the toolbar (two lines, the
+   same with the bar open) and a bit of room below (16rem in all).
+   Fonts differ, so the page may still scroll a little. */
 .code-view {
   position: relative;
   --code-gutter: calc(var(--code-digits, 1) * 1ch + 2 * var(--space-2));
   --code-mark-width: 1.5ch;
-  max-height: max(12rem, calc(100dvh - 14.5rem));
+  max-height: max(12rem, calc(100dvh - 16rem));
   overflow: auto;
   overflow-anchor: none;
   border: 1px solid var(--color-border);
