@@ -91,11 +91,14 @@ test("#L: marked, on screen, announced, Tab lands on it", async ({
   const target = row(page, 12345);
   await expect(target).toHaveClass(/code-line-target/);
   await expect(target).toBeInViewport();
-  await expect(page.locator('main [role="status"]')).toHaveText(
+  await expect(page.locator("main .file-text > [role=status]")).toHaveText(
     "Line 12345 marked.",
   );
   expect(await rowCount(page)).toBeLessThan(100);
   await page.locator("main h1").focus();
+  // The toolbar's Find button first, then the line.
+  await page.keyboard.press(tabKey(browserName));
+  await expect(page.getByRole("button", { name: "Find" })).toBeFocused();
   await page.keyboard.press(tabKey(browserName));
   await expect(target.locator(".code-cell")).toBeFocused();
 
@@ -106,7 +109,7 @@ test("#L: marked, on screen, announced, Tab lands on it", async ({
   await expect(row(page, 99)).not.toHaveClass(/code-line-target/);
   await expect(row(page, 121)).not.toHaveClass(/code-line-target/);
   await expect(row(page, 100)).toBeInViewport();
-  await expect(page.locator('main [role="status"]')).toHaveText(
+  await expect(page.locator("main .file-text > [role=status]")).toHaveText(
     "Lines 100–120 marked.",
   );
 

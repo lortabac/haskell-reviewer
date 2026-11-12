@@ -3,12 +3,16 @@ import { render } from "solid-js/web";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { webkitFocus } from "../../test/focus";
 import { fakeLayout } from "../../test/layout";
+import { plainPieces } from "./display";
+import { createFinder } from "./find";
 import { lineIndex } from "./lines";
 import type { LinkInfo } from "./links";
 import { lineNodes } from "./paint";
 import {
   type CodeApi,
   CodeView,
+  type CodeViewProps,
+  type FindHits,
   fallbackRowHeight as h,
   type LineDecor,
   type LineMarks,
@@ -390,6 +394,23 @@ describe("CodeView", () => {
     expect(api.cursor().line).toBe(1);
   });
 
+  it("an API move before the click's late check wins over it", async () => {
+    for (const move of ["focusLine", "focusAt", "setCursor"] as const) {
+      const { root, api } = mount(lines(10));
+      press(root, 4, caret(textAt(root, 4), 0));
+      release();
+      // The late check (a task later) hasn't run yet.
+      if (move === "focusLine") api.focusLine(7);
+      else if (move === "focusAt") api.focusAt(7, 0);
+      else api.setCursor(7);
+      await new Promise((done) => setTimeout(done, 0));
+      expect(api.cursor().line).toBe(7);
+      dispose?.();
+      dispose = undefined;
+      document.body.replaceChildren();
+    }
+  });
+
   it("marks lines", () => {
     const [marks, setMarks] = createSignal<LineMarks | undefined>({
       from: 2,
@@ -404,13 +425,6 @@ describe("CodeView", () => {
     expect(marked()).toEqual(["2", "3"]);
     setMarks(undefined);
     expect(marked()).toEqual([]);
-  });
-
-  it("shows the Ctrl+F hint", () => {
-    const { root } = mount("a\n");
-    expect(root.querySelector(".code-hint")?.textContent).toBe(
-      "Browser find (Ctrl+F) sees only the lines on screen.",
-    );
   });
 });
 
@@ -990,5 +1004,188 @@ describe("token cursor", () => {
     // Keys go on from there.
     press("ArrowLeft");
     expect(document.activeElement).toBe(link(root, 2, "l2"));
+  });
+});
+
+describe("find", () => {
+  class FakeHighlight extends Set<Range> {
+    priority = 0;
+  }
+  let registry: Map<string, FakeHighlight>;
+  beforeEach(() => {
+    registry = new Map();
+    vi.stubGlobal("Highlight", FakeHighlight);
+    vi.stubGlobal("CSS", { highlights: registry });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  function mountFind(
+    text: string,
+    find: () => FindHits | undefined,
+    renderLine?: () => CodeViewProps["renderLine"],
+  ): { root: HTMLElement; api: CodeApi } {
+    const root = document.createElement("div");
+    document.body.append(root);
+    let api: CodeApi | undefined;
+    dispose = render(
+      () => (
+        <CodeView
+          text={text}
+          index={lineIndex(text)}
+          find={find()}
+          renderLine={renderLine?.()}
+          ref={(a) => (api = a)}
+        />
+      ),
+      root,
+    );
+    if (api === undefined) throw new Error("no api");
+    return { root, api };
+  }
+  const hits = (text: string, q: string, current: number): FindHits => ({
+    matches: createFinder(text, lineIndex(text)).search(q),
+    current,
+  });
+  const texts = (name: string) =>
+    [...(registry.get(name) ?? [])].map((r) => r.toString());
+
+  it("draws the hits, the current one apart", () => {
+    const text = "ab ab\ncd\nab\n";
+    const { root } = mountFind(text, () => hits(text, "ab", 1));
+    expect(texts("code-find")).toEqual(["ab", "ab"]);
+    expect(texts("code-find-current")).toEqual(["ab"]);
+    expect(
+      [...root.querySelectorAll(".code-find-line")].map((r) =>
+        r.getAttribute("data-line"),
+      ),
+    ).toEqual(["1"]);
+  });
+
+  it("a range goes across a link and a glyph", () => {
+    const text = "a\x01b cd\n";
+    const render = (n: number, t: string): Node[] => {
+      void n;
+      const a = document.createElement("a");
+      a.className = "code-link";
+      a.textContent = "␁b";
+      return [
+        document.createTextNode("a"),
+        a,
+        document.createTextNode(t.slice(3)),
+      ];
+    };
+    mountFind(
+      text,
+      () => hits(text, "\x01b c", 0),
+      () => render,
+    );
+    expect(texts("code-find-current")).toEqual(["␁b c"]);
+  });
+
+  it("draws again after a new renderLine", () => {
+    const text = "ab\n";
+    const [render, setRender] = createSignal<CodeViewProps["renderLine"]>();
+    // eslint-disable-next-line solid/reactivity -- mountFind reads it in JSX
+    mountFind(text, () => hits(text, "ab", 0), render);
+    const before = [...(registry.get("code-find-current") ?? [])][0];
+    setRender(() => (_n: number, t: string) => lineNodes(plainPieces(t)));
+    const after = [...(registry.get("code-find-current") ?? [])][0];
+    expect(after).toBeDefined();
+    expect(after).not.toBe(before);
+    expect(after?.toString()).toBe("ab");
+  });
+
+  it("moves the cursor to the hit, not the focus", () => {
+    const text = lines(100);
+    const [find, setFind] = createSignal<FindHits>();
+    // eslint-disable-next-line solid/reactivity -- mountFind reads it in JSX
+    const { api } = mountFind(text, find);
+    const input = document.createElement("input");
+    document.body.append(input);
+    input.focus();
+    setFind(hits(text, "line 50", 0));
+    expect(api.cursor()).toEqual({ line: 50, col: 0, link: false });
+    expect(document.activeElement).toBe(input);
+    input.remove();
+  });
+
+  it("clears when there are no hits", () => {
+    const text = "ab\n";
+    const [find, setFind] = createSignal<FindHits | undefined>(
+      hits(text, "ab", 0),
+    );
+    // eslint-disable-next-line solid/reactivity -- mountFind reads it in JSX
+    mountFind(text, find);
+    expect(registry.size).toBe(2);
+    setFind(undefined);
+    expect(registry.size).toBe(0);
+  });
+
+  it("draws hits on rows that scroll in, later", async () => {
+    const text = lines(2000);
+    const { root } = mountFind(text, () => hits(text, "line", -1));
+    const first = texts("code-find").length;
+    expect(first).toBeGreaterThan(0);
+    const v = view(root);
+    v.scrollTop = 1500 * h;
+    v.dispatchEvent(new Event("scroll"));
+    await vi.waitFor(() => expect(rowLines(root)).toContain(1500));
+    const set = registry.get("code-find");
+    const rows = new Set(
+      [...(set ?? [])].map((r) =>
+        r.startContainer.parentElement?.closest(".code-row"),
+      ),
+    );
+    const drawn = [...rows].map((r) => r?.getAttribute("data-line"));
+    expect(drawn).toContain("1500");
+  });
+
+  it("caps the ranges of a row, but the current hit is drawn", () => {
+    const text = "a ".repeat(5010) + "\n";
+    mountFind(text, () => hits(text, "a", 5009));
+    expect(registry.get("code-find")?.size).toBe(5000);
+    expect(texts("code-find-current")).toEqual(["a"]);
+    const cur = [...(registry.get("code-find-current") ?? [])][0];
+    expect(cur?.startOffset).toBe(2 * 5009);
+  });
+
+  it("an outline box per rect of the current hit, none outside", () => {
+    const text = "ab\ncd\n";
+    const [find, setFind] = createSignal<FindHits | undefined>(
+      hits(text, "ab", 0),
+    );
+    vi.spyOn(Range.prototype, "getClientRects").mockImplementation(
+      () =>
+        [
+          { left: 10, top: 20, right: 10, bottom: 35, width: 0, height: 15 },
+          { left: 10, top: 20, right: 30, bottom: 35, width: 20, height: 15 },
+          { left: 30, top: 20, right: 40, bottom: 35, width: 10, height: 15 },
+        ] as unknown as DOMRectList,
+    );
+    // eslint-disable-next-line solid/reactivity -- mountFind reads it in JSX
+    const { root } = mountFind(text, find);
+    const boxes = () => root.querySelectorAll(".code-find-box");
+    expect(boxes().length).toBe(1);
+    expect(
+      root.querySelector(".code-find-boxes")?.getAttribute("aria-hidden"),
+    ).toBe("true");
+    // Not in the cells: not in a copy.
+    expect(root.querySelector(".code-cell .code-find-box")).toBeNull();
+    setFind(undefined);
+    expect(boxes().length).toBe(0);
+  });
+
+  it("ranges go with the view, and with the hits", () => {
+    const text = "ab\n";
+    const [find, setFind] = createSignal<FindHits | undefined>(
+      hits(text, "ab", 0),
+    );
+    // eslint-disable-next-line solid/reactivity -- mountFind reads it in JSX
+    mountFind(text, find);
+    expect(registry.size).toBe(2);
+    dispose?.();
+    dispose = undefined;
+    expect(registry.size).toBe(0);
+    void setFind;
   });
 });

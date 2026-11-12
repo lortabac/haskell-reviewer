@@ -61,6 +61,27 @@ export function colIn(cell: Node, node: Node, offset: number): number {
   return r.toString().length;
 }
 
+// nodeAt for many columns at once, sorted up: one walk of the text.
+export function nodesAt(cell: Node, cols: readonly number[]): [Node, number][] {
+  const out: [Node, number][] = [];
+  const w = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+  let t = w.nextNode() as Text | null;
+  let start = 0;
+  let last: Text | undefined;
+  for (const col of cols) {
+    // At a border between two nodes: the end of the first.
+    while (t !== null && col > start + t.length) {
+      start += t.length;
+      last = t;
+      t = w.nextNode() as Text | null;
+    }
+    if (t !== null) out.push([t, Math.max(0, col - start)]);
+    else if (last !== undefined) out.push([last, last.length]);
+    else out.push([cell, cell.childNodes.length]);
+  }
+  return out;
+}
+
 // The other way: the text node and offset at col in cell. At a border
 // between two nodes, the end of the first. Past the end: the end.
 export function nodeAt(cell: Node, col: number): [Node, number] {
