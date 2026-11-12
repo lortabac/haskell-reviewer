@@ -1,22 +1,36 @@
 // Code on the module page: heads, signatures, types. One span per
 // token, with its class (no colours in M1, D-31 comes later); linked
-// tokens are links to declarations of this page. Static: code doesn't
+// tokens are links to declarations of this page, or out of it. Static: code doesn't
 // change while the page shows.
 import type { JSX } from "solid-js";
-import type { Code as Tokens, CodeToken } from "../api/code";
-import { type Links, useLinks } from "./links";
+import { type Code as Tokens, type CodeToken, outerLink } from "../api/code";
+import { type Links, outerAttrs, useLinks } from "./links";
 import { wrapParts } from "./signature";
 
 function token(t: CodeToken, links: Links): JSX.Element {
   const [cls, text, n] = t;
   if (cls === "sp") return text;
-  // Links out of the module ([class, text, null, link]) don't show
-  // yet.
-  const href = typeof n !== "number" ? undefined : links.decl(n);
-  return href === undefined ? (
-    <span class={`tok-${cls}`}>{text}</span>
-  ) : (
-    <a class={`tok-${cls}`} href={href}>
+  if (typeof n === "number") {
+    // A declaration of this page.
+    const href = links.decl(n);
+    return href === undefined ? (
+      <span class={`tok-${cls}`}>{text}</span>
+    ) : (
+      <a class={`tok-${cls}`} href={href}>
+        {text}
+      </a>
+    );
+  }
+  // Out of the module: docs of another one, or Hoogle. Never a pragma.
+  const k = outerLink(t);
+  const info = k === null || cls === "prag" ? undefined : links.outer(k);
+  if (info === undefined) return <span class={`tok-${cls}`}>{text}</span>;
+  const { class: extra, ...attrs } = outerAttrs(text, info);
+  return (
+    <a
+      class={extra === undefined ? `tok-${cls}` : `tok-${cls} ${extra}`}
+      {...attrs}
+    >
       {text}
     </a>
   );

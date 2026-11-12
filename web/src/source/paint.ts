@@ -6,10 +6,14 @@
 import type { StyledPiece } from "./display";
 import { type LinkInfo, linkName } from "./links";
 
-// link: the LinkInfo of a link word; undefined: no link.
+// link: the LinkInfo of a link word; undefined: no link. tabbable: the
+// links are normal Tab stops and plain links (no jump state), as on
+// the docs page; else they are out of the tab order (the view has one
+// stop).
 export function lineNodes(
   ps: readonly StyledPiece[],
   link?: (n: number) => LinkInfo | undefined,
+  opts: { tabbable?: boolean } = {},
 ): Node[] {
   const out: Node[] = [];
   const named: [HTMLAnchorElement, LinkInfo][] = [];
@@ -25,7 +29,7 @@ export function lineNodes(
       continue;
     }
     if (a === undefined || aLink !== p.link) {
-      a = anchor(p.link, info);
+      a = anchor(p.link, info, opts.tabbable === true);
       aLink = p.link;
       out.push(a);
       named.push([a, info]);
@@ -46,16 +50,22 @@ function pieceNode(p: StyledPiece): Node {
   return s;
 }
 
-function anchor(link: number, info: LinkInfo): HTMLAnchorElement {
+function anchor(
+  link: number,
+  info: LinkInfo,
+  tabbable: boolean,
+): HTMLAnchorElement {
   const a = document.createElement("a");
   a.className = info.guess ? "code-link code-link-guess" : "code-link";
   a.href = info.href;
-  a.tabIndex = -1;
+  if (!tabbable) a.tabIndex = -1;
   a.setAttribute("draggable", "false");
   a.dataset.link = String(link);
   if (info.external) {
     a.target = "_blank";
     a.rel = "noopener noreferrer";
+  } else if (tabbable) {
+    // The docs page handles its own links (ModulePage).
   } else if (info.here) {
     // Same file: the router must not scroll the page to the top.
     a.setAttribute("noscroll", "");

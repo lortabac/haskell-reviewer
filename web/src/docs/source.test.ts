@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { SourcePart, Span } from "../api/module";
-import { firstCodeLine, sourceRows, textParts, type TextPart } from "./source";
+import {
+  firstCodeLine,
+  rowSegs,
+  sourceRows,
+  textParts,
+  type SourceRow,
+  type TextPart,
+} from "./source";
 
 const part = (span: Span, text: string): TextPart => ({ span, text });
 
@@ -97,5 +104,112 @@ describe("textParts and firstCodeLine", () => {
   it("first code line: not docs, earliest", () => {
     expect(firstCodeLine(parts)).toBe(38);
     expect(firstCodeLine([parts[0] as SourcePart])).toBeUndefined();
+  });
+});
+
+const spans = (parts: TextPart[]) =>
+  sourceRows(parts).map((r) => (r.kind === "line" ? r.spans : []));
+
+describe("row spans", () => {
+  it("pad is in no span; the text maps to its line and column", () => {
+    expect(spans([part([3, 5, 4, 8], "f = 1\n    + 2")])).toEqual([
+      [{ at: 4, line: 3, col: 5, len: 5 }],
+      [{ at: 0, line: 4, col: 1, len: 7 }],
+    ]);
+  });
+
+  it("touching parts: two spans; a gap: the filler is in none", () => {
+    expect(
+      spans([part([1, 1, 1, 4], "abc"), part([1, 4, 1, 6], "de")]),
+    ).toEqual([
+      [
+        { at: 0, line: 1, col: 1, len: 3 },
+        { at: 3, line: 1, col: 4, len: 2 },
+      ],
+    ]);
+    expect(
+      spans([part([1, 1, 1, 4], "abc"), part([1, 8, 1, 10], "de")]),
+    ).toEqual([
+      [
+        { at: 0, line: 1, col: 1, len: 3 },
+        { at: 6, line: 1, col: 8, len: 2 },
+      ],
+    ]);
+  });
+
+  it("astral characters count as one; CRLF is dropped", () => {
+    expect(spans([part([1, 1, 2, 3], "\u{1d465}y\r\nab")])).toEqual([
+      [{ at: 0, line: 1, col: 1, len: 2 }],
+      [{ at: 0, line: 2, col: 1, len: 2 }],
+    ]);
+  });
+
+  it("a span ending at column 1: the line break is not in it", () => {
+    expect(spans([part([1, 1, 3, 1], "a\nb\n")])).toEqual([
+      [{ at: 0, line: 1, col: 1, len: 1 }],
+      [{ at: 0, line: 2, col: 1, len: 1 }],
+    ]);
+  });
+
+  it("an overlap: its text has no span", () => {
+    expect(
+      spans([part([1, 1, 2, 4], "abc\ndef"), part([1, 2, 1, 3], "b")]),
+    ).toEqual([
+      [{ at: 0, line: 1, col: 1, len: 3 }],
+      [{ at: 0, line: 2, col: 1, len: 3 }],
+    ]);
+  });
+});
+
+describe("rowSegs", () => {
+  const seg = (from: number, to: number, link = 0) => ({
+    from,
+    to,
+    cls: "variable",
+    link,
+  });
+  const row = (...sp: SourceRow[]) => {
+    const r = sp[0];
+    if (r?.kind !== "line") throw new Error("not a line");
+    return r;
+  };
+
+  it("shifts to the row's columns, clips to the span", () => {
+    // "  f = 1" from column 3 of line 5: runs on line 5 and 6.
+    const r = row(...sourceRows([part([5, 3, 5, 8], "f = 1")]));
+    const runs = [
+      [],
+      [],
+      [],
+      [],
+      [],
+      [seg(1, 4), seg(5, 6, 2), seg(7, Infinity)],
+    ];
+    expect(rowSegs(r, runs)).toEqual([seg(3, 4), seg(5, 6, 2), seg(7, 8)]);
+  });
+
+  it("two parts on a row: each its own columns", () => {
+    const r = row(
+      ...sourceRows([part([1, 1, 1, 4], "abc"), part([1, 8, 1, 10], "hi")]),
+    );
+    // Row: "abc … hi": h is at row column 7, from file column 8.
+    expect(rowSegs(r, [[], [seg(1, 2), seg(8, 9, 1), seg(20, 25)]])).toEqual([
+      seg(1, 2),
+      seg(7, 8, 1),
+    ]);
+  });
+
+  it("astral before: code points", () => {
+    const r = row(...sourceRows([part([1, 1, 1, 4], "\u{1d465}yz")]));
+    expect(rowSegs(r, [[], [seg(3, 4)]])).toEqual([seg(3, 4)]);
+  });
+
+  it("no spans: no segs", () => {
+    const rows = sourceRows([
+      part([1, 1, 2, 4], "abc\ndef"),
+      part([1, 2, 1, 3], "b"),
+    ]);
+    expect(rows.length).toBe(2);
+    expect(rowSegs(row(...rows), [[], [seg(1, 2)]])).toEqual([seg(1, 2)]);
   });
 });

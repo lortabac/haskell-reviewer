@@ -7,6 +7,8 @@ import {
   type LinkInfo,
   linkInfos,
   linkName,
+  pageLinkInfos,
+  shortName,
 } from "./links";
 
 const view = { path: "src/A.hs", ref: "A" };
@@ -160,5 +162,58 @@ describe("jumpOf", () => {
     expect(jumpOf(2, targets, runs, line)).toBeUndefined();
     expect(jumpOf(5, targets, runs, line)).toBeUndefined();
     expect(jumpOf(9, targets, runs, line)).toBeUndefined();
+  });
+});
+
+describe("pageLinkInfos", () => {
+  const page = { ref: "A", typedRef: "A.Typed" };
+  const infos = (...t: Target[]) => pageLinkInfos(page, t, "/tok");
+
+  it("a declaration: its docs; this module as typed in the URL", () => {
+    const [here, other] = infos(
+      ["decl", "A", "src/A.hs", 4, "val:y", [], 1, null, false],
+      ["decl", "B", "src/B.hs", 4, "val:y", ["ambiguous"], 2, null, true],
+    );
+    expect(here).toEqual({
+      href: "/tok/docs/tree/A.Typed#val%3Ay",
+      about: "documentation",
+      guess: false,
+      external: false,
+      here: false,
+    });
+    expect(other?.href).toBe("/tok/docs/tree/B#val%3Ay");
+    expect(linkName("y", other as LinkInfo)).toBe(
+      "y, documentation in B, resolved heuristically",
+    );
+  });
+
+  it("a module: its docs; an external: Hoogle in a new tab; a local: none", () => {
+    const [m, e, l] = infos(
+      ["module", "B.C", "src/B/C.hs", [], 1],
+      ["external", "Data.Char", null, "only-open", 1, "toUpper"],
+      ["local", 3, 1],
+    );
+    expect(m?.href).toBe("/tok/docs/tree/B.C");
+    expect(e).toMatchObject({ external: true, guess: true });
+    expect(e?.href).toBe(hoogleHref("toUpper"));
+    // The full name, as in the source view.
+    expect(linkName("toUpper", e as LinkInfo)).toBe(
+      "toUpper, Data.Char, search on Hoogle, resolved heuristically, opens in a new tab",
+    );
+    expect(l).toBeUndefined();
+  });
+
+  it("short names: the text and the marks", () => {
+    const i = (guess: boolean, external: boolean): LinkInfo => ({
+      href: "#",
+      about: "long words",
+      guess,
+      external,
+      here: false,
+    });
+    expect(shortName("x", i(false, false))).toBe("x");
+    expect(shortName("x", i(true, true))).toBe(
+      "x, resolved heuristically, opens in a new tab",
+    );
   });
 });

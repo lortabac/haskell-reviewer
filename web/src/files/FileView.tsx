@@ -1,6 +1,5 @@
 import { useLocation, useResolvedPath } from "@solidjs/router";
 import {
-  batch,
   createEffect,
   createMemo,
   createResource,
@@ -14,19 +13,11 @@ import {
   Show,
   Switch,
   untrack,
-  useContext,
 } from "solid-js";
 import { getCbor } from "../api/client";
 import { decodeFileView, type FileView as View } from "../api/files";
 import { docsHref } from "../api/module";
-import {
-  decodeSourceView,
-  type LexedSource,
-  type OutlineEntry,
-  sameLexed,
-} from "../api/source";
-import { IndexingContext } from "../events/indexing";
-import { refetchStep } from "../events/partialRefetch";
+import { type LexedSource, type OutlineEntry } from "../api/source";
 import { bannerText } from "../modules/notices";
 import { useModules } from "../modules/store";
 import { NotFound } from "../NotFound";
@@ -37,6 +28,7 @@ import {
   type FindHits,
   type LineMarks,
 } from "../source/CodeView";
+import { createSource } from "../source/createSource";
 import { FindBar } from "../source/FindBar";
 import { highlightDecor, highlightedLine } from "../source/decor";
 import { type Highlight, highlightOf } from "../source/highlight";
@@ -47,7 +39,6 @@ import { bytes, limit } from "../ui/format";
 import { bringOnPage } from "../ui/scroll";
 import {
   apiFileUrl,
-  apiSourceUrl,
   hrefFor,
   lineHref,
   parseLineHash,
@@ -88,7 +79,10 @@ function FilePage(props: { path: string }): JSX.Element {
     const r = result();
     return r?.kind === "ok" ? r.value : undefined;
   };
-  const lexed = createSource(() => props.path, view);
+  const lexed = createSource(
+    () => props.path,
+    () => view()?.generation,
+  );
   // A link in main (like a symlink target) took us here: its page is
   // gone, so put focus on the new heading instead of letting it drop to
   // body. Again if a 404 swaps the heading.
@@ -123,76 +117,6 @@ function FilePage(props: { path: string }): JSX.Element {
         </Match>
       </Switch>
     </Show>
-  );
-}
-
-// Highlighting, at the same time as the text. Never waited for: the
-// text shows plain first (the server can take a while when indexing).
-// Any failure: plain, no message. While the answer is partial, asked
-// again on indexing events (D-286): at most once a second, plus once
-// when indexing is done. A failed or plain answer keeps the last good
-// one; an equal one changes nothing (no redraw). An answer or event
-// for another snapshot is dropped (stale until a reload).
-function createSource(
-  path: () => string,
-  view: () => View | undefined,
-): () => LexedSource | undefined {
-  const indexing = useContext(IndexingContext);
-  const [latest, setLatest] = createSignal<LexedSource>();
-  const [partial, setPartial] = createSignal(false);
-  // Bumped on each fetch: a late answer of an earlier one is dropped.
-  let seq = 0;
-  let ac: AbortController | undefined;
-  let lastAt = 0;
-  let answerGen: number | undefined;
-  // The refetch at done is done once, until partial changes.
-  let doneAsked = false;
-  const fetchSource = () => {
-    ac?.abort();
-    const mine = ++seq;
-    const signal = (ac = new AbortController()).signal;
-    lastAt = Date.now();
-    void getCbor(apiSourceUrl(untrack(path)), decodeSourceView, {
-      signal,
-    }).then((r) => {
-      if (mine !== seq || r.kind !== "ok") return;
-      const s = r.value;
-      const v = untrack(view);
-      if (v !== undefined && s.generation !== v.generation) return;
-      answerGen = s.generation;
-      if (s.partial !== untrack(partial)) doneAsked = false;
-      batch(() => {
-        setPartial(s.partial);
-        if (s.highlight === "lexed") setLatest(s);
-      });
-    });
-  };
-  fetchSource();
-  onCleanup(() => {
-    seq++;
-    ac?.abort();
-  });
-  createEffect(() => {
-    const p = indexing.indexing();
-    if (p === undefined || !partial()) return;
-    const step = refetchStep(p, answerGen, lastAt, Date.now());
-    if (step === "due") fetchSource();
-    else if (step === "done" && !doneAsked) {
-      doneAsked = true;
-      fetchSource();
-    }
-  });
-  // Only a lexed answer for this very text (same generation).
-  return createMemo(
-    (): LexedSource | undefined => {
-      const v = view();
-      const s = latest();
-      return v !== undefined && s !== undefined && s.generation === v.generation
-        ? s
-        : undefined;
-    },
-    undefined,
-    { equals: sameLexed },
   );
 }
 

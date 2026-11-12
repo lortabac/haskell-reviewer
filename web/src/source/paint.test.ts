@@ -111,3 +111,16 @@ describe("lineNodes with links", () => {
     expect(p.textContent).toBe("<b>x</b>");
   });
 });
+
+describe("lineNodes, tabbable", () => {
+  it("normal Tab stops and no jump state; default: out of the order", () => {
+    const ps = [piece("a", "variable", 1)];
+    const link = () => info();
+    const a = lineNodes(ps, link, { tabbable: true })[0] as HTMLAnchorElement;
+    expect(a.getAttribute("tabindex")).toBeNull();
+    expect(a.hasAttribute("state")).toBe(false);
+    expect(a.hasAttribute("noscroll")).toBe(false);
+    const b = lineNodes(ps, link)[0] as HTMLAnchorElement;
+    expect(b.getAttribute("tabindex")).toBe("-1");
+  });
+});

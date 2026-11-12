@@ -9,6 +9,7 @@ import {
   useContext,
 } from "solid-js";
 import type { Handle } from "../api/module";
+import type { Highlight } from "../source/highlight";
 import type { PageIndex } from "./pageIndex";
 
 export interface PageCtx {
@@ -27,6 +28,11 @@ export interface PageCtx {
   // already says what's private in its own headings, so per-item
   // marks (D-203) are off.
   marks: boolean;
+  // The first "Show source" calls it: the page then fetches the
+  // highlighting, once for all its sources (pageSource.ts).
+  wantSource: () => void;
+  // The highlighting of the inline sources, when it is there.
+  highlight: () => Highlight | undefined;
 }
 
 export const PageContext = createContext<PageCtx>();

@@ -1,6 +1,7 @@
 // The hover card of one source view (G12, WCAG 1.4.13, D-285): on a
 // token link under the pointer (after a delay) or with keyboard focus
-// (at once). Hoverable, Esc hides it, no timeout. One card per view.
+// (at once). Hoverable, Esc hides it, no timeout. One card per view,
+// and one showing in the document.
 import { onCleanup, onMount } from "solid-js";
 import { setVar } from "../ui/cssom";
 import type { CardText } from "./hover";
@@ -50,6 +51,18 @@ const linkOf = (t: EventTarget | null): HTMLElement | undefined =>
     ? (t.closest<HTMLElement>("a.code-link") ?? undefined)
     : undefined;
 
+// The card of this document that shows now: one at a time (a page can
+// have several views, like the inline sources of the docs page).
+interface Active {
+  // Another card is about to show: hide, and remember a focus card.
+  yieldIt: () => void;
+  // The card that took over ended: the focus card comes back.
+  restore: () => void;
+}
+let active: Active | undefined;
+// The view whose focus card is hidden for another view's card.
+let yielded: Active | undefined;
+
 const same = (a: Spot | undefined, b: Spot | undefined) =>
   a !== undefined && b !== undefined && a.line === b.line && a.col === b.col;
 
@@ -61,7 +74,15 @@ export function createHoverCard(opts: {
   text: (link: number) => CardText | undefined;
   // A drag from a link is on: no card.
   dragging: () => boolean;
+  // Selectors of the view's row, its text cell and its gutter (the
+  // right edge of it is where cards can't go over).
+  parts?: { row: string; cell: string; gutter: string };
 }): HoverCard {
+  const parts = opts.parts ?? {
+    row: ".code-row",
+    cell: ".code-cell",
+    gutter: ".code-mark",
+  };
   let owner: Owner | undefined;
   let visible = false;
   let focused: Focused | undefined;
@@ -77,8 +98,8 @@ export function createHoverCard(opts: {
   let described: HTMLElement | undefined;
 
   const spotOf = (el: HTMLElement): Spot | undefined => {
-    const r = el.closest(".code-row");
-    const cell = el.closest(".code-cell");
+    const r = el.closest(parts.row);
+    const cell = el.closest(parts.cell);
     if (r === null || cell === null) return undefined;
     return {
       line: Number(r.getAttribute("data-line")),
@@ -87,7 +108,7 @@ export function createHoverCard(opts: {
   };
   // The link at a spot now (rows get redrawn).
   const linkAt = (s: Spot) => {
-    const cell = opts.row(s.line)?.querySelector(".code-cell");
+    const cell = opts.row(s.line)?.querySelector(parts.cell);
     if (cell == null) return undefined;
     return [...cell.querySelectorAll<HTMLElement>("a.code-link")].find(
       (a) => colIn(cell, a, 0) === s.col,
@@ -114,11 +135,27 @@ export function createHoverCard(opts: {
     if (visible !== v) {
       visible = v;
       opts.card().hidden = !v;
+      if (v) {
+        const other = active;
+        if (other !== undefined && other !== me) other.yieldIt();
+        active = me;
+        if (yielded === me) yielded = undefined;
+      } else if (active === me) {
+        active = undefined;
+        if (!quiet) {
+          const y = yielded;
+          yielded = undefined;
+          y?.restore();
+        }
+      }
       if (v) document.addEventListener("keydown", onEsc, true);
       else document.removeEventListener("keydown", onEsc, true);
     }
     syncDescribed();
   };
+
+  // yieldIt hides without waking the view it took over from.
+  let quiet = false;
 
   const stopPending = () => {
     clearTimeout(showTimer);
@@ -132,13 +169,33 @@ export function createHoverCard(opts: {
     setVisible(false);
   };
 
-  // A pointer card ended: the focused link's card again, if it had one.
-  const endPointer = () => {
-    hide();
+  // The focused link's card again, if it had one.
+  const restoreFocus = () => {
     const f = focused;
     if (f !== undefined && f.card && !same(f, dismissed) && f.el.isConnected) {
       show(f.el, "focus");
     }
+  };
+
+  // A pointer card ended.
+  const endPointer = () => {
+    hide();
+    restoreFocus();
+  };
+
+  const me: Active = {
+    yieldIt: () => {
+      const back =
+        owner?.source === "focus" &&
+        focused !== undefined &&
+        focused.card &&
+        !same(focused, dismissed);
+      quiet = true;
+      hide();
+      quiet = false;
+      if (back) yielded = me;
+    },
+    restore: restoreFocus,
   };
 
   // Put the card at its owner, or hide it there if the owner is out
@@ -146,7 +203,7 @@ export function createHoverCard(opts: {
   const place = () => {
     const o = owner;
     if (o === undefined) return;
-    const r = o.el.closest<HTMLElement>(".code-row");
+    const r = o.el.closest<HTMLElement>(parts.row);
     if (!o.el.isConnected || r === null) {
       if (o.source === "pointer") endPointer();
       else hide();
@@ -172,7 +229,7 @@ export function createHoverCard(opts: {
         bottom: top + v.clientHeight,
       },
       gutter:
-        r.querySelector(".code-mark")?.getBoundingClientRect().right ?? left,
+        r.querySelector(parts.gutter)?.getBoundingClientRect().right ?? left,
       wrap: (card.parentElement ?? v).getBoundingClientRect(),
       card: { width: c.width, height: c.height },
       windowHeight: window.innerHeight,
@@ -361,6 +418,8 @@ export function createHoverCard(opts: {
     e.preventDefault();
     e.stopPropagation();
     dismissed = { line: owner.line, col: owner.col };
+    // As in one view: no focus card comes back after Esc.
+    yielded = undefined;
     hide();
   }
 
@@ -405,6 +464,7 @@ export function createHoverCard(opts: {
     document.addEventListener("scroll", follow, true);
     window.addEventListener("resize", follow);
     onCleanup(() => {
+      if (yielded === me) yielded = undefined;
       hide();
       if (frame !== undefined) cancelAnimationFrame(frame);
       document.removeEventListener("mousedown", onDown, true);
