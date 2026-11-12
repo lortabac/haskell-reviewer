@@ -6,18 +6,20 @@ import Data.Text qualified as Text
 import HaskellReviewer.Core.Code
   ( Code,
     CodeClass (..),
-    CodeEnv,
+    CodeEnv (..),
     CodeToken (..),
     classHead,
     codeEnv,
     codeOf,
     famInstHead,
     instanceHead,
+    plainCode,
     typeHead,
   )
 import HaskellReviewer.Core.Decls
   ( Decl (..),
     DeclInfo (..),
+    ModulePragma (..),
     Signature (..),
     ValueDecl (..),
     declInfo,
@@ -36,7 +38,8 @@ import HaskellReviewer.Core.Parser
     defaultParseSettings,
     parseSource,
   )
-import HaskellReviewer.Core.Tokens (TokenClass (..))
+import HaskellReviewer.Core.SourceText (sliceSpan, sourceLines)
+import HaskellReviewer.Core.Tokens (Token (..), TokenClass (..), tokenList)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 
@@ -161,6 +164,43 @@ tests =
                   (Space, " "),
                   (Tok Macro, "TY")
                 ],
+      testCase "links out: by token index; a local link wins; none in pragmas" $ do
+        let src =
+              "module M where\ndata T = T\nx :: T -> Maybe a\nx = undefined\n\
+              \{-# RULES \"r\" x = x #-}\n"
+        case parseSource defaultParseSettings src of
+          Parsed m -> do
+            let names = localNames ((.value) <$> m.header.name) m.declarations
+                -- Every token links out, to its index + 1.
+                env =
+                  CodeEnv
+                    { source = sourceLines src,
+                      tokens = m.tokens,
+                      names = names,
+                      outer = \i -> fromIntegral i + 1
+                    }
+                pragmaCode = concatMap (plainCode env . (.span)) m.pragmas
+            [(t.text, t.link /= Nothing, t.outer /= 0) | t <- sigOf env m "val:x"]
+              @?= [ ("x", False, True),
+                    (" ", False, False),
+                    ("::", False, True),
+                    (" ", False, False),
+                    ("T", True, False),
+                    (" ", False, False),
+                    ("->", False, True),
+                    (" ", False, False),
+                    ("Maybe", False, True),
+                    (" ", False, False),
+                    ("a", False, True)
+                  ]
+            -- The word is the token's own.
+            [t.outer | t <- sigOf env m "val:x", t.text == "Maybe"]
+              @?= [ fromIntegral i + 1
+                  | (i, tok) <- zip [0 :: Int ..] (tokenList m.tokens),
+                    sliceSpan (sourceLines src) tok.span == "Maybe"
+                  ]
+            [t.outer | t <- pragmaCode, t.outer /= 0] @?= []
+          other -> assertFailure (take 300 (show other)),
       testCase "tabs and CRLF" $
         signatures "module M where\r\nx\t::\tMaybe\r\n  Int\r\nx = Nothing\r\n" $
           [("val:x", "x :: Maybe Int")],

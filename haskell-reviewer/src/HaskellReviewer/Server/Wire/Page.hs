@@ -26,6 +26,7 @@ import Control.Exception (evaluate)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Containers.ListUtils (nubOrd)
 import Data.Foldable (toList)
+import Data.IntMap.Strict qualified as IntMap
 import Data.List (find)
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Map.Strict (Map)
@@ -40,7 +41,6 @@ import HaskellReviewer.Core.Code
     CodeEnv (..),
     CodeToken (..),
     classHead,
-    codeEnv,
     codeOf,
     codeOfSpans,
     conFields,
@@ -93,7 +93,7 @@ import HaskellReviewer.Core.Decls
     famInstConstructors,
     formConstructors,
   )
-import HaskellReviewer.Core.DocLinks (localNames, resolveLocal)
+import HaskellReviewer.Core.DocLinks (docRef, localNames, resolveLocal)
 import HaskellReviewer.Core.FileContent (FileSize (..), TooLargeInfo (..))
 import HaskellReviewer.Core.FileList (EntryKind (..), ListSource (..), mkFileList)
 import HaskellReviewer.Core.ModuleModel
@@ -135,6 +135,7 @@ import HaskellReviewer.Core.Modules
     PackageModules (..),
     Preprocessor (..),
     buildModuleIndex,
+    modulePath,
     moduleRef,
     renderModuleId,
     renderPreprocessor,
@@ -159,6 +160,18 @@ import HaskellReviewer.Core.Project
     renderComponentName,
   )
 import HaskellReviewer.Core.RelPath (RelPath, relPathFromSegments, relPathText)
+import HaskellReviewer.Core.Resolve
+  ( ModuleState (..),
+    ParsedInput (..),
+    ResolveInput (..),
+    isPartial,
+    resolveModule,
+  )
+import HaskellReviewer.Core.ResolveWarmUp
+  ( resolveWarmUpIndex,
+    resolveWarmUpInput,
+    resolveWarmUpModules,
+  )
 import HaskellReviewer.Core.RichText
   ( Block (..),
     Cell (..),
@@ -177,12 +190,19 @@ import HaskellReviewer.Core.RichText
     TableBody (..),
     urlText,
   )
-import HaskellReviewer.Core.SourceText (sliceSpan)
+import HaskellReviewer.Core.SourceLinks
+  ( PageLinks (..),
+    linksInput,
+    noPageLinks,
+    pageLinks,
+  )
+import HaskellReviewer.Core.SourceText (sliceSpan, sourceLines)
 import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
 import HaskellReviewer.Core.Tokens (TokenClass (..))
 import HaskellReviewer.Effects.Parser (declsWarmUp, haddockWarmUp)
 import HaskellReviewer.Server.Cbor qualified as Cbor
 import HaskellReviewer.Server.Wire (noSourceReason)
+import HaskellReviewer.Server.Wire.Targets (encodeTarget)
 import HaskellReviewer.Session.Index (ParsedSource (..))
 import HaskellReviewer.Session.Snapshot (Generation (..))
 
@@ -193,13 +213,19 @@ data ModuleView = ModuleView
   { moduleId :: ModuleId,
     -- | The file, if there is one.
     path :: Maybe RelPath,
+    -- | Resolution read a module not ready yet ('isPartial'): the
+    -- links may change. At the top level, like the source view's
+    -- ('HaskellReviewer.Server.Wire.Source.SourceView'); false unless
+    -- the module parsed.
+    partial :: Bool,
     answer :: ModuleAnswer
   }
 
 -- | What we have for a module.
 data ModuleAnswer
-  = -- | It parsed: the model and the file's text.
-    ParsedAnswer ParsedSource
+  = -- | It parsed: the model and the file's text, and its links out of
+    -- the module.
+    ParsedAnswer ParsedSource PageLinks
   | -- | We ran the parser, and show it as text.
     TextOnlyAnswer TextOnlyModule
   | -- | Text only, without running the parser.
@@ -226,14 +252,23 @@ left out; spans are [startLine, startCol, endLine, endCol], code
 points, end exclusive):
 
   {generation, id, ref, path, package: {name, version} | null,
-   component | null, tier: {kind: syntactic, reason: no-hie}, parse}
+   component | null, tier: {kind: syntactic, reason: no-hie}, partial,
+   parse}
+
+partial is true when resolution read a module not ready yet, so links
+may change (as on the source view); false for a page not parsed.
 
 parse is {kind: text-only, reason, warnings} (reasons as for the
 banner: parse-error, pragma-error, preprocessed, parser-crashed,
 too-slow, generated, no-source, not-text, too-large) or
 
   {kind: parsed, header, exports, imports, extensions, warnings,
-   declarations, docItems, pragmas}
+   idParts, targets, declarations, docItems, pragmas}
+
+targets are links out of this module, as on the source view (Note
+[Source view] in "HaskellReviewer.Server.Wire.Source"): decl, module
+and external, never local; def is always false. See Note [Page links]
+in "HaskellReviewer.Core.SourceLinks".
 
 Declarations come in source order. Every one has kind (type, class,
 value, patsyn, instance, faminst, splice), n (its handle) and id (Note
@@ -252,20 +287,24 @@ Instances (Note [Instance placement]) are listed once, each with
 attached; types and classes list the handles of theirs.
 
 Code (heads, signatures, types) is a list of tokens, each
-[class, text] or [class, text, n] when it links (Note [Local
-links in code] in "HaskellReviewer.Core.Code"); classes are short
-names ('tokenClassName'), "sp" a space.
+[class, text], [class, text, n] when it links to a declaration of this
+page (Note [Local links in code] in "HaskellReviewer.Core.Code"), or
+[class, text, null, link] when it links out, link being 1 + the
+index of its target in targets; classes are short names
+('tokenClassName'), "sp" a space.
 
 Doc comments are {span, doc}; a doc is {blocks, since}, each block and
-inline {kind, ...}. A name in a comment carries its local target
-(Note [Local doc links] in "HaskellReviewer.Core.DocLinks"); a module
-link its ref if the module is in the project, and its anchor as
-written: Haddock's (v:x, t:T), not our declaration ids (cross-module
-links come later). List item numbers and @since versions are decimal
-text, as they can be over 2^53; a number is null, and since too, when
-haddock-library may have got it wrong (Note [Big numbers] in
-"HaskellReviewer.Core.Parser.Haddock"). URLs are http or https
-('SafeUrl'); the client checks again.
+inline {kind, ...}. A name in a comment is {kind: name, written, ns,
+target, link}: target the handle of a local declaration (Note [Local
+doc links] in "HaskellReviewer.Core.DocLinks"), else null; link, only
+when target is null, 1 + the index of its target in targets, else
+null (Note [Names in docs] there). A module link carries its ref if
+the module is in the project, and its anchor as written: Haddock's
+(v:x, t:T), not our declaration ids. List item numbers and @since
+versions are decimal text, as they can be over 2^53; a number is null,
+and since too, when haddock-library may have got it wrong (Note [Big
+numbers] in "HaskellReviewer.Core.Parser.Haddock"). URLs are http or
+https ('SafeUrl'); the client checks again.
 -}
 
 {- Note [Instance placement]
@@ -299,6 +338,7 @@ encodeModulePage (Generation g) idx v =
       ("package", Cbor.nullable package owner),
       ("component", Cbor.nullable (Cbor.text . renderComponentName . snd) owner),
       ("tier", syntacticTier),
+      ("partial", Cbor.bool v.partial),
       ("parse", answer v.answer)
     ]
   where
@@ -313,7 +353,7 @@ encodeModulePage (Generation g) idx v =
           )
         ]
     answer = \case
-      ParsedAnswer s -> parsedModule idx s
+      ParsedAnswer s links -> parsedModule idx s links
       TextOnlyAnswer t -> textOnly (parserReason t.reason) t.warnings
       NotParsed r -> textOnly (notParsedReason r) []
     textOnly reason ws =
@@ -374,10 +414,15 @@ once can livelock the RTS (Q-RTS-BLACKHOLE). So before the index is
 filled, the listing thread encodes 'pageWarmUp': the warm-up modules
 of the parser (every kind of declaration, every kind of Haddock
 markup), one with CPP, one with every export form and a line past 256
-columns (Note [Slicing] in "HaskellReviewer.Core.SourceText"), and a
-text-only page for each reason. A test checks they have every token class code
-can have, every declaration kind, doc node and value of the other
-enum-like fields.
+columns (Note [Slicing] in "HaskellReviewer.Core.SourceText"), the
+resolution warm-up project's modules with their links (every target
+kind, how, a code link and a doc link out, partial true and false, a
+null and a non-null sig), and a text-only page for each reason. A test
+checks they have every token class code can have, every declaration
+kind, doc node and value of the other enum-like fields. Every reason
+code is warmed up by the source view's warm-up (Note [Source view] in
+"HaskellReviewer.Server.Wire.Source"), which uses the same encoder for
+targets.
 -}
 
 -- | Encode 'pageWarmUp'. See Note [Page warm-up].
@@ -388,6 +433,7 @@ warmUpPages = mapM_ (evaluate . LBS.length) pageWarmUp
 pageWarmUp :: [LBS.ByteString]
 pageWarmUp =
   map parsedPage [declsWarmUp, haddockWarmUp, cppPage, exportsPage]
+    <> mapMaybe resolvedPage resolveWarmUpModules
     <> map
       (page . TextOnlyAnswer . textOnly)
       [ ParseFailed parseError Nothing,
@@ -407,13 +453,30 @@ pageWarmUp =
       ]
   where
     parsedPage t = case parseSource defaultParseSettings t of
-      Parsed m -> page (ParsedAnswer ParsedSource {text = t, parsed = m})
+      Parsed m -> page (ParsedAnswer ParsedSource {text = t, parsed = m} noPageLinks)
       TextOnly o -> page (TextOnlyAnswer o)
     page a =
       encodeModulePage
         (Generation 1)
         warmUpIndex
-        ModuleView {moduleId = warmUpId, path = Nothing, answer = a}
+        ModuleView {moduleId = warmUpId, path = Nothing, partial = False, answer = a}
+    resolvedPage i = case resolveWarmUpInput.state i of
+      ModuleParsed p ->
+        let idx = resolveWarmUpIndex
+            res = resolveModule resolveWarmUpInput i
+            links = pageLinks (linksInput idx resolveWarmUpInput.state i p res)
+         in Just $
+              encodeModulePage
+                (Generation 1)
+                idx
+                ModuleView
+                  { moduleId = i,
+                    path = modulePath idx i,
+                    partial = maybe False isPartial res,
+                    answer =
+                      ParsedAnswer ParsedSource {text = p.text, parsed = p.parsed} links
+                  }
+      _ -> Nothing
     textOnly r =
       textOnlyModule
         r
@@ -483,14 +546,15 @@ warmUpId = maybe (error "E.hs is a valid path") LooseModule warmUpPath
 data Env = Env
   { code :: CodeEnv,
     index :: ModuleIndex,
+    links :: PageLinks,
     objects :: Objects,
     placed :: Placement,
     -- | Who sends what. See Note [Sent once].
     senders :: Map Piece Handle
   }
 
-parsedModule :: ModuleIndex -> ParsedSource -> Encoding
-parsedModule idx s =
+parsedModule :: ModuleIndex -> ParsedSource -> PageLinks -> Encoding
+parsedModule idx s links =
   Cbor.obj
     [ kind "parsed",
       ("header", header env m.header),
@@ -499,6 +563,7 @@ parsedModule idx s =
       ("extensions", extensions m.extensions),
       ("warnings", Cbor.list (Cbor.text . renderParseWarning) m.warnings),
       ("idParts", Cbor.list Cbor.text objs.partList),
+      ("targets", Cbor.list encodeTarget links.targets),
       ("declarations", Cbor.list (topDecl env) m.declarations),
       ("docItems", Cbor.list (docItem env) m.docItems),
       ("pragmas", Cbor.list (pragma env) m.pragmas)
@@ -509,8 +574,15 @@ parsedModule idx s =
     objs = objectsOf m.declarations
     env =
       Env
-        { code = codeEnv s.text m.tokens names,
+        { code =
+            CodeEnv
+              { source = sourceLines s.text,
+                tokens = m.tokens,
+                names = names,
+                outer = \i -> IntMap.findWithDefault 0 i links.code
+              },
           index = idx,
+          links = links,
           objects = objs,
           placed = placement objs m.declarations,
           senders = objs.senders
@@ -1329,8 +1401,14 @@ inlines env = Cbor.list inline
                 TypeNs -> "type"
                 AnyNs -> "any"
             ),
-            ("target", Cbor.nullable Cbor.int (target r))
+            ("target", Cbor.nullable Cbor.int local),
+            ("link", Cbor.nullable Cbor.word32 (outer local))
           ]
+        where
+          local = target r
+          outer = \case
+            Nothing -> Map.lookup (docRef r) env.links.docs
+            Just _ -> Nothing
       ModuleLink l ->
         Cbor.obj
           [ kind "module",
@@ -1344,15 +1422,17 @@ inlines env = Cbor.list inline
 
 -- * Internal
 
--- | Code: @[class, text]@ or @[class, text, id]@ per token. See
--- Note [Module page].
+-- | Code: @[class, text]@, @[class, text, n]@ or @[class, text, null,
+-- link]@ per token. See Note [Module page].
 code_ :: Env -> Code -> Encoding
 code_ env = Cbor.list token
   where
-    token t = case firstWithId env =<< t.link of
-      Nothing -> Cbor.list id [Cbor.text (tokenClassName t.kind), Cbor.text t.text]
-      Just n ->
-        Cbor.list id [Cbor.text (tokenClassName t.kind), Cbor.text t.text, Cbor.int n]
+    token t = Cbor.list id $ case firstWithId env =<< t.link of
+      Just n -> [cls t, Cbor.text t.text, Cbor.int n]
+      Nothing
+        | t.outer /= 0 -> [cls t, Cbor.text t.text, Cbor.null_, Cbor.word32 t.outer]
+        | otherwise -> [cls t, Cbor.text t.text]
+    cls t = Cbor.text (tokenClassName t.kind)
 
 -- | The code of a span, part of these declarations (they don't link
 -- to themselves).

@@ -59,7 +59,7 @@ import HaskellReviewer.Core.RelPath (RelPath, relPathFromSegments, relPathText)
 import HaskellReviewer.Core.Resolve (ModuleState (..), ParsedInput (..), isPartial)
 import HaskellReviewer.Core.Root (CanonicalRoot)
 import HaskellReviewer.Core.Search (forceCandidates, moduleCandidates)
-import HaskellReviewer.Core.SourceLinks (linksOf)
+import HaskellReviewer.Core.SourceLinks (LinksInput, linksInput, pageLinks, sourceLinks)
 import HaskellReviewer.Effects.FileSystem (ListError, ReadError (..))
 import HaskellReviewer.Effects.Log (Logger, logInfo)
 import HaskellReviewer.Server.Security (methodNotAllowed, notFound)
@@ -78,8 +78,7 @@ import HaskellReviewer.Server.Wire.Page
     encodeModulePage,
   )
 import HaskellReviewer.Server.Wire.Source
-  ( LexedSource,
-    SourceBody (..),
+  ( SourceBody (..),
     SourceView (..),
     encodeSource,
     parsedSource,
@@ -239,12 +238,16 @@ fileApp api side segs req respond
 --
 -- A module we parse comes from its slot: if it's not done, it jumps the
 -- queue and we wait for it (Note [Indexing] in
--- "HaskellReviewer.Session.Index"). Generated, preprocessed and
+-- "HaskellReviewer.Session.Index"), then for its direct imports of
+-- ours, up to 'importWait' ('awaitImports'). Then we resolve it, for the
+-- links out of the module (Note [Page links] in
+-- "HaskellReviewer.Core.SourceLinks"). Generated, preprocessed and
 -- no-source modules answer from the module index, without reading
 -- anything.
 --
 -- An unknown ref, or a module whose file is gone, is a 404 with a JSON
--- body ('encodeModuleNotFound'). A bad side is a plain 404.
+-- body ('encodeModuleNotFound'). A bad side is a plain 404. Exceptions
+-- from resolution are not caught: a 500.
 moduleApp :: FilesApi -> Text -> [Text] -> Application
 moduleApp api side segs req respond
   | req.requestMethod /= methodGet = respond (methodNotAllowed "GET")
@@ -255,7 +258,9 @@ moduleApp api side segs req respond
         Right snap -> case found snap of
           Nothing -> respond (missing snap)
           Just (i, m) -> case m.source of
-            HaskellSource f -> fromIndex snap i f.path
+            HaskellSource f -> do
+              awaitImports snap.resolver importWait i
+              fromIndex snap i f.path
             GeneratedSource f -> answer snap i (Just f.path) (GeneratedModule f.tool)
             PreprocessedSource f ->
               answer snap i (Just f.path) (PreprocessedModule f.tool)
@@ -268,16 +273,25 @@ moduleApp api side segs req respond
       m <- findModule snap.modules i
       Just (i, m)
     missing snap = jsonWith status404 (encodeModuleNotFound snap.generation)
-    view snap v =
-      computed snap (pure (encodeModulePage snap.generation snap.modules v)) >>= respond
-    answer snap i path r =
-      view snap ModuleView {moduleId = i, path = path, answer = NotParsed r}
+    view snap v = viewWith snap (pure v)
+    viewWith snap mk =
+      computed snap (encodeModulePage snap.generation snap.modules <$> mk) >>= respond
+    unlinked i path a =
+      ModuleView {moduleId = i, path = path, partial = False, answer = a}
+    answer snap i path r = view snap (unlinked i path (NotParsed r))
     fromIndex snap i path =
       awaitModule snap.index i >>= \case
-        Just (Right (IndexedParsed p)) ->
-          view snap ModuleView {moduleId = i, path = Just path, answer = ParsedAnswer p}
+        Just (Right (IndexedParsed p)) -> viewWith snap $ do
+          (input, partial) <- linksFor snap i p
+          pure
+            ModuleView
+              { moduleId = i,
+                path = Just path,
+                partial = partial,
+                answer = ParsedAnswer p (pageLinks input)
+              }
         Just (Right (IndexedTextOnly t)) ->
-          view snap ModuleView {moduleId = i, path = Just path, answer = TextOnlyAnswer t}
+          view snap (unlinked i (Just path) (TextOnlyAnswer t))
         Just (Right (IndexedNotText size)) ->
           answer snap i (Just path) (NotTextModule size)
         Just (Right (IndexedTooLarge info)) ->
@@ -327,7 +341,8 @@ sourceApp api side segs req respond
     fromIndex snap path i =
       awaitModule snap.index i >>= \case
         Just (Right (IndexedParsed s)) -> viewWith snap $ do
-          (lexed, partial) <- linked snap i s
+          (input, partial) <- linksFor snap i s
+          let lexed = parsedSource s.parsed (sourceLinks input)
           pure (viewOf path (Just i) partial (LexedBody lexed))
         Just (Right (IndexedTextOnly t)) ->
           view snap (viewOf path (Just i) False (textOnlySource t))
@@ -346,16 +361,16 @@ computed snap mk =
     _ <- evaluate (LBS.length body)
     pure (cbor body)
 
--- | A parsed module's lexed view, resolved, and whether it's partial.
-linked :: Snapshot -> ModuleId -> ParsedSource -> IO (LexedSource, Bool)
-linked snap i s = do
+-- | What the links of a parsed module read, resolved, and whether it's
+-- partial. For the source view and the page.
+linksFor :: Snapshot -> ModuleId -> ParsedSource -> IO (LinksInput, Bool)
+linksFor snap i s = do
   -- i is Ready: resolveModuleWith doesn't wait.
   resolved <- resolveModuleWith snap.resolver i
   let res = fst <$> resolved
       state = maybe (const ModuleNotParsed) snd resolved
       p = ParsedInput {text = s.text, parsed = s.parsed}
-      links = linksOf snap.modules state i p res
-  pure (parsedSource s.parsed links, maybe False isPartial res)
+  pure (linksInput snap.modules state i p res, maybe False isPartial res)
 
 -- | @GET api\/indexing\/\<side>@: how far indexing is. The only side is
 -- @tree@. The same body as the @indexing@ event.

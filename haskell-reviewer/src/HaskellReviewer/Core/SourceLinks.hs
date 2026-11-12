@@ -21,9 +21,16 @@ module HaskellReviewer.Core.SourceLinks
     OutlineKind (..),
 
     -- * Building
+    linksInput,
     linksOf,
     sourceLinks,
     forceSourceLinks,
+
+    -- * The module page
+    PageLinks (..),
+    pageLinks,
+    noPageLinks,
+    forcePageLinks,
 
     -- * Reading
     linkAt,
@@ -34,11 +41,13 @@ module HaskellReviewer.Core.SourceLinks
 where
 
 import Data.Containers.ListUtils (nubOrd)
+import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IntMap
+import Data.IntSet qualified as IntSet
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (fromMaybe, isNothing, mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Vector.Unboxed qualified as Vector
@@ -70,17 +79,30 @@ import HaskellReviewer.Core.Decls
     InstanceForm (..),
     MethodDecl (..),
     Part (..),
+    PartRole (..),
     PatSynDecl (..),
     Signature (..),
     TypeDecl (..),
     ValueDecl (..),
+    declExtent,
     declInfo,
     famInstConstructors,
     formConstructors,
   )
-import HaskellReviewer.Core.DocLinks (noLocalNames)
+import HaskellReviewer.Core.DocLinks
+  ( DocRef (..),
+    docNames,
+    docRef,
+    localNames,
+    noLocalNames,
+    resolveLocal,
+  )
 import HaskellReviewer.Core.ModuleGraph (MappingGuess (..))
-import HaskellReviewer.Core.ModuleModel (ParsedModule (..))
+import HaskellReviewer.Core.ModuleModel
+  ( Located (..),
+    ModuleHeader (..),
+    ParsedModule (..),
+  )
 import HaskellReviewer.Core.Modules (ModuleId, ModuleIndex, modulePath, moduleRef)
 import HaskellReviewer.Core.Names
   ( DeclId,
@@ -98,6 +120,7 @@ import HaskellReviewer.Core.Occurrences
     Role (Def, Sig),
     TokenIx (..),
     binderAt,
+    occurrenceAt,
     occurrenceList,
   )
 import HaskellReviewer.Core.Occurrences qualified as Occ (Certainty (..))
@@ -112,13 +135,20 @@ import HaskellReviewer.Core.Resolve
     Reason (..),
     Resolved (..),
     Target (..),
+    forceDocNames,
     quoter,
   )
 import HaskellReviewer.Core.RichText (NameRef (..))
 import HaskellReviewer.Core.RichText qualified as Rich (RefNamespace (..))
 import HaskellReviewer.Core.SourceText (SourceLines, sliceSpan, sourceLines)
 import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
-import HaskellReviewer.Core.Tokens (TokenClass (..), tokenCount, tokenSpanAt)
+import HaskellReviewer.Core.Tokens
+  ( TokenClass (..),
+    Tokens,
+    tokenCount,
+    tokenIndexFrom,
+    tokenSpanAt,
+  )
 
 {- Note [Source links]
 
@@ -363,24 +393,34 @@ linksOf ::
   ParsedInput ->
   Maybe ModuleResolution ->
   SourceLinks
-linksOf idx state self p res =
-  sourceLinks
-    LinksInput
-      { self = self,
-        index = idx,
-        text = p.text,
-        parsed = p.parsed,
-        resolution = res,
-        state = state,
-        pathOf = modulePath idx
-      }
+linksOf idx state self p res = sourceLinks (linksInput idx state self p res)
+
+-- | What 'sourceLinks' and 'pageLinks' read, with the module states
+-- resolution read.
+linksInput ::
+  ModuleIndex ->
+  (ModuleId -> ModuleState) ->
+  ModuleId ->
+  ParsedInput ->
+  Maybe ModuleResolution ->
+  LinksInput
+linksInput idx state self p res =
+  LinksInput
+    { self = self,
+      index = idx,
+      text = p.text,
+      parsed = p.parsed,
+      resolution = res,
+      state = state,
+      pathOf = modulePath idx
+    }
 
 -- | The links and outline of a parsed module. See Note [Source links].
 sourceLinks :: LinksInput -> SourceLinks
 sourceLinks input =
   SourceLinks
     { links = Vector.replicate n 0 Vector.// done.words,
-      targets = map (targetOf places lines') (reverse done.new),
+      targets = linkTargets input ls (reverse done.new),
       outline = mapMaybe outlineEntry input.parsed.declarations
     }
   where
@@ -391,16 +431,22 @@ sourceLinks input =
       | (TokenIx i, o) <- occurrenceList input.parsed.occurrences,
         Just k <- [keyOf input ls i o]
       ]
-    done = foldl' assign (Assigned Map.empty 0 [] []) keyed
+    done = foldl' assign noneAssigned keyed
+
+-- | The targets of these keys, in order. Each target module's ref,
+-- file, names and code are read once.
+linkTargets :: LinksInput -> SourceLines -> [Key] -> [LinkTarget]
+linkTargets input ls keys = map (targetOf places lines') keys
+  where
     -- Each decl target module's names and code, read once.
     lines' =
       Map.fromList
-        [(m, declFacts input ls m) | m <- nubOrd [m | KeyDecl m _ _ _ _ <- done.new]]
+        [(m, declFacts input ls m) | m <- nubOrd [m | KeyDecl m _ _ _ _ <- keys]]
     -- Each target module's ref and file, found once.
     places =
       Map.fromList
         [ (m, (moduleRef input.index m, input.pathOf m))
-        | m <- nubOrd (concatMap keyModule done.new)
+        | m <- nubOrd (concatMap keyModule keys)
         ]
     keyModule = \case
       KeyDecl m _ _ _ _ -> [m]
@@ -411,8 +457,14 @@ sourceLinks input =
 forceSourceLinks :: SourceLinks -> ()
 forceSourceLinks s =
   s.links `seq`
-    foldr (seq . forceTarget) () s.targets `seq`
+    forceTargets s.targets `seq`
       foldr (seq . entry) () s.outline
+  where
+    entry e = forceDeclId e.id `seq` ()
+
+-- | Force targets fully.
+forceTargets :: [LinkTarget] -> ()
+forceTargets = foldr (seq . forceTarget) ()
   where
     forceTarget = \case
       ToLocal l -> l `seq` ()
@@ -427,7 +479,109 @@ forceSourceLinks s =
       ToExternal x -> forceExternalModule x.module_ `seq` x.query `seq` ()
     reasons = foldr seq ()
     sig = maybe () (`seq` ())
-    entry e = forceDeclId e.id `seq` ()
+
+-- * The module page
+
+{- Note [Page links]
+
+The module page links code and doc names to other modules with the
+same targets as the source view (Note [Source links]), in a table of
+its own. Links to this module stay handles (Note [Local links in code]
+in "HaskellReviewer.Core.Code", Note [Local doc links] in
+"HaskellReviewer.Core.DocLinks"), so the table has no local targets
+and no target in this module (a guess on this module, say). Every
+target is a use: def is false.
+
+- Code: the tokens inside the head parts of the top-level declarations
+  (Note [Extents] in "HaskellReviewer.Core.Decls"), each with the
+  target the source view gives it. The page only shows code from head
+  parts, so that covers it. Some of them the page never shows (an
+  instance signature): their targets are in the table anyway.
+- Doc names that aren't local: their result from resolution (Note
+  [Names in docs] in "HaskellReviewer.Core.DocLinks"), the Hoogle
+  query from the name. Resolution leaves those results lazy, for the
+  source view: 'pageLinks' forces them all before use
+  ('forceDocNames').
+
+Order: code targets in token order, then doc ones in page order, each
+distinct target once. Linear in the head tokens and doc names, plus the
+declarations of the modules linked to, as for the source view.
+-}
+
+-- | The links of a module page. See Note [Page links].
+data PageLinks = PageLinks
+  { -- | Keyed by token index: 1 + the target's index. Tokens with no
+    -- link aren't there.
+    code :: IntMap Word32,
+    -- | The same, keyed by doc name.
+    docs :: Map DocRef Word32,
+    targets :: [LinkTarget]
+  }
+  deriving (Eq, Show)
+
+-- | No links: for a page with no resolution.
+noPageLinks :: PageLinks
+noPageLinks = PageLinks {code = IntMap.empty, docs = Map.empty, targets = []}
+
+-- | The links of a module page. See Note [Page links].
+pageLinks :: LinksInput -> PageLinks
+pageLinks input =
+  PageLinks
+    { code = IntMap.fromList [(i, w) | (Left i, w) <- done.words],
+      docs = Map.fromList [(r, w) | (Right r, w) <- done.words],
+      targets = linkTargets input ls (reverse done.new)
+    }
+  where
+    p = input.parsed
+    ls = sourceLines input.text
+    names = localNames ((.value) <$> p.header.name) p.declarations
+    heads =
+      IntSet.fromList
+        [ i
+        | d <- p.declarations,
+          part <- NonEmpty.toList (declExtent d).parts,
+          part.role == HeadPart,
+          i <- tokenIndices p.tokens part.span
+        ]
+    code =
+      [ (Left i, k)
+      | i <- IntSet.toAscList heads,
+        Just o <- [occurrenceAt p.occurrences (TokenIx i)],
+        Just k <- [pageKey input.self =<< keyOf input ls i o]
+      ]
+    docs =
+      [ (Right r, k)
+      | Just res <- [input.resolution],
+        () <- [forceDocNames res],
+        r <- nubOrd [docRef n | n <- docNames p, isNothing (resolveLocal names n)],
+        Just x <- [Map.lookup r res.docNames],
+        Just k <- [pageKey input.self =<< fromResolved AtUse r.occ x]
+      ]
+    done = foldl' assign noneAssigned (code <> docs)
+
+-- | Force it fully.
+forcePageLinks :: PageLinks -> ()
+forcePageLinks l = forceTargets l.targets `seq` l.code `seq` foldr seq () l.docs
+
+-- | A key as the page has it. See Note [Page links].
+pageKey :: ModuleId -> Key -> Maybe Key
+pageKey self = \case
+  KeyLocal _ _ -> Nothing
+  KeyDecl m d rs k _
+    | m /= self -> Just (KeyDecl m d rs k AtUse)
+  KeyModule m rs k
+    | m /= self -> Just (KeyModule m rs k)
+  k@KeyExternal {} -> Just k
+  _ -> Nothing
+
+-- | The indices of the tokens that start in a span.
+tokenIndices :: Tokens -> Span -> [Int]
+tokenIndices ts s =
+  takeWhile inside [tokenIndexFrom ts s.startLine s.startCol .. tokenCount ts - 1]
+  where
+    inside i =
+      let t = tokenSpanAt ts i
+       in (t.startLine, t.startCol) < (s.endLine, s.endCol)
 
 -- * Reading
 
@@ -447,15 +601,18 @@ data Key
   deriving (Eq, Ord)
 
 -- | Targets so far: their indices, how many, the new ones (last
--- first), and the link words set (last first).
-data Assigned = Assigned
+-- first), and the link words set (last first), by what links.
+data Assigned a = Assigned
   { seen :: Map Key Int,
     count :: Int,
     new :: [Key],
-    words :: [(Int, Word32)]
+    words :: [(a, Word32)]
   }
 
-assign :: Assigned -> (Int, Key) -> Assigned
+noneAssigned :: Assigned a
+noneAssigned = Assigned Map.empty 0 [] []
+
+assign :: Assigned a -> (a, Key) -> Assigned a
 assign a (i, k) = case Map.lookup k a.seen of
   Just j -> a {words = (i, word j) : a.words}
   Nothing ->
@@ -479,15 +636,15 @@ keyOf input ls i o = case o.resolution of
   FreeRef ctx -> do
     res <- input.resolution
     resolved <- IntMap.lookup i res.names
-    fromResolved ls input i ctx role resolved
+    fromResolved role (nameOf ls input i ctx) resolved
   BuiltInRef -> Nothing
   NotAName _ -> Nothing
   where
     role = if o.role `elem` [Def, Sig] then AtDef else AtUse
 
-fromResolved ::
-  SourceLines -> LinksInput -> Int -> FreeContext -> DeclRole -> Resolved -> Maybe Key
-fromResolved ls input i ctx role = \case
+-- | A resolution's key, with the name for Hoogle.
+fromResolved :: DeclRole -> Text -> Resolved -> Maybe Key
+fromResolved role name = \case
   Exact t -> Just (home t [] 1)
   Heuristic rs t ->
     Just (home t (map reasonOf (NonEmpty.toList rs)) (candidatesOf (NonEmpty.toList rs)))
@@ -506,7 +663,7 @@ fromResolved ls input i ctx role = \case
           withModule = case how of
             HowOneOf -> ""
             _ -> " +module:" <> m
-       in KeyExternal g.module_ how k (nameOf ls input i ctx <> withModule)
+       in KeyExternal g.module_ how k (name <> withModule)
     candidatesOf rs = case [k | Ambiguous k <- rs] of
       k : _ -> k
       [] -> 1
@@ -595,7 +752,13 @@ declFacts :: LinksInput -> SourceLines -> ModuleId -> Map DeclId DeclFacts
 declFacts input selfLines m = case source of
   Just (ls, parsed) ->
     -- Lazy: built on the first sig asked for, once.
-    let env = CodeEnv {source = ls, tokens = parsed.tokens, names = noLocalNames}
+    let env =
+          CodeEnv
+            { source = ls,
+              tokens = parsed.tokens,
+              names = noLocalNames,
+              outer = const 0
+            }
      in Map.fromListWith
           (\_ old -> old)
           [ (info.id, DeclFacts {line = info.nameSpan.startLine, sig = sigText =<< code})

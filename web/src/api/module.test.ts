@@ -131,6 +131,7 @@ describe("shared pieces", () => {
       package: null,
       component: null,
       tier: { kind: "syntactic", reason: "no-hie" },
+      partial: false,
       parse: {
         kind: "parsed",
         header: { name: null, haddock: null, warning: null },
@@ -139,6 +140,7 @@ describe("shared pieces", () => {
         extensions: { language: "GHC2021", enabled: [], fromPragmas: [] },
         warnings: [],
         idParts: [],
+        targets: [],
         declarations: [
           {
             kind: "value",

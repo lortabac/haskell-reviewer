@@ -41,6 +41,7 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
 import Data.Word (Word64)
+import HaskellReviewer.Core.DocLinks (DocRef (..))
 import HaskellReviewer.Core.Entities
   ( Avail (..),
     Entity (..),
@@ -100,6 +101,7 @@ import HaskellReviewer.Core.Resolve
     isPartial,
     resolveModule,
   )
+import HaskellReviewer.Core.RichText qualified as Rich (RefNamespace (..))
 import HaskellReviewer.Core.Root (Root (..))
 import HaskellReviewer.Core.SourceText (sliceSpan, sourceLines)
 import HaskellReviewer.Core.Span (renderSpan)
@@ -233,9 +235,22 @@ dumpInput input ms = Text.unlines (concatMap one ms)
                   <> renderResolved res
        in [line k res False | (k, res) <- IntMap.toList r.names]
             <> [line k res True | (k, res) <- IntMap.toList r.punFields]
+            <> [ "  doc " <> docText d <> " -> " <> renderResolved res
+               | (d, res) <- Map.toList r.docNames
+               ]
             <> [ "partial: " <> Text.intercalate ", " (map renderModuleId r.notReady)
                | isPartial r
                ]
+    docText (d :: DocRef) =
+      nsPrefix d.namespace
+        <> "'"
+        <> maybe "" (\(ModuleName q) -> q <> ".") d.qualifier
+        <> d.occ
+        <> "'"
+    nsPrefix = \case
+      Rich.ValueNs -> "v"
+      Rich.TypeNs -> "t"
+      Rich.AnyNs -> ""
     cut t = if Text.length t > 40 then Text.take 40 t <> "..." else t
     quote t = "\"" <> t <> "\""
 

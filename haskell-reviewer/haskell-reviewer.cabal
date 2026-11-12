@@ -129,6 +129,7 @@ library
     HaskellReviewer.Server.Wire
     HaskellReviewer.Server.Wire.Page
     HaskellReviewer.Server.Wire.Source
+    HaskellReviewer.Server.Wire.Targets
 
     -- App
     HaskellReviewer.App.Cli
@@ -275,6 +276,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Server.ApiTest
     HaskellReviewer.Server.AssetsTest
     HaskellReviewer.Server.CborTest
+    HaskellReviewer.Server.PageLinksTest
     HaskellReviewer.Server.PageTest
     HaskellReviewer.Server.EventsTest
     HaskellReviewer.Server.ListenTest

@@ -93,6 +93,8 @@ const decoders: Record<string, (value: unknown) => unknown> = {
   "module-too-large": decodeModulePage,
   "module-page": decodeModulePage,
   "module-page-sections": decodeModulePage,
+  "module-page-links": decodeModulePage,
+  "module-page-partial": decodeModulePage,
   "module-not-found": decodeModuleNotFound,
   prefs: decodePrefs,
   "prefs-defaults": decodePrefs,
@@ -532,6 +534,7 @@ describe("decoders reject bad shapes", () => {
       package: { name: "p", version: "1" },
       component: "lib",
       tier: { kind: "syntactic", reason: "no-hie" },
+      partial: false,
       parse: {
         kind: "text-only",
         reason: { kind: "too-slow" },
@@ -549,6 +552,7 @@ describe("decoders reject bad shapes", () => {
         extensions: { language: "GHC2021", enabled: [], fromPragmas: [] },
         warnings: [],
         idParts: [],
+        targets: [],
         declarations: [],
         docItems: [],
         pragmas: [],
@@ -556,6 +560,18 @@ describe("decoders reject bad shapes", () => {
       },
     });
     expect(decodeModulePage(parsed({}))).toEqual(parsed({}));
+    // A pragma with this code.
+    const code = (c: unknown[]) => ({
+      kind: "rules",
+      span: [1, 1, 1, 2],
+      names: [],
+      code: c,
+    });
+    const linked = parsed({
+      targets: [["external", "Prelude", null, "only-open", 1, "T"]],
+      pragmas: [code([["con", "T", null, 1]])],
+    });
+    expect(decodeModulePage(linked)).toEqual(linked);
     const reason = (r: object) => ({
       ...view,
       parse: { kind: "text-only", reason: r, warnings: [] },
@@ -566,6 +582,25 @@ describe("decoders reject bad shapes", () => {
       { ...view, package: { name: "p" } },
       { ...view, component: undefined },
       { ...view, tier: { kind: "precise", reason: "no-hie" } },
+      { ...view, partial: undefined },
+      parsed({ targets: undefined }),
+      parsed({ targets: [["local", 1, 1]] }),
+      // Links past the table: a code token, a doc name.
+      parsed({ targets: [], pragmas: [code([["con", "T", null, 1]])] }),
+      parsed({ pragmas: [code([["con", "T", 1, 1]])] }),
+      parsed({ pragmas: [code([["con", "T", null, 0]])] }),
+      parsed({
+        docItems: [
+          {
+            kind: "heading",
+            level: 1,
+            inlines: [
+              { kind: "name", written: "x", ns: "any", target: null, link: 1 },
+            ],
+            span: [1, 1, 1, 2],
+          },
+        ],
+      }),
       { ...view, parse: { kind: "maybe" } },
       { ...view, parse: { ...view.parse, warnings: undefined } },
       reason({ kind: "nope" }),

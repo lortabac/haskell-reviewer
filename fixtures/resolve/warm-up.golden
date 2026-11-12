@@ -106,6 +106,30 @@ exports:
   9:23-9:25 "KB" type def -> exact w:lib:Defs con:KB
   10:15-10:21 "Either" type use -> external Prelude (only open import)
   12:17-12:20 "Int" type use -> external Prelude (only open import)
+== w:lib:Docs
+exports:
+  val:f @w:lib:Docs
+  3:14-3:17 "Rec" type import -> exact w:lib:Defs type:Rec
+  3:24-3:27 "Nat" type import -> exact w:lib:Defs type:Nat
+  4:19-4:23 "sort" var import -> external Data.List (listed)
+  10:6-10:11 "D.Nat" type use -> exact w:lib:Defs type:Nat
+  10:15-10:18 "Rec" type use -> exact w:lib:Defs type:Rec
+  10:22-10:25 "Int" type use -> external Prelude (one of 2)
+  10:26-10:29 "+++" type use -> exact w:lib:Ops type:+++
+  10:30-10:34 "Bool" type use -> external Prelude (one of 2)
+  11:5-11:14 "undefined" var use -> external Prelude (one of 2)
+  doc v'Rec' -> exact w:lib:Defs con:Rec
+  doc t'Rec' -> exact w:lib:Defs type:Rec
+  doc '+++' -> exact w:lib:Ops type:+++
+  doc 'Nat' -> exact w:lib:Defs type:Nat
+  doc 'Z' -> exact w:lib:Defs con:Z
+  doc 'f' -> external Prelude (one of 2)
+  doc 'mystery' -> external Prelude (one of 2)
+  doc 'o' -> exact w:lib:Ops val:o
+  doc 'sort' -> external Data.List (listed)
+  doc 'D.val' -> exact w:lib:Defs val:val
+  doc 'Defs.amb' -> exact w:lib:Defs val:amb
+  doc 'Nope.x' -> unresolved (no candidate)
 == w:lib:Gen
 exports:
   val:gen @splice w:lib:Gen
@@ -117,6 +141,11 @@ exports:
   open: splices w:lib:NoList
   3:3-3:7 "pure" var use [splice] -> heuristic[made by splice here] w:lib:NoList
   4:6-4:13 "mystery" var use -> heuristic[made by splice here] w:lib:NoList
+== w:lib:Ops
+exports:
+  type:+++ @w:lib:Ops
+  val:o @w:lib:Ops
+  2:16-2:22 "Either" type use -> external Prelude (only open import)
 == w:lib:Other
 exports:
   val:amb @w:lib:Other

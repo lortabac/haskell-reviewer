@@ -97,9 +97,9 @@ describe("DocView", () => {
     const root = show(
       doc([
         para(
-          { kind: "name", written: "f", ns: "any", target: 1 },
-          { kind: "name", written: "g", ns: "value", target: null },
-          { kind: "name", written: "h", ns: "type", target: 9 },
+          { kind: "name", written: "f", ns: "any", target: 1, link: null },
+          { kind: "name", written: "g", ns: "value", target: null, link: 2 },
+          { kind: "name", written: "h", ns: "type", target: 9, link: null },
         ),
       ]),
     );
@@ -282,12 +282,14 @@ describe("Code and Signature", () => {
     ["pun", "->"],
     ["sp", " "],
     ["con", "U", 9],
+    ["sp", " "],
+    ["con", "V", null, 1],
   ];
 
-  it("a span per token with its class; links to the page", () => {
+  it("a span per token with its class; links to the page only", () => {
     const root = mount(() => <Code code={code} />);
     const c = root.querySelector("code.code");
-    expect(c?.textContent).toBe("f :: T -> U");
+    expect(c?.textContent).toBe("f :: T -> U V");
     expect(
       [...(c?.children ?? [])].map((e) => [e.tagName, e.className]),
     ).toEqual([
@@ -296,6 +298,8 @@ describe("Code and Signature", () => {
       ["A", "tok-con"],
       ["SPAN", "tok-pun"],
       // Not on the page: no link.
+      ["SPAN", "tok-con"],
+      // Out of the module: no link yet.
       ["SPAN", "tok-con"],
     ]);
     expect(c?.querySelector("a")?.getAttribute("href")).toBe(
@@ -306,9 +310,9 @@ describe("Code and Signature", () => {
   it("signature: parts cut before arrows, a space between", () => {
     const root = mount(() => <Signature code={code} />);
     const sig = root.querySelector("code.sig");
-    expect(sig?.textContent).toBe("f :: T -> U");
+    expect(sig?.textContent).toBe("f :: T -> U V");
     expect(
       [...(sig?.querySelectorAll(".sig-part") ?? [])].map((p) => p.textContent),
-    ).toEqual(["f :: T", "-> U"]);
+    ).toEqual(["f :: T", "-> U V"]);
   });
 });

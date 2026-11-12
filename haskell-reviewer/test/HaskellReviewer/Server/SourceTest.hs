@@ -27,6 +27,7 @@ import Control.Monad (forM_, void, when)
 import Data.Aeson qualified as Aeson
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString.Lazy qualified as LBS
+import Data.Containers.ListUtils (nubOrd)
 import Data.List (sort)
 import Data.Maybe (fromMaybe)
 import Data.Set qualified as Set
@@ -48,12 +49,11 @@ import HaskellReviewer.Server.Wire.Source
   ( SourceBody (..),
     coveringView,
     encodeSource,
-    howName,
     outlineKindName,
-    reasonName,
     sourceWarmUp,
     textOnlySource,
   )
+import HaskellReviewer.Server.Wire.Targets (howName, reasonName)
 import HaskellReviewer.Session.Index
   ( SlotState (..),
     isRequested,
@@ -288,6 +288,19 @@ routeTests =
       putMVar gate ()
       second <- okSource (indexed api) "s/src/B.hs"
       bool (field "partial" second) @?= False,
+    testCase "the module page: links out, partial while an import isn't ready" $ do
+      gate <- newEmptyMVar
+      let api = (gatedOn "s/src/A.hs" gate) {workers = 2}
+          outs v = map arr (arr (field "targets" (field "parse" v)))
+      first <- okPage api "C"
+      bool (field "partial" first) @?= True
+      let modules = [t | t <- outs first, str (head' t) == "module"]
+      assertBool (show modules) (any (\t -> str (t !! 1) == "A") modules)
+      putMVar gate ()
+      second <- okPage (indexed api) "C"
+      bool (field "partial" second) @?= False
+      let decls = [str (t !! 4) | t <- outs second, str (head' t) == "decl"]
+      sort (nubOrd decls) @?= ["type:Shape", "val:area"],
     testCase "gate on: answered while indexing, from Pending" gateCase,
     testCase "the body is built inside the gate" $ do
       snap <- sourceApi.snapshot >>= either (assertFailure . show) pure
@@ -340,6 +353,14 @@ gateCase = do
 -- | The 404 body of the source route.
 fileNotFound :: LBS.ByteString
 fileNotFound = "{\"generation\":1,\"kind\":\"not-found\",\"what\":\"file\"}"
+
+-- | The module page of a ref, as JSON.
+okPage :: TestApi -> Text -> IO Aeson.Value
+okPage api ref = do
+  r <- getApi api ["api", "module", "tree", ref]
+  r.status @?= 200
+  lookup "Content-Type" r.headers @?= Just "application/cbor"
+  cborValue r.body
 
 -- | GET api/source/tree/<path>: a 200 with CBOR, as JSON.
 okSource :: TestApi -> Text -> IO Aeson.Value

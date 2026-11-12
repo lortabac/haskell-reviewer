@@ -24,6 +24,7 @@ import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
 import GHC.Conc (getAllocationCounter)
+import HaskellReviewer.Core.DocLinks (DocRef (..))
 import HaskellReviewer.Core.Entities
   ( Avail (..),
     Entity (..),
@@ -79,6 +80,7 @@ import HaskellReviewer.Core.Resolve
     resolveModule,
   )
 import HaskellReviewer.Core.ResolveWarmUp (resolveWarmUpInput, resolveWarmUpModules)
+import HaskellReviewer.Core.RichText qualified as Rich (RefNamespace (..))
 import HaskellReviewer.Core.SourceText (sliceSpan, sourceLines)
 import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
 import HaskellReviewer.Core.Tokens (tokenIndexFrom, tokenSpanAt)
@@ -112,6 +114,8 @@ tests =
       testCase "not ready: a guess on the module, partial; exact once ready" notReadyCase,
       testCase "the memo gets final sets only" finalOnly,
       testCase "home imports: implicit Prelude, no externals, no repeats" homeImportsCase,
+      testCase "doc names: qualifiers, namespaces, home first" docNamesCase,
+      testCase "doc names: a hit beats a guess; DataKinds" docNamesRankCase,
       testCase
         "every free token gets one result; list tokens stay in their import"
         coverage,
@@ -299,6 +303,72 @@ notReadyCase = do
   lookup "a" (results ready "B")
     @?= Just (Exact (DeclTarget (modId "A") (Named DVal "a")))
   fmap isPartial (resolveModule ready (modId "B")) @?= Just False
+
+-- | See Note [Resolution] in "HaskellReviewer.Core.Resolve".
+docNamesCase :: Assertion
+docNamesCase = do
+  let input =
+        memInput
+          Set.empty
+          [ ("D", "module D where\ndata T = T\nv = 1\ntype a +++ b = Either a b\n"),
+            ( "A",
+              "{-# LANGUAGE NoImplicitPrelude #-}\n\
+              \-- | 'Q.v' 'D.v' t'T' v'T' 'T' 'sort' 'Nope.x' '+++' 'e'.\n\
+              \module A where\n\
+              \import qualified D as Q\n\
+              \import D hiding (v)\n\
+              \import Data.List (sort)\n\
+              \import Data.Maybe\n"
+            )
+          ]
+      docs = maybe [] (Map.toList . (.docNames)) (resolveModule input (modId "A"))
+      exact d = "exact p:lib:D " <> d
+  [(r.namespace, r.qualifier, r.occ, renderResolved x) | (r, x) <- docs]
+    @?= [ (Rich.ValueNs, Nothing, "T", exact "con:T"),
+          (Rich.TypeNs, Nothing, "T", exact "type:T"),
+          (Rich.AnyNs, Nothing, "+++", exact "type:+++"),
+          (Rich.AnyNs, Nothing, "T", exact "type:T"),
+          (Rich.AnyNs, Nothing, "e", "external Data.Maybe (only open import)"),
+          (Rich.AnyNs, Nothing, "sort", "external Data.List (listed)"),
+          (Rich.AnyNs, Just (ModuleName "D"), "v", exact "val:v"),
+          (Rich.AnyNs, Just (ModuleName "Nope"), "x", "unresolved (no candidate)"),
+          (Rich.AnyNs, Just (ModuleName "Q"), "v", exact "val:v")
+        ]
+
+-- | A hit beats a guess made from a miss, whatever the order; no
+-- DataKinds fallback when constructors come next.
+docNamesRankCase :: Assertion
+docNamesRankCase = do
+  let input =
+        memInput
+          Set.empty
+          [ ("D", "module D where\ndata N = Z\n"),
+            ( "A",
+              "{-# LANGUAGE DataKinds #-}\n\
+              \-- | ':|' 'Z' t'Z'.\n\
+              \module A where\n\
+              \import Data.List.NonEmpty (NonEmpty ((:|)))\n\
+              \import D\n"
+            ),
+            ( "S",
+              "{-# LANGUAGE TemplateHaskell, NoImplicitPrelude #-}\n\
+              \-- | 'Data.Map.insert'.\n\
+              \module S where\n\
+              \import qualified Data.Map as M (insert)\n\
+              \$(pure [])\n"
+            )
+          ]
+      docs m =
+        [ (r.namespace, r.occ, renderResolved x)
+        | Just res <- [resolveModule input (modId m)],
+          (r, x) <- Map.toList res.docNames
+        ]
+  docs "A"
+    @?= [ (Rich.TypeNs, "Z", "heuristic[datakinds] p:lib:D con:Z"),
+          (Rich.AnyNs, ":|", "external Data.List.NonEmpty (listed)"),
+          (Rich.AnyNs, "Z", "exact p:lib:D con:Z")
+        ]
+  docs "S" @?= [(Rich.AnyNs, "insert", "external Data.Map (listed)")]
 
 finalOnly :: Assertion
 finalOnly = do

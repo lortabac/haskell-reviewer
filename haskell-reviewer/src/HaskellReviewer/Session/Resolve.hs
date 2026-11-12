@@ -99,7 +99,9 @@ waits for them, up to 'importWait' (G2).
 Q-RTS-BLACKHOLE: request threads share the Resolver. The graph is
 forced in 'newResolver', before the snapshot is filled. Sets are forced
 before they go in the memo, and the memo is a strict map, so the TVar
-holds no thunk. The result is forced before it's returned. The shared
+holds no thunk. The result is forced before it's returned, except
+docNames, which stays lazy and is forced only by pageLinks, on the
+request thread. The shared
 values of resolution are built by 'warmUpResolve', in the listing
 thread, before the fill.
 -}
@@ -129,7 +131,9 @@ newResolver idx index = do
 
 -- | Resolve a module's free names: wait for the module, resolve, keep
 -- the new final sets. 'Nothing' if it has no slot, or didn't parse, or
--- failed. The result is fully forced. See Note [Session resolution].
+-- failed. The result is forced, except @docNames@, which stays lazy
+-- and is forced only by @pageLinks@, on the request thread. See Note
+-- [Session resolution].
 resolveModule :: Resolver -> ModuleId -> IO (Maybe ModuleResolution)
 resolveModule r i = fmap fst <$> resolveModuleWith r i
 

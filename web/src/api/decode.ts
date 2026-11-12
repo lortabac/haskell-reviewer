@@ -51,6 +51,13 @@ export function nat(value: unknown, path: string): number {
   return n;
 }
 
+// A link word or a count: an integer, 1 or more.
+export function positive(value: unknown, path: string): number {
+  const n = nat(value, path);
+  if (n < 1) throw new DecodeError(path, "an integer, 1 or more");
+  return n;
+}
+
 export function bool(value: unknown, path: string): boolean {
   if (typeof value !== "boolean") throw new DecodeError(path, "a boolean");
   return value;

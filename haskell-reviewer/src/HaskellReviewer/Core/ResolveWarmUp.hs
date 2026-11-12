@@ -369,6 +369,24 @@ files =
           "f = m"
         ]
     ),
+    -- Doc names of every kind. See Note [Names in docs] in
+    -- "HaskellReviewer.Core.DocLinks".
+    ("w/src/Ops.hs", "module Ops where\ntype a +++ b = Either a b\no = 1\n"),
+    ( "w/src/Docs.hs",
+      Text.unlines
+        [ "module Docs (f) where",
+          "import qualified Defs as D",
+          "import Defs (Rec (..), Nat (..))",
+          "import Data.List (sort)",
+          "import Data.Char",
+          "import Ops",
+          "-- | Alias 'D.val', module 'Defs.amb', t'Rec', v'Rec', 'Nat' (a type),",
+          "-- 'Z' (a constructor), '+++' (a type), 'o' (no sig), 'sort' (listed),",
+          "-- 'mystery' (one of the open imports), 'Nope.x' (nothing), 'f' (local).",
+          "f :: D.Nat -> Rec -> Int +++ Bool",
+          "f = undefined"
+        ]
+    ),
     -- A package import.
     ( "w/src/Pkg.hs",
       Text.unlines

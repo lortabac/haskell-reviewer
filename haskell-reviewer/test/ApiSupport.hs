@@ -230,6 +230,18 @@ sourceTexts =
       \sorted :: [Shape] -> [Shape]\n\
       \sorted shapes = sortOn area shapes\n"
     ),
+    -- Links out of the module on its page: code and doc names.
+    ( "s/src/C.hs",
+      "module C (describe) where\n\
+      \\n\
+      \import A\n\
+      \import qualified Data.List as L\n\
+      \\n\
+      \-- | 'area' of a 'Shape', sorted with 'L.sortOn' or 'Data.List.sortOn'.\n\
+      \-- See 'describe', and 'Nope.x'.\n\
+      \describe :: Shape -> Maybe Double\n\
+      \describe _ = Nothing\n"
+    ),
     ( "s/src/Cpp.hs",
       "{-# LANGUAGE CPP #-}\n\
       \module Cpp (x) where\n\
@@ -488,6 +500,7 @@ sourceSnapshot =
                             listed
                             [ "A",
                               "B",
+                              "C",
                               "Cpp",
                               "Bad",
                               "Slow",
