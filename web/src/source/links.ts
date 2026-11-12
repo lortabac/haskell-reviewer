@@ -10,7 +10,7 @@ export interface LinkInfo {
   href: string;
   // What follows the token's text in its name: "x, <about>".
   about: string;
-  // Resolved heuristically: dotted underline, a title.
+  // Resolved heuristically: dotted underline, said in the name.
   guess: boolean;
   // Off site (Hoogle): new tab.
   external: boolean;

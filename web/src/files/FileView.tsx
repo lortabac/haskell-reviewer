@@ -279,6 +279,7 @@ function FileText(props: {
     const h = hl();
     return h === undefined ? undefined : highlightedLine(h);
   });
+  const card = (k: number) => hl()?.cards[k - 1];
   const lineDecor = createMemo(() => {
     const h = hl();
     return h === undefined ? undefined : highlightDecor(h, docs);
@@ -336,6 +337,7 @@ function FileText(props: {
         marks={marks()}
         renderLine={renderLine()}
         lineDecor={lineDecor()}
+        card={card}
         ref={(a) => (api = a)}
       />
     </Show>

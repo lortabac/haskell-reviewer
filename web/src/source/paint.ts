@@ -53,7 +53,6 @@ function anchor(link: number, info: LinkInfo): HTMLAnchorElement {
   a.tabIndex = -1;
   a.setAttribute("draggable", "false");
   a.dataset.link = String(link);
-  if (info.guess) a.title = "Resolved heuristically";
   if (info.external) {
     a.target = "_blank";
     a.rel = "noopener noreferrer";

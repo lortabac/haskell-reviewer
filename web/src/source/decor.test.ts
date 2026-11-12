@@ -18,6 +18,7 @@ const h: Highlight = {
   outline: [entry],
   byLine: new Map([[2, entry]]),
   links: [],
+  cards: [],
 };
 
 describe("decor", () => {

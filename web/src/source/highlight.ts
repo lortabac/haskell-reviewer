@@ -8,6 +8,7 @@ import {
   regionKinds,
   type Target,
 } from "../api/source";
+import { type CardText, cardOf } from "./hover";
 import type { LinkInfo } from "./links";
 
 // A run's part on one line. Code point columns from 1, end exclusive;
@@ -85,6 +86,8 @@ export interface Highlight {
   runs: Seg[][];
   // By link word − 1; undefined: not a link.
   links: readonly (LinkInfo | undefined)[];
+  // Hover cards, by link word − 1.
+  cards: readonly CardText[];
   kinds: LineKind[];
   // Entries on a line of the file only (no dead "line N" links).
   outline: OutlineEntry[];
@@ -102,6 +105,7 @@ export function highlightOf(
   return {
     runs,
     links,
+    cards: s.targets.map(cardOf),
     kinds: lineKinds(s.regions, count),
     outline,
     byLine: outlineByLine(outline),

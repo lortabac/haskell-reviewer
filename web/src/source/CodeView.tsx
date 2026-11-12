@@ -12,6 +12,7 @@ import {
   createRenderEffect,
   createSelector,
   createSignal,
+  createUniqueId,
   getOwner,
   type JSX,
   on,
@@ -22,6 +23,7 @@ import {
 import { setVar } from "../ui/cssom";
 import { bringOnPage } from "../ui/scroll";
 import { createCopy } from "./copy";
+import { createHoverCard } from "./createHoverCard";
 import { plainPieces } from "./display";
 import { focusKeepingSelection } from "./focus";
 import {
@@ -33,6 +35,7 @@ import {
   type Stop,
 } from "./keys";
 import type { LineKind } from "./highlight";
+import type { CardText } from "./hover";
 import { type LineIndex, lineText } from "./lines";
 import { lineNodes } from "./paint";
 import { colIn, domPoint, pointAt, replaceKeepingSelection } from "./selection";
@@ -99,6 +102,8 @@ export interface CodeViewProps {
   // the selection.
   renderLine?: ((line: number, text: string) => Node[]) | undefined;
   lineDecor?: ((line: number) => LineDecor | undefined) | undefined;
+  // The hover card of a link word (D-285); undefined: none.
+  card?: ((link: number) => CardText | undefined) | undefined;
   ref?: (api: CodeApi) => void;
 }
 
@@ -111,6 +116,8 @@ export function CodeView(props: CodeViewProps): JSX.Element {
   let box!: HTMLDivElement;
   let rowsEl!: HTMLDivElement;
   let probe!: HTMLDivElement;
+  let cardEl!: HTMLDivElement;
+  const cardId = createUniqueId();
   const owner = getOwner();
   const count = () => props.index.count;
   const clamp = (n: number) => Math.min(Math.max(1, n), Math.max(1, count()));
@@ -235,14 +242,18 @@ export function CodeView(props: CodeViewProps): JSX.Element {
     setCursor(c);
     applyStop(cell, c);
     if (link !== undefined) {
-      focusKeepingSelection(link);
+      // In view first, then the card (placed there), then focus: the
+      // description is there when focus comes.
       revealX(link);
+      if (page) bringOnPage(r);
+      hover.beforeFocus(link);
+      focusKeepingSelection(link);
     } else {
       // Not the cursor's cell yet (inside an effect): wait.
       if (!cell.hasAttribute("tabindex")) return false;
       focusKeepingSelection(cell);
+      if (page) bringOnPage(r);
     }
-    if (page) bringOnPage(r);
     return true;
   };
   // The cursor's row is pinned, so it's mounted and its cell focusable
@@ -262,6 +273,14 @@ export function CodeView(props: CodeViewProps): JSX.Element {
     if (!tryFocus(line, want, page)) pendingFocus = { line, want, page };
   };
   const focusLine = (n: number) => focusAt(n, goal);
+
+  const hover = createHoverCard({
+    view: () => box,
+    card: () => cardEl,
+    row,
+    text: (k) => props.card?.(k),
+    dragging: () => linkDrag !== undefined,
+  });
 
   const copy = createCopy({
     view: () => box,
@@ -711,6 +730,14 @@ export function CodeView(props: CodeViewProps): JSX.Element {
       { defer: true },
     ),
   );
+  // After the rows redrew (render effects run first).
+  createEffect(
+    on(
+      () => props.renderLine,
+      () => hover.relink(),
+      { defer: true },
+    ),
+  );
 
   return (
     <div class="code-wrap">
@@ -732,6 +759,15 @@ export function CodeView(props: CodeViewProps): JSX.Element {
       >
         <div ref={(el) => (rowsEl = el)} class="code-rows" role="rowgroup" />
       </div>
+      {/* The hover card: over the rows, outside the grid and its
+          copy. Text only. */}
+      <div
+        ref={(el) => (cardEl = el)}
+        id={cardId}
+        class="code-card"
+        role="tooltip"
+        hidden
+      />
       {/* Measures a row: same classes, height 1.5em. No text, and after
           the view, so it's never in a copy. */}
       <div

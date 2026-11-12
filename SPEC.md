@@ -383,7 +383,9 @@ The whole file, syntax-highlighted (§5.6), with line numbers.
   links. Guessed links have a dotted underline and say so in their name
   (D-283).
 - Hovering an identifier shows its type when known (precise tier), or else
-  its declared signature.
+  its declared signature. The same card shows when the token cursor
+  reaches a link: signature, module, why it's a guess; Esc hides it
+  (D-285).
 - **Find references**: for a selected identifier, a list of the places where it
   is used. These are exact at the precise tier and textual-but-scoped at the
   syntactic tier, and labelled accordingly.
@@ -585,7 +587,7 @@ also has a UI control, so nothing is lost with shortcuts off.
 | `b` | Switch side (base/head) |
 | `a` | Ask the LLM about the focus/selection |
 | `y` | Copy the focused item's primary identifier (§5.7) |
-| `Esc` | Close the overlay/panel; clear the selection |
+| `Esc` | Close the hover card if one shows; else close the overlay/panel; clear the selection |
 | `?` | Show the keyboard help |
 
 In the source view, ←/→ move between the links of the line and ↑/↓
@@ -611,6 +613,8 @@ keep the column (D-284).
   reader's virtual cursor. Instead, `j`/`k`, `n`/`p` and find in file move
   focus and scroll, and the focused line is announced (real focus on the
   line's cell, D-277).
+- The hover card (SC 1.4.13) can be hovered, Esc hides it, and it stays
+  until the pointer or focus leaves (D-285).
 - Text scales to 200% without loss of function. Side-by-side diffs fall
   back to unified below a minimum width.
 - Reflows to one column (header, then sidebar, then main) at 320px wide,
@@ -1567,7 +1571,8 @@ a framework would cost more than it saves.
   lines are text and spans built from the token runs; when the highlight
   comes late, only the rows on screen are redrawn, and the selection,
   focus and layout stay put (D-279). Identifier links are real `<a>`
-  elements inside the rows (D-283).
+  elements inside the rows (D-283). One hover card per view, placed by
+  our own code (D-285).
 - **Virtualisation** (D-70): every source and diff view is virtualised,
   so only the visible lines are in the DOM. Rows carry ARIA row indexes,
   so assistive tech knows where it is in the file. Our own **find in file**
