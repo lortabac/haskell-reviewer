@@ -10,7 +10,9 @@ import { wrapParts } from "./signature";
 function token(t: CodeToken, links: Links): JSX.Element {
   const [cls, text, n] = t;
   if (cls === "sp") return text;
-  const href = n === undefined ? undefined : links.decl(n);
+  // Links out of the module ([class, text, null, link]) don't show
+  // yet.
+  const href = typeof n !== "number" ? undefined : links.decl(n);
   return href === undefined ? (
     <span class={`tok-${cls}`}>{text}</span>
   ) : (

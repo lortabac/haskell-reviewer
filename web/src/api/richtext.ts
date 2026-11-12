@@ -8,6 +8,7 @@ import {
   nullable,
   object,
   oneOf,
+  positive,
   str,
 } from "./decode";
 
@@ -72,12 +73,14 @@ export type Inline =
   // url: http or https only, checked here too.
   | { kind: "link"; url: string; label: Inline[] | null }
   // target: the handle of a declaration of this module, if the name is
-  // one (module.ts, byHandle).
+  // one (module.ts, byHandle). Else link: 1 + the index of its target
+  // in the page's targets, if it links out of the module.
   | {
       kind: "name";
       written: string;
       ns: (typeof nameSpaces)[number];
       target: number | null;
+      link: number | null;
     }
   // ref: the module's ref, if it's in the project. anchor as written.
   | {
@@ -140,6 +143,7 @@ export function decodeInline(value: unknown, path: string): Inline {
         written: field(o, "written", path, str),
         ns: field(o, "ns", path, oneOf(nameSpaces)),
         target: field(o, "target", path, nullable(nat)),
+        link: field(o, "link", path, nullable(positive)),
       };
     case "module":
       return {

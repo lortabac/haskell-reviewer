@@ -10,7 +10,7 @@ import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString.Lazy qualified as LBS
 import Data.Foldable (toList)
 import Data.Int (Int64)
-import Data.List (nub)
+import Data.List (nub, sort)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -26,6 +26,7 @@ import HaskellReviewer.Core.Project
     parserGhcVersion,
   )
 import HaskellReviewer.Core.RelPath (RelPath, relPathFromSegments)
+import HaskellReviewer.Core.SourceLinks (noPageLinks)
 import HaskellReviewer.Server.Wire.Page
   ( ModuleAnswer (..),
     ModuleView (..),
@@ -224,6 +225,25 @@ warmUpTest =
     assertBool "an instance id" (any ((/= Null) . field "inst") ids)
     assertBool "a linked token" $
       or [True | Array a <- values, [String _, String _, Number _] <- [toList a]]
+    -- Links out of the module (Note [Page links] in
+    -- "HaskellReviewer.Core.SourceLinks").
+    assertBool "a token linked out" $
+      or [True | Array a <- values, [String _, String _, Null, Number _] <- [toList a]]
+    assertBool "a doc name linked out" $
+      or [True | Object o <- values, Just (Number _) <- [KeyMap.lookup "link" o]]
+    nub [b | p <- pages, Bool b <- [field "partial" p]] @?= [False, True]
+    let outs =
+          [toList t | p <- pages, Array t <- toList' (field "targets" (field "parse" p))]
+        toList' = \case
+          Array a -> toList a
+          _ -> []
+        kindsOf = nub [k | String k : _ <- outs]
+        externals = [t | t@(String "external" : _) <- outs]
+        declOuts = [t | t@(String "decl" : _) <- outs]
+    filter (`notElem` kindsOf) ["decl", "module", "external"] @?= []
+    nub [h | t <- externals, String h <- take 1 (drop 3 t)]
+      `sameAs` ["listed", "only-open", "one-of"]
+    nub [isNull v | t <- declOuts, v <- take 1 (drop 7 t)] `sameAs` [False, True]
     -- A line past 256 columns (Note [Slicing]).
     assertBool "a long line" $
       or
@@ -344,6 +364,15 @@ warmUpTest =
 
 -- * Helpers
 
+-- | The same elements, in any order.
+sameAs :: (Ord a, Show a) => [a] -> [a] -> Assertion
+sameAs xs ys = sort xs @?= sort ys
+
+isNull :: Value -> Bool
+isNull = \case
+  Null -> True
+  _ -> False
+
 num :: Int -> Text
 num = Text.pack . show
 
@@ -454,7 +483,8 @@ viewOf src m =
   ModuleView
     { moduleId = LooseModule file,
       path = Just file,
-      answer = ParsedAnswer ParsedSource {text = src, parsed = m}
+      partial = False,
+      answer = ParsedAnswer ParsedSource {text = src, parsed = m} noPageLinks
     }
 
 file :: RelPath

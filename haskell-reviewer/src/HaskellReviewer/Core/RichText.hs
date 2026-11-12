@@ -174,7 +174,7 @@ data NameRef = NameRef
 
 -- | @v'x'@, @t'T'@ or plain @'x'@.
 data RefNamespace = ValueNs | TypeNs | AnyNs
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 -- * Links
 

@@ -2,7 +2,8 @@
 
 -- | Code as tokens, for declaration heads and signatures on the docs
 -- page (SPEC §4.2): each token with its class, its text from the file,
--- and a link if it names a declaration of this module.
+-- and a link if it names a declaration of this module, else maybe one
+-- out of the module.
 module HaskellReviewer.Core.Code
   ( -- * Code
     Code,
@@ -35,6 +36,7 @@ import Data.List.NonEmpty qualified as NonEmpty
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Word (Word32)
 import HaskellReviewer.Core.Decls
   ( ClassDecl (..),
     ConArgs (..),
@@ -60,7 +62,13 @@ import HaskellReviewer.Core.Project (ModuleName (..))
 import HaskellReviewer.Core.RichText (NameRef (..), RefNamespace (..))
 import HaskellReviewer.Core.SourceText (SourceLines, sliceSpan, sourceLines)
 import HaskellReviewer.Core.Span (Col, Line, Span (..))
-import HaskellReviewer.Core.Tokens (Token (..), TokenClass (..), Tokens, tokensIn)
+import HaskellReviewer.Core.Tokens
+  ( Token (..),
+    TokenClass (..),
+    Tokens,
+    tokenIndexFrom,
+    tokensIn,
+  )
 
 -- * Code
 
@@ -73,7 +81,11 @@ data CodeToken = CodeToken
     -- | As written in the file. A space is one @' '@.
     text :: Text,
     -- | The local declaration it names. See Note [Local links in code].
-    link :: Maybe DeclId
+    link :: Maybe DeclId,
+    -- | Else, its link out of the module: 1 + its index in the page's
+    -- targets, 0 for none, as on the wire. See Note [Local links in
+    -- code].
+    outer :: Word32
   }
   deriving (Eq, Show)
 
@@ -88,13 +100,16 @@ data CodeClass = Space | Tok TokenClass
 data CodeEnv = CodeEnv
   { source :: SourceLines,
     tokens :: Tokens,
-    names :: LocalNames
+    names :: LocalNames,
+    -- | A token's link out of the module, by token index: 1 + its
+    -- index in the page's targets, 0 for none, as on the wire.
+    outer :: Int -> Word32
   }
 
--- | From the file's text, its tokens and its names.
+-- | From the file's text, its tokens and its names. No links out.
 codeEnv :: Text -> Tokens -> LocalNames -> CodeEnv
 codeEnv text ts names =
-  CodeEnv {source = sourceLines text, tokens = ts, names = names}
+  CodeEnv {source = sourceLines text, tokens = ts, names = names, outer = const 0}
 
 {- Note [Code tokens]
 
@@ -125,6 +140,12 @@ signature the name itself. A declaration's own name doesn't link (in
 its head, its signature, its kind signature...), nor does anything that
 would link to the declaration itself. Pragmas (RULES and the like)
 have value-level code: no links at all ('plainCode').
+
+A token of type-level code with no local link gets its link out of
+the module, if any ('CodeEnv' outer, by token index: Note [Page links]
+in "HaskellReviewer.Core.SourceLinks"). That one comes from
+resolution, so it has none of the rules above: a VarId can have one
+(a function in a splice, say). A local link wins.
 -}
 
 -- | The code of a span, in the head or signature of these declarations
@@ -285,12 +306,23 @@ renderWith links env = go []
     go _ [] = []
     go before (t : ts) =
       let text = sliceSpan env.source t.span
-          tok = CodeToken {kind = Tok t.kind, text = text, link = linkOf before t text}
+          link = linkOf before t text
+          tok =
+            CodeToken
+              { kind = Tok t.kind,
+                text = text,
+                link = link,
+                outer = outerOf link t
+              }
           rest = tok : go (take 2 ((t, text) : before)) ts
        in case before of
             (p, _) : _ | spanEnd p.span /= spanStart t.span -> space : rest
             _ -> rest
-    space = CodeToken {kind = Space, text = " ", link = Nothing}
+    space = CodeToken {kind = Space, text = " ", link = Nothing, outer = 0}
+    outerOf link t = case (links, link) of
+      (TypeLinks _, Nothing) ->
+        env.outer (tokenIndexFrom env.tokens t.span.startLine t.span.startCol)
+      _ -> 0
     linkOf before t text = case links of
       TypeLinks self
         | t.kind `elem` [ConId, ConSym, VarSym],

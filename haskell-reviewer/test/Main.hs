@@ -74,6 +74,7 @@ import HaskellReviewer.Server.AssetsTest qualified
 import HaskellReviewer.Server.CborTest qualified
 import HaskellReviewer.Server.EventsTest qualified
 import HaskellReviewer.Server.ListenTest qualified
+import HaskellReviewer.Server.PageLinksTest qualified
 import HaskellReviewer.Server.PageTest qualified
 import HaskellReviewer.Server.Prefs (warmUpPrefs)
 import HaskellReviewer.Server.Router (warmUpGzip)
@@ -222,6 +223,8 @@ main = do
                       HaskellReviewer.Server.ApiTest.tests,
                       HaskellReviewer.Server.SourceTest.tests
                     ],
+                HaskellReviewer.Server.PageLinksTest.tests,
+                HaskellReviewer.Server.PageLinksTest.linearTests,
                 HaskellReviewer.Server.PageTest.tests
               ],
         HaskellReviewer.Server.AssetsTest.tests,

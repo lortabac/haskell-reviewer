@@ -110,6 +110,12 @@ cases =
     -- The page: every kind of declaration and doc markup; sections.
     cbor "module-page" (okCbor pageApi (modulePath "Page")),
     cbor "module-page-sections" (okCbor pageApi (modulePath "Sections")),
+    -- Links out of the module, in code and docs; partial while an
+    -- import isn't parsed.
+    cbor "module-page-links" (okCbor (indexed sourceApi) (modulePath "C")),
+    cbor "module-page-partial" $ do
+      gate <- newEmptyMVar
+      okCbor (gatedOn "s/src/A.hs" gate) {workers = 2} (modulePath "C"),
     json "module-not-found" (notFoundJson projectApi (modulePath "Nope")),
     json "prefs-defaults" (okJson fixtureApi ["api", "prefs"]),
     -- The source view: linked, CPP, partial (an import that never gets

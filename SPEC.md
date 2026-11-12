@@ -329,7 +329,7 @@ A module page in the style of Haddock:
    - **Instances**: listed under the class and under each type, collapsed by
      default, as on Hackage. Orphan instances are flagged.
 4. Every identifier in a type or signature is a **link** to its definition
-   (another module page, or Hackage for external names).
+   (another module page, or Hoogle for external names, D-283, D-289).
 
 Differences from Hackage, made on purpose for reviewers:
 - **All top-level declarations** are shown by default, not just exported
@@ -1498,7 +1498,9 @@ a framework would cost more than it saves.
   an outline (each entry with a label from the server: the name, or the
   instance head, `instance C Maybe (Maybe a)`, D-287); the file's text
   comes from `api/file`. While the answer is partial, the view refetches
-  on `indexing` events, at most once a second (D-286). Search is
+  on `indexing` events, at most once a second (D-286). A module page
+  has the same `partial` flag and a targets table of the same shape for
+  its links out of the module (D-289). Search is
   `GET api/search/<side>?q=` (D-207). Every response
   carries its snapshot generation id, and the client caches by
   *(generation, resource)*. Preferences (`api/prefs`) are the exception:

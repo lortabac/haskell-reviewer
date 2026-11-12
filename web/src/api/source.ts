@@ -12,6 +12,7 @@ import {
   nullable,
   object,
   oneOf,
+  positive,
   str,
 } from "./decode";
 
@@ -216,13 +217,6 @@ function tuple(value: unknown, path: string, length: number): unknown[] {
 
 const reasons = array(oneOf(reasonCodes));
 
-// A count: 1 or more.
-function positive(value: unknown, path: string): number {
-  const n = nat(value, path);
-  if (n < 1) throw new DecodeError(path, "an integer, 1 or more");
-  return n;
-}
-
 // Region runs: CPP directive and excluded lines. Whole lines, as the
 // server makes them.
 const regionClasses: readonly number[] = [
@@ -230,7 +224,7 @@ const regionClasses: readonly number[] = [
   displayClasses.indexOf("cppDirective"),
 ];
 
-function decodeTarget(value: unknown, path: string): Target {
+export function decodeTarget(value: unknown, path: string): Target {
   if (!Array.isArray(value)) throw new DecodeError(path, "an array");
   const kind = oneOf(targetKinds)(value[0], `${path}[0]`);
   const at = (i: number) => `${path}[${i}]`;

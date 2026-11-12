@@ -25,6 +25,7 @@ module HaskellReviewer.Core.Resolve
     ExportSets (..),
     forceResolved,
     forceModuleResolution,
+    forceDocNames,
 
     -- * Running
     resolveModule,
@@ -38,10 +39,11 @@ where
 
 import Control.Monad (forM)
 import Control.Monad.ST (ST, runST)
-import Data.Char (isSpace)
+import Data.Char (isAlpha, isSpace, isUpper)
 import Data.Containers.ListUtils (nubOrd, nubOrdOn)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IntMap
+import Data.List (sortOn)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Map.Strict (Map)
@@ -54,6 +56,7 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import HaskellReviewer.Core.Code (nameRef)
 import HaskellReviewer.Core.Decls (Extent (..), Part (..), declExtent)
+import HaskellReviewer.Core.DocLinks (DocRef (..), docNames, docRef)
 import HaskellReviewer.Core.Entities
   ( Avail (..),
     Entity (..),
@@ -196,6 +199,31 @@ Contexts:
 
 Each distinct (written name, space, in splice) is looked up once per
 module. See Note [Lookup cost] in "HaskellReviewer.Core.ImportScope".
+
+Names in doc comments (Note [Names in docs] in
+"HaskellReviewer.Core.DocLinks") go through the same lookup, not in a
+splice, once per distinct name:
+
+- @M.x@: through the imports with alias M, then through those of
+  module M (@'Data.Map.insert'@ with @import qualified Data.Map as
+  Map@).
+- @t'T'@: types. @v'x'@: constructors if it starts with an upper case
+  letter or @:@, else values.
+- plain @'x'@: values. Plain @'T'@ or @':+'@: types, then
+  constructors. Plain @'+'@: values, then types.
+- Of these lookups (each space, alias then module name), the first
+  declaration of ours wins; else the first other hit (an external name
+  from a list, say); else the first guess made from a miss (an open
+  import, a module not ready, splices here); else nothing. So a miss
+  in the types doesn't hide a constructor found by a list.
+- DataKinds: when a plain name tries constructors anyway, the types
+  lookup has no DataKinds fallback, so a constructor of ours is exact.
+
+Only the page uses doc names: the results are lazy, so the source view
+doesn't pay for them. Their lookups get a scope of their own, indexed
+for as many lookups as there are doc names (Note [Lookup cost] in
+"HaskellReviewer.Core.ImportScope"), so the main scope's index choice
+doesn't need them.
 -}
 
 {- Note [Export set walk]
@@ -325,6 +353,10 @@ data ModuleResolution = ModuleResolution
     names :: IntMap Resolved,
     -- | The field of each pun whose field is free (@C {f}@).
     punFields :: IntMap Resolved,
+    -- | The names in doc comments. See Note [Names in docs] in
+    -- "HaskellReviewer.Core.DocLinks". Lazy: only the page reads them,
+    -- and forces them ('forceDocNames').
+    docNames :: ~(Map DocRef Resolved),
     -- | Modules read that are not ready yet: results may change.
     notReady :: [ModuleId],
     -- | Final export sets computed here, not in the memo yet.
@@ -353,13 +385,20 @@ forceResolved = \case
       DeclTarget m d -> m `seq` forceDeclId d
       ModuleTarget m -> m `seq` ()
 
--- | Force every result and set of a module's resolution.
+-- | Force every result and set of a module's resolution, except
+-- @docNames@, which stays lazy and is forced only by @pageLinks@, on
+-- the request thread ('forceDocNames').
 forceModuleResolution :: ModuleResolution -> ()
 forceModuleResolution r =
   foldr (\x acc -> forceResolved x `seq` acc) () r.names `seq`
     foldr (\x acc -> forceResolved x `seq` acc) () r.punFields `seq`
       foldr seq () r.notReady `seq`
         forceExportSets r.newFinal
+
+-- | Force the doc name results. Not in 'forceModuleResolution': the
+-- source view doesn't read them.
+forceDocNames :: ModuleResolution -> ()
+forceDocNames r = foldr (\x acc -> forceResolved x `seq` acc) () r.docNames
 
 -- * Running
 
@@ -386,6 +425,8 @@ resolveModule input self = case input.state self of
           ]
         -- Distinct names to look up, for the scope's index choice.
         lookups = Set.size (Set.fromList (map (.text) frees))
+        -- Lazy: only the page reads doc names.
+        refs = Set.fromList (map docRef (docNames p.parsed))
         -- A cut at this module, in what an import brings: its own names.
         own si = case si.target of
           TargetHome m s -> si {target = TargetHome m (withoutOpen OpenCycle self s)}
@@ -398,6 +439,8 @@ resolveModule input self = case input.state self of
               self = self,
               table = t,
               scope = scope',
+              docScope = mkScope (Set.size refs) scopeImports,
+              fullNames = fullNameScope (Set.size refs) p.parsed scopeImports,
               byIndex = IntMap.fromList [(si.index, si) | si <- scopeImports],
               lines = ls,
               parsed = p.parsed,
@@ -414,6 +457,7 @@ resolveModule input self = case input.state self of
       ModuleResolution
         { names = IntMap.fromList names,
           punFields = IntMap.fromList punResults,
+          docNames = Map.fromSet (docLookup ctx) refs,
           notReady =
             Set.toList $
               Set.unions
@@ -613,6 +657,13 @@ data Ctx s = Ctx
     self :: ModuleId,
     table :: LocalTable,
     scope :: Scope,
+    -- | The same imports, indexed for the doc names (Note [Lookup
+    -- cost] in "HaskellReviewer.Core.ImportScope"). Built only when
+    -- needed.
+    docScope :: ~Scope,
+    -- | The imports by module name, not alias, for doc names. Built
+    -- only when needed.
+    fullNames :: ~Scope,
     byIndex :: IntMap ScopeImport,
     lines :: SourceLines,
     parsed :: ParsedModule,
@@ -836,6 +887,74 @@ plainLookup ctx k = case lookupScope ctx.scope n.qualifier n.occ k.space of
     | otherwise -> decide ctx l
   where
     n = nameRef (if k.space == TypeSpace then Rich.TypeNs else Rich.ValueNs) k.written
+
+-- * Names in docs
+
+-- | How good a doc name result is, best first. See Note [Resolution].
+data DocRank = HomeHit | OtherHit | MissGuess
+  deriving (Eq, Ord)
+
+-- | A name in a doc comment. See Note [Resolution].
+docLookup :: Ctx s -> DocRef -> Resolved
+docLookup ctx r = case sortOn fst results of
+  (_, x) : _ -> x
+  [] -> Unresolved NoCandidate
+  where
+    spaces = docSpaces r
+    -- Stable: the first of each rank wins.
+    results =
+      [ x
+      | sp <- spaces,
+        scope <- scopes,
+        Just x <- [look scope sp]
+      ]
+    scopes = case r.qualifier of
+      Nothing -> [ctx.docScope]
+      Just _ -> [ctx.docScope, ctx.fullNames]
+    -- No DataKinds fallback when constructors come next anyway.
+    dataKinds = ctx.dataKinds && ConSpace `notElem` spaces
+    look scope sp = case lookupScope scope r.qualifier r.occ sp of
+      l@(Found _) -> hit (decide ctx l)
+      Missing m
+        | sp == TypeSpace,
+          dataKinds,
+          cons@(Found _) <- lookupScope scope r.qualifier r.occ ConSpace ->
+            hit (addReason DataKinds (decide ctx cons))
+        | otherwise -> case missing ctx m of
+            Unresolved _ -> Nothing
+            x -> Just (MissGuess, x)
+    hit x = case x of
+      Unresolved _ -> Nothing
+      _ -> Just (if isHomeDecl x then HomeHit else OtherHit, x)
+    isHomeDecl = \case
+      Exact (DeclTarget _ _) -> True
+      Heuristic _ (DeclTarget _ _) -> True
+      _ -> False
+
+-- | The spaces a doc name is looked up in, in order. See Note
+-- [Resolution].
+docSpaces :: DocRef -> [Space]
+docSpaces r = case r.namespace of
+  Rich.TypeNs -> [TypeSpace]
+  Rich.ValueNs -> if conLike then [ConSpace] else [ValueSpace]
+  Rich.AnyNs
+    | conLike -> [TypeSpace, ConSpace]
+    | varLike -> [ValueSpace]
+    | otherwise -> [ValueSpace, TypeSpace]
+  where
+    first = fst <$> Text.uncons r.occ
+    conLike = maybe False (\c -> isUpper c || c == ':') first
+    varLike = maybe False (\c -> c == '_' || (isAlpha c && not (isUpper c))) first
+
+-- | The imports with each one's module name as its alias, for doc
+-- names written with the full name, indexed for this many lookups. The
+-- implicit Prelude (index -1) isn't there: @docScope@ has it under its
+-- name already.
+fullNameScope :: Int -> ParsedModule -> [ScopeImport] -> Scope
+fullNameScope lookups p is =
+  mkScope lookups [si {alias = n} | si <- is, Just n <- [IntMap.lookup si.index names]]
+  where
+    names = IntMap.fromList (zip [0 ..] [i.name.value | i <- p.imports])
 
 -- | A token of an import list: in that import's module only.
 importItem :: Ctx s -> Int -> ItemRef -> Resolved

@@ -18,6 +18,12 @@ import { pageIndex } from "../docs/pageIndex";
 import { encodePath } from "../files/paths";
 import { noSourceReasons, type NoSourceReason } from "./modules";
 import {
+  decodeTarget,
+  type DeclTarget,
+  type ExternalTarget,
+  type ModuleTarget,
+} from "./source";
+import {
   decodeDocComment,
   decodeInlines,
   decodeSpan,
@@ -132,6 +138,9 @@ export interface ParsedModule {
   warnings: string[];
   // The long parts of ids (WireId, idText).
   idParts: string[];
+  // Links out of the module, as on the source view: code tokens and doc
+  // names point here with 1 + the index. Never local; def is false.
+  targets: PageTarget[];
   // In source order.
   declarations: Declaration[];
   // Headings and named chunks among the declarations.
@@ -186,8 +195,14 @@ export interface ModulePage {
   component: string | null;
   // No HIE files yet: always this.
   tier: { kind: "syntactic"; reason: "no-hie" };
+  // Resolution read a module not ready yet: links may change, ask
+  // again later. False when not parsed.
+  partial: boolean;
   parse: ParsedModule | TextOnlyModule;
 }
+
+// What a page links to out of the module.
+export type PageTarget = DeclTarget | ModuleTarget | ExternalTarget;
 
 // * Declarations
 
@@ -623,8 +638,8 @@ function decodeParse(
   const o = object(value, path);
   const kind = field(o, "kind", path, oneOf(parseKinds));
   switch (kind) {
-    case "parsed":
-      return {
+    case "parsed": {
+      const page: ParsedModule = {
         kind,
         header: field(o, "header", path, decodeHeader),
         exports: field(o, "exports", path, nullable(array(decodeExport))),
@@ -632,16 +647,54 @@ function decodeParse(
         extensions: field(o, "extensions", path, decodeExtensions),
         warnings: field(o, "warnings", path, array(str)),
         idParts: field(o, "idParts", path, array(str)),
+        targets: field(o, "targets", path, array(decodePageTarget)),
         declarations: field(o, "declarations", path, array(decodeDeclaration)),
         docItems: field(o, "docItems", path, array(decodeDocItem)),
         pragmas: field(o, "pragmas", path, array(decodePragma)),
       };
+      checkLinks(page, page.targets.length, path);
+      return page;
+    }
     case "text-only":
       return {
         kind,
         reason: field(o, "reason", path, decodeReason),
         warnings: field(o, "warnings", path, array(str)),
       };
+  }
+}
+
+function decodePageTarget(value: unknown, path: string): PageTarget {
+  const t = decodeTarget(value, path);
+  if (t[0] === "local") throw new DecodeError(path, "not a local target");
+  return t;
+}
+
+// Every link out of the module points into the targets. Code and doc
+// names are all over the page, so this walks all of it (the targets
+// left out): a code token [class, text, null, link], a name's link.
+// A shape walk: 4-element arrays with a null third item are code
+// tokens, numeric "link" keys are name links; nothing else on the
+// page has those shapes.
+function checkLinks(value: unknown, targets: number, path: string): void {
+  if (Array.isArray(value)) {
+    if (value.length === 4 && value[2] === null) {
+      if (typeof value[3] === "number" && value[3] > targets) {
+        throw new DecodeError(`${path}[3]`, "a link into targets");
+      }
+      return;
+    }
+    value.forEach((v: unknown, i) => {
+      checkLinks(v, targets, `${path}[${i}]`);
+    });
+  } else if (typeof value === "object" && value !== null) {
+    for (const [k, v] of Object.entries(value)) {
+      if (k === "targets") continue;
+      if (k === "link" && typeof v === "number" && v > targets) {
+        throw new DecodeError(`${path}.link`, "a link into targets");
+      }
+      checkLinks(v, targets, `${path}.${k}`);
+    }
   }
 }
 
@@ -672,6 +725,7 @@ export function decodeModulePage(value: unknown): ModulePage {
     package: field(o, "package", path, nullable(decodePackage)),
     component: field(o, "component", path, nullable(str)),
     tier: field(o, "tier", path, decodeTier),
+    partial: field(o, "partial", path, bool),
     parse: field(o, "parse", path, decodeParse),
   };
 }

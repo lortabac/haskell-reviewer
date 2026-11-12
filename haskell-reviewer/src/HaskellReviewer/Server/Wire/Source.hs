@@ -14,8 +14,6 @@ module HaskellReviewer.Server.Wire.Source
     encodeSource,
 
     -- * Names
-    reasonName,
-    howName,
     outlineKindName,
 
     -- * Warm-up
@@ -57,9 +55,8 @@ import HaskellReviewer.Core.Modules
     modulePath,
     moduleRef,
   )
-import HaskellReviewer.Core.Names (ExternalModule (..), renderDeclId)
+import HaskellReviewer.Core.Names (renderDeclId)
 import HaskellReviewer.Core.Parser (defaultParseSettings, parseSource)
-import HaskellReviewer.Core.Project (ModuleName (..), PackageName (..))
 import HaskellReviewer.Core.RelPath (RelPath, relPathFromSegments, relPathText)
 import HaskellReviewer.Core.Resolve
   ( ModuleState (..),
@@ -74,14 +71,8 @@ import HaskellReviewer.Core.ResolveWarmUp
     resolveWarmUpModules,
   )
 import HaskellReviewer.Core.SourceLinks
-  ( DeclLink (..),
-    DeclRole (..),
-    ExternalLink (..),
-    GuessHow (..),
-    LinkReason (..),
-    LinkTarget (..),
+  ( LinkTarget (..),
     LocalLink (..),
-    ModuleLink (..),
     OutlineEntry (..),
     OutlineKind (..),
     SourceLinks (..),
@@ -95,6 +86,7 @@ import HaskellReviewer.Server.Cbor (Encoding)
 import HaskellReviewer.Server.Cbor qualified as Cbor
 import HaskellReviewer.Server.Wire (encodeFileNotFound, encodeModuleNotFound)
 import HaskellReviewer.Server.Wire.Page (syntacticTier)
+import HaskellReviewer.Server.Wire.Targets (encodeTarget)
 import HaskellReviewer.Session.Snapshot (Generation (..))
 
 {- Note [Source view]
@@ -223,7 +215,7 @@ encodeSource (Generation g) idx v =
           [ ("highlight", Cbor.text "lexed"),
             ("runs", Cbor.list Cbor.word32 (runWords s.runs)),
             ("regions", Cbor.list Cbor.word32 (concatMap regionWords s.regions)),
-            ("targets", Cbor.list target s.targets),
+            ("targets", Cbor.list encodeTarget s.targets),
             ("outline", Cbor.list outlineEntry s.outline)
           ]
 
@@ -247,42 +239,6 @@ regionWords r =
       CppExcluded -> 1
       Prose -> 2
 
-target :: LinkTarget -> Encoding
-target =
-  Cbor.list id . \case
-    ToLocal l ->
-      let Col c = l.col
-       in [Cbor.text "local", line l.line, Cbor.word32 c]
-    ToDecl d ->
-      [ Cbor.text "decl",
-        Cbor.text d.ref,
-        Cbor.text (relPathText d.path),
-        Cbor.nullable line d.line,
-        Cbor.text (renderDeclId d.id),
-        reasons d.reasons,
-        Cbor.int d.candidates,
-        Cbor.nullable Cbor.text d.sig,
-        Cbor.bool (d.role == AtDef)
-      ]
-    ToModule m ->
-      [ Cbor.text "module",
-        Cbor.text m.ref,
-        Cbor.nullable (Cbor.text . relPathText) m.path,
-        reasons m.reasons,
-        Cbor.int m.candidates
-      ]
-    ToExternal x ->
-      let ModuleName name = x.module_.name
-       in [ Cbor.text "external",
-            Cbor.text name,
-            Cbor.nullable (\(PackageName p) -> Cbor.text p) x.module_.package,
-            Cbor.text (howName x.how),
-            Cbor.int x.count,
-            Cbor.text x.query
-          ]
-  where
-    reasons = Cbor.list (Cbor.text . reasonName)
-
 outlineEntry :: OutlineEntry -> Encoding
 outlineEntry e =
   Cbor.list
@@ -299,33 +255,6 @@ line :: Line -> Encoding
 line (Line l) = Cbor.word32 l
 
 -- * Names
-
--- | The wire code of a reason.
-reasonName :: LinkReason -> Text
-reasonName = \case
-  ReasonAmbiguous -> "ambiguous"
-  ReasonNotReady -> "not-ready"
-  ReasonNotParsed -> "not-parsed"
-  ReasonMadeBySplice -> "made-by-splice"
-  ReasonMadeBySpliceHere -> "made-by-splice-here"
-  ReasonViaSplice -> "via-splice"
-  ReasonWildcard -> "wildcard"
-  ReasonRecordDot -> "record-dot"
-  ReasonDataKinds -> "data-kinds"
-  ReasonCppImport -> "cpp-import"
-  ReasonImportCycle -> "import-cycle"
-  ReasonAmbiguousModule -> "ambiguous-module"
-  ReasonUnlistedModule -> "unlisted-module"
-  ReasonLooseImport -> "loose-import"
-  ReasonListedNotFound -> "listed-not-found"
-  ReasonThisModule -> "this-module"
-
--- | The wire code of an external link's how.
-howName :: GuessHow -> Text
-howName = \case
-  HowListed -> "listed"
-  HowOnlyOpen -> "only-open"
-  HowOneOf -> "one-of"
 
 -- | The wire code of an outline kind: the page's declaration kinds.
 outlineKindName :: OutlineKind -> Text

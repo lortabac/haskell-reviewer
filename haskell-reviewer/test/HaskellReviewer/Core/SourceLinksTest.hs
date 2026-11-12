@@ -82,10 +82,9 @@ import HaskellReviewer.Server.Wire.Source
   ( SourceBody (..),
     SourceView (..),
     encodeSource,
-    howName,
     parsedSource,
-    reasonName,
   )
+import HaskellReviewer.Server.Wire.Targets (howName, reasonName)
 import HaskellReviewer.Session.Snapshot (Generation (..))
 import IndexSupport (MemProject (..), libFile, memProject, modId)
 import ResolveDump (Fixture (..), cases, loadFixture, resolveInput)

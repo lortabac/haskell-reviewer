@@ -114,7 +114,9 @@ describe("pageIndex", () => {
     if (py === undefined || !("type" in py) || Array.isArray(py.type)) {
       throw new Error("py");
     }
-    expect(ix.sentFieldType(py.type.sharedWith)).toEqual([["con", "Double"]]);
+    expect(ix.sentFieldType(py.type.sharedWith)).toEqual([
+      ["con", "Double", null, 1],
+    ]);
     expect(ix.sentSignature(99999)).toBeUndefined();
   });
 
