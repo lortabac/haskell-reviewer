@@ -3,7 +3,7 @@
 // (cursor, selection ends). Fixed row height, no wrap.
 import {
   createVirtualizer,
-  type Range,
+  type Range as VRange,
   type Virtualizer,
 } from "@tanstack/solid-virtual";
 import {
@@ -26,6 +26,8 @@ import { createCopy } from "./copy";
 import { createHoverCard } from "./createHoverCard";
 import { plainPieces } from "./display";
 import { focusKeepingSelection } from "./focus";
+import { inLine, type Matches } from "./find";
+import { createPaint, maxRangesPerRow } from "./findPaint";
 import {
   isSelectAll,
   keyTarget,
@@ -38,7 +40,14 @@ import type { LineKind } from "./highlight";
 import type { CardText } from "./hover";
 import { type LineIndex, lineText } from "./lines";
 import { lineNodes } from "./paint";
-import { colIn, domPoint, pointAt, replaceKeepingSelection } from "./selection";
+import {
+  colIn,
+  domPoint,
+  nodeAt,
+  nodesAt,
+  pointAt,
+  replaceKeepingSelection,
+} from "./selection";
 import { createRowHeight, mountRows, withPins } from "./virtual";
 
 // Lines from 1, columns in UTF-16 units from 0. link: the cursor is on
@@ -91,6 +100,13 @@ const kindLabel: Record<Exclude<LineKind, "code">, string> = {
   directive: "CPP directive",
 };
 
+// The hits of find (T09). current: the one to show (-1: none). A new
+// object moves the view to the current hit, even if it is the same one.
+export interface FindHits {
+  matches: Matches;
+  current: number;
+}
+
 // text and index are read once: a new file needs a new view.
 export interface CodeViewProps {
   text: string;
@@ -104,6 +120,8 @@ export interface CodeViewProps {
   lineDecor?: ((line: number) => LineDecor | undefined) | undefined;
   // The hover card of a link word (D-285); undefined: none.
   card?: ((link: number) => CardText | undefined) | undefined;
+  // Hits to draw; undefined: none.
+  find?: FindHits | undefined;
   ref?: (api: CodeApi) => void;
 }
 
@@ -167,7 +185,7 @@ export function CodeView(props: CodeViewProps): JSX.Element {
     get rangeExtractor() {
       // eslint-disable-next-line solid/reactivity -- read again on each change
       const p = pins();
-      return (r: Range) => withPins(r, p);
+      return (r: VRange) => withPins(r, p);
     },
     onChange: follow,
   });
@@ -208,9 +226,9 @@ export function CodeView(props: CodeViewProps): JSX.Element {
 
   // Scroll sideways so el isn't under the sticky gutter or past the
   // right edge.
-  const revealX = (el: Element) => {
+  const revealX = (el: Element, rect?: DOMRect) => {
     const b = box.getBoundingClientRect();
-    const r = el.getBoundingClientRect();
+    const r = rect ?? el.getBoundingClientRect();
     const gutter =
       el
         .closest(".code-row")
@@ -301,12 +319,18 @@ export function CodeView(props: CodeViewProps): JSX.Element {
   // eslint-disable-next-line solid/reactivity -- once, at setup
   props.ref?.({
     scrollToLine: (n, align = "center") => scrollToLine(n, align),
-    focusLine,
+    focusLine: (n) => {
+      clearTimeout(upTimer);
+      focusLine(n);
+    },
     focusAt: (n, col) => {
+      // A move now wins over a click's late check.
+      clearTimeout(upTimer);
       goal = col;
       focusAt(n, col);
     },
     setCursor: (n, col = 0) => {
+      clearTimeout(upTimer);
       const line = clamp(n);
       goal = col;
       setCursor({ line, col: Math.min(col, lineLength(line)), link: false });
@@ -609,6 +633,8 @@ export function CodeView(props: CodeViewProps): JSX.Element {
     // The new height first: the browser clamps scrollTop to the old one.
     setVar(rowsEl, "--code-h", `${v.getTotalSize()}px`);
     box.scrollTop = top * h;
+    // The outline of a find hit moved with its row.
+    repaint();
   });
   createEffect(() => {
     setVar(box, "--code-digits", String(String(count()).length));
@@ -617,6 +643,10 @@ export function CodeView(props: CodeViewProps): JSX.Element {
   createEffect(() => setVar(rowsEl, "--code-h", `${v.getTotalSize()}px`));
 
   const isCursor = createSelector(() => cursor().line);
+  const isFindLine = createSelector(() => {
+    const f = props.find;
+    return f === undefined ? 0 : (f.matches.line[f.current] ?? 0);
+  });
   const onLink = createMemo(() => cursor().link);
   const marked = (n: number) =>
     props.marks !== undefined && n >= props.marks.from && n <= props.marks.to;
@@ -634,6 +664,7 @@ export function CodeView(props: CodeViewProps): JSX.Element {
       const kind = decor()?.kind;
       return {
         "code-line-target": marked(n),
+        "code-find-line": isFindLine(n),
         "code-excluded": kind === "excluded",
         "code-directive": kind === "directive",
       };
@@ -700,6 +731,98 @@ export function CodeView(props: CodeViewProps): JSX.Element {
 
   // eslint-disable-next-line solid/reactivity -- mountRows tracks lines
   mountRows(() => rowsEl, lines, lineRow, owner);
+  // Find: draw the hits of the mounted rows. Again when rows come or
+  // redraw (from the effects below), or the hits change. The place
+  // matters: a separate effect on lines made the Ctrl+A e2e fail once
+  // (cause not found).
+  const paint = createPaint();
+  onCleanup(paint.clear);
+  // The outline of the current hit: boxes in the scroll box, outside
+  // the cells (so not in a copy), in content coordinates.
+  const boxes = document.createElement("div");
+  boxes.className = "code-find-boxes";
+  boxes.setAttribute("aria-hidden", "true");
+  const outline = (r: Range | undefined) => {
+    boxes.replaceChildren();
+    if (r === undefined || typeof r.getClientRects !== "function") return;
+    // One box: rows don't wrap. The union of the rects with a width
+    // (a hit that starts on a token border gives an empty one, and a
+    // link gives its own rect too).
+    let left = Infinity;
+    let top = Infinity;
+    let right = -Infinity;
+    let bottom = -Infinity;
+    for (const q of r.getClientRects()) {
+      if (q.width <= 0) continue;
+      left = Math.min(left, q.left);
+      top = Math.min(top, q.top);
+      right = Math.max(right, q.right ?? q.left + q.width);
+      bottom = Math.max(bottom, q.bottom ?? q.top + q.height);
+    }
+    if (left === Infinity) return;
+    const b = box.getBoundingClientRect();
+    const el = document.createElement("div");
+    el.className = "code-find-box";
+    const x = left - b.left - box.clientLeft + box.scrollLeft;
+    const y = top - b.top - box.clientTop + box.scrollTop;
+    setVar(el, "--box-x", `${x}px`);
+    setVar(el, "--box-y", `${y}px`);
+    setVar(el, "--box-w", `${right - left}px`);
+    setVar(el, "--box-h", `${bottom - top}px`);
+    boxes.append(el);
+  };
+  onMount(() => box.append(boxes));
+  // The view moves to the current hit, once its row is drawn.
+  let reveal = false;
+  const repaint = () => {
+    const f = props.find;
+    if (f === undefined) {
+      paint.clear();
+      outline(undefined);
+      return;
+    }
+    const m = f.matches;
+    const ranges: Range[] = [];
+    let cur: Range | undefined;
+    const range = (a: [Node, number], z: [Node, number]) => {
+      const r = document.createRange();
+      r.setStart(...a);
+      r.setEnd(...z);
+      return r;
+    };
+    for (const n of lines()) {
+      const cell = cellOf(n);
+      if (cell === undefined) continue;
+      const [lo, hi] = inLine(m, n);
+      const end = Math.min(hi, lo + maxRangesPerRow);
+      const cols: number[] = [];
+      for (let i = lo; i < end; i++) cols.push(m.from[i]!, m.to[i]!);
+      const at = nodesAt(cell, cols);
+      for (let i = lo; i < end; i++) {
+        const r = range(at[2 * (i - lo)]!, at[2 * (i - lo) + 1]!);
+        if (i === f.current) cur = r;
+        else ranges.push(r);
+      }
+      // The current one is always drawn, past the cap too.
+      if (f.current >= end && f.current < hi) {
+        cur = range(
+          nodeAt(cell, m.from[f.current]!),
+          nodeAt(cell, m.to[f.current]!),
+        );
+      }
+    }
+    paint.set(ranges, cur);
+    outline(cur);
+    if (reveal && cur !== undefined) {
+      reveal = false;
+      const cell = cellOf(m.line[f.current]!);
+      if (cell !== undefined) {
+        revealX(cell, cur.getBoundingClientRect());
+        // It may have moved the view: the boxes again.
+        outline(cur);
+      }
+    }
+  };
   // A focus that waited for its row or the cell's tabindex (user
   // effects run after the DOM ones).
   const retryFocus = () => {
@@ -726,6 +849,7 @@ export function CodeView(props: CodeViewProps): JSX.Element {
       () => {
         retryFocus();
         copy.afterMount();
+        repaint();
       },
       { defer: true },
     ),
@@ -734,16 +858,48 @@ export function CodeView(props: CodeViewProps): JSX.Element {
   createEffect(
     on(
       () => props.renderLine,
-      () => hover.relink(),
+      () => {
+        hover.relink();
+        repaint();
+      },
       { defer: true },
+    ),
+  );
+
+  // A new hit: the cursor goes there (before the scroll, so the view
+  // doesn't move it), no focus change.
+  createEffect(
+    on(
+      () => props.find,
+      (f) => {
+        const i = f?.current ?? -1;
+        if (f === undefined || i < 0) {
+          repaint();
+          return;
+        }
+        const line = f.matches.line[i]!;
+        const col = f.matches.from[i]!;
+        clearTimeout(upTimer);
+        goal = col;
+        setCursor({ line, col, link: false });
+        reveal = true;
+        // Centre only if the row isn't on screen already.
+        const r = row(line);
+        const b = box.getBoundingClientRect();
+        const rr = r?.getBoundingClientRect();
+        // Inside the borders and the scrollbar.
+        const top = b.top + box.clientTop;
+        const bottom = top + box.clientHeight;
+        if (rr === undefined || rr.top < top || rr.bottom > bottom) {
+          scrollToLine(line, "center");
+        }
+        repaint();
+      },
     ),
   );
 
   return (
     <div class="code-wrap">
-      <p class="code-hint">
-        Browser find (Ctrl+F) sees only the lines on screen.
-      </p>
       <div
         ref={(el) => (box = el)}
         class="code-view"

@@ -4,10 +4,12 @@
 
    Pairs we use for text: fg/bg, fg/surface, fg/border, fg/mark,
    muted/bg, muted/surface, link/bg, link/surface; in the source view
-   fg and each hl-* on bg, surface, mark and selection, muted on
-   selection. Pairs for a ring or a border only: focus/bg,
-   focus/surface, hl-excluded/surface. Don't put text in muted/border
-   or muted/mark (dark theme): both are under 4.5:1.
+   fg and each hl-* on bg, surface, mark, selection, find and
+   find-current, muted on selection, find and find-current. Pairs for
+   a ring or a border only: focus/bg, focus/surface, focus/find,
+   focus/find-current, focus/mark, focus/selection, hl-excluded/surface.
+   Don't put text in muted/border or muted/mark (dark theme): both are
+   under 4.5:1.
 
    light-dark() picks a value from the element's own color-scheme
    (D-203): the root follows the OS (color-scheme: light dark) unless
@@ -26,6 +28,12 @@
   --color-mark: light-dark(#fff8c5, #3d3000);
   /* Selected text in the source view. */
   --color-selection: light-dark(#ddf4ff, #1d3149);
+  /* Find hits in the source view, and the current one. As strong as the
+     4.5:1 text rule allows (every text colour reads on them), in hues
+     apart from mark (yellow). The current hit also has an outline in
+     the focus colour (>= 3:1 on both), and an underline. */
+  --color-find: light-dark(#a4fcfc, #003535);
+  --color-find-current: light-dark(#d3fc58, #3d1a5c);
 
   /* Highlighting (SPEC §5.6), GitHub-like. Text on bg, surface, mark
      and selection. Directives use pragma. The excluded colour is also

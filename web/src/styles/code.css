@@ -5,20 +5,73 @@
   font-size: 0.9rem;
 }
 
-.code-hint {
+/* Find (source/FindBar.tsx): the button and the hint, then the bar. */
+.code-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
   margin: 0 0 var(--space-1);
-  color: var(--color-muted);
   font-family: var(--font-sans);
-  font-size: 0.85em;
+  font-size: 0.85rem;
+}
+
+/* Its own line under the button and the bar, so opening the bar
+   doesn't change the toolbar's height. */
+.code-hint {
+  flex: 1 1 100%;
+  min-width: 0;
+  color: var(--color-muted);
+}
+
+.code-find-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+.code-toolbar button,
+.code-find-bar input {
+  padding: var(--space-1) var(--space-2);
+  font: inherit;
+  color: var(--color-fg);
+  background: var(--color-bg);
+  /* Muted, not the border token: the edge needs 3:1 to be seen. */
+  border: 1px solid var(--color-muted);
+  border-radius: 4px;
+}
+
+.code-toolbar button {
+  cursor: pointer;
+}
+
+.code-toolbar button:disabled {
+  cursor: default;
+}
+
+.code-find-bar[hidden] {
+  display: none;
+}
+
+.code-find-bar input {
+  min-width: 12rem;
+  max-width: 100%;
+}
+
+.code-find-count {
+  color: var(--color-muted);
 }
 
 /* The scroll box: both ways. As tall as the file, but at most the
-   window less the header, the path and the hint (about 12.5rem) and
-   a bit of room below (14rem in all). */
+   window less the header, the path and the toolbar (two lines, the
+   same with the bar open) and a bit of room below (16rem in all).
+   Fonts differ, so the page may still scroll a little. */
 .code-view {
+  position: relative;
   --code-gutter: calc(var(--code-digits, 1) * 1ch + 2 * var(--space-2));
   --code-mark-width: 1.5ch;
-  max-height: max(12rem, calc(100dvh - 14rem));
+  max-height: max(12rem, calc(100dvh - 16rem));
   overflow: auto;
   overflow-anchor: none;
   border: 1px solid var(--color-border);
@@ -97,8 +150,7 @@
 }
 
 .code-outline-mark::before {
-  /* The plain one for Firefox < 128; others hide it from readers. */
-  content: "•";
+  /* The alt text hides it from readers. */
   content: "•" / "";
 }
 
@@ -121,6 +173,38 @@
 .code-cell:focus-visible {
   outline: var(--focus-ring);
   outline-offset: -2px;
+}
+
+/* Find hits (source/findPaint.ts). The current one is underlined too,
+   not colour alone. */
+::highlight(code-find) {
+  background-color: var(--color-find);
+}
+
+::highlight(code-find-current) {
+  background-color: var(--color-find-current);
+  text-decoration: underline 2px;
+}
+
+/* The outline of the current hit (CodeView paints boxes, placed by
+   --box-x/y/w/h in the scroll box's content): a cue that is not a
+   colour or a text decoration, which Firefox < 146 doesn't paint in
+   ::highlight. Under the sticky gutter (z-index 1). */
+.code-find-box {
+  position: absolute;
+  left: var(--box-x, 0);
+  top: var(--box-y, 0);
+  width: var(--box-w, 0);
+  height: var(--box-h, 0);
+  box-sizing: border-box;
+  border: 2px solid var(--color-focus);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* The row of the current hit: a bar by the code, in the focus colour. */
+.code-find-line > .code-mark {
+  box-shadow: inset 3px 0 0 var(--color-focus);
 }
 
 .code-view ::selection {

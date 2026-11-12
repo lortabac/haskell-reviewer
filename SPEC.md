@@ -398,7 +398,9 @@ The whole file, syntax-highlighted (§5.6), with line numbers.
   Views are virtualised (§11.7), so the browser's own find (Ctrl-F, left
   untouched) sees only the lines on screen. The toolbar says so
   permanently: "Browser find sees only visible lines — press f to search
-  the whole file".
+  the whole file" ("use Find" until the `f` key exists). The search is
+  literal and smart case; Enter and Shift+Enter go to the next and
+  previous match (D-288).
 - In diff mode, changed lines carry gutter markers, and a "show diff here"
   action switches to the diff view at the same place.
 
@@ -628,7 +630,8 @@ keep the column (D-284).
 - **Light and dark** themes, following the OS by default, with a manual
   override: a System/Light/Dark control in the header, remembered across
   sessions (D-203). No custom theming. Tokens use CSS `light-dark()`:
-  Chromium 123, Firefox 120 or Safari 17.5 at minimum.
+  Chromium 123, Firefox 140 or Safari 17.5 at minimum (Firefox 140 for
+  the CSS Custom Highlight API, D-288).
 - A monospace font for all code. Signatures wrap at `->` and `=>` the way
   Haddock does, and never scroll horizontally in the docs view.
 - Change colours carry meaning (added, removed, modified) and are always
@@ -1572,7 +1575,8 @@ a framework would cost more than it saves.
   comes late, only the rows on screen are redrawn, and the selection,
   focus and layout stay put (D-279). Identifier links are real `<a>`
   elements inside the rows (D-283). One hover card per view, placed by
-  our own code (D-285).
+  our own code (D-285). Find matches are drawn with the CSS Custom
+  Highlight API, so the rows don't change (D-288).
 - **Virtualisation** (D-70): every source and diff view is virtualised,
   so only the visible lines are in the DOM. Rows carry ARIA row indexes,
   so assistive tech knows where it is in the file. Our own **find in file**

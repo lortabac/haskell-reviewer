@@ -31,7 +31,13 @@ import { bannerText } from "../modules/notices";
 import { useModules } from "../modules/store";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
-import { type CodeApi, CodeView, type LineMarks } from "../source/CodeView";
+import {
+  type CodeApi,
+  CodeView,
+  type FindHits,
+  type LineMarks,
+} from "../source/CodeView";
+import { FindBar } from "../source/FindBar";
 import { highlightDecor, highlightedLine } from "../source/decor";
 import { type Highlight, highlightOf } from "../source/highlight";
 import { jumpOf, linkInfos } from "../source/links";
@@ -299,6 +305,7 @@ function FileText(props: {
       : `Lines ${m.from}–${m.to} marked.`;
   };
   let api: CodeApi | undefined;
+  const [find, setFind] = createSignal<FindHits>();
   // A same-file link was followed: where the cursor goes, once the
   // hash changes (D-284).
   let jump: { line: number; col: number } | undefined;
@@ -338,6 +345,7 @@ function FileText(props: {
         renderLine={renderLine()}
         lineDecor={lineDecor()}
         card={card}
+        find={find()}
         ref={(a) => (api = a)}
       />
     </Show>
@@ -384,6 +392,14 @@ function FileText(props: {
       <p class="sr-only" role="status">
         {hint()}
       </p>
+      <Show when={index().count > 0}>
+        <FindBar
+          text={props.text}
+          index={index()}
+          api={() => api}
+          onFind={setFind}
+        />
+      </Show>
       {view}
       {/* After the view: it comes late, and must not push the view. */}
       <Show when={outline()} keyed>

@@ -61,7 +61,7 @@ const hl = [
 ];
 
 // Backgrounds behind source view text.
-const codeBgs = ["bg", "surface", "mark", "selection"];
+const codeBgs = ["bg", "surface", "mark", "selection", "find", "find-current"];
 
 describe("design tokens: contrast (SPEC §5.4, tokens.css header)", () => {
   it("found every token used below", () => {
@@ -75,6 +75,8 @@ describe("design tokens: contrast (SPEC §5.4, tokens.css header)", () => {
       "focus",
       "mark",
       "selection",
+      "find",
+      "find-current",
       ...hl,
     ]) {
       expect(t[name], `token --color-${name}`).toBeDefined();
@@ -94,6 +96,9 @@ describe("design tokens: contrast (SPEC §5.4, tokens.css header)", () => {
       codeBgs.map((b): [string, string] => [f, b]),
     ),
     ["muted", "selection"],
+    // Control glyphs (muted) inside a find hit.
+    ["muted", "find"],
+    ["muted", "find-current"],
   ];
 
   it.each(textPairs)("text %s on %s is >= 4.5:1 in both themes", (a, b) => {
@@ -105,6 +110,11 @@ describe("design tokens: contrast (SPEC §5.4, tokens.css header)", () => {
   const uiPairs: [string, string][] = [
     ["focus", "bg"],
     ["focus", "surface"],
+    // The outline of the current find hit, on any row.
+    ["focus", "find"],
+    ["focus", "find-current"],
+    ["focus", "mark"],
+    ["focus", "selection"],
     ["muted", "bg"],
     ["muted", "surface"],
     // The dashed bar by excluded lines.
