@@ -7,7 +7,7 @@ import type { CardText } from "./hover";
 import { placeCard } from "./place";
 import { colIn } from "./selection";
 
-export const showDelay = 300;
+export const showDelay = 500;
 export const hideDelay = 300;
 
 export interface HoverCard {

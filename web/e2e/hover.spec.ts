@@ -224,7 +224,7 @@ test("Esc hides a pointer card with focus outside the view", async ({
   await expect(card(page)).toBeHidden();
   await expect(h1).toBeFocused();
   // Still on the link: it stays hidden.
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(800);
   await expect(card(page)).toBeHidden();
 });
 
@@ -276,7 +276,7 @@ test("a drag from a link shows no card, copy stays exact", async ({
   await page.mouse.move(a.x + 1, a.y + a.height / 2);
   await page.mouse.down();
   await page.mouse.move(b.x + b.width - 2, b.y + b.height / 2, { steps: 5 });
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(800);
   await expect(card(page)).toBeHidden();
   await page.mouse.up();
   const end = lines(linksMainHs)[n + 2]!.length;
@@ -369,7 +369,7 @@ test("a real click on a link gives no card; a key after it does", async ({
   const area = linkAt(page, n, "area");
   await area.click();
   await expect(area).toBeFocused();
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(900);
   await expect(card(page)).toBeHidden();
   await expect(area).not.toHaveAttribute("aria-describedby", /./);
   await expect(page).toHaveURL(server.base + mainUrl);
@@ -444,7 +444,7 @@ for (const esc of [false, true]) {
     expect(await old?.evaluate((el) => el.isConnected)).toBe(false);
     await expect(area).toBeFocused();
     if (esc) {
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(800);
       await expect(card(page)).toBeHidden();
       await expect(area).not.toHaveAttribute("aria-describedby", /./);
     } else {
