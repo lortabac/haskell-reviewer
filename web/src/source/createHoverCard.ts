@@ -8,7 +8,7 @@ import { placeCard } from "./place";
 import { colIn } from "./selection";
 
 export const showDelay = 500;
-export const hideDelay = 300;
+export const hideDelay = 200;
 
 export interface HoverCard {
   // el (a link) is about to get focus by keys or focusAt: its card
