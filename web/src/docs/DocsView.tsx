@@ -23,6 +23,7 @@ import {
   type TextOnlyModule,
 } from "../api/module";
 import { hrefFor, lineHref, withBase } from "../files/paths";
+import { pageLinkInfos } from "../source/links";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
 import { usePrefs } from "../prefs/store";
@@ -41,6 +42,7 @@ import {
 import { readable, WarningNotice } from "./Decl";
 import { type Links, LinksContext } from "./links";
 import { pageIndex, type PageIndex } from "./pageIndex";
+import { createPageSource } from "./pageSource";
 import { reasonBanner, reasonLine } from "./reasons";
 import { DocView } from "./RichText";
 import {
@@ -254,6 +256,14 @@ function ModulePage(props: {
   const prefs = usePrefs();
   const base = useResolvedPath(() => "/");
   const ix = createMemo(() => pageIndex(props.parsed));
+  // Links out of the module, for code tokens and doc names.
+  const outerInfos = createMemo(() =>
+    pageLinkInfos(
+      { ref: props.page.ref, typedRef: props.typedRef },
+      props.parsed.targets,
+      base(),
+    ),
+  );
   const links: Links = {
     decl: (n) => {
       const id = ix().idOfHandle(n);
@@ -262,6 +272,7 @@ function ModulePage(props: {
         : withBase(base(), docsHref(props.typedRef, id));
     },
     module: (ref, anchor) => withBase(base(), docsHref(ref, anchor)),
+    outer: (k) => outerInfos()[k - 1],
   };
   const header = () => props.parsed.header;
   const name = () => header().name?.value ?? props.page.ref;
@@ -271,6 +282,16 @@ function ModulePage(props: {
   const anchors = new Anchors();
   const instancesOpen = openStates();
   const sourceHref = useSourceHref(() => props.page);
+  // The page is keyed: these props never change.
+  /* eslint-disable solid/reactivity */
+  const source = createPageSource({
+    ref: props.page.ref,
+    typedRef: props.typedRef,
+    path: props.page.path,
+    generation: props.page.generation,
+    base,
+  });
+  /* eslint-enable solid/reactivity */
   const b = createMemo(() => body(props.parsed, ix(), prefs.exportedOnly()));
   const hidden = createMemo(() => hiddenCount(props.parsed));
   const ctx: PageCtx = {
@@ -288,6 +309,8 @@ function ModulePage(props: {
     get marks() {
       return b().mode !== "B";
     },
+    wantSource: source.want,
+    highlight: source.highlight,
   };
   // The element of a declaration. In an instance list if it or a
   // parent is an instance with a home (opened first); else in the main

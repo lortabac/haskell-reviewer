@@ -17,6 +17,7 @@ afterEach(() => {
 
 // Handles 1 and 2 are on the page; 9 isn't.
 const links: Links = {
+  outer: () => undefined,
   decl: (n) => (n === 9 ? undefined : `/tok/docs/tree/M#h${n}`),
   module: (ref, anchor) =>
     `/tok/docs/tree/${ref}` + (anchor === null ? "" : "#" + anchor),

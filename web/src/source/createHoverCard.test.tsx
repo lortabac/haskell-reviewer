@@ -3,7 +3,7 @@ import { render } from "solid-js/web";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeLayout } from "../../test/layout";
 import { type CodeApi, CodeView } from "./CodeView";
-import { hideDelay, showDelay } from "./createHoverCard";
+import { createHoverCard, hideDelay, showDelay } from "./createHoverCard";
 import type { CardText } from "./hover";
 import { lineIndex } from "./lines";
 import type { LinkInfo } from "./links";
@@ -505,5 +505,166 @@ describe("hover card", () => {
     setRender(() => (n: number, t: string) => linked(n, t));
     expect(document.activeElement).toBe(link(root, 1, "l1"));
     expect(shown(root)).toBe(false);
+  });
+});
+
+// Blocks that are not a CodeView: the docs page's inline source (T10b).
+describe("hover card with parts, several blocks", () => {
+  function Block(props: { top: number }) {
+    let pre!: HTMLPreElement;
+    let cardEl!: HTMLDivElement;
+    createHoverCard({
+      view: () => pre,
+      card: () => cardEl,
+      row: (n) =>
+        pre.querySelector<HTMLElement>(`.src-row[data-line="${n}"]`) ??
+        undefined,
+      text: (k) => cardOf(k),
+      dragging: () => false,
+      parts: { row: ".src-row", cell: ".src-code", gutter: ".src-num" },
+    });
+    return (
+      <div class="src-wrap" data-top={props.top}>
+        <pre
+          class="src"
+          ref={(el) => {
+            pre = el;
+            // No layout in happy-dom.
+            Object.defineProperty(el, "clientWidth", { value: 800 });
+            Object.defineProperty(el, "clientHeight", { value: 100 });
+          }}
+        >
+          <span class="src-row" data-line="1">
+            <span class="src-num">1</span>
+            <span class="src-code">
+              {lineNodes(
+                [{ text: "l1", cls: null, link: 1, ctrl: false }],
+                linkInfo,
+                {
+                  tabbable: true,
+                },
+              )}
+            </span>
+          </span>
+        </pre>
+        <div
+          id={`card${props.top}`}
+          class="code-card"
+          role="tooltip"
+          hidden
+          ref={(el) => (cardEl = el)}
+        />
+      </div>
+    );
+  }
+
+  function mountBlocks() {
+    const root = document.createElement("div");
+    document.body.append(root);
+    dispose = render(
+      () => (
+        <>
+          <Block top={0} />
+          <Block top={300} />
+        </>
+      ),
+      root,
+    );
+    return [...root.querySelectorAll<HTMLElement>(".src-wrap")];
+  }
+
+  beforeEach(() => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        const top = Number(this.closest(".src-wrap")?.getAttribute("data-top"));
+        if (this.classList.contains("src-wrap"))
+          return new DOMRect(0, top, 800, 200);
+        if (this.classList.contains("src"))
+          return new DOMRect(0, top, 800, 100);
+        if (this.classList.contains("code-card"))
+          return new DOMRect(0, 0, 200, 50);
+        if (this.classList.contains("src-row"))
+          return new DOMRect(0, top, 800, 21);
+        if (this.classList.contains("src-num"))
+          return new DOMRect(0, top, 30, 21);
+        if (this.matches("a.code-link")) return new DOMRect(100, top, 20, 21);
+        return new DOMRect();
+      },
+    );
+  });
+
+  // happy-dom's focus() sends no focusin.
+  const focusIn = (el: HTMLElement) => {
+    el.focus();
+    el.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+  };
+  const focusOut = (el: HTMLElement) => {
+    el.blur();
+    el.dispatchEvent(
+      new FocusEvent("focusout", {
+        bubbles: true,
+        relatedTarget: document.body,
+      }),
+    );
+  };
+
+  const parts = (b: HTMLElement) => ({
+    a: b.querySelector<HTMLElement>("a.code-link")!,
+    card: b.querySelector<HTMLElement>(".code-card")!,
+  });
+
+  it("parts: a focus card shows, with the description", () => {
+    const [a] = mountBlocks();
+    const p = parts(a!);
+    focusIn(p.a);
+    expect(p.card.hidden).toBe(false);
+    expect(p.a.getAttribute("aria-describedby")).toBe(p.card.id);
+    expect(p.card.textContent).toContain("About l1.");
+  });
+
+  it("one card at a time; the focus card comes back when the other ends", () => {
+    const [a, b] = mountBlocks();
+    const pa = parts(a!);
+    const pb = parts(b!);
+    focusIn(pa.a);
+    expect(pa.card.hidden).toBe(false);
+    pointer("pointerover", pb.a);
+    vi.advanceTimersByTime(showDelay);
+    expect(pb.card.hidden).toBe(false);
+    expect(pa.card.hidden).toBe(true);
+    // The pointer leaves: B ends, A's focus card is back.
+    pointer("pointerout", pb.a, { relatedTarget: document.body });
+    vi.advanceTimersByTime(hideDelay);
+    expect(pb.card.hidden).toBe(true);
+    expect(pa.card.hidden).toBe(false);
+    expect(pa.a.getAttribute("aria-describedby")).toBe(pa.card.id);
+  });
+
+  it("Esc on the other view's pointer card: no card comes back", () => {
+    const [a, b] = mountBlocks();
+    const pa = parts(a!);
+    const pb = parts(b!);
+    focusIn(pa.a);
+    pointer("pointerover", pb.a);
+    vi.advanceTimersByTime(showDelay);
+    expect(pb.card.hidden).toBe(false);
+    press("Escape");
+    expect(pb.card.hidden).toBe(true);
+    expect(pa.card.hidden).toBe(true);
+    expect(document.activeElement).toBe(pa.a);
+  });
+
+  it("focus moved away meanwhile: nothing comes back", () => {
+    const [a, b] = mountBlocks();
+    const pa = parts(a!);
+    const pb = parts(b!);
+    focusIn(pa.a);
+    pointer("pointerover", pb.a);
+    vi.advanceTimersByTime(showDelay);
+    focusOut(pa.a);
+    pointer("pointerout", pb.a, { relatedTarget: document.body });
+    vi.advanceTimersByTime(hideDelay);
+    expect(pa.card.hidden).toBe(true);
+    expect(pb.card.hidden).toBe(true);
   });
 });

@@ -3,7 +3,7 @@
 import { onCleanup, type JSX } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import type { Block, Cell, Doc, Inline } from "../api/richtext";
-import { type Links, useLinks } from "./links";
+import { type Links, outerAttrs, useLinks } from "./links";
 
 // A code/example/property block (docs.css) only gets a Tab stop while
 // it actually scrolls sideways: not every block at every width, only
@@ -223,9 +223,17 @@ function inline(i: Inline, links: Links): JSX.Element {
         </a>
       );
     case "name": {
-      const href = i.target === null ? undefined : links.decl(i.target);
       const name = <code>{i.written}</code>;
-      return href === undefined ? name : <a href={href}>{name}</a>;
+      if (i.target !== null) {
+        const href = links.decl(i.target);
+        return href === undefined ? name : <a href={href}>{name}</a>;
+      }
+      const info = i.link === null ? undefined : links.outer(i.link);
+      return info === undefined ? (
+        name
+      ) : (
+        <a {...outerAttrs(i.written, info)}>{name}</a>
+      );
     }
     case "module": {
       const text =

@@ -1,7 +1,7 @@
 // Where each token link of api/source goes, and what a reader hears
 // (D-283). Pure: paint.ts makes the <a>.
 import { docsHref } from "../api/module";
-import type { Target } from "../api/source";
+import type { ExternalTarget, Target } from "../api/source";
 import { hrefFor, lineHref, withBase } from "../files/paths";
 import { utf16Cols } from "./columns";
 import type { Seg } from "./highlight";
@@ -28,6 +28,22 @@ export function hoogleHref(query: string): string {
 export interface ViewPlace {
   path: string;
   ref: string | null;
+}
+
+function externalInfo(t: ExternalTarget): LinkInfo {
+  const [, module, pkg, how, count, query] = t;
+  // one-of: the module is just the first of the open imports.
+  const where =
+    how === "one-of"
+      ? `one of ${count} modules`
+      : `${module}${pkg === null ? "" : ` (${pkg})`}`;
+  return {
+    href: hoogleHref(query),
+    about: `${where}, search on Hoogle`,
+    guess: how !== "listed",
+    external: true,
+    here: false,
+  };
 }
 
 // One per target, by index (link word − 1). base: the router base.
@@ -80,23 +96,61 @@ export function linkInfos(
           here: path === view.path,
         };
       }
-      case "external": {
-        const [, module, pkg, how, count, query] = t;
-        // one-of: the module is just the first of the open imports.
-        const where =
-          how === "one-of"
-            ? `one of ${count} modules`
-            : `${module}${pkg === null ? "" : ` (${pkg})`}`;
+      case "external":
+        return externalInfo(t);
+    }
+  });
+}
+
+// The module page's links (T10b): the page's own ref (as in the
+// targets) and as typed in the URL (kept for same-module links). Every
+// declaration goes to its docs, a local has no link (no line anchors
+// on a docs page). One per target, by index.
+export function pageLinkInfos(
+  page: { ref: string; typedRef: string },
+  targets: readonly Target[],
+  base: string | undefined,
+): (LinkInfo | undefined)[] {
+  const app = (rel: string) => withBase(base, rel);
+  return targets.map((t): LinkInfo | undefined => {
+    switch (t[0]) {
+      case "local":
+        return undefined;
+      case "decl": {
+        const [, ref, , , id, reasons] = t;
+        const same = ref === page.ref;
         return {
-          href: hoogleHref(query),
-          about: `${where}, search on Hoogle`,
-          guess: how !== "listed",
-          external: true,
+          href: app(docsHref(same ? page.typedRef : ref, id)),
+          about: same ? "documentation" : `documentation in ${ref}`,
+          guess: reasons.length > 0,
+          external: false,
           here: false,
         };
       }
+      case "module": {
+        const [, ref, , reasons] = t;
+        return {
+          href: app(docsHref(ref)),
+          about: `module ${ref}`,
+          guess: reasons.length > 0,
+          external: false,
+          here: false,
+        };
+      }
+      case "external":
+        return externalInfo(t);
     }
   });
+}
+
+// A shorter name, for signatures, heads and Haddock names: the text
+// and the marks only (T10b).
+export function shortName(text: string, info: LinkInfo): string {
+  return (
+    text +
+    (info.guess ? ", resolved heuristically" : "") +
+    (info.external ? ", opens in a new tab" : "")
+  );
 }
 
 // A link's accessible name: it starts with the visible text.

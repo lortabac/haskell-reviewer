@@ -371,8 +371,10 @@ An **extent** is a *set* of source ranges, not one range, because a
 signature, its pragmas and its equations need not be next to each other.
 Non-adjacent ranges are shown in source order, separated by an elision
 marker that gives the line numbers.
-Rendered with syntax highlighting (§5.6) and the same identifier links as
-the full source. Several declarations may be expanded at once.
+Rendered with syntax highlighting (§5.6) and the same identifier
+resolution as the full source; links go to docs anchors (another module's
+page, or Hoogle), and local names aren't links (D-291, D-292). Several
+declarations may be expanded at once.
 
 ### 4.4 Full-source view
 

@@ -250,6 +250,11 @@ describe("module page", () => {
     ]);
     expect(hrefs).toEqual([
       ["area", "/tok/docs/tree/Page#val%3Aarea"],
+      // A name that links out: Hoogle, a guess (T10b).
+      [
+        "Missing",
+        "https://hoogle.haskell.org/?hoogle=Missing%20%2Bmodule%3APrelude",
+      ],
       ["Sections", "/tok/docs/tree/Sections"],
       ["Sections", "/tok/docs/tree/Sections#v%3Ax"],
       ["the sections", "/tok/docs/tree/Sections"],

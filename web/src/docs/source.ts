@@ -2,6 +2,7 @@
 // source order, joined, with line numbers, and "⋯" rows for the lines
 // left out. Plain text: .lhs ">" and CPP lines as written.
 import type { SourcePart, Span } from "../api/module";
+import type { Seg } from "../source/highlight";
 
 // A part with its text (shared ones resolved).
 export interface TextPart {
@@ -9,8 +10,19 @@ export interface TextPart {
   text: string;
 }
 
+// Which part of a row's text is which part of the file: from code point
+// `at` of the row (from 0), `len` code points, they are line `line` of
+// the file from column `col` (from 1). Pad, " … " and text after an
+// overlap are in no span.
+export interface RowSpan {
+  at: number;
+  line: number;
+  col: number;
+  len: number;
+}
+
 export type SourceRow =
-  | { kind: "line"; line: number; text: string }
+  | { kind: "line"; line: number; text: string; spans: RowSpan[] }
   // Lines from..to (both included) are left out.
   | { kind: "gap"; from: number; to: number };
 
@@ -53,19 +65,48 @@ export function sourceRows(parts: TextPart[]): SourceRow[] {
     before(a.span, b.span) ? -1 : before(b.span, a.span) ? 1 : 0,
   );
   const rows: SourceRow[] = [];
-  let cur: { kind: "line"; line: number; text: string } | undefined;
+  let cur: (SourceRow & { kind: "line" }) | undefined;
   // Where the last part ended: line and column.
   let endLine = 0;
   let endCol = 0;
-  const add = (text: string, line: number) => {
-    const lines = text.replace(/\r/g, "").split("\n");
+  // Adds pre (no place in the file), then text, which starts at column
+  // col of line: col undefined: text has no place either. A lone "\r"
+  // in the middle of a line shifts the columns after it (not handled).
+  const add = (pre: string, text: string, line: number, col?: number) => {
+    const lines = (pre + text).replace(/\r/g, "").split("\n");
+    const skip = [...pre.replace(/\r/g, "")].length;
     lines.forEach((t, i) => {
       if (i === 0 && cur !== undefined) {
+        const at = [...cur.text].length;
         cur.text += t;
+        note(cur, at, t, i, skip, line, col);
         return;
       }
-      cur = { kind: "line", line: line + i, text: t };
+      cur = { kind: "line", line: line + i, text: t, spans: [] };
       rows.push(cur);
+      note(cur, 0, t, i, skip, line, col);
+    });
+  };
+  // t was added to row at code point at; it is line i of the added text.
+  const note = (
+    row: SourceRow & { kind: "line" },
+    at: number,
+    t: string,
+    i: number,
+    skip: number,
+    line: number,
+    col: number | undefined,
+  ) => {
+    if (col === undefined) return;
+    // Only the first line has the pre.
+    const cut = i === 0 ? Math.min(skip, [...t].length) : 0;
+    const len = [...t].length - cut;
+    if (len <= 0) return;
+    row.spans.push({
+      at: at + cut,
+      line: line + i,
+      col: i === 0 ? col : 1,
+      len,
     });
   };
   for (const p of sorted) {
@@ -81,19 +122,20 @@ export function sourceRows(parts: TextPart[]): SourceRow[] {
     }
     const pad = " ".repeat(Math.max(0, sc - 1));
     if (cur === undefined) {
-      add(pad + text, sl);
+      add(pad, text, sl, sc);
     } else if (sl === endLine) {
-      add(sc <= endCol ? text : " … " + text, sl);
+      add(sc <= endCol ? "" : " … ", text, sl, sc);
     } else if (sl === endLine + 1) {
       cur = undefined;
-      add(pad + text, sl);
+      add(pad, text, sl, sc);
     } else if (sl > endLine) {
       rows.push({ kind: "gap", from: endLine + 1, to: sl - 1 });
       cur = undefined;
-      add(pad + text, sl);
+      add(pad, text, sl, sc);
     } else {
-      // Starts before the last end (overlap): go on from there.
-      add(text, endLine);
+      // Starts before the last end (overlap): go on from there. The
+      // text is not where its lines say: no spans.
+      add("", text, endLine);
     }
     if (last > endLine || (last === endLine && lastCol > endCol)) {
       endLine = last;
@@ -101,4 +143,23 @@ export function sourceRows(parts: TextPart[]): SourceRow[] {
     }
   }
   return rows;
+}
+
+// The segs of a row: runs (per file line, as in highlightOf) cut to
+// the row's spans and moved to the row's columns (code points from 1).
+export function rowSegs(
+  row: SourceRow & { kind: "line" },
+  runs: readonly (readonly Seg[])[],
+): Seg[] {
+  const out: Seg[] = [];
+  for (const sp of row.spans) {
+    const end = sp.col + sp.len;
+    const shift = sp.at + 1 - sp.col;
+    for (const s of runs[sp.line] ?? []) {
+      const from = Math.max(s.from, sp.col);
+      const to = Math.min(s.to, end);
+      if (from < to) out.push({ ...s, from: from + shift, to: to + shift });
+    }
+  }
+  return out;
 }

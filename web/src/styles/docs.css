@@ -222,6 +222,10 @@
   outline-offset: 2px;
 }
 
+.src-wrap {
+  position: relative;
+}
+
 .src-num {
   display: inline-block;
   min-width: 4ch;
@@ -304,4 +308,10 @@
 /* Links off the app open in a new tab: say so. */
 .ext-link::after {
   content: " ↗" / "";
+}
+
+/* A guess (heuristic link) in a signature, head or Haddock name: always
+   underlined, dotted (not colour alone). */
+a.link-guess {
+  text-decoration: underline dotted;
 }
