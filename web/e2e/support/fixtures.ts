@@ -14,6 +14,7 @@ import {
   makeCabalProject,
   makeDocsProject,
   makeHlProject,
+  makeLinksProject,
   makeProject,
   type Project,
 } from "./project";
@@ -94,6 +95,7 @@ interface WorkerFixtures {
   cabalProject: Project;
   docsProject: Project;
   hlProject: Project;
+  linksProject: Project;
 }
 
 export const test = base.extend<TestFixtures, WorkerFixtures>({
@@ -131,6 +133,16 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     // eslint-disable-next-line no-empty-pattern
     async ({}, use) => {
       const p = await makeHlProject();
+      await use(p);
+      await p.remove();
+    },
+    { scope: "worker" },
+  ],
+
+  linksProject: [
+    // eslint-disable-next-line no-empty-pattern
+    async ({}, use) => {
+      const p = await makeLinksProject();
       await use(p);
       await p.remove();
     },

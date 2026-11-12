@@ -160,7 +160,7 @@ In browse mode there is exactly one side.
   the manifest use the short form `Module.Name` only when it is unique on
   that side, and the full form otherwise.
 - **Names from dependencies** (D-42): shown with their package and linked
-  to Hackage. They are not browsable in-app. The owning package is found
+  to Hackage (the source view links them to Hoogle, D-283). They are not browsable in-app. The owning package is found
   from, in order:
   1. `dist-newstyle/cache/plan.json`, when present (read-only; gives exact
      versions);
@@ -377,7 +377,11 @@ the full source. Several declarations may be expanded at once.
 ### 4.4 Full-source view
 
 The whole file, syntax-highlighted (§5.6), with line numbers.
-- Every identifier is a link to its definition (go-to-definition).
+- Every identifier is a link to its definition (go-to-definition): a
+  use to the definition's line, a top-level definition to its docs, a
+  name from a dependency to Hoogle (new tab). Local binders aren't
+  links. Guessed links have a dotted underline and say so in their name
+  (D-283).
 - Hovering an identifier shows its type when known (precise tier), or else
   its declared signature.
 - **Find references**: for a selected identifier, a list of the places where it
@@ -571,7 +575,7 @@ also has a UI control, so nothing is lost with shortcuts off.
 | `j` / `k` | Next / previous declaration (docs, expanded diff) or hunk (diff) |
 | `n` / `p` | Next / previous **change** (any view, diff mode) |
 | `]` / `[` | Next / previous changed file or module |
-| `Enter` | Open the focused item |
+| `Enter` | Open the focused item (in the source view: follow the link) |
 | `g d` | Go to definition of the identifier under the cursor/focus |
 | `g r` | Find references |
 | `s` | Toggle the inline source of the focused declaration |
@@ -584,6 +588,9 @@ also has a UI control, so nothing is lost with shortcuts off.
 | `Esc` | Close the overlay/panel; clear the selection |
 | `?` | Show the keyboard help |
 
+In the source view, ←/→ move between the links of the line and ↑/↓
+keep the column (D-284).
+
 ### 5.4 Accessibility
 
 (D-29) Target: **WCAG 2.1 level AA**.
@@ -593,7 +600,8 @@ also has a UI control, so nothing is lost with shortcuts off.
 - Semantic HTML first. The sidebar is an ARIA `tree`. Diff tables expose
   per-line roles, with an accessible name for each line ("added line 42",
   "removed line 40"). Identifier links have names that include their
-  target.
+  target. In the source view the line's links are a token cursor: one
+  Tab stop, arrows move between links (D-284).
 - The LLM answer stream is an `aria-live="polite"` region that announces
   the result when the answer finishes, not token by token.
 - Contrast ≥ 4.5:1 for text in both themes, including syntax-highlighting
@@ -1482,7 +1490,8 @@ a framework would cost more than it saves.
   display-class runs with links into a targets table, line regions and
   an outline (each entry with a label from the server: the name, or the
   instance head, `instance C Maybe (Maybe a)`, D-287); the file's text
-  comes from `api/file`. Search is
+  comes from `api/file`. While the answer is partial, the view refetches
+  on `indexing` events, at most once a second (D-286). Search is
   `GET api/search/<side>?q=` (D-207). Every response
   carries its snapshot generation id, and the client caches by
   *(generation, resource)*. Preferences (`api/prefs`) are the exception:
@@ -1557,7 +1566,8 @@ a framework would cost more than it saves.
   relatives are banned by a lint rule, and checked in CI. Highlighted
   lines are text and spans built from the token runs; when the highlight
   comes late, only the rows on screen are redrawn, and the selection,
-  focus and layout stay put (D-279).
+  focus and layout stay put (D-279). Identifier links are real `<a>`
+  elements inside the rows (D-283).
 - **Virtualisation** (D-70): every source and diff view is virtualised,
   so only the visible lines are in the DOM. Rows carry ARIA row indexes,
   so assistive tech knows where it is in the file. Our own **find in file**

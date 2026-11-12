@@ -51,9 +51,13 @@ export async function postJson<T>(
 export async function getCbor<T>(
   path: string,
   decode: (value: unknown) => T,
+  opts?: { signal?: AbortSignal },
 ): Promise<Result<T>> {
-  return get(path, "application/cbor", async (res) =>
-    decode(fromCbor(new Uint8Array(await res.arrayBuffer()))),
+  return get(
+    path,
+    "application/cbor",
+    async (res) => decode(fromCbor(new Uint8Array(await res.arrayBuffer()))),
+    opts?.signal,
   );
 }
 

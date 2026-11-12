@@ -70,7 +70,9 @@ tests :: TestTree
 tests =
   testGroup
     "Source API"
-    [ testCase "warm-up: every kind, reason, how, class, region, outline, sig" coverage,
+    [ testCase
+        "warm-up: every kind, reason, how, class, region, outline, sig, def"
+        coverage,
       testCase "text only: lexed if it has tokens or regions, else plain" textOnlyCase,
       testGroup "route" routeTests
     ]
@@ -131,6 +133,9 @@ coverage = do
   forM_ sigShapes $ \g -> assertBool (show g) (Set.member g texts)
   assertBool "a cut sig" (any (Text.isSuffixOf "\x2026") texts)
   assertBool "a null sig" (any isNull sigs)
+  -- The def bit, both ways.
+  Set.fromList [bool (t !! 8) | t <- map arr targets, str (head' t) == "decl"]
+    @?= Set.fromList [False, True]
   -- Every link is in the table.
   assertBool "links in range" (all (\k -> runAt k 5 <= length targets) [0 .. nRuns - 1])
 

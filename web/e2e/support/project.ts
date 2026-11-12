@@ -359,3 +359,67 @@ export async function makeHlProject(): Promise<Project> {
     remove: () => rm(root, { recursive: true, force: true }),
   };
 }
+
+// A project for source links (T08b): a cross-module use, a definition
+// with a signature and two equations, a local binder, an exact and a
+// heuristic external, a field of two types (a guess), and 200 lines of
+// uses (a long file: links off screen).
+export const linksTypesHs = [
+  "module Links.Types (Shape (..), area) where",
+  "",
+  "data Shape = Circle Double | Square Double",
+  "",
+  "area :: Shape -> Double",
+  "area (Circle r) = 3 * r * r",
+  "area (Square s) = s * s",
+  "",
+].join("\n");
+
+export const linksMainHs = [
+  "{-# LANGUAGE DuplicateRecordFields #-}",
+  "module Links.Main where",
+  "",
+  "import Data.Char",
+  "import Data.List (sort)",
+  "import Links.Types",
+  "",
+  "data P = P {f :: Int}",
+  "data Q = Q {f :: Int}",
+  "",
+  "g r = f r",
+  "",
+  "total :: [Shape] -> Double",
+  "total xs = go xs",
+  "  where",
+  "    go ys = sum (map area ys)",
+  "",
+  "up :: String -> String",
+  "up = map toUpper",
+  "",
+  "sorted :: [Int] -> [Int]",
+  "sorted = sort",
+  "",
+  ...Array.from(
+    { length: 200 },
+    (_, i) => `v${i + 1} = area (Circle ${i + 1})`,
+  ),
+  "",
+].join("\n");
+
+// The line of the first line starting so in text.
+export function lineOf(text: string, start: string): number {
+  return text.split("\n").findIndex((l) => l.startsWith(start)) + 1;
+}
+
+export async function makeLinksProject(): Promise<Project> {
+  const root = await mkdtemp(join(tmpdir(), "hr-e2e-"));
+  git(root, "init", "-q");
+  await put(root, "Links/Types.hs", linksTypesHs);
+  await put(root, "Links/Main.hs", linksMainHs);
+  git(root, "add", "-A");
+  git(root, "commit", "-q", "-m", "fixture");
+  return {
+    root,
+    remove: () => rm(root, { recursive: true, force: true }),
+  };
+}

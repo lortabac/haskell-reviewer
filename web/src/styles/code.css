@@ -161,6 +161,30 @@
   color: var(--color-hl-excluded);
 }
 
+/* Token links (D-283): the token's own colour, underlined on hover and
+   focus. A guess is always underlined, dotted (not colour alone). */
+.code-link {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.code-link:hover,
+.code-link:focus-visible {
+  text-decoration: underline;
+}
+
+.code-link-guess,
+.code-link-guess:hover,
+.code-link-guess:focus-visible {
+  text-decoration: underline dotted;
+}
+
+.code-link:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+
 /* Control characters, drawn as glyphs: muted and boxed, so they don't
    pass for text. */
 .code-ctrl {

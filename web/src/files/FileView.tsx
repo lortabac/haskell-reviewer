@@ -1,15 +1,20 @@
 import { useLocation, useResolvedPath } from "@solidjs/router";
 import {
+  batch,
   createEffect,
   createMemo,
   createResource,
+  createSignal,
   For,
   type JSX,
   Match,
   on,
   onCleanup,
+  onMount,
   Show,
   Switch,
+  untrack,
+  useContext,
 } from "solid-js";
 import { getCbor } from "../api/client";
 import { decodeFileView, type FileView as View } from "../api/files";
@@ -18,7 +23,10 @@ import {
   decodeSourceView,
   type LexedSource,
   type OutlineEntry,
+  sameLexed,
 } from "../api/source";
+import { IndexingContext } from "../events/indexing";
+import { refetchStep } from "../events/partialRefetch";
 import { bannerText } from "../modules/notices";
 import { useModules } from "../modules/store";
 import { NotFound } from "../NotFound";
@@ -26,7 +34,8 @@ import { PageTitle } from "../PageTitle";
 import { type CodeApi, CodeView, type LineMarks } from "../source/CodeView";
 import { highlightDecor, highlightedLine } from "../source/decor";
 import { type Highlight, highlightOf } from "../source/highlight";
-import { lineIndex } from "../source/lines";
+import { jumpOf, linkInfos } from "../source/links";
+import { lineIndex, lineText } from "../source/lines";
 import { createDelay, focusInMain, focusLost } from "../ui/focus";
 import { bytes, limit } from "../ui/format";
 import { bringOnPage } from "../ui/scroll";
@@ -58,13 +67,6 @@ function FilePage(props: { path: string }): JSX.Element {
     () => props.path,
     (p) => getCbor(apiFileUrl(p), decodeFileView),
   );
-  // Highlighting, at the same time. Never waited for: the text shows
-  // plain first (the server can take a while when indexing). Any
-  // failure: plain, no message.
-  const [source] = createResource(
-    () => props.path,
-    (p) => getCbor(apiSourceUrl(p), decodeSourceView),
-  );
   const slow = createDelay(() => file.loading, 300);
   // Generated or preprocessed: say why there's only text. Needs the
   // module tree, but never waits for it.
@@ -80,15 +82,7 @@ function FilePage(props: { path: string }): JSX.Element {
     const r = result();
     return r?.kind === "ok" ? r.value : undefined;
   };
-  // Only a lexed answer for this very text (same generation).
-  const lexed = (v: View): LexedSource | undefined => {
-    const r = source.state === "ready" ? source() : undefined;
-    if (r?.kind !== "ok") return undefined;
-    const s = r.value;
-    return s.highlight === "lexed" && s.generation === v.generation
-      ? s
-      : undefined;
-  };
+  const lexed = createSource(() => props.path, view);
   // A link in main (like a symlink target) took us here: its page is
   // gone, so put focus on the new heading instead of letting it drop to
   // body. Again if a 404 swaps the heading.
@@ -116,13 +110,83 @@ function FilePage(props: { path: string }): JSX.Element {
         }
       >
         <Match when={view()} keyed>
-          {(v) => body(v, props.path, () => lexed(v))}
+          {(v) => body(v, props.path, lexed)}
         </Match>
         <Match when={result()?.kind === "error"}>
           <p>Couldn't load this file.</p>
         </Match>
       </Switch>
     </Show>
+  );
+}
+
+// Highlighting, at the same time as the text. Never waited for: the
+// text shows plain first (the server can take a while when indexing).
+// Any failure: plain, no message. While the answer is partial, asked
+// again on indexing events (D-286): at most once a second, plus once
+// when indexing is done. A failed or plain answer keeps the last good
+// one; an equal one changes nothing (no redraw). An answer or event
+// for another snapshot is dropped (stale until a reload).
+function createSource(
+  path: () => string,
+  view: () => View | undefined,
+): () => LexedSource | undefined {
+  const indexing = useContext(IndexingContext);
+  const [latest, setLatest] = createSignal<LexedSource>();
+  const [partial, setPartial] = createSignal(false);
+  // Bumped on each fetch: a late answer of an earlier one is dropped.
+  let seq = 0;
+  let ac: AbortController | undefined;
+  let lastAt = 0;
+  let answerGen: number | undefined;
+  // The refetch at done is done once, until partial changes.
+  let doneAsked = false;
+  const fetchSource = () => {
+    ac?.abort();
+    const mine = ++seq;
+    const signal = (ac = new AbortController()).signal;
+    lastAt = Date.now();
+    void getCbor(apiSourceUrl(untrack(path)), decodeSourceView, {
+      signal,
+    }).then((r) => {
+      if (mine !== seq || r.kind !== "ok") return;
+      const s = r.value;
+      const v = untrack(view);
+      if (v !== undefined && s.generation !== v.generation) return;
+      answerGen = s.generation;
+      if (s.partial !== untrack(partial)) doneAsked = false;
+      batch(() => {
+        setPartial(s.partial);
+        if (s.highlight === "lexed") setLatest(s);
+      });
+    });
+  };
+  fetchSource();
+  onCleanup(() => {
+    seq++;
+    ac?.abort();
+  });
+  createEffect(() => {
+    const p = indexing.indexing();
+    if (p === undefined || !partial()) return;
+    const step = refetchStep(p, answerGen, lastAt, Date.now());
+    if (step === "due") fetchSource();
+    else if (step === "done" && !doneAsked) {
+      doneAsked = true;
+      fetchSource();
+    }
+  });
+  // Only a lexed answer for this very text (same generation).
+  return createMemo(
+    (): LexedSource | undefined => {
+      const v = view();
+      const s = latest();
+      return v !== undefined && s !== undefined && s.generation === v.generation
+        ? s
+        : undefined;
+    },
+    undefined,
+    { equals: sameLexed },
   );
 }
 
@@ -190,11 +254,16 @@ function FileText(props: {
   const location = useLocation();
   const base = useResolvedPath(() => "/");
   const index = createMemo(() => lineIndex(props.text));
-  const hl = createMemo((): Highlight | undefined =>
-    props.source === undefined
-      ? undefined
-      : highlightOf(props.source, index().count),
-  );
+  const hl = createMemo((): Highlight | undefined => {
+    const s = props.source;
+    if (s === undefined) return undefined;
+    const links = linkInfos(
+      { path: props.path, ref: s.ref },
+      s.targets,
+      base(),
+    );
+    return highlightOf(s, index().count, links);
+  });
   const line = (n: number) => withBase(base(), lineHref(props.path, n));
   // The outline, if it has entries.
   const outline = () => {
@@ -229,6 +298,34 @@ function FileText(props: {
       : `Lines ${m.from}–${m.to} marked.`;
   };
   let api: CodeApi | undefined;
+  // A same-file link was followed: where the cursor goes, once the
+  // hash changes (D-284).
+  let jump: { line: number; col: number } | undefined;
+  const onLinkClick = (e: MouseEvent) => {
+    const a =
+      e.target instanceof Element
+        ? e.target.closest<HTMLAnchorElement>("a.code-link")
+        : null;
+    const s = props.source;
+    const h = hl();
+    if (a === null || s === undefined || h === undefined) return;
+    if (e.defaultPrevented || e.button !== 0) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+    const k = Number(a.dataset.link);
+    if (h.links[k - 1]?.here !== true) return;
+    const text = props.text;
+    const idx = index();
+    const j = jumpOf(k, s.targets, h.runs, (n) => lineText(text, idx, n));
+    if (j === undefined) return;
+    if (a.hash === location.hash) {
+      // Same URL: no navigation, so move here.
+      e.preventDefault();
+      api?.focusAt(j.line, j.col);
+      api?.scrollToLine(j.line, "center");
+    } else {
+      jump = j;
+    }
+  };
   // Made before the effect below: its effects (the virtualiser's set
   // up) must run first.
   const view = (
@@ -249,8 +346,20 @@ function FileText(props: {
       if (m === undefined || a === undefined) return;
       // The cursor goes there too, so Tab lands on the line. Focus
       // stays in the view if it was there (its old row may go away).
-      if (a.hasFocus()) a.focusLine(m.from);
-      else a.setCursor(m.from);
+      const j = jump;
+      jump = undefined;
+      // A link of another file took us here: focus the line.
+      const state: unknown = untrack(() => location.state);
+      const codeJump =
+        typeof state === "object" &&
+        state !== null &&
+        "codeJump" in state &&
+        state.codeJump === true;
+      if (j !== undefined && j.line === m.from && a.hasFocus()) {
+        a.focusAt(j.line, j.col);
+      } else if (a.hasFocus() || codeJump) {
+        a.focusLine(m.from);
+      } else a.setCursor(m.from);
       a.scrollToLine(m.from, "center");
       // Then the page, if the view is off screen. After the router's
       // own scroll to the top.
@@ -261,9 +370,15 @@ function FileText(props: {
       onCleanup(() => cancelAnimationFrame(frame));
     }),
   );
+  let wrap!: HTMLDivElement;
+  onMount(() => {
+    // Native: before the router's click handler on the document.
+    wrap.addEventListener("click", onLinkClick);
+    onCleanup(() => wrap.removeEventListener("click", onLinkClick));
+  });
   // file-text: a test hook, no style.
   return (
-    <div class="file-text">
+    <div class="file-text" ref={(el) => (wrap = el)}>
       <p class="sr-only" role="status">
         {hint()}
       </p>

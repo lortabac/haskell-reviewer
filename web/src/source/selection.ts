@@ -211,3 +211,17 @@ export function replaceKeepingSelection(cell: Element, nodes: Node[]): void {
     Math.min(fno, size(fn)),
   );
 }
+
+// The text point under (x, y) in the window, if any.
+export function pointAt(x: number, y: number): [Node, number] | undefined {
+  if (typeof document.caretPositionFromPoint === "function") {
+    const p = document.caretPositionFromPoint(x, y);
+    return p === null ? undefined : [p.offsetNode, p.offset];
+  }
+  // WebKit before 18.2.
+  const d = document as Document & {
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  };
+  const r = d.caretRangeFromPoint?.(x, y) ?? null;
+  return r === null ? undefined : [r.startContainer, r.startOffset];
+}

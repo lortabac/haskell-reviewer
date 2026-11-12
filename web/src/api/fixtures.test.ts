@@ -332,6 +332,8 @@ describe("API fixtures", () => {
       t[0] === "decl" ? t[5] : t[0] === "module" ? t[3] : [],
     );
     expect(sorted(reasons)).toEqual(sorted(reasonCodes));
+    const defs = ts.flatMap((t) => (t[0] === "decl" ? [String(t[8])] : []));
+    expect(sorted([...new Set(defs)])).toEqual(["false", "true"]);
     const externals = ts.flatMap((t) => (t[0] === "external" ? [t] : []));
     expect(sorted(externals.map((t) => t[3]))).toEqual(sorted(guessHows));
     expect(sorted(externals.map((t) => String(t[2] === null)))).toEqual([

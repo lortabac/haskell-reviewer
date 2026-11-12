@@ -17,6 +17,7 @@ const h: Highlight = {
   kinds: ["code", "excluded", "directive"],
   outline: [entry],
   byLine: new Map([[2, entry]]),
+  links: [],
 };
 
 describe("decor", () => {
@@ -24,6 +25,28 @@ describe("decor", () => {
     const p = document.createElement("p");
     p.append(...highlightedLine(h)(1, "if x"));
     expect(p.querySelector(".hl-keyword")?.textContent).toBe("if");
+    expect(p.textContent).toBe("if x");
+  });
+
+  it("highlightedLine: a link word with a LinkInfo is an <a>", () => {
+    const linked: Highlight = {
+      ...h,
+      runs: [[], [{ from: 1, to: 3, cls: "keyword", link: 1 }]],
+      links: [
+        {
+          href: "/x",
+          about: "here",
+          guess: false,
+          external: false,
+          here: true,
+        },
+      ],
+    };
+    const p = document.createElement("p");
+    p.append(...highlightedLine(linked)(1, "if x"));
+    const a = p.querySelector("a.code-link");
+    expect(a?.getAttribute("href")).toBe("/x");
+    expect(a?.getAttribute("aria-label")).toBe("if, here");
     expect(p.textContent).toBe("if x");
   });
 

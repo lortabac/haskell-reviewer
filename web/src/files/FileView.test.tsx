@@ -1,4 +1,6 @@
+import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Indexing } from "../api/events";
 import { cbor, cborFixture, fixture, stubFetch } from "../../test/fixtures";
 import { fakeLayout } from "../../test/layout";
 import { fallbackRowHeight as h } from "../source/CodeView";
@@ -666,5 +668,262 @@ describe("FileView highlighting", () => {
     expect(main.querySelector(".code-cell span")).toBeNull();
     expect(main.querySelector(".code-outline, .code-excluded")).toBeNull();
     expect(main.textContent).toBe(before);
+  });
+});
+
+describe("FileView links and refetch", () => {
+  // app/Main.hs (file-text): "(main)" on line 1 uses main; main's
+  // signature (line 4) and equation (line 5) are its definition;
+  // putStrLn is external.
+  const targets = [
+    [
+      "decl",
+      "Main",
+      "app/Main.hs",
+      4,
+      "val:main",
+      [],
+      1,
+      "main :: IO ()",
+      true,
+    ],
+    ["external", "Prelude", null, "only-open", 1, "putStrLn +module:Prelude"],
+    [
+      "decl",
+      "Main",
+      "app/Main.hs",
+      4,
+      "val:main",
+      [],
+      1,
+      "main :: IO ()",
+      false,
+    ],
+  ];
+  const runs = [
+    1, 1, 0, 7, 0, 0, 0, 8, 0, 12, 1, 0, 0, 14, 0, 18, 2, 3, 3, 1, 0, 5, 2, 1,
+    1, 1, 0, 5, 2, 1, 0, 8, 0, 16, 2, 2,
+  ];
+  const lexed = (over: Record<string, unknown> = {}) => ({
+    generation: 1,
+    path: "app/Main.hs",
+    ref: "Main",
+    tier: { kind: "syntactic", reason: "no-hie" },
+    partial: false,
+    highlight: "lexed",
+    runs,
+    regions: [],
+    targets,
+    outline: [],
+    ...over,
+  });
+
+  // Mounts app/Main.hs; api/source answers with the next of answers
+  // (the last one again when they run out). now: Date.now.
+  async function openWith(
+    answers: [number, unknown][] | ((call: number) => Promise<Response>),
+    indexing: () => Indexing | undefined = () => undefined,
+    url = "/tok/src/tree/app/Main.hs",
+  ) {
+    const plain = stubFetch({
+      "/tok/api/files/tree": [200, fixture("files")],
+      "/tok/api/file/tree/app/Main.hs": [200, cborFixture("file-text")],
+    }).getMockImplementation()!;
+    let calls = 0;
+    const signals: (AbortSignal | undefined)[] = [];
+    const mock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (input !== "/tok/api/source/tree/app/Main.hs") return plain(input);
+      signals.push(init?.signal ?? undefined);
+      calls++;
+      if (typeof answers === "function") return answers(calls);
+      const [status, body] = answers[Math.min(calls - 1, answers.length - 1)]!;
+      return Promise.resolve(
+        new Response(new Uint8Array(cbor(body)), {
+          status,
+          headers: { "Content-Type": "application/cbor" },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", mock);
+    const main = mountAppAt(url, undefined, indexing).querySelector("main");
+    if (main === null) throw new Error("no main");
+    await vi.waitFor(() => {
+      expect(main.querySelector("a.code-link")).not.toBeNull();
+    });
+    return { main, calls: () => calls, signals };
+  }
+
+  const linkOn = (main: HTMLElement, n: number) => {
+    const a = main.querySelector<HTMLAnchorElement>(
+      `.code-row[data-line="${n}"] a.code-link`,
+    );
+    if (a === null) throw new Error(`no link on ${n}`);
+    return a;
+  };
+
+  it("links: use to its line, definition to docs, external to Hoogle", async () => {
+    const { main } = await openWith([[200, lexed()]]);
+    const use = linkOn(main, 1);
+    expect(use.textContent).toBe("main");
+    expect(use.getAttribute("href")).toBe("/tok/src/tree/app/Main.hs#L4");
+    expect(use.getAttribute("aria-label")).toBe(
+      "main, defined in app/Main.hs line 4",
+    );
+    expect(linkOn(main, 4).getAttribute("href")).toBe(
+      "/tok/docs/tree/Main#val%3Amain",
+    );
+    const ext = main.querySelectorAll<HTMLAnchorElement>(
+      '.code-row[data-line="5"] a.code-link',
+    )[1];
+    expect(ext?.getAttribute("href")).toBe(
+      "https://hoogle.haskell.org/?hoogle=putStrLn%20%2Bmodule%3APrelude",
+    );
+    expect(ext?.getAttribute("target")).toBe("_blank");
+  });
+
+  it("a same-file link: the cursor goes to the definition's name", async () => {
+    const { main } = await openWith([[200, lexed()]]);
+    const use = linkOn(main, 1);
+    use.focus();
+    use.click();
+    await vi.waitFor(() => {
+      expect(window.location.hash).toBe("#L4");
+      expect(document.activeElement).toBe(linkOn(main, 4));
+    });
+  });
+
+  it("a same-file link to the hash we're on: no navigation, the cursor moves", async () => {
+    const { main } = await openWith(
+      [[200, lexed()]],
+      undefined,
+      "/tok/src/tree/app/Main.hs#L4",
+    );
+    const use = linkOn(main, 1);
+    use.focus();
+    const click = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      detail: 1,
+    });
+    use.dispatchEvent(click);
+    expect(click.defaultPrevented).toBe(true);
+    expect(window.location.hash).toBe("#L4");
+    expect(document.activeElement).toBe(linkOn(main, 4));
+  });
+
+  describe("refetch while partial", () => {
+    let now = 1000;
+    beforeEach(() => {
+      now = 1000;
+      vi.spyOn(Date, "now").mockImplementation(() => now);
+    });
+    const at = (generation: number, ready: number) => ({
+      generation,
+      total: 2,
+      ready,
+      failed: 0,
+    });
+    const settle = () => new Promise((r) => setTimeout(r, 20));
+
+    it("throttled, then due, then once at done; never for another snapshot", async () => {
+      const [ix, setIx] = createSignal<Indexing>();
+      // eslint-disable-next-line solid/reactivity -- read by the view
+      const { calls } = await openWith([[200, lexed({ partial: true })]], ix);
+      expect(calls()).toBe(1);
+      now = 1500;
+      setIx(at(1, 1));
+      await settle();
+      expect(calls()).toBe(1);
+      now = 2100;
+      setIx(at(1, 1));
+      await vi.waitFor(() => expect(calls()).toBe(2));
+      now = 2200;
+      setIx(at(1, 2));
+      await vi.waitFor(() => expect(calls()).toBe(3));
+      setIx({ ...at(1, 2) });
+      now = 9000;
+      setIx(at(2, 1));
+      await settle();
+      expect(calls()).toBe(3);
+    });
+
+    it("a late answer of an earlier fetch is dropped; unmount aborts", async () => {
+      const [ix, setIx] = createSignal<Indexing>();
+      const body = (line: number) =>
+        new Response(
+          new Uint8Array(
+            cbor(
+              lexed({
+                partial: true,
+                targets: targets.map((t, i) =>
+                  i === 2 ? [...t.slice(0, 3), line, ...t.slice(4)] : t,
+                ),
+              }),
+            ),
+          ),
+          { status: 200, headers: { "Content-Type": "application/cbor" } },
+        );
+      let late: ((r: Response) => void) | undefined;
+      // eslint-disable-next-line solid/reactivity -- read by the view
+      const { main, calls, signals } = await openWith(
+        (call) =>
+          call === 2
+            ? new Promise((done) => (late = done))
+            : Promise.resolve(body(call === 1 ? 4 : 5)),
+        ix,
+      );
+      now = 2000;
+      setIx(at(1, 1));
+      await vi.waitFor(() => expect(late).toBeDefined());
+      now = 3100;
+      setIx(at(1, 1));
+      await vi.waitFor(() => {
+        expect(calls()).toBe(3);
+        expect(linkOn(main, 1).getAttribute("href")).toContain("#L5");
+      });
+      expect(signals[1]?.aborted).toBe(true);
+      late?.(body(2));
+      await settle();
+      expect(linkOn(main, 1).getAttribute("href")).toContain("#L5");
+      expect(signals[2]?.aborted).toBe(false);
+      unmountApp();
+      expect(signals[2]?.aborted).toBe(true);
+    });
+
+    it("not partial: no refetch", async () => {
+      const [ix, setIx] = createSignal<Indexing>();
+      // eslint-disable-next-line solid/reactivity -- read by the view
+      const { calls } = await openWith([[200, lexed()]], ix);
+      now = 5000;
+      setIx(at(1, 1));
+      await settle();
+      expect(calls()).toBe(1);
+    });
+
+    it("a failed refetch keeps the last highlight; an equal one no redraw", async () => {
+      const [ix, setIx] = createSignal<Indexing>();
+      // eslint-disable-next-line solid/reactivity -- read by the view
+      const { main, calls } = await openWith(
+        [
+          [200, lexed({ partial: true })],
+          [500, "boom"],
+          [200, lexed({ partial: true })],
+          [200, lexed({ partial: true, targets: [...targets].reverse() })],
+        ],
+        ix,
+      );
+      const first = linkOn(main, 1);
+      for (const [i, t] of [2000, 3100, 4200].entries()) {
+        now = t;
+        setIx(at(1, 1));
+        await vi.waitFor(() => expect(calls()).toBe(i + 2));
+        await settle();
+        // Still there, the same node: no redraw.
+        if (i < 2) expect(linkOn(main, 1)).toBe(first);
+      }
+      // A changed answer redraws.
+      expect(linkOn(main, 1)).not.toBe(first);
+      expect(first.isConnected).toBe(false);
+    });
   });
 });
