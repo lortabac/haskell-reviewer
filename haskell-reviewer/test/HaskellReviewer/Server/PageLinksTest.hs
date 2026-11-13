@@ -54,7 +54,7 @@ import HaskellReviewer.Server.Wire.Page
     ModuleView (..),
     encodeModulePage,
   )
-import HaskellReviewer.Session.Index (ParsedSource (..))
+import HaskellReviewer.Session.Index (newParsedSource)
 import HaskellReviewer.Session.Snapshot (Generation (..))
 import IndexSupport (MemProject (..), libFile, memProject, modId)
 import ResolveDump (Fixture (..), cases, loadFixture, resolveInput)
@@ -318,7 +318,7 @@ view i p links =
     { moduleId = i,
       path = Just (libFile "U"),
       partial = False,
-      answer = ParsedAnswer ParsedSource {text = p.text, parsed = p.parsed} links
+      answer = ParsedAnswer (newParsedSource p.text p.parsed) links
     }
 
 -- | A target's kind.

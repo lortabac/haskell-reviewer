@@ -203,7 +203,7 @@ import HaskellReviewer.Effects.Parser (declsWarmUp, haddockWarmUp)
 import HaskellReviewer.Server.Cbor qualified as Cbor
 import HaskellReviewer.Server.Wire (noSourceReason)
 import HaskellReviewer.Server.Wire.Targets (encodeTarget)
-import HaskellReviewer.Session.Index (ParsedSource (..))
+import HaskellReviewer.Session.Index (ParsedSource (..), newParsedSource)
 import HaskellReviewer.Session.Snapshot (Generation (..))
 
 -- * Types
@@ -453,7 +453,7 @@ pageWarmUp =
       ]
   where
     parsedPage t = case parseSource defaultParseSettings t of
-      Parsed m -> page (ParsedAnswer ParsedSource {text = t, parsed = m} noPageLinks)
+      Parsed m -> page (ParsedAnswer (newParsedSource t m) noPageLinks)
       TextOnly o -> page (TextOnlyAnswer o)
     page a =
       encodeModulePage
@@ -474,7 +474,7 @@ pageWarmUp =
                     path = modulePath idx i,
                     partial = maybe False isPartial res,
                     answer =
-                      ParsedAnswer ParsedSource {text = p.text, parsed = p.parsed} links
+                      ParsedAnswer (newParsedSource p.text p.parsed) links
                   }
       _ -> Nothing
     textOnly r =

@@ -144,6 +144,7 @@ import HaskellReviewer.Server.Listen
     renderListenError,
   )
 import HaskellReviewer.Server.Prefs (warmUpPrefs)
+import HaskellReviewer.Server.Refs (warmUpRefs)
 import HaskellReviewer.Server.Router (Routes (..), application, warmUpGzip)
 import HaskellReviewer.Server.Search (warmUpSearch)
 import HaskellReviewer.Server.Wire.Page (warmUpPages)
@@ -357,7 +358,8 @@ newRealDeps spawnSetup = do
         prefsPath = (\env -> prefsFile (`lookup` env)) <$> getEnvironment,
         probeFiles = FileSystem.probeFiles,
         readProject = Session.Project.readProject,
-        warmUp = [Parser.warmUpParser, warmUpResolve, warmUpPages, warmUpSource],
+        warmUp =
+          [Parser.warmUpParser, warmUpResolve, warmUpPages, warmUpSource, warmUpRefs],
         readEntry = FileSystem.readEntry,
         parse = Parser.parseGuarded,
         indexWorkers = getNumCapabilities,

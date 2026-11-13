@@ -33,7 +33,7 @@ import HaskellReviewer.Server.Wire.Page
     encodeModulePage,
     pageWarmUp,
   )
-import HaskellReviewer.Session.Index (ParsedSource (..))
+import HaskellReviewer.Session.Index (newParsedSource)
 import HaskellReviewer.Session.Snapshot (Generation (..))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
@@ -484,7 +484,7 @@ viewOf src m =
     { moduleId = LooseModule file,
       path = Just file,
       partial = False,
-      answer = ParsedAnswer ParsedSource {text = src, parsed = m} noPageLinks
+      answer = ParsedAnswer (newParsedSource src m) noPageLinks
     }
 
 file :: RelPath

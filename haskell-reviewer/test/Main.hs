@@ -47,6 +47,7 @@ import HaskellReviewer.Core.ProjectFileTest qualified
 import HaskellReviewer.Core.ProjectGoldenTest qualified
 import HaskellReviewer.Core.ProjectLoadTest qualified
 import HaskellReviewer.Core.ProjectTest qualified
+import HaskellReviewer.Core.ReferencesTest qualified
 import HaskellReviewer.Core.RelPathTest qualified
 import HaskellReviewer.Core.ResolveGoldenTest qualified
 import HaskellReviewer.Core.ResolveTest qualified
@@ -77,6 +78,8 @@ import HaskellReviewer.Server.ListenTest qualified
 import HaskellReviewer.Server.PageLinksTest qualified
 import HaskellReviewer.Server.PageTest qualified
 import HaskellReviewer.Server.Prefs (warmUpPrefs)
+import HaskellReviewer.Server.Refs (warmUpRefs)
+import HaskellReviewer.Server.RefsTest qualified
 import HaskellReviewer.Server.Router (warmUpGzip)
 import HaskellReviewer.Server.RouterTest qualified
 import HaskellReviewer.Server.Search (warmUpSearch)
@@ -110,6 +113,9 @@ main = do
   -- each serve warms it up again. Once here, before any test runs
   -- (Q-RTS-BLACKHOLE).
   warmUpSearch
+  -- The same for the refs route. It parses and resolves the warm-up
+  -- project too, here on one thread.
+  warmUpRefs
   -- Tests run in parallel: share expensive values through withResource.
   -- See Note [Shared values in tests] in HaskellReviewer.Core.PackageGlobTest.
   defaultMain $
@@ -205,6 +211,7 @@ main = do
                 HaskellReviewer.Core.OccurrencesTest.linearTests,
                 HaskellReviewer.Core.ParseGoldenTest.tests,
                 HaskellReviewer.Core.ParserTest.tests,
+                HaskellReviewer.Core.ReferencesTest.tests,
                 HaskellReviewer.Core.ResolveGoldenTest.tests,
                 HaskellReviewer.Core.ResolveTest.tests,
                 HaskellReviewer.Core.ResolveTest.linearTests,
@@ -221,6 +228,7 @@ main = do
                     "API"
                     [ HaskellReviewer.Server.ApiGoldenTest.tests,
                       HaskellReviewer.Server.ApiTest.tests,
+                      HaskellReviewer.Server.RefsTest.tests,
                       HaskellReviewer.Server.SourceTest.tests
                     ],
                 HaskellReviewer.Server.PageLinksTest.tests,

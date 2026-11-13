@@ -33,6 +33,8 @@ import HaskellReviewer.Core.ModuleGraph (ImportTarget (..), mapImport)
 import HaskellReviewer.Core.ModuleModel (Extensions (..), ParsedModule (..))
 import HaskellReviewer.Core.ModuleModel qualified as Model (Import (..), Located (..))
 import HaskellReviewer.Core.Modules (ModuleIndex, buildModuleIndex)
+import HaskellReviewer.Core.Names (DeclId (..), DeclNs (..))
+import HaskellReviewer.Core.References (RefsAnswer (..))
 import HaskellReviewer.Core.RelPath (relPathText)
 import HaskellReviewer.Core.Resolve
   ( ModuleResolution (..),
@@ -66,6 +68,7 @@ import HaskellReviewer.Session.Index
 import HaskellReviewer.Session.Resolve
   ( Resolver,
     awaitImports,
+    findReferences,
     memoKeys,
     moduleState,
     newResolver,
@@ -99,6 +102,7 @@ tests =
       testCase "nothing for text only, no slot, failed" nothingCases,
       testCase "a new resolver has its own memo, same results" newResolverCase,
       testCase "many threads while indexing: same as one thread after" concurrent,
+      testCase "find references: partial while indexing; the memo grows" findRefsCase,
       testCase "moduleState of each slot state" moduleStateCase,
       testCase "the warm-up covers every slot state and import path" warmUpCovers
     ]
@@ -394,6 +398,33 @@ warmUpCovers = do
     or [length (homeMapped i p) > length (homeImports input.graph i p) | (i, p) <- parsed]
   assertBool "an external import" (or [not (null (external i p)) | (i, p) <- parsed])
   Set.toList (Set.fromList [implicit p | (_, p) <- parsed]) @?= [False, True]
+
+findRefsCase :: Assertion
+findRefsCase = do
+  w <-
+    newWorld
+      ["C"]
+      [ ("A", "module A (a) where\na = 1\n"),
+        ("B", "module B where\nimport A\nb = a\n"),
+        ("C", "module C where\nimport A\nc = a\n")
+      ]
+  let find = within (findReferences w.resolver show (modId "A") (Named DVal "a"))
+  withAsync (runWorkers w.deps 2 w.index) $ \_ -> do
+    waitState w.index (modId "A") isReady
+    waitState w.index (modId "B") isReady
+    during <- find
+    during.partial @?= True
+    -- A's export and equation, B's use.
+    during.total @?= 3
+    during.resolved @?= 2
+    memoKeys w.resolver >>= (@?= [modId "A"])
+    release w "C"
+    waitDone w.index
+  after <- find
+  after.partial @?= False
+  after.total @?= 4
+  -- Already in the memo: nothing new.
+  Map.keys after.newFinal @?= []
 
 -- * A world: an index of one library, with real parses
 
