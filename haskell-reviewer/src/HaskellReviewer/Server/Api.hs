@@ -140,7 +140,8 @@ a file view of each kind ('cborWarmUp'), so the shared values of cborg
 and of our CBOR code are built before request threads race on them. The
 gzip path gets the same before warp listens (Note [Compression] in
 "HaskellReviewer.Server.Router"), and so does the search route
-(warmUpSearch in "HaskellReviewer.Server.Search").
+(warmUpSearch in "HaskellReviewer.Server.Search"). The listing thread
+runs the refs route too (warmUpRefs in "HaskellReviewer.Server.Refs").
 
 What the workers put in the slots is forced before it gets there (Note
 [Indexing] in "HaskellReviewer.Session.Index").

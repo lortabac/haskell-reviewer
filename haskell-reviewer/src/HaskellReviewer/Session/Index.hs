@@ -10,6 +10,7 @@ module HaskellReviewer.Session.Index
     SlotState (..),
     Indexed (..),
     ParsedSource (..),
+    newParsedSource,
     IndexFailure (..),
     Progress (..),
     IndexDeps (..),
@@ -89,6 +90,7 @@ import HaskellReviewer.Core.Modules
 import HaskellReviewer.Core.NameTable (NameEntry, forceNames, moduleNames)
 import HaskellReviewer.Core.Parser (ParseSettings, moduleParseSettings)
 import HaskellReviewer.Core.Project (GhcVersion)
+import HaskellReviewer.Core.References (OccKeys, occKeys)
 import HaskellReviewer.Core.RelPath (RelPath, relPathText)
 import HaskellReviewer.Effects.FileSystem (ReadError (..))
 import HaskellReviewer.Effects.Log (Logger, exceptionMessage, logInfo, logVerbose)
@@ -153,11 +155,12 @@ Q-RTS-BLACKHOLE: request threads read what workers write, and workers
 share the queue. So nothing shared holds a thunk. The two counts are
 strict Ints, written with modifyTVar'. The parse result is
 fully forced by parseGuarded (the text is strict, read already), the
-names by 'forceNames', both before the transaction that publishes
-them. The queue is a strict map with strict fields, written with '$!'.
-The rest is StrictData values written already evaluated. The slots
-and the queue are built and forced in 'newIndex', before any worker or
-request sees them.
+names by 'forceNames', the keys of find references by 'evaluate' (an
+unboxed vector), all before the transaction that publishes them. The
+queue is a strict map with strict fields, written with '$!'. The rest
+is StrictData values written already evaluated. The slots and the queue
+are built and forced in 'newIndex', before any worker or request sees
+them.
 -}
 
 -- * Types
@@ -213,9 +216,16 @@ data Indexed
 -- text, shared with nothing else.
 data ParsedSource = ParsedSource
   { text :: Text,
-    parsed :: ParsedModule
+    parsed :: ParsedModule,
+    -- | For find references. See Note [Find references] in
+    -- "HaskellReviewer.Core.References".
+    occKeys :: OccKeys
   }
   deriving (Eq, Show)
+
+-- | A parsed module and its text, with its keys.
+newParsedSource :: Text -> ParsedModule -> ParsedSource
+newParsedSource t m = ParsedSource {text = t, parsed = m, occKeys = occKeys t m}
 
 -- | Why there is no answer for a module.
 data IndexFailure
@@ -513,7 +523,7 @@ indexOne deps index c =
                 Parsed m -> do
                   let ns = moduleNames m.declarations
                   _ <- evaluate (forceNames ns)
-                  let source = ParsedSource {text = t, parsed = m}
+                  source <- evaluate (newParsedSource t m)
                   pure (Done (IndexedParsed source) (Just ns))
                 TextOnly o -> pure (Done (IndexedTextOnly o) Nothing)
         Right (Binary size) -> pure (Done (IndexedNotText size) Nothing)

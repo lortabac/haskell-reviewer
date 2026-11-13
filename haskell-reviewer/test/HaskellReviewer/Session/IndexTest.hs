@@ -49,6 +49,7 @@ import HaskellReviewer.Core.Project
     ProjectSource (..),
     parserGhcVersion,
   )
+import HaskellReviewer.Core.References (occKeys)
 import HaskellReviewer.Core.RelPath (RelPath, relPathFromSegments, relPathText)
 import HaskellReviewer.Effects.FileSystem (ReadError (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), Logger (..), newLogger)
@@ -445,10 +446,12 @@ parsingTests =
           waitDone index
         names <- atomically (readNames index)
         Map.keys names @?= [m "A", m "B"]
-        -- A parsed module keeps its text, for the docs page.
+        -- A parsed module keeps its text, for the docs page, and the
+        -- keys of find references.
         atomically (slotState index (m "A")) >>= \case
-          Just (Ready (IndexedParsed p)) ->
+          Just (Ready (IndexedParsed p)) -> do
             p.text @?= "module A (a) where\ndata T = K\na = 1\n"
+            p.occKeys @?= occKeys p.text p.parsed
           other -> assertFailure (take 300 (show other))
     ]
 

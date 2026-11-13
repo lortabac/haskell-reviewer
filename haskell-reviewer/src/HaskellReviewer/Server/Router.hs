@@ -32,6 +32,7 @@ import HaskellReviewer.Server.Api
 import HaskellReviewer.Server.Assets (Asset (..), lookupAsset, shellFor)
 import HaskellReviewer.Server.Events (EventStream, eventsApp)
 import HaskellReviewer.Server.Prefs (prefsApp)
+import HaskellReviewer.Server.Refs (refsApp)
 import HaskellReviewer.Server.Search (searchApp)
 import HaskellReviewer.Server.Security
   ( checkAccess,
@@ -95,6 +96,11 @@ Paths below are what the router sees, after the token.
 - api/search/<side>?q=<text>: modules and names that match, as JSON
   (Note [Search route] in "HaskellReviewer.Server.Search"). Same sides
   and methods as above; a bad q is a plain 400.
+- api/refs/<side>?module=<ref>&decl=<id>: the references to one
+  declaration, as JSON (Note [Refs route] in
+  "HaskellReviewer.Server.Refs"). Same sides and methods; bad params
+  are a plain 400, an unknown module or declaration a 404 with a JSON
+  body.
 - api/prefs: the UI preferences, as JSON. GET, and POST with an
   application/json body (Note [Prefs route] in
   "HaskellReviewer.Server.Prefs"); 405 otherwise, HEAD too.
@@ -209,6 +215,7 @@ router shell routes req respond = case req.pathInfo of
   "api" : "source" : side : path -> sourceApp routes.files side path req respond
   ["api", "indexing", side] -> indexingApp routes.files side req respond
   ["api", "search", side] -> searchApp routes.files side req respond
+  ["api", "refs", side] -> refsApp routes.files side req respond
   ["api", "prefs"] -> prefsApp routes.prefs req respond
   _ -> respond notFound
   where

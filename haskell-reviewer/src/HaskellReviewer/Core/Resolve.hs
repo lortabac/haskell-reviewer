@@ -29,11 +29,13 @@ module HaskellReviewer.Core.Resolve
 
     -- * Running
     resolveModule,
+    resolveModuleOnly,
     exportSets,
     homeImports,
 
     -- * Names
     quoter,
+    occKey,
   )
 where
 
@@ -404,7 +406,23 @@ forceDocNames r = foldr (\x acc -> forceResolved x `seq` acc) () r.docNames
 
 -- | Resolve a module's free names. 'Nothing' if it isn't parsed.
 resolveModule :: ResolveInput -> ModuleId -> Maybe ModuleResolution
-resolveModule input self = case input.state self of
+resolveModule input = resolveWith input AllNames
+
+-- | Like 'resolveModule', but only the free tokens and pun fields whose
+-- 'occKey' passes, and no doc names. The tokens it keeps get the same
+-- results as with 'resolveModule'. For find references.
+resolveModuleOnly :: ResolveInput -> ModuleId -> (Text -> Bool) -> Maybe ModuleResolution
+resolveModuleOnly input self keep = resolveWith input (OnlyNames keep) self
+
+-- | Which names to resolve.
+data Which
+  = -- | All, doc names too.
+    AllNames
+  | -- | The free tokens whose key passes; no doc names.
+    OnlyNames (Text -> Bool)
+
+resolveWith :: ResolveInput -> Which -> ModuleId -> Maybe ModuleResolution
+resolveWith input which self = case input.state self of
   ModuleParsed p -> Just $ runST $ do
     env <- newEnv input
     t <- tableOf env self p.parsed
@@ -412,21 +430,30 @@ resolveModule input self = case input.state self of
     imports <- scopeFor env Set.empty self p.parsed (cppBlocks ls p.parsed)
     let occs = occurrenceList p.parsed.occurrences
         textAt i = sliceSpan ls (tokenSpanAt p.parsed.tokens i)
+        wanted c txt = case which of
+          AllNames -> True
+          OnlyNames keep -> keep (occKey c txt)
         frees =
-          [ freeToken i (textAt i) o o.namespace c
+          [ freeToken i txt o o.namespace c
           | (TokenIx i, o) <- occs,
-            FreeRef c <- [o.resolution]
+            FreeRef c <- [o.resolution],
+            let txt = textAt i,
+            wanted c txt
           ]
         -- A pun's field is a field.
         puns =
-          [ freeToken i (textAt i) o FieldNs c
+          [ freeToken i txt o FieldNs c
           | (TokenIx i, o) <- occs,
-            Just (FreeRef c) <- [o.punField]
+            Just (FreeRef c) <- [o.punField],
+            let txt = textAt i,
+            wanted c txt
           ]
         -- Distinct names to look up, for the scope's index choice.
         lookups = Set.size (Set.fromList (map (.text) frees))
         -- Lazy: only the page reads doc names.
-        refs = Set.fromList (map docRef (docNames p.parsed))
+        refs = case which of
+          AllNames -> Set.fromList (map docRef (docNames p.parsed))
+          OnlyNames _ -> Set.empty
         -- A cut at this module, in what an import brings: its own names.
         own si = case si.target of
           TargetHome m s -> si {target = TargetHome m (withoutOpen OpenCycle self s)}
@@ -1108,3 +1135,12 @@ quoter t =
         (\c -> c /= '|' && not (isSpace c))
         (Text.drop 1 t)
     )
+
+-- | The name a free token is looked up by, with no qualifier: the
+-- quoter for a quasi-quote. A token can only resolve to a declaration
+-- with this name. The key of the find references index (Note [Find
+-- references] in "HaskellReviewer.Core.References").
+occKey :: FreeContext -> Text -> Text
+occKey c t = case c of
+  QuasiQuoter -> (quoter t).occ
+  _ -> (nameRef Rich.ValueNs t).occ

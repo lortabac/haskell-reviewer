@@ -11,6 +11,8 @@ module ApiSupport
     sourceApi,
     sourceTexts,
     gatedOn,
+    refsApi,
+    refsGatedOn,
     forceFixtures,
     indexed,
     indexAll,
@@ -207,6 +209,100 @@ gatedOn path gate =
       workers = sourceApi.workers
     }
 
+-- | A project for find references: a class method used, imported,
+-- exported and defined in instances, here and elsewhere; an operator
+-- with a +; an ambiguous import (a guess); a field pun; a quasi-quoter;
+-- and a name with 1001 references (export, signature, equation and 998
+-- uses).
+refsApi :: TestApi
+refsApi = apiFor refsSnapshot
+
+-- | 'refsApi', with the parse of this file (a path of 'refsTexts') held
+-- until the gate is full. Each request gets a fresh snapshot, so each
+-- parses it again.
+refsGatedOn :: Text -> MVar () -> TestApi
+refsGatedOn path gate =
+  refsApi
+    { parse = \settings t -> do
+        when (Just t == lookup path refsTexts) (readMVar gate)
+        parseGuarded settings t,
+      -- See sourceApi: names the record type.
+      workers = refsApi.workers
+    }
+
+-- | The texts of 'refsApi''s modules, by path.
+refsTexts :: [(Text, Text)]
+refsTexts =
+  [ ( "r/src/R/Shape.hs",
+      "module R.Shape (Shape (..), HasArea (area), Pt (..), (<+>), big) where\n\
+      \\n\
+      \-- | A shape.\n\
+      \data Shape = Circle Double | Square Double\n\
+      \\n\
+      \class HasArea a where\n\
+      \  area :: a -> Double\n\
+      \\n\
+      \instance HasArea Shape where\n\
+      \  area (Circle r) = 3 * r * r\n\
+      \  area (Square s) = s * s\n\
+      \\n\
+      \data Pt = Pt {px :: Double}\n\
+      \\n\
+      \(<+>) :: Shape -> Shape -> Shape\n\
+      \a <+> _ = a\n\
+      \\n\
+      \big :: Int\n\
+      \big = 0\n"
+    ),
+    ( "r/src/R/Use.hs",
+      "{-# LANGUAGE NamedFieldPuns #-}\n\
+      \module R.Use (total, area) where\n\
+      \\n\
+      \import R.Shape (HasArea (area), Pt (..), Shape (..))\n\
+      \import qualified R.Shape as S\n\
+      \\n\
+      \newtype Box = Box Double\n\
+      \\n\
+      \instance S.HasArea Box where\n\
+      \  area (Box d) = d\n\
+      \\n\
+      \total :: [Shape] -> Double\n\
+      \total xs = sum (map area xs) + S.area (Square 1 S.<+> Circle 2)\n\
+      \\n\
+      \x :: Pt -> Double\n\
+      \x Pt {px} = px\n"
+    ),
+    ( "r/src/R/Guess.hs",
+      "module R.Guess (guess) where\n\
+      \\n\
+      \import R.Shape\n\
+      \import R.Other\n\
+      \\n\
+      \-- | Both export an area: a guess on the first.\n\
+      \guess = area\n"
+    ),
+    ("r/src/R/Other.hs", "module R.Other (area) where\n\narea = 0\n"),
+    ("r/src/R/QQ.hs", "module R.QQ (qq) where\n\nqq = undefined\n"),
+    ( "r/src/R/Quote.hs",
+      "{-# LANGUAGE QuasiQuotes #-}\n\
+      \module R.Quote (quoted) where\n\
+      \\n\
+      \import R.QQ\n\
+      \\n\
+      \quoted = [qq|some text|]\n"
+    ),
+    ( "r/src/R/Many.hs",
+      "module R.Many (many) where\n\
+      \\n\
+      \import R.Shape\n\
+      \\n\
+      \many =\n\
+      \  [ big\n"
+        <> Text.concat (replicate 997 "  , big\n")
+        <> "  ]\n"
+    )
+  ]
+
 -- | The texts of 'sourceApi''s modules, by path: tests gate on them.
 sourceTexts :: [(Text, Text)]
 sourceTexts =
@@ -269,7 +365,8 @@ forceFixtures = do
       implicitSnapshot,
       pageSnapshot,
       searchSnapshot,
-      sourceSnapshot
+      sourceSnapshot,
+      refsSnapshot
     ]
     void
   forM_ contents $ \(p, c) -> evaluate p >> evaluate (forceContent c)
@@ -522,6 +619,47 @@ sourceSnapshot =
   where
     listed n = ListedModule {name = ModuleName n, kind = Exposed, autogen = False}
 
+refsSnapshot :: IO Snapshot
+refsSnapshot =
+  newSnapshot
+    fixtureRoot
+    ( fileList $
+        ("r/r.cabal", EntryFile)
+          : [(Text.Encoding.encodeUtf8 p, EntryFile) | (p, _) <- refsTexts]
+    )
+    Project
+      { source = ProjectFile [],
+        withCompiler = Nothing,
+        ghc = fixtureGhc,
+        packages =
+          [ Package
+              { name = PackageName "r",
+                version = "1",
+                cabalFile = relPath "r/r.cabal",
+                flags = [],
+                components =
+                  [ (component Lib "r/src")
+                      { modules =
+                          map
+                            listed
+                            [ "R.Shape",
+                              "R.Use",
+                              "R.Guess",
+                              "R.Other",
+                              "R.Many",
+                              "R.QQ",
+                              "R.Quote"
+                            ]
+                      }
+                  ]
+              }
+          ],
+        brokenPackages = [],
+        warnings = []
+      }
+  where
+    listed n = ListedModule {name = ModuleName n, kind = Exposed, autogen = False}
+
 pageSnapshot :: IO Snapshot
 pageSnapshot =
   newSnapshot
@@ -659,7 +797,7 @@ contents =
       TooLarge TooLargeInfo {size = FileSize 2_000_000, limit = textLimit}
     )
   ]
-    <> [(p, TextContent t) | (p, t) <- sourceTexts]
+    <> [(p, TextContent t) | (p, t) <- sourceTexts <> refsTexts]
   where
     link p t =
       Link

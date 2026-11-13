@@ -15,6 +15,8 @@ import ApiSupport
     indexed,
     pageApi,
     projectApi,
+    refsApi,
+    refsGatedOn,
     searchApi,
     sourceApi,
   )
@@ -137,6 +139,23 @@ cases =
     json "search-qualified" (okSearch (indexed searchApi) "?q=Data.Map.insert"),
     -- Nothing indexed yet: modules only.
     json "search-partial" (okSearch searchApi {workers = 0} "?q=map"),
+    -- Find references: every kind, a guess; partial while a module
+    -- isn't parsed; not found.
+    json "refs" (okRefs (indexed refsApi) "?module=R.Shape&decl=val:area"),
+    json "refs-partial" $ do
+      gate <- newEmptyMVar
+      okRefs
+        (refsGatedOn "r/src/R/Use.hs" gate) {workers = 2}
+        "?module=R.Shape&decl=con:Square",
+    json "refs-not-found" $ do
+      r <-
+        getApiQuery
+          (indexed refsApi)
+          ["api", "refs", "tree"]
+          "?module=R.Shape&decl=val:nope"
+      r.status @?= 404
+      lookup "Content-Type" r.headers @?= Just "application/json"
+      pure (r.body <> "\n"),
     -- Every value other than the built-in one.
     json "prefs" (okJson fixtureApi {prefs = configured} ["api", "prefs"])
   ]
@@ -182,6 +201,14 @@ okJson api path = (<> "\n") <$> answer 200 "application/json" api path
 okSearch :: TestApi -> ByteString -> IO LBS.ByteString
 okSearch api query = do
   r <- getApiQuery api ["api", "search", "tree"] query
+  r.status @?= 200
+  lookup "Content-Type" r.headers @?= Just "application/json"
+  pure (r.body <> "\n")
+
+-- | GET api/refs/tree with this query string; must be a 200 with JSON.
+okRefs :: TestApi -> ByteString -> IO LBS.ByteString
+okRefs api query = do
+  r <- getApiQuery api ["api", "refs", "tree"] query
   r.status @?= 200
   lookup "Content-Type" r.headers @?= Just "application/json"
   pure (r.body <> "\n")

@@ -15,6 +15,8 @@ module HaskellReviewer.Session.Resolve
     resolveModuleWith,
     awaitImports,
     importWait,
+    findReferences,
+    referencesIn,
 
     -- * Warm-up
     warmUpResolve,
@@ -40,6 +42,7 @@ import Control.Concurrent.STM
   )
 import Control.Exception (evaluate)
 import Control.Monad (unless)
+import Data.List (sortOn)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
@@ -49,6 +52,14 @@ import HaskellReviewer.Core.FileContent (FileSize (..), TooLargeInfo (..))
 import HaskellReviewer.Core.ModuleGraph (ModuleGraph, buildModuleGraph, forceModuleGraph)
 import HaskellReviewer.Core.ModuleModel (TextOnlyReason (..), textOnlyModule)
 import HaskellReviewer.Core.Modules (ModuleId (..), ModuleIndex)
+import HaskellReviewer.Core.Names (DeclId)
+import HaskellReviewer.Core.References
+  ( RefsAnswer (..),
+    RefsInput (..),
+    findRefs,
+    forceRefsAnswer,
+    mayRefer,
+  )
 import HaskellReviewer.Core.RelPath (RelPath, relPathFromSegments)
 import HaskellReviewer.Core.Resolve
   ( ExportSets (..),
@@ -70,6 +81,7 @@ import HaskellReviewer.Session.Index
     ParsedSource (..),
     SlotState (..),
     awaitModule,
+    newParsedSource,
     readStates,
     requestModule,
     slotState,
@@ -90,6 +102,10 @@ memo in one transaction, so they agree. It resolves with no lock held.
 New final sets go in the memo with a left-biased union: two requests
 may build the same set at once; the first one in wins, the other copy
 is dropped. Both are equal anyway.
+
+'findReferences' reads the slots and the memo the same way, then
+resolves the candidates one after the other, and puts all their new
+final sets in the memo at once.
 
 A result that read a module not ready yet is partial ('isPartial'):
 the client asks again later. To make that rarer, 'awaitImports' first
@@ -180,6 +196,54 @@ awaitImports r (Microseconds d) i =
 importWait :: Microseconds
 importWait = Microseconds 100_000
 
+-- | Find the references to a declaration of a parsed module, over the
+-- whole side, with the slots as they are now: it never waits. Modules
+-- other than home go by @order@. The new final sets go in the memo, as
+-- for 'resolveModule'. The answer is forced. See Note [Find references]
+-- in "HaskellReviewer.Core.References".
+findReferences ::
+  (Ord k) => Resolver -> (ModuleId -> k) -> ModuleId -> DeclId -> IO RefsAnswer
+findReferences r order home d = do
+  (states, memo) <- atomically $ (,) <$> readStates r.index <*> readTVar r.memo
+  let answer = referencesIn r.graph order states memo home d
+  _ <- evaluate (forceRefsAnswer answer)
+  unless (Map.null answer.newFinal) $
+    atomically (modifyTVar' r.memo (`Map.union` answer.newFinal))
+  pure answer
+
+-- | What 'findReferences' computes, from slot states and a memo read
+-- at once. Pure: the refs route's warm-up runs it too.
+referencesIn ::
+  (Ord k) =>
+  ModuleGraph ->
+  (ModuleId -> k) ->
+  Map ModuleId SlotState ->
+  Map ModuleId ExportSet ->
+  ModuleId ->
+  DeclId ->
+  RefsAnswer
+referencesIn graph order states memo home d =
+  findRefs
+    RefsInput
+      { resolve = ResolveInput {graph = graph, state = moduleState states, memo = memo},
+        home = home,
+        decl = d,
+        others =
+          sortOn
+            order
+            [ i
+            | (i, Ready (IndexedParsed s)) <- Map.toList states,
+              i /= home,
+              mayRefer d s.occKeys
+            ],
+        indexing = any notDone states
+      }
+  where
+    notDone = \case
+      Pending -> True
+      Parsing -> True
+      _ -> False
+
 -- * Warm-up
 
 -- | Resolve the warm-up project once, through 'moduleState', so the
@@ -238,7 +302,7 @@ warmUpStates =
   where
     slotOf = \case
       ModuleParsed p ->
-        Ready (IndexedParsed ParsedSource {text = p.text, parsed = p.parsed})
+        Ready (IndexedParsed (newParsedSource p.text p.parsed))
       ModuleNotParsed -> Ready (IndexedTextOnly (textOnlyModule TooSlow []))
       ModuleNotReady -> Pending
     extra n = LooseModule (pathOf ["warm-up", n <> ".hs"])

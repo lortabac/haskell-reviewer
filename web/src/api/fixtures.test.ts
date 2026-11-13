@@ -41,6 +41,7 @@ import {
   type ModulePage,
 } from "./module";
 import { decodePrefs, sidebarViews, themes } from "./prefs";
+import { decodeRefs, decodeRefsNotFound, refKinds, refsUrl } from "./refs";
 import {
   decodeSearch,
   searchKinds,
@@ -98,6 +99,9 @@ const decoders: Record<string, (value: unknown) => unknown> = {
   "module-not-found": decodeModuleNotFound,
   prefs: decodePrefs,
   "prefs-defaults": decodePrefs,
+  refs: decodeRefs,
+  "refs-partial": decodeRefs,
+  "refs-not-found": decodeRefsNotFound,
   search: decodeSearch,
   "search-qualified": decodeSearch,
   "search-partial": decodeSearch,
@@ -314,6 +318,29 @@ describe("API fixtures", () => {
       "Data.Map",
       "Data.IntMap",
     ]);
+  });
+
+  it("the refs fixtures cover every kind, guesses, partial", () => {
+    const answers = ["refs", "refs-partial"].map((n) => decodeRefs(fixture(n)));
+    const results = answers.flatMap((a) => a.results);
+    expect(sorted(results.map((r) => r.kind))).toEqual(sorted(refKinds));
+    expect(sorted(results.map((r) => String(r.heuristic)))).toEqual([
+      "false",
+      "true",
+    ]);
+    expect(sorted(answers.map((a) => String(a.partial)))).toEqual([
+      "false",
+      "true",
+    ]);
+    // Home first, then by module name.
+    const refs = decodeRefs(fixture("refs"));
+    expect([...new Set(refs.results.map((r) => r.ref))]).toEqual([
+      "R.Shape",
+      "R.Guess",
+      "R.Use",
+    ]);
+    expect(refs.total).toBe(refs.results.length);
+    expect(decodeRefsNotFound(fixture("refs-not-found")).what).toBe("decl");
   });
 
   it("the source fixtures cover every value", () => {
@@ -709,6 +736,67 @@ describe("decoders reject bad shapes", () => {
     );
     expect(searchUrl("Data.Map.insert")).toBe(
       "/api/search/tree?q=Data.Map.insert",
+    );
+  });
+
+  it("refs", () => {
+    const ref = {
+      module: "A",
+      ref: "A",
+      path: "src/A.hs",
+      span: [1, 2, 1, 3],
+      kind: "use",
+      heuristic: true,
+      reasons: ["ambiguous"],
+      line: "x = a",
+      lineCol: 1,
+    };
+    const good = {
+      generation: 1,
+      module: "A",
+      decl: "val:a",
+      partial: false,
+      total: 2,
+      results: [ref, { ...ref, heuristic: false, reasons: [], path: null }],
+    };
+    expect(decodeRefs(good)).toEqual(good);
+    const withRef = (r: object) => ({ ...good, results: [r] });
+    for (const bad of [
+      null,
+      { ...good, generation: -1 },
+      { ...good, decl: undefined },
+      { ...good, partial: "no" },
+      { ...good, total: 1 },
+      { ...good, results: {} },
+      withRef({ ...ref, kind: "def" }),
+      withRef({ ...ref, span: [1, 2, 3] }),
+      withRef({ ...ref, reasons: [] }),
+      withRef({ ...ref, heuristic: false }),
+      withRef({ ...ref, reasons: ["nope"] }),
+      withRef({ ...ref, line: undefined }),
+      withRef({ ...ref, lineCol: 0 }),
+      withRef({ ...ref, path: undefined }),
+    ]) {
+      expect(() => decodeRefs(bad), JSON.stringify(bad)).toThrow(DecodeError);
+    }
+    const missing = { generation: 1, kind: "not-found", what: "module" };
+    expect(decodeRefsNotFound(missing)).toEqual(missing);
+    for (const bad of [
+      { ...missing, what: "file" },
+      { ...missing, kind: "text" },
+    ]) {
+      expect(() => decodeRefsNotFound(bad), JSON.stringify(bad)).toThrow(
+        DecodeError,
+      );
+    }
+  });
+
+  it("refs URL: both params encoded, + too", () => {
+    expect(refsUrl("R.Shape", "val:<+>")).toBe(
+      "/api/refs/tree?module=R.Shape&decl=val%3A%3C%2B%3E",
+    );
+    expect(refsUrl("p:lib:A", "field:T.f")).toBe(
+      "/api/refs/tree?module=p%3Alib%3AA&decl=field%3AT.f",
     );
   });
 

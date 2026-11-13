@@ -390,7 +390,9 @@ The whole file, syntax-highlighted (§5.6), with line numbers.
   (D-285).
 - **Find references**: for a selected identifier, a list of the places where it
   is used. These are exact at the precise tier and textual-but-scoped at the
-  syntactic tier, and labelled accordingly.
+  syntactic tier, and labelled accordingly. At the syntactic tier the
+  server finds them on request, over the whole side, from the names each
+  module uses (D-294); locals are found in the page itself.
 - A gutter outline shows the top-level declarations, with a link from each
   back to the docs view. The same list, collapsed under the view
   ("Outline (N)"), is the keyboard way in: each entry links to its docs
@@ -1359,10 +1361,12 @@ is marked *partial*, and the client asks again as indexing goes on (D-252,
 D-259, D-262). Before resolving, a request waits up to about 100 ms
 after the module's own parse for its direct home imports (D-252, D-274);
 a module reached only through re-exports can still make the first answer
-partial. The per-side tables built from the results (name →
-declarations, and a reverse-reference table for find-references and
-"Affected") come later. The reverse table is built in the background, and
-is marked *partial* until it is complete (§10.2).
+partial. Find references is on request too (D-294): each parsed module
+keeps, from its parse, the names its free tokens use (as hashes), and a
+request resolves only those tokens, in the modules that have the
+declaration's name, with the same memo. It is *partial* while indexing
+runs or a module read isn't ready. There is no background reverse table;
+one may come in M4 for "Affected".
 
 #### 11.4.6 HIE companions
 
@@ -1504,7 +1508,10 @@ a framework would cost more than it saves.
   has the same `partial` flag and a targets table of the same shape for
   its links out of the module (D-289); the docs page refetches it the
   same way and only its links change (D-293). Search is
-  `GET api/search/<side>?q=` (D-207). Every response
+  `GET api/search/<side>?q=` (D-207). Find references is
+  `GET api/refs/<side>?module=<ref>&decl=<id>` (JSON, D-294): at most
+  1000 results with their line, a total and the same `partial` flag; a
+  missing module or declaration is a 404 with a small JSON body. Every response
   carries its snapshot generation id, and the client caches by
   *(generation, resource)*. Preferences (`api/prefs`) are the exception:
   they don't belong to a snapshot, so they have no generation (D-197). A

@@ -16,6 +16,7 @@ module HaskellReviewer.Core.SourceLinks
     ModuleLink (..),
     ExternalLink (..),
     LinkReason (..),
+    linkReason,
     GuessHow (..),
     OutlineEntry (..),
     OutlineKind (..),
@@ -647,7 +648,8 @@ fromResolved :: DeclRole -> Text -> Resolved -> Maybe Key
 fromResolved role name = \case
   Exact t -> Just (home t [] 1)
   Heuristic rs t ->
-    Just (home t (map reasonOf (NonEmpty.toList rs)) (candidatesOf (NonEmpty.toList rs)))
+    let rs' = NonEmpty.toList rs
+     in Just (home t (map linkReason rs') (candidatesOf rs'))
   External g -> Just (external g)
   Unresolved _ -> Nothing
   where
@@ -677,8 +679,9 @@ nameOf ls input i ctx = case ctx of
   where
     written = sliceSpan ls (tokenSpanAt input.parsed.tokens i)
 
-reasonOf :: Reason -> LinkReason
-reasonOf = \case
+-- | A resolution reason as a link reason.
+linkReason :: Reason -> LinkReason
+linkReason = \case
   Ambiguous _ -> ReasonAmbiguous
   NotReady -> ReasonNotReady
   NotParsed -> ReasonNotParsed

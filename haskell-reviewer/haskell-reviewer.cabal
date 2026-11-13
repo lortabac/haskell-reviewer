@@ -81,6 +81,7 @@ library
     HaskellReviewer.Core.ProjectFile
     HaskellReviewer.Core.ProjectLoad
     HaskellReviewer.Core.RelPath
+    HaskellReviewer.Core.References
     HaskellReviewer.Core.Resolve
     HaskellReviewer.Core.ResolveWarmUp
     HaskellReviewer.Core.RichText
@@ -123,6 +124,7 @@ library
     HaskellReviewer.Server.Events
     HaskellReviewer.Server.Listen
     HaskellReviewer.Server.Prefs
+    HaskellReviewer.Server.Refs
     HaskellReviewer.Server.Router
     HaskellReviewer.Server.Search
     HaskellReviewer.Server.Security
@@ -254,6 +256,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.ProjectGoldenTest
     HaskellReviewer.Core.ProjectLoadTest
     HaskellReviewer.Core.ProjectTest
+    HaskellReviewer.Core.ReferencesTest
     HaskellReviewer.Core.RelPathTest
     HaskellReviewer.Core.ResolveGoldenTest
     HaskellReviewer.Core.ResolveTest
@@ -278,6 +281,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Server.CborTest
     HaskellReviewer.Server.PageLinksTest
     HaskellReviewer.Server.PageTest
+    HaskellReviewer.Server.RefsTest
     HaskellReviewer.Server.EventsTest
     HaskellReviewer.Server.ListenTest
     HaskellReviewer.Server.RouterTest

@@ -14,6 +14,9 @@ module HaskellReviewer.Server.Wire
     encodeIndexing,
     encodePrefs,
     encodeSearch,
+    encodeRefs,
+    RefsMissing (..),
+    encodeRefsNotFound,
     helloPayload,
 
     -- * Shared
@@ -71,6 +74,13 @@ import HaskellReviewer.Core.Project
     renderComponentName,
     renderProjectWarning,
   )
+import HaskellReviewer.Core.References
+  ( RefKind (..),
+    RefLine (..),
+    RefMatch (..),
+    Reference (..),
+    RefsAnswer (..),
+  )
 import HaskellReviewer.Core.RelPath (relDirText, relPathText)
 import HaskellReviewer.Core.Search
   ( Hit (..),
@@ -78,7 +88,9 @@ import HaskellReviewer.Core.Search
     ModuleCandidate (..),
     SearchResult (..),
   )
+import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
 import HaskellReviewer.Server.Cbor qualified as Cbor
+import HaskellReviewer.Server.Wire.Targets (reasonName)
 import HaskellReviewer.Session.Index (Progress (..))
 import HaskellReviewer.Session.Snapshot (Generation (..))
 
@@ -335,6 +347,80 @@ encodeSearch (Generation g) query indexing r =
     parent = \case
       Field p _ -> Just p
       _ -> Nothing
+
+-- | GET api\/refs\/\<side>?module=…&decl=…, with each module's name and
+-- ref, and its file:
+--
+-- > {"generation":1,"module":"A","decl":"val:area","partial":false,"total":1,
+-- >  "results":[{"module":"B","ref":"B","path":"src/B.hs","span":[8,23,8,27],
+-- >    "kind":"use","heuristic":false,"reasons":[],
+-- >    "line":"sorted shapes = sortOn area shapes","lineCol":1}]}
+--
+-- - @module@: the home module's ref. @decl@: the id as asked.
+-- - @partial@: indexing isn't done, or a module read isn't ready.
+-- - @total@: every reference, before the cap
+--   ('HaskellReviewer.Core.References.refsLimit').
+-- - Each result: its module's name (as search has it), @ref@, @path@;
+--   @span@ of the token (end exclusive, columns in code points);
+--   @kind@: use, import, export, binding; @heuristic@, and @reasons@
+--   (the source view's codes, empty when exact); @line@, cut to
+--   'HaskellReviewer.Core.References.lineCap' code points around the
+--   token; @lineCol@, the column of its first code point.
+--
+-- See Note [Find references] in "HaskellReviewer.Core.References".
+encodeRefs ::
+  Generation ->
+  Text ->
+  Text ->
+  (ModuleId -> ModuleCandidate) ->
+  (ModuleId -> Maybe Text) ->
+  RefsAnswer ->
+  LBS.ByteString
+encodeRefs (Generation g) home decl candidate pathOf a =
+  Encoding.encodingToLazyByteString . Aeson.pairs $
+    ("generation" .= g)
+      <> ("module" .= home)
+      <> ("decl" .= decl)
+      <> ("partial" .= a.partial)
+      <> ("total" .= a.total)
+      <> Encoding.pair "results" (Encoding.list result a.results)
+  where
+    result r =
+      let m = candidate r.match.module_
+          Span (Line l1) (Col c1) (Line l2) (Col c2) = r.match.span
+          Col lc = r.line.col
+       in Aeson.pairs $
+            ("module" .= m.name)
+              <> ("ref" .= m.ref)
+              <> ("path" .= pathOf r.match.module_)
+              <> ("span" .= [l1, c1, l2, c2])
+              <> ("kind" .= refKind r.match.kind)
+              <> ("heuristic" .= not (null r.match.reasons))
+              <> ("reasons" .= map reasonName r.match.reasons)
+              <> ("line" .= r.line.text)
+              <> ("lineCol" .= lc)
+    refKind :: RefKind -> Text
+    refKind = \case
+      RefUse -> "use"
+      RefImport -> "import"
+      RefExport -> "export"
+      RefBinding -> "binding"
+
+-- | What a find references 404 didn't find.
+data RefsMissing = MissingModule | MissingDecl
+  deriving (Eq, Show)
+
+-- | The 404 of the refs route:
+-- @{"generation":1,"kind":"not-found","what":"module"}@, or @"decl"@.
+encodeRefsNotFound :: Generation -> RefsMissing -> LBS.ByteString
+encodeRefsNotFound (Generation g) what =
+  Encoding.encodingToLazyByteString . Aeson.pairs $
+    ("generation" .= g) <> kindIs "not-found" <> ("what" .= whatText)
+  where
+    whatText :: Text
+    whatText = case what of
+      MissingModule -> "module"
+      MissingDecl -> "decl"
 
 -- * Internal
 
