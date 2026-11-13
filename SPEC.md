@@ -1502,7 +1502,8 @@ a framework would cost more than it saves.
   comes from `api/file`. While the answer is partial, the view refetches
   on `indexing` events, at most once a second (D-286). A module page
   has the same `partial` flag and a targets table of the same shape for
-  its links out of the module (D-289). Search is
+  its links out of the module (D-289); the docs page refetches it the
+  same way and only its links change (D-293). Search is
   `GET api/search/<side>?q=` (D-207). Every response
   carries its snapshot generation id, and the client caches by
   *(generation, resource)*. Preferences (`api/prefs`) are the exception:

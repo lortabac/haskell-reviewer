@@ -1,16 +1,7 @@
-import {
-  batch,
-  createEffect,
-  createMemo,
-  createSignal,
-  onCleanup,
-  untrack,
-  useContext,
-} from "solid-js";
+import { createEffect, createMemo, createSignal, untrack } from "solid-js";
 import { getCbor } from "../api/client";
 import { decodeSourceView, type LexedSource, sameLexed } from "../api/source";
-import { IndexingContext } from "../events/indexing";
-import { refetchStep } from "../events/partialRefetch";
+import { createRefetchLoop } from "../events/refetchLoop";
 import { apiSourceUrl } from "../files/paths";
 
 // Highlighting, at the same time as the text. Never waited for: the
@@ -31,39 +22,22 @@ export function createSource(
   // below hides those).
   onAnswer?: (s: LexedSource) => void,
 ): () => LexedSource | undefined {
-  const indexing = useContext(IndexingContext);
   const [latest, setLatest] = createSignal<LexedSource>();
-  const [partial, setPartial] = createSignal(false);
-  // Bumped on each fetch: a late answer of an earlier one is dropped.
-  let seq = 0;
-  let ac: AbortController | undefined;
-  let lastAt = 0;
-  let answerGen: number | undefined;
-  // The refetch at done is done once, until partial changes.
-  let doneAsked = false;
-  const fetchSource = () => {
-    ac?.abort();
-    const mine = ++seq;
-    const signal = (ac = new AbortController()).signal;
-    lastAt = Date.now();
-    void getCbor(apiSourceUrl(untrack(path)), decodeSourceView, {
-      signal,
-    }).then((r) => {
-      if (mine !== seq || r.kind !== "ok") return;
+  const fetchSource = createRefetchLoop(
+    (signal) =>
+      getCbor(apiSourceUrl(untrack(path)), decodeSourceView, { signal }),
+    (r) => {
+      if (r.kind !== "ok") return undefined;
       const s = r.value;
       const g = untrack(generation);
-      if (g !== undefined && s.generation !== g) return;
-      answerGen = s.generation;
-      if (s.partial !== untrack(partial)) doneAsked = false;
-      batch(() => {
-        setPartial(s.partial);
-        if (s.highlight === "lexed") {
-          setLatest(s);
-          onAnswer?.(s);
-        }
-      });
-    });
-  };
+      if (g !== undefined && s.generation !== g) return undefined;
+      if (s.highlight === "lexed") {
+        setLatest(s);
+        onAnswer?.(s);
+      }
+      return s;
+    },
+  );
   let started = false;
   const start = () => {
     if (started) return;
@@ -76,20 +50,6 @@ export function createSource(
       if (enabled()) untrack(start);
     });
   }
-  onCleanup(() => {
-    seq++;
-    ac?.abort();
-  });
-  createEffect(() => {
-    const p = indexing.indexing();
-    if (p === undefined || !partial()) return;
-    const step = refetchStep(p, answerGen, lastAt, Date.now());
-    if (step === "due") fetchSource();
-    else if (step === "done" && !doneAsked) {
-      doneAsked = true;
-      fetchSource();
-    }
-  });
   // Only a lexed answer for this very text (same generation).
   return createMemo(
     (): LexedSource | undefined => {
