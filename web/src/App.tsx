@@ -6,6 +6,7 @@ import { DocsView } from "./docs/DocsView";
 import { FileView } from "./files/FileView";
 import { Frame } from "./Frame";
 import { Home } from "./Home";
+import { RefsView } from "./refs/RefsView";
 import { ProjectNotices } from "./modules/ProjectNotices";
 import { ModulesProvider } from "./modules/store";
 import { NotFound } from "./NotFound";
@@ -35,6 +36,7 @@ export function App(props: {
     <Router base={basePath(window.location.pathname)} root={root}>
       <Route path="/" component={Home} />
       <Route path="/docs/tree/*ref" component={DocsView} />
+      <Route path="/refs/tree/*ref" component={RefsView} />
       <Route path="/src/tree/*path" component={FileView} />
       <Route path="*" component={NotFound} />
     </Router>

@@ -15,8 +15,10 @@ export function mountAppAt(
   path: string,
   initialPrefs?: Prefs,
   indexing: Accessor<Indexing | undefined> = () => undefined,
+  // The history entry's state, as a page left it.
+  state: unknown = null,
 ): HTMLElement {
-  window.history.replaceState(null, "", path);
+  window.history.replaceState(state, "", path);
   const root = document.createElement("div");
   document.body.append(root);
   dispose = render(

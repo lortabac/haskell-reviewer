@@ -16,6 +16,7 @@ import "./styles/code.css";
 import "./styles/modules.css";
 import "./styles/docs.css";
 import "./styles/search.css";
+import "./styles/refs.css";
 
 const root = document.getElementById("root");
 if (root === null) {

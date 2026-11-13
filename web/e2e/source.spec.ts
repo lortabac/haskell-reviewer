@@ -96,9 +96,11 @@ test("#L: marked, on screen, announced, Tab lands on it", async ({
   );
   expect(await rowCount(page)).toBeLessThan(100);
   await page.locator("main h1").focus();
-  // The toolbar's Find button first, then the line.
+  // The toolbar's Find and References buttons first, then the line.
   await page.keyboard.press(tabKey(browserName));
   await expect(page.getByRole("button", { name: "Find" })).toBeFocused();
+  await page.keyboard.press(tabKey(browserName));
+  await expect(page.getByRole("button", { name: "References" })).toBeFocused();
   await page.keyboard.press(tabKey(browserName));
   await expect(target.locator(".code-cell")).toBeFocused();
 

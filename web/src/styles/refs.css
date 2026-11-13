@@ -1,0 +1,91 @@
+/* The references page (refs/RefsView.tsx). */
+.refs-title code {
+  font-family: var(--font-mono);
+}
+
+.refs-summary,
+.refs-tier,
+.refs-partial {
+  margin: 0 0 var(--space-2);
+}
+
+.refs-tier {
+  color: var(--color-muted);
+}
+
+.refs-badge {
+  display: inline-block;
+  padding: 0 var(--space-1);
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  border: 1px solid var(--color-muted);
+  border-radius: 4px;
+}
+
+.refs-guess {
+  border-style: dotted;
+}
+
+.refs-group {
+  margin: var(--space-3) 0 0;
+}
+
+.refs-group-head {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.refs-home {
+  font-weight: normal;
+  color: var(--color-muted);
+}
+
+.refs-group-meta {
+  margin: 0 0 var(--space-1);
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
+}
+
+.refs-count {
+  color: var(--color-muted);
+}
+
+.refs-items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.refs-item {
+  padding: var(--space-1) 0;
+  border-top: 1px solid var(--color-border);
+  overflow-wrap: anywhere;
+}
+
+.refs-line {
+  display: inline-block;
+  min-width: 3ch;
+  color: var(--color-muted);
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
+.refs-snippet {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+}
+
+/* Not colour alone: bold too. */
+.ref-hit {
+  color: inherit;
+  font-weight: 700;
+  background: var(--color-mark);
+}
+
+.refs-why {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.85rem;
+}

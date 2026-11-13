@@ -240,6 +240,21 @@ describe("module page", () => {
     expect(op?.getAttribute("href")).toBe("/tok/src/tree/Page.hs#L42");
   });
 
+  it("find references: named declarations and nested items only", async () => {
+    const main = await page();
+    const a = decl(main, "area").querySelector(".decl-actions a:last-child");
+    expect(a?.textContent).toBe("Find references of area");
+    expect(a?.getAttribute("href")).toBe("/tok/refs/tree/Page?decl=val%3Aarea");
+    const sub = main.querySelector<HTMLAnchorElement>(".subdecl-refs");
+    expect(sub?.textContent).toMatch(/^References/);
+    expect(sub?.getAttribute("href")).toMatch(
+      /^\/tok\/refs\/tree\/Page\?decl=/,
+    );
+    const list = instances(decl(main, "data Shape"));
+    openDetails(list);
+    expect(list.querySelector(".decl-actions a[href*='/refs/']")).toBeNull();
+  });
+
   it("rich text in docs: links, names, math, big numbers", async () => {
     const main = await page();
     const doc = main.querySelector(".doc");

@@ -315,3 +315,10 @@
 a.link-guess {
   text-decoration: underline dotted;
 }
+
+/* "References" in the head of a nested declaration. */
+.subdecl-refs {
+  margin-left: var(--space-2);
+  font-family: var(--font-sans);
+  font-size: 0.85em;
+}

@@ -29,6 +29,12 @@ export interface FindBarProps {
   api: () => CodeApi | undefined;
   // The hits to draw; undefined when the bar is closed.
   onFind: (hits: FindHits | undefined) => void;
+  // More for the toolbar, after the Find button (the references bar).
+  children?: JSX.Element;
+  // Called when the bar opens, before it draws: others close then.
+  onOpen?: () => void;
+  // Gets a way to close the bar with no focus change.
+  handle?: (h: { closeQuietly: () => void }) => void;
 }
 
 export function FindBar(props: FindBarProps): JSX.Element {
@@ -95,6 +101,7 @@ export function FindBar(props: FindBarProps): JSX.Element {
   };
 
   const show = () => {
+    props.onOpen?.();
     const c = props.api()?.cursor();
     origin =
       c === undefined ? { line: 1, col: 0 } : { line: c.line, col: c.col };
@@ -119,6 +126,16 @@ export function FindBar(props: FindBarProps): JSX.Element {
     setOpen(false);
     props.onFind(undefined);
   };
+  // eslint-disable-next-line solid/reactivity -- given once
+  props.handle?.({
+    closeQuietly: () => {
+      if (!open()) return;
+      clearTimeout(timer);
+      say("");
+      setOpen(false);
+      props.onFind(undefined);
+    },
+  });
   const toggle = () => (open() ? close() : show());
 
   const onInputKey = (e: KeyboardEvent) => {
@@ -151,6 +168,7 @@ export function FindBar(props: FindBarProps): JSX.Element {
       >
         Find
       </button>
+      {props.children}
       <div
         id={barId}
         class="code-find-bar"
@@ -196,7 +214,7 @@ export function FindBar(props: FindBarProps): JSX.Element {
       <span class="code-hint">
         Browser find sees only visible lines — use Find to search the whole file
       </span>
-      <p class="sr-only" role="status">
+      <p class="sr-only code-find-status" role="status">
         {said()}
       </p>
     </div>
