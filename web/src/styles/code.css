@@ -333,3 +333,24 @@
   font-family: var(--font-mono);
   white-space: pre-wrap;
 }
+
+/* The References button and the local bar (source/RefsBar.tsx). */
+.code-refs-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+.code-refs-bar[hidden] {
+  display: none;
+}
+
+.code-refs-count,
+.code-refs-note {
+  color: var(--color-muted);
+}
+
+.code-refs-note:empty {
+  display: none;
+}

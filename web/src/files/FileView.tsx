@@ -30,6 +30,9 @@ import {
 } from "../source/CodeView";
 import { createSource } from "../source/createSource";
 import { FindBar } from "../source/FindBar";
+import { shouldReland } from "../source/landing";
+import { RefsBar } from "../source/RefsBar";
+import { utf16Cols } from "../source/columns";
 import { highlightDecor, highlightedLine } from "../source/decor";
 import { type Highlight, highlightOf } from "../source/highlight";
 import { jumpOf, linkInfos } from "../source/links";
@@ -229,10 +232,16 @@ function FileText(props: {
       : `Lines ${m.from}–${m.to} marked.`;
   };
   let api: CodeApi | undefined;
+  // The same, as a signal, for the label of the References button.
+  const [apiSig, setApiSig] = createSignal<CodeApi>();
+  let closeFind: (() => void) | undefined;
+  let closeRefs: (() => void) | undefined;
   const [find, setFind] = createSignal<FindHits>();
   // A same-file link was followed: where the cursor goes, once the
   // hash changes (D-284).
   let jump: { line: number; col: number } | undefined;
+  // Where a refs link landed before the highlight came.
+  let land: { line: number; col: number } | undefined;
   const onLinkClick = (e: MouseEvent) => {
     const a =
       e.target instanceof Element
@@ -270,7 +279,10 @@ function FileText(props: {
         lineDecor={lineDecor()}
         card={card}
         find={find()}
-        ref={(a) => (api = a)}
+        ref={(a) => {
+          api = a;
+          setApiSig(a);
+        }}
       />
     </Show>
   );
@@ -289,8 +301,20 @@ function FileText(props: {
         state !== null &&
         "codeJump" in state &&
         state.codeJump === true;
+      // A refs page link also says the token's column (code points).
+      const cp =
+        codeJump && typeof state === "object" && state !== null
+          ? (state as { cp?: unknown }).cp
+          : undefined;
       if (j !== undefined && j.line === m.from && a.hasFocus()) {
         a.focusAt(j.line, j.col);
+      } else if (typeof cp === "number" && cp >= 1) {
+        const col =
+          utf16Cols(lineText(props.text, index(), m.from), [cp])[0] ?? 0;
+        a.focusAt(m.from, col);
+        // No highlight yet: the token is no link. When it comes, once
+        // more, if nothing else moved the cursor meanwhile.
+        if (untrack(hl) === undefined) land = { line: m.from, col };
       } else if (a.hasFocus() || codeJump) {
         a.focusLine(m.from);
       } else a.setCursor(m.from);
@@ -302,6 +326,19 @@ function FileText(props: {
         if (r !== undefined) bringOnPage(r);
       });
       onCleanup(() => cancelAnimationFrame(frame));
+    }),
+  );
+  createEffect(
+    on(hl, (h) => {
+      const l = land;
+      if (h === undefined || l === undefined) return;
+      land = undefined;
+      // After the rows are drawn again.
+      queueMicrotask(() => {
+        if (shouldReland(l, api?.cursor(), api?.hasFocus() === true)) {
+          api?.focusAt(l.line, l.col);
+        }
+      });
     }),
   );
   let wrap!: HTMLDivElement;
@@ -322,7 +359,19 @@ function FileText(props: {
           index={index()}
           api={() => api}
           onFind={setFind}
-        />
+          onOpen={() => closeRefs?.()}
+          handle={(h) => (closeFind = h.closeQuietly)}
+        >
+          <RefsBar
+            hl={hl}
+            targets={() => props.source?.targets ?? []}
+            lineText={(n) => lineText(props.text, index(), n)}
+            api={apiSig}
+            onHits={setFind}
+            onOpen={() => closeFind?.()}
+            handle={(h) => (closeRefs = h.closeQuietly)}
+          />
+        </FindBar>
       </Show>
       {view}
       {/* After the view: it comes late, and must not push the view. */}

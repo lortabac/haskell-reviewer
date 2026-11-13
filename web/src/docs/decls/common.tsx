@@ -117,6 +117,26 @@ export function SharedWith(props: {
   );
 }
 
+// "Find references" of a declaration, in its actions row (T12). Not
+// for one with no refs page (instances, splices, nameless).
+export function RefsLink(props: {
+  d: Pick<DeclInfo, "n" | "name">;
+  // For screen readers: whose references.
+  label: string;
+}): JSX.Element {
+  const page = usePage();
+  return (
+    <Show when={page.refsHref(props.d)}>
+      {(h) => (
+        <a href={h()}>
+          Find references
+          <span class="sr-only"> of {props.label}</span>
+        </a>
+      )}
+    </Show>
+  );
+}
+
 // The head of a value, method or pattern synonym (D-187): the
 // signature as written for the one that sends it (all names), its own
 // signature and the sender for the others, else its name.
@@ -288,6 +308,14 @@ export function Sub(props: {
           labels={props.labels ?? []}
           mark={mark()}
         />
+        <Show when={page.refsHref(props.d)}>
+          {(h) => (
+            <a class="subdecl-refs" href={h()}>
+              References
+              <span class="sr-only"> of {props.d.name}</span>
+            </a>
+          )}
+        </Show>
       </div>
       <SharedWith sender={props.shared} />
       <Warning info={props.d} />

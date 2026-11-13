@@ -10,10 +10,12 @@ export interface CardText {
 }
 
 // Why a link is a guess, in words. k: the number of candidates.
-export function reasonText(r: ReasonCode, k: number): string {
+export function reasonText(r: ReasonCode, k?: number): string {
   switch (r) {
     case "ambiguous":
-      return `One of ${k} candidates in scope.`;
+      return k === undefined
+        ? "One of several candidates in scope."
+        : `One of ${k} candidates in scope.`;
     case "not-ready":
       return "A module it depends on wasn't indexed yet.";
     case "not-parsed":

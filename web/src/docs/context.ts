@@ -8,7 +8,7 @@ import {
   type Setter,
   useContext,
 } from "solid-js";
-import type { Handle } from "../api/module";
+import type { DeclInfo, Handle } from "../api/module";
 import type { Highlight } from "../source/highlight";
 import type { PageIndex } from "./pageIndex";
 
@@ -16,6 +16,9 @@ export interface PageCtx {
   ix: PageIndex;
   // The file view URL at a line, if the module has a source.
   sourceHref: ((line: number) => string) | undefined;
+  // The refs page of a declaration (T12); undefined for one with no
+  // name (and instances: they have none).
+  refsHref: (d: Pick<DeclInfo, "n" | "name">) => string | undefined;
   // Elements for anchors, by key (scope + handle, see anchorKey).
   anchors: Anchors;
   // Open state of the instance list of a type, class or family.

@@ -30,7 +30,8 @@ export function anchorFromHash(hash: string): string | null | { bad: true } {
 // encoding stays as typed.
 export function queryFromUrl(pathname: string): string {
   const [, , view, side, ...rest] = pathname.split("/");
-  if ((view !== "docs" && view !== "src") || side !== "tree") return "";
+  if ((view !== "docs" && view !== "src" && view !== "refs") || side !== "tree")
+    return "";
   return rest
     .filter((s) => s !== "")
     .map((s) => {

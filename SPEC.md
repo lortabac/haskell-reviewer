@@ -282,6 +282,7 @@ back/forward, new tabs and copy-paste between tabs work. Shape:
 /<token>/src/<side>/<path/to/File.hs>[#L<n>[-L<m>]]
 /<token>/diff/<path/to/File.hs>[?layout=unified|split][#<side>-L<n>]
 /<token>/changes[#<decl-id>]
+/<token>/refs/<side>/<module>?decl=<decl>
 ```
 
 `<side>` is `head` / `base` in diff mode and `tree` in browse mode.
@@ -296,7 +297,8 @@ printed as in §4.6 and percent-encoded. Haddock's anchors (`#v:<name>`,
 `#t:<Name>`) work too: the page finds the declaration by namespace and
 name and puts its `<decl>` in the URL instead (D-182). The `<decl-id>` used by `/changes`
 is the same `<decl>` (fields and instances included) qualified by its
-module. An
+module. `/refs` lists the references to one declaration; its `<decl>`
+is the same, in the query, percent-encoded (D-296). An
 unresolvable URL shows a "not found in this snapshot" page with a search box
 prefilled from the URL, never a blank page.
 
@@ -388,11 +390,17 @@ The whole file, syntax-highlighted (§5.6), with line numbers.
   its declared signature. The same card shows when the token cursor
   reaches a link: signature, module, why it's a guess; Esc hides it
   (D-285).
-- **Find references**: for a selected identifier, a list of the places where it
-  is used. These are exact at the precise tier and textual-but-scoped at the
-  syntactic tier, and labelled accordingly. At the syntactic tier the
-  server finds them on request, over the whole side, from the names each
-  module uses (D-294); locals are found in the page itself.
+- **Find references**: a "References" button in the source toolbar acts
+  on the token under the cursor; the docs page has a "Find references"
+  link on each named declaration. For a declaration it opens the
+  references page: the places where it is used, grouped by module, with a
+  snippet each and a link to the token (D-296). These are exact at the
+  precise tier and textual-but-scoped at the syntactic tier, and labelled
+  accordingly. At the syntactic tier the server finds them on request,
+  over the whole side, from the names each module uses (D-294). For a
+  local the button opens a bar like find: it steps through the binder and
+  uses in this file. A name from a dependency or a module has no
+  references here, and the button says so.
 - A gutter outline shows the top-level declarations, with a link from each
   back to the docs view. The same list, collapsed under the view
   ("Outline (N)"), is the keyboard way in: each entry links to its docs
@@ -621,6 +629,11 @@ keep the column (D-284).
   line's cell, D-277).
 - The hover card (SC 1.4.13) can be hovered, Esc hides it, and it stays
   until the pointer or focus leaves (D-285).
+- The references page is a normal main view: its h1 takes focus, each
+  module is a section with an h2, results are a list of links; a guess
+  is said in words, not by colour or underline alone; the count is said
+  once in a polite live region when the list is complete. The local
+  references bar says "Reference n of m, line L" (D-296).
 - Text scales to 200% without loss of function. Side-by-side diffs fall
   back to unified below a minimum width.
 - Reflows to one column (header, then sidebar, then main) at 320px wide,

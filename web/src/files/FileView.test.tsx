@@ -811,6 +811,40 @@ describe("FileView links and refetch", () => {
     expect(document.activeElement).toBe(linkOn(main, 4));
   });
 
+  it("References: a declaration goes to its page; an outside name says why", async () => {
+    const { main } = await openWith([[200, lexed()]]);
+    const button = main.querySelector<HTMLButtonElement>(".code-refs-button")!;
+    expect(button.textContent).toBe("References");
+    const note = main.querySelector(".code-refs-note")!;
+    button.click();
+    expect(note.textContent).toBe("Put the cursor on a name first.");
+    linkOn(main, 1).focus();
+    await vi.waitFor(() =>
+      expect(button.textContent).toBe("References to main"),
+    );
+    // The external putStrLn.
+    main
+      .querySelectorAll<HTMLAnchorElement>(
+        '.code-row[data-line="5"] a.code-link',
+      )[1]!
+      .focus();
+    await vi.waitFor(() => expect(button.textContent).toBe("References"));
+    button.click();
+    expect(note.textContent).toBe(
+      "References need a name declared in this project.",
+    );
+    linkOn(main, 1).focus();
+    await vi.waitFor(() =>
+      expect(button.textContent).toBe("References to main"),
+    );
+    button.click();
+    await vi.waitFor(() =>
+      expect(window.location.pathname + window.location.search).toBe(
+        "/tok/refs/tree/Main?decl=val%3Amain",
+      ),
+    );
+  });
+
   describe("refetch while partial", () => {
     let now = 1000;
     beforeEach(() => {

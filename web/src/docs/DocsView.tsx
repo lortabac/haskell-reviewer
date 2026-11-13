@@ -28,6 +28,7 @@ import { pageLinkInfos } from "../source/links";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
 import { usePrefs } from "../prefs/store";
+import { refsHref } from "../refs/urls";
 import { onReselectAnchor } from "../reselectAnchor";
 import { SearchBox } from "../search/SearchBox";
 import { createDelay, focusInMain, focusLost } from "../ui/focus";
@@ -353,6 +354,12 @@ function ModulePage(props: {
     },
     get marks() {
       return b().mode !== "B";
+    },
+    refsHref: (d) => {
+      const id = d.name === null ? undefined : ix().idOfHandle(d.n);
+      return id === undefined || id.startsWith("inst:")
+        ? undefined
+        : withBase(base(), refsHref(props.page.ref, id));
     },
     wantSource: source.want,
     highlight: source.highlight,

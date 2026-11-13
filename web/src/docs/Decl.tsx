@@ -22,6 +22,7 @@ import {
   type SharedName,
   SharedWith,
   sigHead,
+  RefsLink,
   Sub,
   Title,
   Warning,
@@ -59,6 +60,14 @@ export function Decl(props: {
     const line = firstCodeLine(source());
     return line === undefined ? undefined : page.sourceHref?.(line);
   };
+  // Instances and splices have no refs page.
+  const named = () => {
+    const d = props.decl;
+    return d.kind !== "splice" && d.kind !== "instance" && d.kind !== "faminst";
+  };
+  const refs = () => (
+    <RefsLink d={props.decl as Pick<DeclInfo, "n" | "name">} label={what()} />
+  );
   const derivedFor = () => {
     const f = head().derivedFor;
     return f === undefined || f.n === props.home ? undefined : f;
@@ -91,7 +100,14 @@ export function Decl(props: {
       <Warning info={props.decl} />
       <Docs info={props.decl} level={props.level} />
       {details(props.decl, props.level)}
-      <Show when={source().length > 0}>
+      <Show
+        when={source().length > 0}
+        fallback={
+          <Show when={named()}>
+            <p class="decl-actions">{refs()}</p>
+          </Show>
+        }
+      >
         <SourceToggle parts={source()} label={what()}>
           <Show when={href()}>
             {(h) => (
@@ -104,6 +120,7 @@ export function Decl(props: {
               </>
             )}
           </Show>
+          <Show when={named()}> {refs()}</Show>
         </SourceToggle>
       </Show>
     </section>

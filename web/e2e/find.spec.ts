@@ -25,7 +25,7 @@ const findButton = (page: Page): Locator =>
 const box = (page: Page): Locator =>
   page.getByRole("textbox", { name: "Find" });
 const live = (page: Page): Locator =>
-  page.locator('main .code-toolbar [role="status"]');
+  page.locator("main .code-toolbar .code-find-status");
 
 async function open(page: Page, url: string): Promise<void> {
   await page.goto(url);
