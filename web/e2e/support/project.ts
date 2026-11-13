@@ -383,7 +383,7 @@ export const linksMainHs = [
   "import Data.List (sort)",
   "import Links.Types",
   "",
-  "data P = P {f :: Int}",
+  "data P = P {f :: Int} deriving Show",
   "data Q = Q {f :: Int}",
   "",
   "g r = f r",

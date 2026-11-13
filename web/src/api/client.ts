@@ -47,18 +47,32 @@ export async function postJson<T>(
   }
 }
 
-// GET a CBOR API route (D-51) and decode it, like getJson.
+// GET a CBOR API route (D-51) and decode it, like getJson. raw: sees
+// the bytes first; a value from it is the answer, with no decode (the
+// docs page skips an answer equal to the last one, D-293).
 export async function getCbor<T>(
   path: string,
   decode: (value: unknown) => T,
-  opts?: { signal?: AbortSignal },
+  opts?: {
+    signal?: AbortSignal;
+    raw?: (bytes: Uint8Array) => T | undefined;
+  },
 ): Promise<Result<T>> {
   return get(
     path,
     "application/cbor",
-    async (res) => decode(fromCbor(new Uint8Array(await res.arrayBuffer()))),
+    async (res) => {
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      return opts?.raw?.(bytes) ?? decode(fromCbor(bytes));
+    },
     opts?.signal,
   );
+}
+
+export function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 
 // One CBOR item as the plain values JSON would give: objects, arrays,

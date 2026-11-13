@@ -12,6 +12,7 @@ import {
   onCleanup,
   Show,
   Switch,
+  untrack,
 } from "solid-js";
 import { getCbor } from "../api/client";
 import {
@@ -41,7 +42,9 @@ import {
 } from "./context";
 import { readable, WarningNotice } from "./Decl";
 import { type Links, LinksContext } from "./links";
+import { linkFocus } from "./linkFocus";
 import { pageIndex, type PageIndex } from "./pageIndex";
+import { createPageRefetch } from "./pageRefetch";
 import { createPageSource } from "./pageSource";
 import { reasonBanner, reasonLine } from "./reasons";
 import { DocView } from "./RichText";
@@ -68,9 +71,28 @@ export function DocsView(): JSX.Element {
 function DocsPage(props: { moduleRef: string }): JSX.Element {
   // Read before the old page goes away.
   const fromMain = focusInMain();
+  // The body: a partial page skips a refetch with the same bytes
+  // (D-293). ModulePage takes it when it mounts; dropped right after
+  // (it can be big).
+  let bytes: Uint8Array | undefined;
+  const takeBytes = () => bytes;
   const [res] = createResource(
     () => props.moduleRef,
-    (r) => getCbor(apiModuleUrl(r), decodeModulePage),
+    (r) =>
+      getCbor(apiModuleUrl(r), decodeModulePage, {
+        raw: (b) => {
+          bytes = b;
+          return undefined;
+        },
+      }),
+  );
+  createEffect(
+    on(
+      () => res.state,
+      () => {
+        if (res.state === "ready" || res.state === "errored") bytes = undefined;
+      },
+    ),
   );
   const slow = createDelay(() => res.loading, 300);
   // Only the result for this ref, never a stale one.
@@ -113,7 +135,12 @@ function DocsPage(props: { moduleRef: string }): JSX.Element {
       <Match when={page()} keyed>
         {(p) =>
           p.parse.kind === "parsed" ? (
-            <ModulePage page={p} parsed={p.parse} typedRef={props.moduleRef} />
+            <ModulePage
+              page={p}
+              parsed={p.parse}
+              typedRef={props.moduleRef}
+              takeBytes={takeBytes}
+            />
           ) : (
             <TextOnlyPage page={p} parse={p.parse} />
           )
@@ -250,17 +277,32 @@ function ModulePage(props: {
   page: Page;
   parsed: ParsedModule;
   typedRef: string;
+  // The page's body, for the refetch. Call once, when mounting.
+  takeBytes: () => Uint8Array | undefined;
 }): JSX.Element {
   const location = useLocation();
   const navigate = useNavigate();
   const prefs = usePrefs();
   const base = useResolvedPath(() => "/");
   const ix = createMemo(() => pageIndex(props.parsed));
+  let root: HTMLDivElement | undefined;
+  // Partial: asked again while indexing, only links change (D-293).
+  // The page is keyed: these props never change.
+  /* eslint-disable solid/reactivity */
+  const live = props.page.partial
+    ? createPageRefetch(
+        props.typedRef,
+        props.page,
+        props.takeBytes(),
+        linkFocus(() => root),
+      )
+    : undefined;
+  /* eslint-enable solid/reactivity */
   // Links out of the module, for code tokens and doc names.
   const outerInfos = createMemo(() =>
     pageLinkInfos(
       { ref: props.page.ref, typedRef: props.typedRef },
-      props.parsed.targets,
+      live?.targets() ?? props.parsed.targets,
       base(),
     ),
   );
@@ -272,7 +314,10 @@ function ModulePage(props: {
         : withBase(base(), docsHref(props.typedRef, id));
     },
     module: (ref, anchor) => withBase(base(), docsHref(ref, anchor)),
-    outer: (k) => outerInfos()[k - 1],
+    outer: (k) => untrack(outerInfos)[k - 1],
+    live: live !== undefined,
+    token: (t) => live?.token(t) ?? t,
+    name: (n) => live?.name(n) ?? n,
   };
   const header = () => props.parsed.header;
   const name = () => header().name?.value ?? props.page.ref;
@@ -462,7 +507,7 @@ function ModulePage(props: {
     }
   };
   return (
-    <div class="docs-page" on:click={inPage}>
+    <div class="docs-page" on:click={inPage} ref={(el) => (root = el)}>
       <LinksContext.Provider value={links}>
         <PageContext.Provider value={ctx}>
           <PageTitle

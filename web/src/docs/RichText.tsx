@@ -1,9 +1,10 @@
 // Haddock comments, from the AST the server sends: JSX only, no raw
 // HTML, so text in a comment is always text.
-import { onCleanup, type JSX } from "solid-js";
+import { createMemo, onCleanup, type JSX } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import type { Block, Cell, Doc, Inline } from "../api/richtext";
 import { type Links, outerAttrs, useLinks } from "./links";
+import type { NameInline } from "./relink";
 
 // A code/example/property block (docs.css) only gets a Tab stop while
 // it actually scrolls sideways: not every block at every width, only
@@ -176,6 +177,24 @@ function rows(rs: Cell[][], cell: "th" | "td", links: Links): JSX.Element[] {
   });
 }
 
+// A name with no local target: a link out, if it has one.
+function outName(i: NameInline, links: Links): JSX.Element {
+  const name = <code>{i.written}</code>;
+  const info = i.link === null ? undefined : links.outer(i.link);
+  return info === undefined ? (
+    name
+  ) : (
+    <a {...outerAttrs(i.written, info)}>{name}</a>
+  );
+}
+
+// The same while the page is partial: drawn again only when its own
+// link changes (D-293).
+function LiveName(props: { name: NameInline; links: Links }): JSX.Element {
+  const now = createMemo(() => props.links.name(props.name));
+  return <>{outName(now(), props.links)}</>;
+}
+
 // Item labels: the number as written (decimal text, can be over
 // 2^53), or one more than the item before when null.
 export function numberLabels(numbers: (string | null)[]): string[] {
@@ -223,16 +242,15 @@ function inline(i: Inline, links: Links): JSX.Element {
         </a>
       );
     case "name": {
-      const name = <code>{i.written}</code>;
       if (i.target !== null) {
+        const name = <code>{i.written}</code>;
         const href = links.decl(i.target);
         return href === undefined ? name : <a href={href}>{name}</a>;
       }
-      const info = i.link === null ? undefined : links.outer(i.link);
-      return info === undefined ? (
-        name
+      return links.live ? (
+        <LiveName name={i} links={links} />
       ) : (
-        <a {...outerAttrs(i.written, info)}>{name}</a>
+        outName(i, links)
       );
     }
     case "module": {

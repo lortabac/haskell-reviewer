@@ -1,6 +1,8 @@
 // How code and docs on a module page make their links.
 import { createContext, useContext } from "solid-js";
+import type { CodeToken } from "../api/code";
 import type { Handle } from "../api/module";
+import type { NameInline } from "./relink";
 import { type LinkInfo, shortName } from "../source/links";
 
 export interface Links {
@@ -9,7 +11,14 @@ export interface Links {
   // The URL of a module page, with an anchor as written.
   module: (ref: string, anchor: string | null) => string;
   // The link of a page target (1 + its index): to docs, or Hoogle.
+  // Not tracked: an index always means the same target.
   outer: (k: number) => LinkInfo | undefined;
+  // The page is partial: links may change (D-293). Then code and
+  // names draw through token and name, which are tracked.
+  live: boolean;
+  // A token or name as it is now.
+  token: (t: CodeToken) => CodeToken;
+  name: (n: NameInline) => NameInline;
 }
 
 // The attributes of a link out of a page's code or docs: marks for a
