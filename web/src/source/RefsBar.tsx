@@ -34,8 +34,18 @@ export interface RefsBarProps {
   onHits: (hits: FindHits | undefined) => void;
   // Called when the bar opens, before it draws: others close then.
   onOpen?: () => void;
-  // Gets a way to close the bar with no focus change.
-  handle?: (h: { closeQuietly: () => void }) => void;
+  // Gets ways to drive the bar (the g r and Esc keys).
+  handle?: (h: RefsHandle) => void;
+}
+
+export interface RefsHandle {
+  // Close with no focus change.
+  closeQuietly: () => void;
+  // What the References button does.
+  run: () => void;
+  isOpen: () => boolean;
+  // Close; focus goes to the current hit, like Esc in the bar.
+  close: () => void;
 }
 
 export function RefsBar(props: RefsBarProps): JSX.Element {
@@ -123,8 +133,6 @@ export function RefsBar(props: RefsBarProps): JSX.Element {
     say("");
     props.onHits(undefined);
   };
-  // eslint-disable-next-line solid/reactivity -- given once
-  props.handle?.({ closeQuietly });
   const close = () => {
     const h = hits();
     const i = current();
@@ -195,6 +203,8 @@ export function RefsBar(props: RefsBarProps): JSX.Element {
         return;
     }
   };
+  // eslint-disable-next-line solid/reactivity -- given once
+  props.handle?.({ closeQuietly, run, isOpen: open, close });
   const onKey = (e: KeyboardEvent) => {
     if (e.key !== "Escape" || e.isComposing || e.keyCode === 229) return;
     e.preventDefault();

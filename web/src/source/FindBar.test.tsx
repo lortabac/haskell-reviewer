@@ -1,15 +1,16 @@
 import { render } from "solid-js/web";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CodeApi, FindHits } from "./CodeView";
-import { FindBar, typingDelay } from "./FindBar";
+import { FindBar, type FindHandle, typingDelay } from "./FindBar";
 import { lineIndex } from "./lines";
 
 const text = "foo\nbar\nFoo foo\n";
 let dispose: (() => void) | undefined;
 let last: FindHits | undefined;
 let focused: [number, number] | undefined;
+let handle: FindHandle | undefined;
 
-function mount(): HTMLElement {
+function mount(keyHint?: string): HTMLElement {
   const root = document.createElement("div");
   document.body.append(root);
   const api = {
@@ -23,6 +24,8 @@ function mount(): HTMLElement {
         index={lineIndex(text)}
         api={() => api}
         onFind={(h) => (last = h)}
+        handle={(h) => (handle = h)}
+        keyHint={keyHint}
       />
     ),
     root,
@@ -62,6 +65,24 @@ function key(el: Element, k: string, shiftKey = false): void {
 }
 
 describe("FindBar", () => {
+  it("the handle (f, Esc): open, open again, close to the hit", () => {
+    const r = mount("(f)");
+    expect(q(r, ".code-hint").textContent).toBe(
+      "Browser find sees only visible lines — use Find (f) to search the whole file",
+    );
+    handle?.open();
+    expect(handle?.isOpen()).toBe(true);
+    expect(document.activeElement).toBe(input(r));
+    type(r, "bar");
+    button(r).focus();
+    handle?.open();
+    expect(document.activeElement).toBe(input(r));
+    expect(handle?.isOpen()).toBe(true);
+    handle?.close();
+    expect(handle?.isOpen()).toBe(false);
+    expect(focused).toEqual([2, 0]);
+  });
+
   it("is closed at first, with the hint", () => {
     const r = mount();
     expect(button(r).getAttribute("aria-expanded")).toBe("false");

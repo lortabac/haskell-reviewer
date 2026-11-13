@@ -54,7 +54,7 @@ test("the hint and the button, closed", async ({ page, server }) => {
   await open(page, server.base + big);
   await expect(findButton(page)).toHaveAttribute("aria-expanded", "false");
   await expect(page.locator("main .code-hint")).toHaveText(
-    "Browser find sees only visible lines — use Find to search the whole file",
+    "Browser find sees only visible lines — use Find (f) to search the whole file",
   );
   await expect(page.locator("main .code-find-bar")).toBeHidden();
 });

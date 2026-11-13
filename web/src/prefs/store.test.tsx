@@ -90,12 +90,25 @@ describe("PrefsProvider", () => {
     expect(JSON.parse(init.body as string)).toEqual({ theme: "dark" });
   });
 
+  it("single-key shortcuts: on at first, a set posts only that key", () => {
+    const fetch = stubFetch({});
+    mount();
+    expect(current().singleKeyShortcuts()).toBe(true);
+    current().setSingleKeyShortcuts(false);
+    expect(current().singleKeyShortcuts()).toBe(false);
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({
+      singleKeyShortcuts: false,
+    });
+  });
+
   it("a click that doesn't change the value is a no-op: no POST (round 2)", () => {
     const fetch = stubFetch({});
     mount();
     current().setTheme("system"); // already the initial value
     current().setExportedOnly(false); // already false
     current().setSidebar("auto"); // already auto
+    current().setSingleKeyShortcuts(true); // already on
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -106,7 +119,12 @@ describe("PrefsProvider", () => {
     stubFetch({
       "/tok/api/prefs": [
         200,
-        { theme: "light", exportedOnly: true, sidebar: "files" },
+        {
+          theme: "light",
+          exportedOnly: true,
+          sidebar: "files",
+          singleKeyShortcuts: true,
+        },
       ],
     });
     mount();
@@ -129,6 +147,7 @@ describe("PrefsProvider", () => {
       theme: "light",
       exportedOnly: false,
       sidebar: "auto",
+      singleKeyShortcuts: true,
     });
     await vi.waitFor(() => {
       expect(current().status()).toBeUndefined();
@@ -159,6 +178,7 @@ describe("PrefsProvider", () => {
       theme: "dark",
       exportedOnly: true,
       sidebar: "auto",
+      singleKeyShortcuts: true,
     });
     // exportedOnly's own latest save succeeded, but theme's latest
     // save is still failed: the status must stay (per-key failed
@@ -179,10 +199,16 @@ describe("PrefsProvider", () => {
     mount(pending);
     // Touched before the late GET arrives: must not be overridden.
     current().setExportedOnly(true);
-    resolvePending?.({ theme: "dark", exportedOnly: false, sidebar: "files" });
+    resolvePending?.({
+      theme: "dark",
+      exportedOnly: false,
+      sidebar: "files",
+      singleKeyShortcuts: false,
+    });
     await vi.waitFor(() => {
       expect(current().theme()).toBe("dark");
       expect(current().sidebar()).toBe("files");
+      expect(current().singleKeyShortcuts()).toBe(false);
     });
     expect(current().exportedOnly()).toBe(true);
   });

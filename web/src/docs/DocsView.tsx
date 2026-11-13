@@ -21,10 +21,20 @@ import {
   docsHref,
   type ModulePage as Page,
   type ParsedModule,
+  type SourcePart,
   type TextOnlyModule,
 } from "../api/module";
 import { hrefFor, lineHref, withBase } from "../files/paths";
 import { pageLinkInfos } from "../source/links";
+import {
+  currentItem,
+  currentSection,
+  ownOf,
+  stepSection,
+} from "../keys/docsKeys";
+import { useKeyActions, useViewLinks } from "../keys/KeysProvider";
+import { useModules } from "../modules/store";
+import { firstCodeLine } from "./source";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
 import { usePrefs } from "../prefs/store";
@@ -102,6 +112,19 @@ function DocsPage(props: { moduleRef: string }): JSX.Element {
     const r = result();
     return r?.kind === "ok" ? r.value : undefined;
   };
+  // Docs / Source in the header. The path from the tree until the page
+  // comes.
+  const modules = useModules();
+  useViewLinks({
+    current: "docs",
+    docs: () => docsHref(props.moduleRef),
+    source: () => {
+      const p = page();
+      const path =
+        p === undefined ? modules.byRef().get(props.moduleRef)?.path : p.path;
+      return path == null ? undefined : hrefFor(path);
+    },
+  });
   // A link in main took us here: put focus on the new heading, as the
   // old one is gone. Anchors may move it on (ModulePage).
   if (fromMain) {
@@ -339,6 +362,73 @@ function ModulePage(props: {
   });
   /* eslint-enable solid/reactivity */
   const b = createMemo(() => body(props.parsed, ix(), prefs.exportedOnly()));
+  // Keys (D-298): the declaration with focus, else the first on screen.
+  const rootEl = () => root;
+  useKeyActions({
+    next: () => {
+      const r = rootEl();
+      return r !== undefined && stepSection(r, 1);
+    },
+    prev: () => {
+      const r = rootEl();
+      return r !== undefined && stepSection(r, -1);
+    },
+    definition: () => {
+      const a = document.activeElement;
+      const r = rootEl();
+      if (!(a instanceof HTMLAnchorElement) || r === undefined) {
+        return "No link here.";
+      }
+      if (!r.contains(a)) return "No link here.";
+      a.click();
+      return true;
+    },
+    references: () => {
+      const r = rootEl();
+      const item = r === undefined ? undefined : currentItem(r);
+      if (item === undefined) return "No declaration here.";
+      const link = ownOf<HTMLElement>(item, "a.decl-refs, a.subdecl-refs")[0];
+      if (link === undefined) return "No references for this one.";
+      link.click();
+      return true;
+    },
+    source: () => {
+      const r = rootEl();
+      const sec = r === undefined ? undefined : currentSection(r);
+      if (sec === undefined) return "No declaration here.";
+      const button = ownOf<HTMLElement>(sec, "button.decl-source-toggle")[0];
+      if (button === undefined) return "No source for this one.";
+      button.click();
+      return true;
+    },
+  });
+  // 2: the source at the declaration with focus, else the first on
+  // screen.
+  useViewLinks({
+    current: "docs",
+    docs: () => docsHref(props.typedRef),
+    source: () => {
+      const path = props.page.path;
+      return path === null ? undefined : hrefFor(path);
+    },
+    at: (to) => {
+      const path = props.page.path;
+      const r = rootEl();
+      if (to !== "source" || path === null) return undefined;
+      const sec = r === undefined ? undefined : currentSection(r);
+      const d =
+        sec === undefined
+          ? undefined
+          : ix().byHandle.get(Number(sec.dataset.handle));
+      const line =
+        d !== undefined && "source" in d
+          ? firstCodeLine(d.source as SourcePart[])
+          : undefined;
+      return line === undefined
+        ? { href: hrefFor(path) }
+        : { href: lineHref(path, line), state: { codeJump: true } };
+    },
+  });
   const hidden = createMemo(() => hiddenCount(props.parsed));
   const ctx: PageCtx = {
     get ix() {

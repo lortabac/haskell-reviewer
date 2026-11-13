@@ -33,8 +33,26 @@ tests =
     "Prefs"
     [ testCase "precedence: ui.json over config over built-in, per key" $ do
         let config =
-              UiDefaults {theme = ThemeDark, exportedOnly = True, sidebar = SidebarFiles}
+              UiDefaults
+                { theme = ThemeDark,
+                  exportedOnly = True,
+                  sidebar = SidebarFiles,
+                  singleKeyShortcuts = True
+                }
+            configOff =
+              UiDefaults
+                { theme = ThemeDark,
+                  exportedOnly = True,
+                  sidebar = SidebarFiles,
+                  singleKeyShortcuts = False
+                }
         effective builtinDefaults noPrefs @?= eff ThemeSystem False SidebarAuto
+        effective configOff noPrefs
+          @?= shortcutsEff False (eff ThemeDark True SidebarFiles)
+        effective configOff (withShortcuts (Just True) noPrefs)
+          @?= eff ThemeDark True SidebarFiles
+        effective config (withShortcuts (Just False) noPrefs)
+          @?= shortcutsEff False (eff ThemeDark True SidebarFiles)
         effective config noPrefs @?= eff ThemeDark True SidebarFiles
         effective config (prefsOf (Just ThemeLight) Nothing Nothing)
           @?= eff ThemeLight True SidebarFiles
@@ -51,7 +69,10 @@ tests =
         patchPrefs p1 @?= prefsOf Nothing (Just False) Nothing
         p2 <-
           decoded " {\"theme\":\"system\",\"exportedOnly\":true,\"sidebar\":\"auto\"} \n"
-        patchPrefs p2 @?= prefsOf (Just ThemeSystem) (Just True) (Just SidebarAuto),
+        patchPrefs p2 @?= prefsOf (Just ThemeSystem) (Just True) (Just SidebarAuto)
+        p3 <- decoded "{\"singleKeyShortcuts\":false}"
+        patchPrefs p3 @?= withShortcuts (Just False) noPrefs
+        patchKeys p3 @?= ["singleKeyShortcuts"],
       testCase "decodePatch: bad ones, with a reason" $
         mapM_
           ( \(body, why) ->
@@ -70,7 +91,10 @@ tests =
             ("{\"theme\":null}", badTheme),
             ("{\"exportedOnly\":\"true\"}", "exportedOnly: expected true or false"),
             ("{\"exportedOnly\":1}", "exportedOnly: expected true or false"),
-            ("{\"sidebar\":[]}", badSidebar)
+            ("{\"sidebar\":[]}", badSidebar),
+            ("{\"singleKeyShortcuts\":\"off\"}", badShortcuts),
+            ("{\"singleKeyShortcuts\":null}", badShortcuts),
+            ("{\"singleKeyShortcuts\":0}", badShortcuts)
           ],
       testCase "ui.json: unknown keys and values we don't understand are kept" $
         decodePrefsFile
@@ -140,7 +164,10 @@ goldens =
       [ ("empty", emptyPrefsFile),
         ( "full",
           PrefsFile
-            { prefs = prefsOf (Just ThemeLight) (Just False) (Just SidebarModules),
+            { prefs =
+                withShortcuts
+                  (Just False)
+                  (prefsOf (Just ThemeLight) (Just False) (Just SidebarModules)),
               others =
                 KeyMap.fromList
                   [("zz", Aeson.Bool True), ("aa", Aeson.String "x"), ("mm", Aeson.Null)]
@@ -172,17 +199,24 @@ genFile = do
   theme <- Gen.maybe (Gen.element [ThemeSystem, ThemeLight, ThemeDark])
   exportedOnly <- Gen.maybe Gen.bool
   sidebar <- Gen.maybe (Gen.element [SidebarAuto, SidebarModules, SidebarFiles])
+  shortcuts <- Gen.maybe Gen.bool
   others <- Gen.list (Range.linear 0 5) ((,) <$> genKey <*> genValue)
   pure
     PrefsFile
-      { prefs = Prefs {theme = theme, exportedOnly = exportedOnly, sidebar = sidebar},
+      { prefs =
+          Prefs
+            { theme = theme,
+              exportedOnly = exportedOnly,
+              sidebar = sidebar,
+              singleKeyShortcuts = shortcuts
+            },
         others = KeyMap.fromList [(Key.fromText k, v) | (k, v) <- others]
       }
   where
     genKey :: Gen Text
     genKey =
       Gen.filter
-        (`notElem` ["version", "theme", "exportedOnly", "sidebar"])
+        (`notElem` ["version", "theme", "exportedOnly", "sidebar", "singleKeyShortcuts"])
         (Gen.text (Range.linear 0 8) Gen.unicode)
     genValue =
       Gen.choice
@@ -211,12 +245,37 @@ badTheme = "theme: expected one of \"system\", \"light\", \"dark\""
 badSidebar :: Text
 badSidebar = "sidebar: expected one of \"auto\", \"modules\", \"files\""
 
+badShortcuts :: Text
+badShortcuts = "singleKeyShortcuts: expected true or false"
+
 nums :: [Maybe Int]
 nums = [Just 1, Nothing]
 
+-- | Shortcuts on, the default.
 eff :: Theme -> Bool -> SidebarView -> Effective
-eff t e s = Effective {theme = t, exportedOnly = e, sidebar = s}
+eff t e s =
+  Effective {theme = t, exportedOnly = e, sidebar = s, singleKeyShortcuts = True}
 
--- | Prefs with these keys. Record updates would be ambiguous here.
+shortcutsEff :: Bool -> Effective -> Effective
+shortcutsEff k e =
+  Effective
+    { theme = e.theme,
+      exportedOnly = e.exportedOnly,
+      sidebar = e.sidebar,
+      singleKeyShortcuts = k
+    }
+
+-- | Prefs with these keys, shortcuts not set. Record updates would be
+-- ambiguous here.
 prefsOf :: Maybe Theme -> Maybe Bool -> Maybe SidebarView -> Prefs
-prefsOf t e s = Prefs {theme = t, exportedOnly = e, sidebar = s}
+prefsOf t e s =
+  Prefs {theme = t, exportedOnly = e, sidebar = s, singleKeyShortcuts = Nothing}
+
+withShortcuts :: Maybe Bool -> Prefs -> Prefs
+withShortcuts k p =
+  Prefs
+    { theme = p.theme,
+      exportedOnly = p.exportedOnly,
+      sidebar = p.sidebar,
+      singleKeyShortcuts = k
+    }

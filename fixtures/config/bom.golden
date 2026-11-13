@@ -1,4 +1,5 @@
 theme: light
 exported-only: false
 sidebar: auto
+single-key-shortcuts: true
 == warnings

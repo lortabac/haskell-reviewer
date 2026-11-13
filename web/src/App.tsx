@@ -9,6 +9,9 @@ import { Home } from "./Home";
 import { RefsView } from "./refs/RefsView";
 import { ProjectNotices } from "./modules/ProjectNotices";
 import { ModulesProvider } from "./modules/store";
+import { KeysProvider, KeysStatus } from "./keys/KeysProvider";
+import { ShortcutsButton } from "./keys/ShortcutsButton";
+import { ViewSwitch } from "./keys/ViewSwitch";
 import { NotFound } from "./NotFound";
 import { PrefsProvider, PrefsStatus } from "./prefs/store";
 import { ThemeSwitch } from "./prefs/ThemeSwitch";
@@ -55,19 +58,24 @@ function Root(
       pending={props.pendingPrefs}
     >
       <ModulesProvider>
-        <Frame
-          sidebar={<Sidebar />}
-          notices={<ProjectNotices />}
-          search={<SearchBox placement="header" />}
-          controls={
-            <>
-              <ThemeSwitch />
-              <PrefsStatus />
-            </>
-          }
-        >
-          {props.children}
-        </Frame>
+        <KeysProvider>
+          <Frame
+            sidebar={<Sidebar />}
+            notices={<ProjectNotices />}
+            views={<ViewSwitch />}
+            search={<SearchBox placement="header" />}
+            controls={
+              <>
+                <ThemeSwitch />
+                <ShortcutsButton />
+                <PrefsStatus />
+                <KeysStatus />
+              </>
+            }
+          >
+            {props.children}
+          </Frame>
+        </KeysProvider>
       </ModulesProvider>
     </PrefsProvider>
   );

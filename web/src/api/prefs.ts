@@ -12,6 +12,8 @@ export type Prefs = {
   theme: Theme;
   exportedOnly: boolean;
   sidebar: SidebarView;
+  // Keys like j and / (SPEC §5.3, D-45).
+  singleKeyShortcuts: boolean;
 };
 
 // Before the first GET answers (or if it's slow or fails): same as the
@@ -20,6 +22,7 @@ export const defaultPrefs: Prefs = {
   theme: "system",
   exportedOnly: false,
   sidebar: "auto",
+  singleKeyShortcuts: true,
 };
 
 export function decodePrefs(value: unknown, path = "$"): Prefs {
@@ -28,5 +31,6 @@ export function decodePrefs(value: unknown, path = "$"): Prefs {
     theme: field(o, "theme", path, oneOf(themes)),
     exportedOnly: field(o, "exportedOnly", path, bool),
     sidebar: field(o, "sidebar", path, oneOf(sidebarViews)),
+    singleKeyShortcuts: field(o, "singleKeyShortcuts", path, bool),
   };
 }

@@ -128,7 +128,7 @@ export function RefsLink(props: {
   return (
     <Show when={page.refsHref(props.d)}>
       {(h) => (
-        <a href={h()}>
+        <a class="decl-refs" href={h()}>
           Find references
           <span class="sr-only"> of {props.label}</span>
         </a>

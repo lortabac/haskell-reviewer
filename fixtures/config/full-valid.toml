@@ -3,3 +3,4 @@
 theme = "dark"
 exported-only = true
 sidebar = "files"
+single-key-shortcuts = false

@@ -86,6 +86,12 @@ export interface CodeApi {
   selectionLines: () => number[];
   // The row of a line, if it is mounted.
   row: (line: number) => HTMLElement | undefined;
+  // The link at the cursor: the one it is on, else the one under its
+  // column (g d).
+  cursorLink: () => HTMLAnchorElement | undefined;
+  // Esc: no selection, and select-all ends at once (a copy right after
+  // gets nothing). False if there was no selection.
+  clearSelection: () => boolean;
 }
 
 // More for a line: its CPP kind (a row class, and words in its
@@ -340,6 +346,22 @@ export function CodeView(props: CodeViewProps): JSX.Element {
     pin: (ls) => setExtraPins([...ls]),
     selectionLines: selLines,
     row,
+    cursorLink: () => {
+      const c = cursor();
+      const cell = cellOf(c.line);
+      if (cell === undefined) return undefined;
+      const s = linksOf(cell).find((x) =>
+        c.link ? x.start === c.col : x.start <= c.col && c.col < x.end,
+      );
+      return s?.el instanceof HTMLAnchorElement ? s.el : undefined;
+    },
+    clearSelection: () => {
+      copy.endSelectAll();
+      const sel = getSelection();
+      if (sel === null || sel.isCollapsed) return false;
+      sel.removeAllRanges();
+      return true;
+    },
   });
 
   // Keys on a focused line or link. See D-284.

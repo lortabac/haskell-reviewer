@@ -1,7 +1,9 @@
 theme: system
 exported-only: false
 sidebar: auto
+single-key-shortcuts: true
 == warnings
 config.toml:2:9: ui.theme: expected a string, got an integer
 config.toml:3:17: ui.exported-only: expected a boolean, got a string
 config.toml:4:11: ui.sidebar: expected a string, got an array
+config.toml:5:24: ui.single-key-shortcuts: expected a boolean, got a string

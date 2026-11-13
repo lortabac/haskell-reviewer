@@ -265,7 +265,9 @@ The UI has a fixed **frame** and one **main view** at a time.
 ### 4.1 Frame
 
 - **Header**: project name, mode and revisions (`main..feature`, abbreviated
-  hashes), tiers, a global search box, and a switch between views.
+  hashes), tiers, a global search box, a switch between views (Docs /
+  Source; a view the page has none of is shown muted, D-298), and a
+  Shortcuts button (§5.3).
 - **Sidebar**: the module tree, grouped by package and component. In diff
   mode every module carries a change marker (added / removed / modified /
   renamed) and a filter "changed only". The tree also has the "Other
@@ -583,7 +585,12 @@ The style is single-key and GitHub/Gmail-like (D-21). Bindings are fixed in
 v1 and work only when no text input has focus. For WCAG 2.1 SC 2.1.4, one
 setting, **"single-key shortcuts: on/off"** (default on, toggle in the `?`
 overlay and the user config), turns them all off (D-45). Every action
-also has a UI control, so nothing is lost with shortcuts off.
+also has a UI control, so nothing is lost with shortcuts off. Keys match
+the character typed (`event.key`), so Shift is fine where a layout needs
+it for `?`, `/`, `1`, `2`; with Ctrl, Alt or Meta held no shortcut fires.
+`g d` and `g r` are sequences: the second key within 1 second. A
+"Shortcuts" button in the header opens the overlay, also when shortcuts
+are off (D-297, D-298).
 
 | Key | Action |
 |-----|--------|
@@ -591,7 +598,7 @@ also has a UI control, so nothing is lost with shortcuts off.
 | `j` / `k` | Next / previous declaration (docs, expanded diff) or hunk (diff) |
 | `n` / `p` | Next / previous **change** (any view, diff mode) |
 | `]` / `[` | Next / previous changed file or module |
-| `Enter` | Open the focused item (in the source view: follow the link) |
+| `Enter` | Open the focused item (in the source view: follow the link); native, no binding |
 | `g d` | Go to definition of the identifier under the cursor/focus |
 | `g r` | Find references |
 | `s` | Toggle the inline source of the focused declaration |
@@ -962,7 +969,8 @@ as not configured (§8), with the reason.
 - One user config: `$XDG_CONFIG_HOME/haskell-reviewer/config.toml` (on macOS
   the same XDG path, defaulting to `~/.config`). It holds the LLM provider,
   endpoint, model, key source, the deny-list and UI defaults (`[ui]`:
-  `theme`, `exported-only`, `sidebar`; D-199). A bad file is never fatal:
+  `theme`, `exported-only`, `sidebar`, `single-key-shortcuts`; D-199,
+  D-297). A bad file is never fatal:
   each problem is a warning on stderr with line and column.
 - UI choices made in the page and "remembered across sessions" (theme
   override, diff layout, "exported only", single-key shortcuts) are stored
