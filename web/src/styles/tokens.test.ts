@@ -77,6 +77,9 @@ describe("design tokens: contrast (SPEC §5.4, tokens.css header)", () => {
       "selection",
       "find",
       "find-current",
+      "decl-head",
+      "accent",
+      "warn",
       ...hl,
     ]) {
       expect(t[name], `token --color-${name}`).toBeDefined();
@@ -99,6 +102,16 @@ describe("design tokens: contrast (SPEC §5.4, tokens.css header)", () => {
     // Control glyphs (muted) inside a find hit.
     ["muted", "find"],
     ["muted", "find-current"],
+    // The docs page: the head band, and the warn colour.
+    ...[
+      "fg",
+      "muted",
+      "link",
+      "warn",
+      ...hl.filter((h) => h !== "hl-excluded"),
+    ].map((f): [string, string] => [f, "decl-head"]),
+    ["warn", "bg"],
+    ["warn", "surface"],
   ];
 
   it.each(textPairs)("text %s on %s is >= 4.5:1 in both themes", (a, b) => {
@@ -117,6 +130,9 @@ describe("design tokens: contrast (SPEC §5.4, tokens.css header)", () => {
     ["focus", "selection"],
     ["muted", "bg"],
     ["muted", "surface"],
+    ["accent", "bg"],
+    ["accent", "decl-head"],
+    ["focus", "decl-head"],
     // The dashed bar by excluded lines.
     ["hl-excluded", "surface"],
   ];

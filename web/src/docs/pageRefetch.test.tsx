@@ -221,7 +221,7 @@ describe("docs page refetch while partial", () => {
     const ext = main.querySelector<HTMLDetailsElement>(".docs-extensions")!;
     ext.open = true;
     [...area.querySelectorAll<HTMLButtonElement>("button.decl-source-toggle")]
-      .find((b) => b.textContent.includes("of area"))!
+      .find((b) => b.getAttribute("aria-label")?.includes("of area"))!
       .click();
     await vi.waitFor(() => expect(area.querySelector(".src")).not.toBeNull());
     const src = area.querySelector(".src");

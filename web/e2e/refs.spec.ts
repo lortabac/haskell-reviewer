@@ -42,7 +42,9 @@ test("docs: Find references goes to the page; Enter on a use lands on the token"
 }) => {
   const server = await startServer({ root: linksProject.root });
   await page.goto(server.base + docsUrl);
-  const link = page.getByRole("link", { name: "Find references of area" });
+  const link = page.getByRole("link", {
+    name: "Find references (refs) of area",
+  });
   await link.focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(server.base + refsUrl);
@@ -337,7 +339,7 @@ for (const t of themes) {
     // The docs page with the links.
     await page.goto(server.base + "docs/tree/Links.Main");
     await expect(
-      page.getByRole("link", { name: /^Find references of / }).first(),
+      page.getByRole("link", { name: /^Find references \(refs\) of / }).first(),
     ).toBeVisible();
     await axe(page, `docs with refs links, ${t.scheme}`);
   });

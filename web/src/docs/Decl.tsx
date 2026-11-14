@@ -1,7 +1,7 @@
 // One declaration on the module page: a section with its head or
 // signature, badges, warning, docs, what its kind has (constructors,
-// methods...), the inline source and "go to source". Top-level ones,
-// and instances in a list.
+// methods...), an actions row (source, refs, copy) and the inline
+// source. Top-level ones, and instances in a list.
 import { createMemo, createUniqueId, For, type JSX, Show } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import type { Code as Tokens } from "../api/code";
@@ -33,7 +33,7 @@ import { TypeDetails } from "./decls/Types";
 import { PatSynDetails, ValueDetails } from "./decls/Values";
 import { useLinks } from "./links";
 import type { PageIndex } from "./pageIndex";
-import { SourceToggle } from "./SourceToggle";
+import { createSourceToggle } from "./SourceToggle";
 import { firstCodeLine } from "./source";
 
 export { WarningNotice } from "./decls/common";
@@ -70,6 +70,7 @@ export function Decl(props: {
   const refs = () => (
     <RefsLink d={props.decl as Pick<DeclInfo, "n" | "name">} label={what()} />
   );
+  const toggle = createSourceToggle(source, what);
   const derivedFor = () => {
     const f = head().derivedFor;
     return f === undefined || f.n === props.home ? undefined : f;
@@ -82,17 +83,6 @@ export function Decl(props: {
       data-handle={n(props.decl)}
       aria-labelledby={headId}
     >
-      {/* Before the heading: it floats right, text wraps around it. */}
-      <Show when={hasCopyText(props.decl)}>
-        <CopyButton
-          text={() => declCopyText(props.decl, page.ix, page.moduleName)}
-          label={
-            props.decl.kind === "instance" || props.decl.kind === "faminst"
-              ? "Copy instance head"
-              : `Copy ${props.decl.name}`
-          }
-        />
-      </Show>
       <Dynamic
         component={headingTag(props.level)}
         id={headId}
@@ -113,28 +103,33 @@ export function Decl(props: {
       <Warning info={props.decl} />
       <Docs info={props.decl} level={props.level} />
       {details(props.decl, props.level)}
-      <Show
-        when={source().length > 0}
-        fallback={
-          <Show when={named()}>
-            <p class="decl-actions">{refs()}</p>
-          </Show>
-        }
-      >
-        <SourceToggle parts={source()} label={what()}>
-          <Show when={href()}>
+      <Show when={source().length > 0 || named() || hasCopyText(props.decl)}>
+        <p class="decl-actions">
+          <Show when={source().length > 0}>{toggle.button()}</Show>
+          <Show when={source().length > 0 && href()}>
             {(h) => (
-              <>
-                {" "}
-                <a href={h()}>
-                  Go to source
-                  <span class="sr-only"> of {what()}</span>
-                </a>
-              </>
+              <a
+                class="decl-goto"
+                href={h()}
+                aria-label={`Go to source of ${what()}`}
+                data-glyph="source"
+                data-tip="Go to source"
+              />
             )}
           </Show>
-          <Show when={named()}> {refs()}</Show>
-        </SourceToggle>
+          <Show when={named()}>{refs()}</Show>
+          <Show when={hasCopyText(props.decl)}>
+            <CopyButton
+              text={() => declCopyText(props.decl, page.ix, page.moduleName)}
+              label={
+                props.decl.kind === "instance" || props.decl.kind === "faminst"
+                  ? "Copy instance head"
+                  : `Copy ${props.decl.name}`
+              }
+            />
+          </Show>
+        </p>
+        <Show when={source().length > 0}>{toggle.region()}</Show>
       </Show>
     </section>
   );

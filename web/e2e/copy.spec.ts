@@ -167,7 +167,7 @@ test("docs: a selection copied with Ctrl+C has no button words", async ({
   // The text of the selection, in every browser.
   const t = await page.evaluate(() => getSelection()?.toString() ?? "");
   expect(t).toContain("Shape");
-  expect(t).not.toMatch(/\bcopy\b/);
+  expect(t).not.toMatch(/\b(copy|refs|source)\b|(^|\s)[+\u2212](\s|$)/);
   // What Ctrl+C really puts on the clipboard: Chromium can read it.
   if (browserName === "chromium") {
     await page.keyboard.press("ControlOrMeta+c");
@@ -175,7 +175,7 @@ test("docs: a selection copied with Ctrl+C has no button words", async ({
       .poll(() => page.evaluate(() => navigator.clipboard.readText()))
       .toContain("Shape");
     const real = await page.evaluate(() => navigator.clipboard.readText());
-    expect(real).not.toMatch(/\bcopy\b/);
+    expect(real).not.toMatch(/\b(copy|refs|source)\b|(^|\s)[+\u2212](\s|$)/);
   } else {
     // The recorder sees the event; the app doesn't take docs copies.
     expect(await copy(page)).toBeNull();
@@ -393,7 +393,9 @@ test("docs: y on an instance", async ({ page, startServer, docsProject }) => {
   const inst = page
     .locator("main section.decl")
     .filter({
-      has: page.locator(":scope > button[aria-label='Copy instance head']"),
+      has: page.locator(
+        ":scope > .decl-actions > button[aria-label='Copy instance head']",
+      ),
     })
     .first();
   await expect(inst).toBeVisible();
@@ -506,7 +508,7 @@ test("Copy location forgets a declaration when focus went to the sidebar", async
   );
 });
 
-test("buttons never cover text; the heading keeps its spacing", async ({
+test("decl copy button is in the actions row, after the heading; the h1 keeps its spacing", async ({
   page,
   startServer,
   docsProject,
@@ -515,33 +517,21 @@ test("buttons never cover text; the heading keeps its spacing", async ({
   const sec = section(page, /^longSig/);
   await sec.scrollIntoViewIfNeeded();
   await sec.hover();
-  const b = sec.locator(":scope > button.copy-button");
+  const b = sec.locator(":scope > .decl-actions > button.copy-button");
   await expect(b).toHaveCSS("opacity", "1");
-  const hit = await sec.evaluate((el) => {
-    const btn = el.querySelector(":scope > .copy-button");
+  // After the heading in DOM order, and last in its row.
+  const after = await sec.evaluate((el) => {
+    const btn = el.querySelector(".decl-actions > .copy-button");
     const head = el.querySelector(".decl-head");
-    if (btn === null || head === null) return true;
-    const r = btn.getBoundingClientRect();
-    // The rects of the text itself (not the boxes around it).
-    const w = document.createTreeWalker(head, NodeFilter.SHOW_TEXT);
-    for (let t = w.nextNode(); t !== null; t = w.nextNode()) {
-      const range = document.createRange();
-      range.selectNodeContents(t);
-      for (const x of range.getClientRects()) {
-        if (
-          x.width > 0 &&
-          x.left < r.right &&
-          x.right > r.left &&
-          x.top < r.bottom &&
-          x.bottom > r.top
-        ) {
-          return true;
-        }
-      }
-    }
-    return false;
+    return (
+      btn !== null &&
+      head !== null &&
+      (head.compareDocumentPosition(btn) & Node.DOCUMENT_POSITION_FOLLOWING) !==
+        0 &&
+      btn.parentElement?.lastElementChild === btn
+    );
   });
-  expect(hit).toBe(false);
+  expect(after).toBe(true);
   // The h1: its box is the host's (no extra margin), and focus on the
   // heading itself does not show the button.
   const host = page.locator("main .copy-host").first();

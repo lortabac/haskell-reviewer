@@ -260,20 +260,23 @@ describe("hand-made page: details", () => {
     list.open = true;
     list.dispatchEvent(new Event("toggle"));
     expect(
-      decl(list, "data instance").querySelector(".decl-source-toggle")
-        ?.textContent,
+      decl(list, "data instance")
+        .querySelector(".decl-source-toggle")
+        ?.getAttribute("aria-label"),
     ).toBe("Show source of data instance DF Int");
     const box = decl(main, "newtype Box a").querySelector("details");
     if (box === null) throw new Error("no list");
     box.open = true;
     box.dispatchEvent(new Event("toggle"));
     expect(
-      decl(box, "deriving newtype Eq").querySelector(".decl-source-toggle")
-        ?.textContent,
+      decl(box, "deriving newtype Eq")
+        .querySelector(".decl-source-toggle")
+        ?.getAttribute("aria-label"),
     ).toBe("Show source of instance Eq (Box a)");
     expect(
-      decl(main, "$(pure [])").querySelector(".decl-source-toggle")
-        ?.textContent,
+      decl(main, "$(pure [])")
+        .querySelector(".decl-source-toggle")
+        ?.getAttribute("aria-label"),
     ).toMatch(/^Show source of the splice at line \d+$/);
   });
 

@@ -148,6 +148,14 @@ test("details: constructors, fields, methods, instances, pragmas", async ({
   ]);
 });
 
+// The ::before text (the button has no text node).
+function glyph(el: Locator): Promise<string> {
+  return el.evaluate((e) => {
+    const c = getComputedStyle(e, "::before").content;
+    return c.replace(/^"|"$/g, "").replace(/"\s*\/.*$/, "");
+  });
+}
+
 test("inline source: line numbers and gaps", async ({
   page,
   startServer,
@@ -157,7 +165,8 @@ test("inline source: line numbers and gaps", async ({
   await page.goto(server.base + "docs/tree/Shapes");
   const op = decl(page, "(<+>)");
   const button = op.locator(".decl-source-toggle");
-  await expect(button).toHaveText("Show source of <+>");
+  await expect(button).toHaveAccessibleName("Show source of <+>");
+  expect(await glyph(button)).toBe("+");
   await expect(button).toHaveAttribute("aria-expanded", "false");
   await button.click();
   await expect(button).toHaveAttribute("aria-expanded", "true");
@@ -177,7 +186,8 @@ test("inline source: line numbers and gaps", async ({
     .evaluateAll((rows) => rows.map((r) => r.getBoundingClientRect().top));
   expect(tops).toHaveLength(4);
   expect(new Set(tops.map(Math.round)).size).toBe(4);
-  await expect(button).toHaveText("Hide source of <+>");
+  await expect(button).toHaveAccessibleName("Hide source of <+>");
+  expect(await glyph(button)).toBe("\u2212");
   await button.click();
   await expect(op.locator("pre.src")).toHaveCount(0);
 });

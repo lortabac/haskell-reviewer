@@ -78,7 +78,7 @@ export const keymap: readonly KeyRow[] = [
     keys: ["g", "r"],
     label: "Find references",
     where: "Docs, source",
-    control: "Find references link, References button",
+    control: "refs link (Find references)",
   },
   {
     id: "source",
@@ -86,7 +86,7 @@ export const keymap: readonly KeyRow[] = [
     keys: ["s"],
     label: "Show or hide the source of the declaration",
     where: "Docs",
-    control: "Show source button",
+    control: "+ button (Show source)",
   },
   {
     id: "find",
