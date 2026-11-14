@@ -51,7 +51,8 @@ async function focusedStop(page: Page): Promise<{ lost: true } | Stop> {
     const hasRing =
       style.outlineStyle !== "none" &&
       Number.parseFloat(style.outlineWidth) >= 2;
-    const landmark = el.closest("header, nav, main");
+    // The view switch is a nav inside the header: the header counts.
+    const landmark = el.closest("header") ?? el.closest("nav, main");
     return {
       lost: false as const,
       tag: el.tagName,

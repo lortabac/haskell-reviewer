@@ -1,0 +1,115 @@
+/* Keyboard (D-297, D-298): the view switch, the Shortcuts button, the
+   key status and the ? overlay. */
+
+/* Docs / Source: the current one bold with a border, not colour
+   alone. */
+.view-switch {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.view-link,
+.view-missing {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid transparent;
+  border-radius: 4px;
+}
+
+.view-link[aria-current="page"] {
+  font-weight: 600;
+  color: var(--color-fg);
+  text-decoration: none;
+  border-color: var(--color-fg);
+}
+
+.view-missing {
+  color: var(--color-muted);
+}
+
+.shortcuts-button {
+  padding: var(--space-1) var(--space-2);
+  font: inherit;
+  color: var(--color-fg);
+  background: var(--color-bg);
+  border: 1px solid var(--color-muted);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* "No link here.": like prefs-status (frame.css), mounted at all
+   times and out of the header's gap while empty. */
+.keys-status {
+  margin: 0;
+  color: var(--color-muted);
+}
+
+.keys-status:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.keys-help {
+  max-width: min(48rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-fg);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+/* A literal colour: custom properties don't reach ::backdrop in every
+   browser we support. */
+.keys-help::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.keys-help h2 {
+  margin-top: 0;
+}
+
+.keys-help-note {
+  margin: var(--space-2) 0 0;
+}
+
+.keys-help-note:empty {
+  margin: 0;
+}
+
+.keys-help-table {
+  border-collapse: collapse;
+  margin: var(--space-3) 0;
+}
+
+.keys-help-table th,
+.keys-help-table td {
+  padding: var(--space-1) var(--space-2);
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.keys-help-table tbody th {
+  font-weight: normal;
+  white-space: nowrap;
+}
+
+.keys-help kbd {
+  padding: 0 var(--space-1);
+  border: 1px solid var(--color-muted);
+  border-radius: 3px;
+  background: var(--color-surface);
+}
+
+.keys-help button {
+  padding: var(--space-1) var(--space-2);
+  font: inherit;
+  color: var(--color-fg);
+  background: var(--color-bg);
+  border: 1px solid var(--color-muted);
+  border-radius: 4px;
+  cursor: pointer;
+}

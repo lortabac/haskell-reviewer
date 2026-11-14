@@ -4,11 +4,12 @@ import { IndexingStatus } from "./events/IndexingStatus";
 
 // The page frame (SPEC §4.1): header, sidebar, main view.
 // No router hooks here, so tests can render it alone. The sidebar,
-// header controls (the theme switch) and the project notices come in
-// as props.
+// view switch, header controls (the theme switch) and the project
+// notices come in as props.
 export function Frame(
   props: ParentProps<{
     sidebar?: JSX.Element;
+    views?: JSX.Element;
     search?: JSX.Element;
     controls?: JSX.Element;
     notices?: JSX.Element;
@@ -28,6 +29,7 @@ export function Frame(
       </a>
       <header class="frame-header">
         <span class="app-name">haskell-reviewer</span>
+        {props.views}
         {props.search}
         <IndexingStatus />
         {props.controls}

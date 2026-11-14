@@ -415,6 +415,10 @@ export function createHoverCard(opts: {
   // Only while the card shows (capture: before search and the rest).
   function onEsc(e: KeyboardEvent): void {
     if (e.key !== "Escape" || e.isComposing || owner === undefined) return;
+    // A modal dialog over the page (the ? overlay): its Esc, not ours.
+    if (e.target instanceof Element && e.target.closest("dialog[open]")) {
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     dismissed = { line: owner.line, col: owner.col };

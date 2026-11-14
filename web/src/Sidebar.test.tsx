@@ -22,7 +22,9 @@ function mount(
     "/tok/api/modules/tree": modules,
     "/tok/api/file/tree/app/Main.hs": [200, cborFixture("file-text")],
   });
-  const nav = mountAppAt(at, initialPrefs).querySelector("nav");
+  const nav = mountAppAt(at, initialPrefs).querySelector<HTMLElement>(
+    "nav.frame-sidebar",
+  );
   const group = nav?.querySelector('[role="group"]');
   const [m, f] = [...(group?.querySelectorAll("button") ?? [])];
   const modulesPanel = nav?.querySelector<HTMLElement>(".modules-panel");
@@ -174,7 +176,7 @@ describe("Sidebar", () => {
       "/tok/api/modules/tree": [200, fixture("modules")],
     });
     mountAppAt("/tok");
-    const nav = document.querySelector("nav");
+    const nav = document.querySelector<HTMLElement>("nav.frame-sidebar");
     const files = [...(nav?.querySelectorAll("button") ?? [])][1];
     files?.click();
     const calls = fetch.mock.calls as unknown as [string, RequestInit][];

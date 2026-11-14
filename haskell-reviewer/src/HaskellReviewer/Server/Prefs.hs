@@ -122,13 +122,18 @@ warmUpPrefs = do
   mapM_
     (once store)
     [ ("GET", [], ""),
-      ("POST", json, "{\"theme\":\"light\",\"exportedOnly\":true,\"sidebar\":\"files\"}"),
+      ( "POST",
+        json,
+        "{\"theme\":\"light\",\"exportedOnly\":true,\"sidebar\":\"files\",\
+        \\"singleKeyShortcuts\":false}"
+      ),
       ("POST", json, "{"),
       ("POST", json, "[]"),
       ("POST", json, "{}"),
       ("POST", json, "{\"x\":1}"),
       ("POST", json, "{\"theme\":1}"),
       ("POST", json, "{\"exportedOnly\":null}"),
+      ("POST", json, "{\"singleKeyShortcuts\":\"no\"}"),
       ("POST", json, BS.replicate (prefsBodyLimit + 1) 32),
       ("POST", [], "{}"),
       ("PUT", json, "{}")
@@ -144,7 +149,8 @@ warmUpPrefs = do
           void (evaluate (sum (map (Text.length . renderBadValue) d.oddValues)))
     )
     [ "{\"version\":1,\"theme\":\"dark\",\"exportedOnly\":true,\
-      \\"sidebar\":\"high\",\"other\":[1,\"x\",null,{},2.5]}",
+      \\"singleKeyShortcuts\":false,\"sidebar\":\"high\",\
+      \\"other\":[1,\"x\",null,{},2.5]}",
       "",
       "[]",
       "{\"version\":2}",

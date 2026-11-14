@@ -1,4 +1,5 @@
-// The UI preferences (theme, exported only, sidebar view): kept in a
+// The UI preferences (theme, exported only, sidebar view, single-key
+// shortcuts): kept in a
 // signal each, changed optimistically, saved with api/prefs (D-197,
 // D-203). The first GET happens in main.tsx, before render (so the
 // theme is right from the first paint); this provider only takes that
@@ -30,13 +31,20 @@ export interface PrefsApi {
   setExportedOnly: (v: boolean) => void;
   sidebar: Accessor<SidebarView>;
   setSidebar: (v: SidebarView) => void;
+  singleKeyShortcuts: Accessor<boolean>;
+  setSingleKeyShortcuts: (v: boolean) => void;
   // A save failed: a polite status for the header's live region. Clears
   // once every key's latest save has succeeded.
   status: Accessor<string | undefined>;
 }
 
-type Key = "theme" | "exportedOnly" | "sidebar";
-const keys: readonly Key[] = ["theme", "exportedOnly", "sidebar"];
+type Key = "theme" | "exportedOnly" | "sidebar" | "singleKeyShortcuts";
+const keys: readonly Key[] = [
+  "theme",
+  "exportedOnly",
+  "sidebar",
+  "singleKeyShortcuts",
+];
 
 const PrefsContext = createContext<PrefsApi>();
 
@@ -54,6 +62,9 @@ export function PrefsProvider(
     props.initial.exportedOnly,
   );
   const [sidebar, setSidebarSignal] = createSignal(props.initial.sidebar);
+  const [singleKeyShortcuts, setShortcutsSignal] = createSignal(
+    props.initial.singleKeyShortcuts,
+  );
   const [status, setStatusSignal] = createSignal<string>();
 
   // main.tsx already set it once, before this mounts; this keeps it in
@@ -88,6 +99,7 @@ export function PrefsProvider(
     theme: false,
     exportedOnly: false,
     sidebar: false,
+    singleKeyShortcuts: false,
   };
   // A plain promise, read once (not a reactive value): no effect
   // needed, but onMount gives eslint-plugin-solid the "one-time" scope
@@ -97,6 +109,7 @@ export function PrefsProvider(
       if (!touched.theme) setThemeSignal(p.theme);
       if (!touched.exportedOnly) setExportedOnlySignal(p.exportedOnly);
       if (!touched.sidebar) setSidebarSignal(p.sidebar);
+      if (!touched.singleKeyShortcuts) setShortcutsSignal(p.singleKeyShortcuts);
     });
   });
 
@@ -107,11 +120,17 @@ export function PrefsProvider(
   // an unrelated, later exportedOnly save succeeding (round 2 review).
   // The status shows while any key's latest save has failed, and
   // clears only once every key's latest save has succeeded.
-  const latest: Record<Key, number> = { theme: 0, exportedOnly: 0, sidebar: 0 };
+  const latest: Record<Key, number> = {
+    theme: 0,
+    exportedOnly: 0,
+    sidebar: 0,
+    singleKeyShortcuts: 0,
+  };
   const failed: Record<Key, boolean> = {
     theme: false,
     exportedOnly: false,
     sidebar: false,
+    singleKeyShortcuts: false,
   };
   const updateStatus = (): void => {
     setStatus(
@@ -167,6 +186,13 @@ export function PrefsProvider(
       touched.sidebar = true;
       setSidebarSignal(v);
       save("sidebar", { sidebar: v });
+    },
+    singleKeyShortcuts,
+    setSingleKeyShortcuts: (v) => {
+      if (v === singleKeyShortcuts()) return;
+      touched.singleKeyShortcuts = true;
+      setShortcutsSignal(v);
+      save("singleKeyShortcuts", { singleKeyShortcuts: v });
     },
     status,
   };

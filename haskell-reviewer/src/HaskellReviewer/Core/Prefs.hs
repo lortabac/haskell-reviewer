@@ -84,7 +84,8 @@ The keys are the ones of the wire (camelCase), not config.toml's
 data Prefs = Prefs
   { theme :: !(Maybe Theme),
     exportedOnly :: !(Maybe Bool),
-    sidebar :: !(Maybe SidebarView)
+    sidebar :: !(Maybe SidebarView),
+    singleKeyShortcuts :: !(Maybe Bool)
   }
   deriving (Eq, Show)
 
@@ -99,7 +100,8 @@ newtype PrefsPatch = PrefsPatch Prefs
 data Effective = Effective
   { theme :: !Theme,
     exportedOnly :: !Bool,
-    sidebar :: !SidebarView
+    sidebar :: !SidebarView,
+    singleKeyShortcuts :: !Bool
   }
   deriving (Eq, Show)
 
@@ -158,7 +160,13 @@ data PatchError
 
 -- | Nothing set.
 noPrefs :: Prefs
-noPrefs = Prefs {theme = Nothing, exportedOnly = Nothing, sidebar = Nothing}
+noPrefs =
+  Prefs
+    { theme = Nothing,
+      exportedOnly = Nothing,
+      sidebar = Nothing,
+      singleKeyShortcuts = Nothing
+    }
 
 -- | No ui.json yet.
 emptyPrefsFile :: PrefsFile
@@ -170,7 +178,8 @@ effective d p =
   Effective
     { theme = fromMaybe d.theme p.theme,
       exportedOnly = fromMaybe d.exportedOnly p.exportedOnly,
-      sidebar = fromMaybe d.sidebar p.sidebar
+      sidebar = fromMaybe d.sidebar p.sidebar,
+      singleKeyShortcuts = fromMaybe d.singleKeyShortcuts p.singleKeyShortcuts
     }
 
 -- | The keys of the patch win.
@@ -183,7 +192,8 @@ overridePrefs new old =
   Prefs
     { theme = orElse new.theme old.theme,
       exportedOnly = orElse new.exportedOnly old.exportedOnly,
-      sidebar = orElse new.sidebar old.sidebar
+      sidebar = orElse new.sidebar old.sidebar,
+      singleKeyShortcuts = orElse new.singleKeyShortcuts old.singleKeyShortcuts
     }
   where
     orElse a b = maybe b Just a
@@ -203,6 +213,7 @@ patchKeys (PrefsPatch new) =
   ["theme" | Just _ <- [new.theme]]
     <> ["exportedOnly" | Just _ <- [new.exportedOnly]]
     <> ["sidebar" | Just _ <- [new.sidebar]]
+    <> ["singleKeyShortcuts" | Just _ <- [new.singleKeyShortcuts]]
 
 -- | The keys a patch sets.
 patchPrefs :: PrefsPatch -> Prefs
@@ -237,6 +248,10 @@ encodePrefsFile file =
       <> maybe mempty (Encoding.pair "theme" . Encoding.text . themeName) p.theme
       <> maybe mempty (Encoding.pair "exportedOnly" . Encoding.bool) p.exportedOnly
       <> maybe mempty (Encoding.pair "sidebar" . Encoding.text . sidebarName) p.sidebar
+      <> maybe
+        mempty
+        (Encoding.pair "singleKeyShortcuts" . Encoding.bool)
+        p.singleKeyShortcuts
       <> foldMap
         (\(k, v) -> Encoding.pair k (Aeson.toEncoding v))
         (KeyMap.toAscList file.others)
@@ -288,12 +303,15 @@ renderPatchError = \case
 readKey :: Text -> Value -> Maybe (Either BadValue (Prefs -> Prefs))
 readKey key v = case key of
   "theme" -> Just (enum themeFromName ["system", "light", "dark"] setTheme)
-  "exportedOnly" -> Just $ case v of
-    Aeson.Bool b -> Right (setExportedOnly b)
-    _ -> Left BadValue {key = key, expected = "true or false"}
+  "exportedOnly" -> Just (bool setExportedOnly)
   "sidebar" -> Just (enum sidebarFromName ["auto", "modules", "files"] setSidebar)
+  "singleKeyShortcuts" -> Just (bool setSingleKeyShortcuts)
   _ -> Nothing
   where
+    bool :: (Bool -> Prefs -> Prefs) -> Either BadValue (Prefs -> Prefs)
+    bool set = case v of
+      Aeson.Bool b -> Right (set b)
+      _ -> Left BadValue {key = key, expected = "true or false"}
     enum ::
       (Text -> Maybe a) ->
       [Text] ->
@@ -308,18 +326,47 @@ readKey key v = case key of
               expected = "one of " <> Text.intercalate ", " (map quoted names)
             }
 
--- Plain updates would be ambiguous: Effective has the same fields.
+-- One key over the others. Plain updates would be ambiguous: Effective
+-- has the same fields.
 setTheme :: Theme -> Prefs -> Prefs
-setTheme x p =
-  Prefs {theme = Just x, exportedOnly = p.exportedOnly, sidebar = p.sidebar}
+setTheme x =
+  overridePrefs
+    Prefs
+      { theme = Just x,
+        exportedOnly = Nothing,
+        sidebar = Nothing,
+        singleKeyShortcuts = Nothing
+      }
 
 setExportedOnly :: Bool -> Prefs -> Prefs
-setExportedOnly x p =
-  Prefs {theme = p.theme, exportedOnly = Just x, sidebar = p.sidebar}
+setExportedOnly x =
+  overridePrefs
+    Prefs
+      { theme = Nothing,
+        exportedOnly = Just x,
+        sidebar = Nothing,
+        singleKeyShortcuts = Nothing
+      }
 
 setSidebar :: SidebarView -> Prefs -> Prefs
-setSidebar x p =
-  Prefs {theme = p.theme, exportedOnly = p.exportedOnly, sidebar = Just x}
+setSidebar x =
+  overridePrefs
+    Prefs
+      { theme = Nothing,
+        exportedOnly = Nothing,
+        sidebar = Just x,
+        singleKeyShortcuts = Nothing
+      }
+
+setSingleKeyShortcuts :: Bool -> Prefs -> Prefs
+setSingleKeyShortcuts x =
+  overridePrefs
+    Prefs
+      { theme = Nothing,
+        exportedOnly = Nothing,
+        sidebar = Nothing,
+        singleKeyShortcuts = Just x
+      }
 
 quoted :: Text -> Text
 quoted t = "\"" <> t <> "\""

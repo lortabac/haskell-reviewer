@@ -583,6 +583,21 @@ describe("copy", () => {
     expect(api.cursor().line).toBe(7);
   });
 
+  it("clearSelection (Esc): select-all ends at once, a copy gets nothing", () => {
+    const text = "ab\ncd\n";
+    const { root, api } = mount(text);
+    webkitFocus();
+    cell(root, 1).focus();
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "a", ctrlKey: true, bubbles: true }),
+    );
+    expect(copy().text).toBe(text);
+    expect(api.clearSelection()).toBe(true);
+    // No selectionchange yet: select-all must be off anyway.
+    expect(copy().text).not.toBe(text);
+    expect(api.clearSelection()).toBe(false);
+  });
+
   it("leaves other copies alone", () => {
     const { root } = mount("ab\n");
     select([textOf(root, 1), 0], [textOf(root, 1), 2]);

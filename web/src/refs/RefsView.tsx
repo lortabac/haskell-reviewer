@@ -25,6 +25,7 @@ import { anchorName } from "../docs/urls";
 import { createRefetchLoop } from "../events/refetchLoop";
 import { IndexingContext } from "../events/indexing";
 import { hrefFor, lineHref } from "../files/paths";
+import { useViewLinks } from "../keys/KeysProvider";
 import { useModules } from "../modules/store";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
@@ -168,6 +169,33 @@ function RefsPage(props: { module: string; decl: string }): JSX.Element {
     useCached ? { generation: cached.generation, partial: false } : undefined,
   );
   if (!useCached) fetchNow();
+
+  // Docs / Source in the header: the declaration, and its binding
+  // when the list has it. No other keys here.
+  const binding = () => {
+    for (const g of groups.list) {
+      if (g.ref !== module || g.path === null) continue;
+      const b = g.items.find((x) => x.kind === "binding");
+      if (b !== undefined) return { path: g.path, item: b };
+    }
+    return undefined;
+  };
+  useViewLinks({
+    current: "refs",
+    docs: () => docsHref(module, decl),
+    source: () => {
+      const path = modules.byRef().get(module)?.path ?? binding()?.path;
+      return path == null ? undefined : hrefFor(path);
+    },
+    at: (to) => {
+      const b = binding();
+      if (to !== "source" || b === undefined) return undefined;
+      return {
+        href: lineHref(b.path, b.item.span[0]),
+        state: { codeJump: true, cp: b.item.span[1] },
+      };
+    },
+  });
 
   const slow = createDelay(() => state() === "loading", 300);
   // Focus the heading when a link in main brought us here.

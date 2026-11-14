@@ -1,5 +1,6 @@
 theme: dark
 exported-only: false
 sidebar: auto
+single-key-shortcuts: true
 == warnings
 config.toml:1:2: unknown table [llm]

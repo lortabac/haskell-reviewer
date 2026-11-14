@@ -44,6 +44,20 @@ tests =
           r @?= eff ThemeLight True SidebarFiles
           BS.readFile path >>= (@?= "{\"version\":1,\"theme\":\"light\"}\n")
           store.current >>= (@?= eff ThemeLight True SidebarFiles),
+      testCase "single-key shortcuts: saved, read back by another store" $
+        withState $ \_ path -> do
+          (a, _) <- fileStore path
+          r <- a.update =<< patch "{\"singleKeyShortcuts\":false}"
+          r @?= shortcutsOff (effectiveOf config)
+          BS.readFile path
+            >>= (@?= "{\"version\":1,\"singleKeyShortcuts\":false}\n")
+          (b, _) <- fileStore path
+          b.current >>= (@?= shortcutsOff (effectiveOf config))
+          _ <- b.update =<< patch "{\"theme\":\"dark\"}"
+          BS.readFile path
+            >>= ( @?=
+                    "{\"version\":1,\"theme\":\"dark\",\"singleKeyShortcuts\":false}\n"
+                ),
       testCase "two stores on one file: both keys survive, each sees the other" $
         withState $ \_ path -> do
           (a, _) <- fileStore path
@@ -303,13 +317,36 @@ withReadOnly dir action =
 
 -- | Not the built-in defaults, so precedence shows.
 config :: UiDefaults
-config = UiDefaults {theme = ThemeSystem, exportedOnly = True, sidebar = SidebarFiles}
+config =
+  UiDefaults
+    { theme = ThemeSystem,
+      exportedOnly = True,
+      sidebar = SidebarFiles,
+      singleKeyShortcuts = True
+    }
 
 effectiveOf :: UiDefaults -> Effective
-effectiveOf d = eff d.theme d.exportedOnly d.sidebar
+effectiveOf d =
+  Effective
+    { theme = d.theme,
+      exportedOnly = d.exportedOnly,
+      sidebar = d.sidebar,
+      singleKeyShortcuts = d.singleKeyShortcuts
+    }
 
+-- | Shortcuts on, the default.
 eff :: Theme -> Bool -> SidebarView -> Effective
-eff t e s = Effective {theme = t, exportedOnly = e, sidebar = s}
+eff t e s =
+  Effective {theme = t, exportedOnly = e, sidebar = s, singleKeyShortcuts = True}
+
+shortcutsOff :: Effective -> Effective
+shortcutsOff e =
+  Effective
+    { theme = e.theme,
+      exportedOnly = e.exportedOnly,
+      sidebar = e.sidebar,
+      singleKeyShortcuts = False
+    }
 
 -- | A temp state dir and where ui.json goes in it.
 withState :: (FilePath -> FilePath -> IO a) -> IO a

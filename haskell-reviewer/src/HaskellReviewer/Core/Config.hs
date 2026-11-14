@@ -51,6 +51,7 @@ has one table:
   theme = "system"        # system, light or dark
   exported-only = false
   sidebar = "auto"        # auto, modules or files
+  single-key-shortcuts = true
 
 These are defaults: what the user picks in the page (ui.json) wins.
 
@@ -89,7 +90,9 @@ data SidebarView
 data UiDefaults = UiDefaults
   { theme :: !Theme,
     exportedOnly :: !Bool,
-    sidebar :: !SidebarView
+    sidebar :: !SidebarView,
+    -- | Single-key shortcuts (@j@, @/@) on. SPEC §5.3, D-45.
+    singleKeyShortcuts :: !Bool
   }
   deriving (Eq, Show)
 
@@ -112,7 +115,12 @@ data ConfigWarning = ConfigWarning
 -- | What we use with no config file.
 builtinDefaults :: UiDefaults
 builtinDefaults =
-  UiDefaults {theme = ThemeSystem, exportedOnly = False, sidebar = SidebarAuto}
+  UiDefaults
+    { theme = ThemeSystem,
+      exportedOnly = False,
+      sidebar = SidebarAuto,
+      singleKeyShortcuts = True
+    }
 
 -- | The defaults from a config file, and its problems. See Note
 -- [Config file].
@@ -200,9 +208,8 @@ uiKey :: Acc -> Text -> (Position, Value' Position) -> Acc
 uiKey acc@(d, ws) key (keyPos, value) = case key of
   "theme" -> enum themeFromName "system, light or dark" (\t -> d {theme = t})
   "sidebar" -> enum sidebarFromName "auto, modules or files" (\s -> d {sidebar = s})
-  "exported-only" -> case value of
-    Bool' _ b -> (d {exportedOnly = b}, ws)
-    _ -> wrongType "a boolean"
+  "exported-only" -> bool (\b -> d {exportedOnly = b})
+  "single-key-shortcuts" -> bool (\b -> d {singleKeyShortcuts = b})
   _ -> case value of
     Table' _ _ -> warn acc keyPos ("unknown table [ui." <> key <> "]")
     _ -> warn acc keyPos ("unknown key " <> quoted ("ui." <> key))
@@ -215,6 +222,9 @@ uiKey acc@(d, ws) key (keyPos, value) = case key of
           warn acc pos $
             "ui." <> key <> ": unknown value " <> quoted t <> ", expected " <> expected
       _ -> wrongType "a string"
+    bool set = case value of
+      Bool' _ b -> (set b, ws)
+      _ -> wrongType "a boolean"
     wrongType expected =
       warn acc (valueAnn value) $
         "ui." <> key <> ": expected " <> expected <> ", got " <> typeName value

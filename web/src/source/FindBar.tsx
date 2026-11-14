@@ -33,8 +33,20 @@ export interface FindBarProps {
   children?: JSX.Element;
   // Called when the bar opens, before it draws: others close then.
   onOpen?: () => void;
-  // Gets a way to close the bar with no focus change.
-  handle?: (h: { closeQuietly: () => void }) => void;
+  // Gets ways to drive the bar (the f and Esc keys).
+  handle?: (h: FindHandle) => void;
+  // Shown after "Find" in the hint, like "(f)".
+  keyHint?: string | undefined;
+}
+
+export interface FindHandle {
+  // Close with no focus change.
+  closeQuietly: () => void;
+  // Open, or put focus in the input if it is open.
+  open: () => void;
+  isOpen: () => boolean;
+  // Close; focus goes to the current hit, like Esc in the bar.
+  close: () => void;
 }
 
 export function FindBar(props: FindBarProps): JSX.Element {
@@ -135,6 +147,16 @@ export function FindBar(props: FindBarProps): JSX.Element {
       setOpen(false);
       props.onFind(undefined);
     },
+    open: () => {
+      if (open()) {
+        input.focus();
+        input.select();
+      } else show();
+    },
+    isOpen: open,
+    close: () => {
+      if (open()) close();
+    },
   });
   const toggle = () => (open() ? close() : show());
 
@@ -212,7 +234,9 @@ export function FindBar(props: FindBarProps): JSX.Element {
         </button>
       </div>
       <span class="code-hint">
-        Browser find sees only visible lines — use Find to search the whole file
+        {`Browser find sees only visible lines — use Find${
+          props.keyHint === undefined ? "" : ` ${props.keyHint}`
+        } to search the whole file`}
       </span>
       <p class="sr-only code-find-status" role="status">
         {said()}

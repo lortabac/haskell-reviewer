@@ -172,7 +172,12 @@ cases =
     configured =
       newPrefsStore
         (newLogger LevelInfo (\_ -> pure ()))
-        UiDefaults {theme = ThemeDark, exportedOnly = True, sidebar = SidebarModules}
+        UiDefaults
+          { theme = ThemeDark,
+            exportedOnly = True,
+            sidebar = SidebarModules,
+            singleKeyShortcuts = False
+          }
         (Left HomeUnset)
     answering r =
       projectApi

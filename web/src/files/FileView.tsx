@@ -20,6 +20,13 @@ import { docsHref } from "../api/module";
 import { type LexedSource, type OutlineEntry } from "../api/source";
 import { bannerText } from "../modules/notices";
 import { useModules } from "../modules/store";
+import { declAtLine, outlineStep } from "../keys/outline";
+import {
+  useKeyActions,
+  useViewLinks,
+  type ViewTarget,
+} from "../keys/KeysProvider";
+import { usePrefs } from "../prefs/store";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
 import {
@@ -29,9 +36,9 @@ import {
   type LineMarks,
 } from "../source/CodeView";
 import { createSource } from "../source/createSource";
-import { FindBar } from "../source/FindBar";
+import { FindBar, type FindHandle } from "../source/FindBar";
 import { shouldReland } from "../source/landing";
-import { RefsBar } from "../source/RefsBar";
+import { RefsBar, type RefsHandle } from "../source/RefsBar";
 import { utf16Cols } from "../source/columns";
 import { highlightDecor, highlightedLine } from "../source/decor";
 import { type Highlight, highlightOf } from "../source/highlight";
@@ -86,6 +93,25 @@ function FilePage(props: { path: string }): JSX.Element {
     () => props.path,
     () => view()?.generation,
   );
+  // Docs / Source in the header. The module from the tree, else from
+  // the highlight's answer.
+  const moduleRef = () => {
+    for (const info of modules.byRef().values()) {
+      if (info.path === props.path) return info.ref;
+    }
+    return lexed()?.ref ?? undefined;
+  };
+  // Set by FileText: the docs of the declaration at the cursor.
+  let docsAt: (() => ViewTarget | undefined) | undefined;
+  useViewLinks({
+    current: "source",
+    docs: () => {
+      const r = moduleRef();
+      return r === undefined ? undefined : docsHref(r);
+    },
+    source: () => hrefFor(props.path),
+    at: (to) => (to === "docs" ? docsAt?.() : undefined),
+  });
   // A link in main (like a symlink target) took us here: its page is
   // gone, so put focus on the new heading instead of letting it drop to
   // body. Again if a 404 swaps the heading.
@@ -113,7 +139,11 @@ function FilePage(props: { path: string }): JSX.Element {
         }
       >
         <Match when={view()} keyed>
-          {(v) => body(v, props.path, lexed)}
+          {(v) =>
+            body(v, props.path, lexed, (f) => {
+              docsAt = f;
+            })
+          }
         </Match>
         <Match when={result()?.kind === "error"}>
           <p>Couldn't load this file.</p>
@@ -127,10 +157,18 @@ function body(
   v: View,
   path: string,
   source: () => LexedSource | undefined,
+  setDocsAt: (f: (() => ViewTarget | undefined) | undefined) => void,
 ): JSX.Element {
   switch (v.kind) {
     case "text":
-      return <FileText text={v.text} path={path} source={source()} />;
+      return (
+        <FileText
+          text={v.text}
+          path={path}
+          source={source()}
+          setDocsAt={setDocsAt}
+        />
+      );
     case "binary":
       return (
         <p>This file is not UTF-8 text, so it isn't shown ({bytes(v.size)}).</p>
@@ -183,6 +221,7 @@ function FileText(props: {
   text: string;
   path: string;
   source: LexedSource | undefined;
+  setDocsAt?: (f: (() => ViewTarget | undefined) | undefined) => void;
 }): JSX.Element {
   const location = useLocation();
   const base = useResolvedPath(() => "/");
@@ -234,8 +273,9 @@ function FileText(props: {
   let api: CodeApi | undefined;
   // The same, as a signal, for the label of the References button.
   const [apiSig, setApiSig] = createSignal<CodeApi>();
-  let closeFind: (() => void) | undefined;
-  let closeRefs: (() => void) | undefined;
+  let findBar: FindHandle | undefined;
+  let refsBar: RefsHandle | undefined;
+  const prefs = usePrefs();
   const [find, setFind] = createSignal<FindHits>();
   // A same-file link was followed: where the cursor goes, once the
   // hash changes (D-284).
@@ -341,6 +381,60 @@ function FileText(props: {
       });
     }),
   );
+  // Keys (D-298). j / k: the outline's entries.
+  const step = (dir: 1 | -1): boolean => {
+    const entries = outline();
+    const a = api;
+    if (entries === undefined || a === undefined) return false;
+    const to = outlineStep(entries, a.cursor().line, dir);
+    if (to === undefined) return true;
+    a.focusLine(to);
+    a.scrollToLine(to, "center");
+    return true;
+  };
+  useKeyActions({
+    next: () => step(1),
+    prev: () => step(-1),
+    definition: () => {
+      const link = api?.cursorLink();
+      if (link === undefined) return "No link here.";
+      link.click();
+      return true;
+    },
+    references: () => {
+      if (refsBar === undefined) return false;
+      refsBar.run();
+      return true;
+    },
+    find: () => {
+      if (findBar === undefined) return false;
+      findBar.open();
+      return true;
+    },
+    // After the hover card and the bars' own Esc: a bar that is open
+    // while focus is elsewhere.
+    escape: () => {
+      if (findBar?.isOpen() === true) {
+        findBar.close();
+        return true;
+      }
+      if (refsBar?.isOpen() === true) {
+        refsBar.close();
+        return true;
+      }
+      return api?.clearSelection() ?? false;
+    },
+  });
+  // 1: the docs of the declaration at the cursor.
+  // eslint-disable-next-line solid/reactivity -- given once
+  props.setDocsAt?.(() => {
+    const ref = props.source?.ref ?? null;
+    const a = api;
+    if (ref === null || a === undefined) return undefined;
+    const e = declAtLine(outline() ?? [], a.cursor().line);
+    return { href: docsHref(ref, e?.[1] ?? null) };
+  });
+  onCleanup(() => props.setDocsAt?.(undefined));
   let wrap!: HTMLDivElement;
   onMount(() => {
     // Native: before the router's click handler on the document.
@@ -359,8 +453,9 @@ function FileText(props: {
           index={index()}
           api={() => api}
           onFind={setFind}
-          onOpen={() => closeRefs?.()}
-          handle={(h) => (closeFind = h.closeQuietly)}
+          onOpen={() => refsBar?.closeQuietly()}
+          handle={(h) => (findBar = h)}
+          keyHint={prefs.singleKeyShortcuts() ? "(f)" : undefined}
         >
           <RefsBar
             hl={hl}
@@ -368,8 +463,8 @@ function FileText(props: {
             lineText={(n) => lineText(props.text, index(), n)}
             api={apiSig}
             onHits={setFind}
-            onOpen={() => closeFind?.()}
-            handle={(h) => (closeRefs = h.closeQuietly)}
+            onOpen={() => findBar?.closeQuietly()}
+            handle={(h) => (refsBar = h)}
           />
         </FindBar>
       </Show>
