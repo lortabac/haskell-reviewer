@@ -175,6 +175,27 @@
   outline-offset: -2px;
 }
 
+/* Cursor line band (T14d, D-302): only while the view has focus, so not
+   in the find bar. Layers, low to high: the #L mark (row background),
+   this band (cell background, wins in the code area; the mark stays in
+   the gutter), ::selection and the find highlights (paint over
+   backgrounds), the focus ring (outline). The number goes fg, so the
+   cue is not colour alone. */
+.code-view:focus-within .code-cursor-line > .code-cell {
+  background: var(--color-cursor-line);
+}
+
+.code-view:focus-within .code-cursor-line > .code-num {
+  color: var(--color-fg);
+}
+
+@media (forced-colors: active) {
+  .code-view:focus-within .code-cursor-line > .code-num {
+    outline: 2px solid CanvasText;
+    outline-offset: -2px;
+  }
+}
+
 /* Find hits (source/findPaint.ts). The current one is underlined too,
    not colour alone. */
 ::highlight(code-find) {

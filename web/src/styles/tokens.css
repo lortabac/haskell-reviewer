@@ -4,10 +4,11 @@
 
    Pairs we use for text: fg/bg, fg/surface, fg/border, fg/mark,
    muted/bg, muted/surface, link/bg, link/surface; in the source view
-   fg and each hl-* on bg, surface, mark, selection, find and
-   find-current, muted on selection, find and find-current. Pairs for
+   fg and each hl-* on bg, surface, mark, selection, find,
+   find-current and cursor-line, muted on selection, find,
+   find-current and cursor-line. Pairs for
    a ring or a border only: focus/bg, focus/surface, focus/find,
-   focus/find-current, focus/mark, focus/selection, hl-excluded/surface.
+   focus/find-current, focus/cursor-line, focus/mark, focus/selection, hl-excluded/surface.
    On the docs page (D-300): fg, muted, link, each hl-* (not excluded)
    and warn on decl-head, warn on bg and surface; ring or border:
    accent/bg, accent/decl-head, focus/decl-head.
@@ -29,6 +30,9 @@
   --color-focus: light-dark(#0550ae, #6cb6ff);
   /* Marked lines (#L<n>). */
   --color-mark: light-dark(#fff8c5, #3d3000);
+  /* Band on the cursor line while the code view has focus. Soft, but
+     every text colour reads on it. */
+  --color-cursor-line: light-dark(#eceff3, #21262d);
   /* Selected text in the source view. */
   --color-selection: light-dark(#ddf4ff, #1d3149);
   /* Find hits in the source view, and the current one. As strong as the

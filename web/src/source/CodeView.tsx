@@ -695,6 +695,7 @@ export function CodeView(props: CodeViewProps): JSX.Element {
       return {
         "code-line-target": marked(n),
         "code-find-line": isFindLine(n),
+        "code-cursor-line": isCursor(n),
         "code-excluded": kind === "excluded",
         "code-directive": kind === "directive",
       };
