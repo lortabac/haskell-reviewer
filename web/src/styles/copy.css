@@ -27,6 +27,7 @@
 }
 
 :hover > .copy-button,
+.decl:hover > .decl-actions > .copy-button,
 .copy-button:focus {
   opacity: 1;
 }
@@ -37,13 +38,17 @@
   }
 }
 
-/* A heading or a declaration: the button floats right, before the
-   heading, so the text wraps around it and is never covered. The host
-   is a plain block: the heading keeps its margins. */
-.copy-host > .copy-button,
-.decl > .copy-button {
+/* A heading: the button floats right, before the heading, so the text
+   wraps around it and is never covered. The host is a plain block: the
+   heading keeps its margins. */
+.copy-host > .copy-button {
   float: right;
   margin: 0 0 0 var(--space-2);
+}
+
+/* A declaration: last in its actions row (the row has the gap). */
+.decl-actions > .copy-button {
+  margin-left: 0;
 }
 
 /* A tree row: the link and the button on one line. */

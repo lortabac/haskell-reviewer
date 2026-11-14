@@ -9,6 +9,7 @@ import { ConnectionContext } from "./events/ConnectionNotice";
 import { IndexingContext } from "./events/indexing";
 import type { Status } from "./events/protocol";
 import { applyTheme } from "./prefs/theme";
+import { installTips } from "./ui/tips";
 import "./styles/tokens.css";
 import "./styles/frame.css";
 import "./styles/files.css";
@@ -19,6 +20,8 @@ import "./styles/search.css";
 import "./styles/refs.css";
 import "./styles/keys.css";
 import "./styles/copy.css";
+
+installTips();
 
 const root = document.getElementById("root");
 if (root === null) {

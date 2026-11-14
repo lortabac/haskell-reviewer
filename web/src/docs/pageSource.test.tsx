@@ -64,7 +64,7 @@ const calls = (mock: ReturnType<typeof stubFetch>) =>
 async function toggle(main: HTMLElement, label: string): Promise<HTMLElement> {
   const b = await vi.waitFor(() => {
     const x = [...main.querySelectorAll("button.decl-source-toggle")].find(
-      (e) => e.textContent.includes(label),
+      (e) => e.getAttribute("aria-label")?.includes(label),
     );
     expect(x).toBeDefined();
     return x as HTMLButtonElement;

@@ -232,21 +232,47 @@ describe("module page", () => {
 
   it("go to source: first code line, not the doc", async () => {
     const main = await page();
-    const a = decl(main, "area").querySelector(".decl-actions a");
+    const a = decl(main, "area").querySelector(".decl-actions a.decl-goto");
     expect(a?.getAttribute("href")).toBe("/tok/src/tree/Page.hs#L38");
-    expect(a?.textContent).toBe("Go to source of area");
-    const op = decl(main, "(<+>)").querySelector(".decl-actions a");
+    expect(a?.getAttribute("aria-label")).toBe("Go to source of area");
+    expect(a?.textContent).toBe("");
+    expect(a?.getAttribute("data-glyph")).toBe("source");
+    const op = decl(main, "(<+>)").querySelector(".decl-actions a.decl-goto");
     // The fixity line comes first.
     expect(op?.getAttribute("href")).toBe("/tok/src/tree/Page.hs#L42");
   });
 
+  it("actions row: + source refs copy, after the heading, no text", async () => {
+    const main = await page();
+    const d = decl(main, "area");
+    const row = d.querySelector(".decl-actions");
+    const head = d.querySelector(".decl-head");
+    expect(row).not.toBeNull();
+    expect(head?.compareDocumentPosition(row as Node)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(row?.textContent).toBe("");
+    expect([...(row?.children ?? [])].map((e) => e.className)).toEqual([
+      "decl-source-toggle",
+      "decl-goto",
+      "decl-refs",
+      "copy-button",
+    ]);
+  });
+
   it("find references: named declarations and nested items only", async () => {
     const main = await page();
-    const a = decl(main, "area").querySelector(".decl-actions a:last-child");
-    expect(a?.textContent).toBe("Find references of area");
+    const a = decl(main, "area").querySelector(".decl-actions a.decl-refs");
+    expect(a?.getAttribute("aria-label")).toBe(
+      "Find references (refs) of area",
+    );
+    expect(a?.textContent).toBe("");
     expect(a?.getAttribute("href")).toBe("/tok/refs/tree/Page?decl=val%3Aarea");
     const sub = main.querySelector<HTMLAnchorElement>(".subdecl-refs");
-    expect(sub?.textContent).toMatch(/^References/);
+    expect(sub?.getAttribute("aria-label")).toMatch(
+      /^Find references \(refs\) of /,
+    );
+    expect(sub?.textContent).toBe("");
     expect(sub?.getAttribute("href")).toMatch(
       /^\/tok\/refs\/tree\/Page\?decl=/,
     );
@@ -759,7 +785,10 @@ describe("synopsis, pragmas, source", () => {
     expect(box?.textContent).toBe("");
     button.click();
     expect(button.getAttribute("aria-expanded")).toBe("true");
-    expect(button.textContent).toBe("Hide source of <+>");
+    expect(button.getAttribute("aria-label")).toBe("Hide source of <+>");
+    expect(button.getAttribute("data-glyph")).toBe("\u2212");
+    expect(button.getAttribute("data-tip")).toBe("Hide source");
+    expect(button.textContent).toBe("");
     expect(box?.querySelector("pre")?.textContent).toBe(
       [
         "42infixl 6 <+>",

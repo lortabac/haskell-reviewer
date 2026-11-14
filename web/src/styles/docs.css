@@ -23,6 +23,11 @@
   overflow-wrap: anywhere;
 }
 
+/* A deprecation or warning on a declaration. */
+.decl-warning {
+  border-left-color: var(--color-warn);
+}
+
 .docs-notice p {
   margin: 0 0 var(--space-2);
 }
@@ -44,7 +49,7 @@
 /* One declaration. */
 .decl {
   margin: 0 0 var(--space-4);
-  padding-top: var(--space-2);
+  padding-top: var(--space-3);
   border-top: 1px solid var(--color-border);
   scroll-margin-top: var(--space-3);
 }
@@ -58,8 +63,12 @@
   outline-offset: 2px;
 }
 
+/* A band and a bar (a border: shows in forced colours too). */
 .decl-head {
   margin: 0 0 var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-decl-head);
+  border-left: 3px solid var(--color-accent);
   font-size: 1rem;
   font-weight: normal;
 }
@@ -77,6 +86,11 @@
   padding: 0 var(--space-1);
   border: 1px solid var(--color-muted);
   border-radius: 4px;
+}
+
+.decl-badge-warn {
+  color: var(--color-warn);
+  border-color: var(--color-warn);
 }
 
 /* The export mark (D-203): a plain muted word, no border, no pill
@@ -101,10 +115,72 @@
   color: var(--color-muted);
 }
 
-.decl-shared,
-.decl-actions {
+.decl-shared {
   margin: 0 0 var(--space-2);
   font-size: 0.9em;
+}
+
+/* The actions: + source refs copy. The words come from data-glyph (CSS
+   content, so a copied selection has none); the names are aria-label.
+   Longer tip from data-tip on hover and focus (D-300). */
+.decl-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+  font-size: 0.9em;
+}
+
+[data-glyph]::before {
+  content: attr(data-glyph) / "";
+}
+
+.decl-goto,
+.decl-refs,
+.subdecl-refs {
+  color: var(--color-link);
+}
+
+[data-tip] {
+  position: relative;
+}
+
+[data-tip]::after {
+  content: attr(data-tip) / "";
+  display: none;
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  z-index: 5;
+  margin-bottom: 2px;
+  padding: 0 var(--space-1);
+  font-family: var(--font-sans);
+  font-size: 0.85rem;
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1.5;
+  white-space: nowrap;
+  text-decoration: none;
+  color: var(--color-bg);
+  background: var(--color-fg);
+  border: 1px solid var(--color-muted);
+  border-radius: 4px;
+}
+
+/* No tip on touch: the short label stays. Esc sets data-tip-off
+   (ui/tips.ts). */
+@media (hover: hover) {
+  [data-tip]:hover:not([data-tip-off])::after,
+  [data-tip]:focus-visible:not([data-tip-off])::after {
+    display: block;
+  }
+}
+
+/* Near the right edge: the tip grows left (ui/tips.ts). */
+[data-tip][data-tip-side="right"]::after {
+  left: auto;
+  right: 0;
 }
 
 .decl-note {
@@ -139,6 +215,7 @@
 
 .subdecl {
   margin: 0 0 var(--space-2);
+  padding-top: var(--space-1);
   padding-left: var(--space-2);
   border-left: 2px solid var(--color-border);
   scroll-margin-top: var(--space-3);
@@ -190,8 +267,21 @@
   overflow-wrap: anywhere;
 }
 
-/* Show source. */
+/* The + button: small, the glyph in the link colour. */
 .decl-source-toggle {
+  min-width: 1.75em;
+  padding: 0 var(--space-1);
+  font: inherit;
+  text-align: center;
+  color: var(--color-link);
+  background: var(--color-bg);
+  border: 1px solid var(--color-muted);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* "Show all" in the hidden-declaration notice. */
+.docs-button {
   padding: 0 var(--space-2);
   font: inherit;
   color: var(--color-fg);
@@ -201,7 +291,8 @@
   cursor: pointer;
 }
 
-.decl-source-toggle:focus-visible {
+.decl-source-toggle:focus-visible,
+.docs-button:focus-visible {
   outline: var(--focus-ring);
   outline-offset: 2px;
 }
@@ -265,10 +356,38 @@
   overflow-wrap: anywhere;
 }
 
-/* Token links: underlined, as all links. No token colours yet. */
+/* Token colours: the source view's palette (D-300). rop and pun stay
+   plain (D-228). Links are always underlined, so never colour alone. */
+.tok-kw {
+  color: var(--color-hl-keyword);
+}
+.tok-con,
+.tok-conop {
+  color: var(--color-hl-type);
+}
+.tok-var {
+  color: var(--color-hl-variable);
+}
+.tok-op {
+  color: var(--color-hl-operator);
+}
+.tok-num,
+.tok-str,
+.tok-chr {
+  color: var(--color-hl-literal);
+}
+.tok-prag,
+.tok-mac {
+  color: var(--color-hl-pragma);
+}
+.tok-com,
+.tok-doc {
+  color: var(--color-hl-comment);
+}
+
+/* Token links: underlined, as all links. */
 .sig a,
 .code a {
-  color: inherit;
   text-decoration: underline;
 }
 
@@ -316,7 +435,7 @@ a.link-guess {
   text-decoration: underline dotted;
 }
 
-/* "References" in the head of a nested declaration. */
+/* "refs" in the head of a nested declaration. */
 .subdecl-refs {
   margin-left: var(--space-2);
   font-family: var(--font-sans);

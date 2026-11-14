@@ -697,7 +697,7 @@ function ModulePage(props: {
                   </p>
                   <button
                     type="button"
-                    class="decl-source-toggle"
+                    class="docs-button"
                     onClick={() => showAll(location.hash)}
                   >
                     Show all

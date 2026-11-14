@@ -23,41 +23,40 @@ import { lineNodes } from "../source/paint";
 import { colIn } from "../source/selection";
 import { type SourceRow, rowSegs, sourceRows, textParts } from "./source";
 
-export function SourceToggle(props: {
-  parts: SourcePart[];
+// The button and the region share a signal: Decl puts the button in
+// its actions row and the region right after the row.
+export function createSourceToggle(
+  parts: () => SourcePart[],
   // For screen readers: whose source.
-  label: string;
-  // Rest of the actions row (go to source).
-  children?: JSX.Element;
-}): JSX.Element {
+  label: () => string,
+): { button: () => JSX.Element; region: () => JSX.Element } {
   const page = usePage();
   const [open, setOpen] = createSignal(false);
   const id = createUniqueId();
-  return (
-    <>
-      <p class="decl-actions">
-        <button
-          type="button"
-          class="decl-source-toggle"
-          aria-expanded={open()}
-          aria-controls={id}
-          onClick={() => {
-            if (!open()) page.wantSource();
-            setOpen(!open());
-          }}
-        >
-          {open() ? "Hide source" : "Show source"}
-          <span class="sr-only"> of {props.label}</span>
-        </button>
-        {props.children}
-      </p>
+  return {
+    button: () => (
+      <button
+        type="button"
+        class="decl-source-toggle"
+        aria-expanded={open()}
+        aria-controls={id}
+        aria-label={`${open() ? "Hide" : "Show"} source of ${label()}`}
+        data-glyph={open() ? "\u2212" : "+"}
+        data-tip={open() ? "Hide source" : "Show source"}
+        onClick={() => {
+          if (!open()) page.wantSource();
+          setOpen(!open());
+        }}
+      />
+    ),
+    region: () => (
       <div id={id} class="decl-source">
         <Show when={open()}>
-          <SourceRows parts={props.parts} />
+          <SourceRows parts={parts()} />
         </Show>
       </div>
-    </>
-  );
+    ),
+  };
 }
 
 function SourceRows(props: { parts: SourcePart[] }): JSX.Element {

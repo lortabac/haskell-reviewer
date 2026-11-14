@@ -393,8 +393,8 @@ The whole file, syntax-highlighted (§5.6), with line numbers.
   reaches a link: signature, module, why it's a guess; Esc hides it
   (D-285).
 - **Find references**: a "References" button in the source toolbar acts
-  on the token under the cursor; the docs page has a "Find references"
-  link on each named declaration. For a declaration it opens the
+  on the token under the cursor; the docs page has a "refs" link (named
+  "Find references (refs) of x") on each named declaration. For a declaration it opens the
   references page: the places where it is used, grouped by module, with a
   snippet each and a link to the token (D-296). These are exact at the
   precise tier and textual-but-scoped at the syntactic tier, and labelled
@@ -656,6 +656,11 @@ keep the column (D-284).
   sessions (D-203). No custom theming. Tokens use CSS `light-dark()`:
   Chromium 123, Firefox 140 or Safari 17.5 at minimum (Firefox 140 for
   the CSS Custom Highlight API, D-288).
+- Docs declarations: short actions at the bottom of each item, `+`/`−`
+  (show/hide source), `source`, `refs`, then copy, with the long text in a
+  tip on hover and keyboard focus (Esc hides it) and as the accessible
+  name; a light band and a blue accent bar on each heading; a warn colour
+  for orphans and deprecations (D-300).
 - A monospace font for all code. Signatures wrap at `->` and `=>` the way
   Haddock does, and never scroll horizontally in the docs view.
 - Change colours carry meaning (added, removed, modified) and are always
@@ -679,8 +684,8 @@ keep the column (D-284).
   uses no highlighting library: the server sends a token stream and the
   client maps classes to theme colours.
 - It applies to the full-source, inline-source, diff and expanded-diff
-  views. Haddock-rendered text in the docs view is not highlighted, though
-  code inside it is.
+  views, and to docs signatures and code inside Haddock text (D-300).
+  Haddock-rendered prose itself is not highlighted.
 - There is **no semantic colouring**, such as distinguishing locals from
   top-level or imported names. Links and hover already convey that.
 - A file that fails to **lex** has no token colours, but its CPP

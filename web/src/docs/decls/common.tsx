@@ -58,7 +58,14 @@ export function Badges(props: {
           )}
         </Show>
         <For each={props.labels}>
-          {(l) => <span class="decl-badge">{l}</span>}
+          {(l) => (
+            <span
+              class="decl-badge"
+              classList={{ "decl-badge-warn": l === "orphan" }}
+            >
+              {l}
+            </span>
+          )}
         </For>
         <Show when={props.mark}>
           {(m) => <span class="decl-mark">{m()}</span>}
@@ -128,10 +135,13 @@ export function RefsLink(props: {
   return (
     <Show when={page.refsHref(props.d)}>
       {(h) => (
-        <a class="decl-refs" href={h()}>
-          Find references
-          <span class="sr-only"> of {props.label}</span>
-        </a>
+        <a
+          class="decl-refs"
+          href={h()}
+          aria-label={`Find references (refs) of ${props.label}`}
+          data-glyph="refs"
+          data-tip="Find references"
+        />
       )}
     </Show>
   );
@@ -310,10 +320,13 @@ export function Sub(props: {
         />
         <Show when={page.refsHref(props.d)}>
           {(h) => (
-            <a class="subdecl-refs" href={h()}>
-              References
-              <span class="sr-only"> of {props.d.name}</span>
-            </a>
+            <a
+              class="subdecl-refs"
+              href={h()}
+              aria-label={`Find references (refs) of ${props.d.name}`}
+              data-glyph="refs"
+              data-tip="Find references"
+            />
           )}
         </Show>
       </div>

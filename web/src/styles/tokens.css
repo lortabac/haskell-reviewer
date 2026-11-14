@@ -8,6 +8,9 @@
    find-current, muted on selection, find and find-current. Pairs for
    a ring or a border only: focus/bg, focus/surface, focus/find,
    focus/find-current, focus/mark, focus/selection, hl-excluded/surface.
+   On the docs page (D-300): fg, muted, link, each hl-* (not excluded)
+   and warn on decl-head, warn on bg and surface; ring or border:
+   accent/bg, accent/decl-head, focus/decl-head.
    Don't put text in muted/border or muted/mark (dark theme): both are
    under 4.5:1.
 
@@ -46,6 +49,12 @@
   --color-hl-comment: light-dark(#59636e, #9ea7b3);
   --color-hl-pragma: light-dark(#953800, #ffa657);
   --color-hl-excluded: light-dark(#636c76, #979fa9);
+
+  /* Docs page (D-300): band behind a declaration head, the bar at its
+     left, and the colour of the orphan badge and deprecation notices. */
+  --color-decl-head: light-dark(#f0f6fc, #121d2f);
+  --color-accent: light-dark(#0969da, #4493f8);
+  --color-warn: light-dark(#8a5a00, #d29922);
 
   --space-1: 0.25rem;
   --space-2: 0.5rem;
