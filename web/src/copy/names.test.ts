@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Target } from "../api/source";
-import { location, qualified, stripQualifier, targetCopyText } from "./names";
+import {
+  location,
+  maxShown,
+  qualified,
+  shorten,
+  stripQualifier,
+  targetCopyText,
+} from "./names";
 
 describe("qualified", () => {
   it("joins; operators stay bare", () => {
@@ -76,5 +83,39 @@ describe("targetCopyText", () => {
 
   it("a local: nothing", () => {
     expect(targetCopyText("x", ["local", 1, 1], name)).toBeUndefined();
+  });
+});
+
+describe("shorten", () => {
+  const n = (k: number) => "a".repeat(k);
+  it("keeps short texts, up to the limit", () => {
+    expect(maxShown).toBe(40);
+    expect(shorten("a.b")).toBe("a.b");
+    expect(shorten(n(40))).toBe(n(40));
+  });
+  it("cuts the middle: start and end stay", () => {
+    const out = shorten(n(41));
+    expect(Array.from(out)).toHaveLength(40);
+    expect(out).toBe(n(20) + "…" + n(19));
+    const p = "src/Text/Pandoc/Readers/Markdown.hs:120-134".padEnd(80, "x");
+    const q = shorten(p);
+    expect(q.startsWith("src/Text/Pandoc/Rea")).toBe(true);
+    expect(q.endsWith("x".repeat(19))).toBe(true);
+    expect(Array.from(q)).toHaveLength(40);
+  });
+  it("never splits a surrogate pair", () => {
+    const e = "😀";
+    const out = shorten(e.repeat(50));
+    expect(Array.from(out)).toHaveLength(40);
+    expect(out).toBe(e.repeat(20) + "…" + e.repeat(19));
+    // 40 code points are 80 UTF-16 units: shown whole.
+    expect(shorten(e.repeat(40))).toBe(e.repeat(40));
+  });
+  it("collapses whitespace", () => {
+    expect(shorten("  a\n\n  b\t\tc  ")).toBe("a b c");
+  });
+  it("empty and blank", () => {
+    expect(shorten("")).toBe("");
+    expect(shorten(" \n\t ")).toBe("");
   });
 });

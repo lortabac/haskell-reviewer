@@ -39,7 +39,7 @@ describe("y", () => {
     expect(status()).toBe("Nothing to copy here.");
   });
 
-  it("a focused [data-copy] element is copied, and Copied. is said", async () => {
+  it("a focused [data-copy] element is copied, and Copied is said", async () => {
     const writeText = vi.fn(() => Promise.resolve());
     vi.stubGlobal("navigator", { clipboard: { writeText } });
     mount();
@@ -50,7 +50,7 @@ describe("y", () => {
     a.focus();
     press("y");
     expect(writeText).toHaveBeenCalledWith("src/Foo.hs");
-    await vi.waitFor(() => expect(status()).toBe("Copied."));
+    await vi.waitFor(() => expect(status()).toBe("Copied src/Foo.hs"));
     expect(
       document.querySelector(".keys-status")?.getAttribute("aria-live"),
     ).toBe("polite");

@@ -1,7 +1,12 @@
 // Copy a text with the clipboard API (SPEC §5.7, D-299). writeText
 // must start inside the user's gesture (WebKit): call this at once,
 // with no await before it.
-export const copiedWords = "Copied.";
+import { shorten } from "./names";
+
+export const copiedWords = (text: string): string => {
+  const shown = shorten(text);
+  return shown === "" ? "Copied." : `Copied ${shown}`;
+};
 export const failedWords = "Couldn't copy: the browser blocked it.";
 
 // say: the status line. Gives true when the text was copied.
@@ -19,6 +24,6 @@ export async function copyText(
   } catch {
     ok = false;
   }
-  say?.(ok ? copiedWords : failedWords);
+  say?.(ok ? copiedWords(text) : failedWords);
   return ok;
 }

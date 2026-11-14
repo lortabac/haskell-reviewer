@@ -715,8 +715,9 @@ keep the column (D-284).
 - **Copy current location**, in the header, copies `path:line` (or
   `path:12-15` for a selection) on the current side (D-299).
 - The `y` key copies the focused item's primary identifier.
-- Every copy gives brief visual feedback ("Copied"), and the same message
-  is announced to screen readers. Copying never includes UI chrome such as
+- Every copy gives brief visual feedback ("Copied" and the copied text,
+  cut in the middle when long, D-301), and the same message is announced
+  to screen readers. Copying never includes UI chrome such as
   line numbers or gutter markers. Views are virtualised (§11.7), so a
   copied selection is built from the file's text, not from the DOM, and a
   long selection copies every line it spans. A plain text selection in the source and

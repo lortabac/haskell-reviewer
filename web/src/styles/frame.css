@@ -55,6 +55,7 @@ a {
 
 .frame-header {
   grid-area: header;
+  min-width: 0;
   min-height: var(--header-height);
   display: flex;
   flex-wrap: wrap;

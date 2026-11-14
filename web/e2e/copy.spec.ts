@@ -5,7 +5,11 @@
 // focus asserted rather than the selection (WebKit drops it when focus
 // moves).
 import type { Locator, Page } from "@playwright/test";
-import { expectNoAxeViolations as axe, themes } from "./support/a11y";
+import {
+  expectNoAxeViolations as axe,
+  noSideways,
+  themes,
+} from "./support/a11y";
 import {
   copy,
   grantClipboard,
@@ -70,7 +74,7 @@ async function keyTo(page: Page, n: number, name: string): Promise<void> {
   await expect(a).toBeFocused();
 }
 
-test("docs buttons: module, path, declaration, instance; Copied. is polite", async ({
+test("docs buttons: module, path, declaration, instance; Copied is polite", async ({
   page,
   startServer,
   docsProject,
@@ -85,7 +89,7 @@ test("docs buttons: module, path, declaration, instance; Copied. is polite", asy
   await page.locator("main h1").hover();
   await expect(module).toHaveCSS("opacity", "1");
   expect(await text(module)).toBe("Shapes");
-  await expect(status(page)).toHaveText(/^Copied\./);
+  await expect(status(page)).toHaveText("Copied Shapes");
   await expect(status(page)).toHaveAttribute("aria-live", "polite");
   expect(
     await text(page.getByRole("button", { name: "Copy path Shapes.hs" })),
@@ -121,7 +125,7 @@ test("docs: y on a declaration and on a nested item; nothing to copy", async ({
   expect(await nextWrite(page, () => page.keyboard.press("y"))).toBe(
     "Shapes.Shape",
   );
-  await expect(status(page)).toHaveText(/^Copied\./);
+  await expect(status(page)).toHaveText("Copied Shapes.Shape");
   const circle = page.locator("main li.subdecl").filter({ hasText: /Circle/ });
   await circle.first().focus();
   expect(await nextWrite(page, () => page.keyboard.press("y"))).toBe(
@@ -491,7 +495,7 @@ test("a module that doesn't parse: Copy location is the path", async ({
     "Broken.hs",
   );
   await page.keyboard.press("y");
-  await expect(status(page)).toHaveText(/^Copied\./);
+  await expect(status(page)).toHaveText("Copied Broken.hs");
 });
 
 test("Copy location forgets a declaration when focus went to the sidebar", async ({
@@ -574,4 +578,51 @@ test("axe: trees, file view, refs page, header; buttons shown", async ({
     await page.locator("main .refs-group").first().hover();
     await axe(page, `refs page, ${t.scheme}`);
   }
+});
+
+test("a long text: the status shows the middle cut", async ({
+  page,
+  startServer,
+  docsProject,
+}) => {
+  await docs(page, startServer, docsProject.root);
+  const long = "src/Text/Pandoc/Readers/Markdown/Inline.hs:120-134";
+  await page.evaluate((t) => {
+    const a = document.createElement("a");
+    a.href = "#x";
+    a.id = "long-copy";
+    a.dataset.copy = t;
+    a.textContent = "x";
+    document.querySelector("main")?.append(a);
+  }, long);
+  await page.locator("#long-copy").focus();
+  expect(await nextWrite(page, () => page.keyboard.press("y"))).toBe(long);
+  await expect(status(page)).toHaveText(
+    "Copied src/Text/Pandoc/Read…n/Inline.hs:120-134",
+  );
+});
+
+test("320 px: a long status gets an ellipsis, no sideways scroll", async ({
+  page,
+  startServer,
+  docsProject,
+}) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  await docs(page, startServer, docsProject.root);
+  await page.evaluate(() => {
+    const a = document.createElement("a");
+    a.href = "#x";
+    a.id = "long-copy";
+    a.dataset.copy = "src/Text/Pandoc/Readers/Markdown/Inline.hs:120-134";
+    a.textContent = "x";
+    document.querySelector("main")?.append(a);
+  });
+  await page.locator("#long-copy").focus();
+  await nextWrite(page, () => page.keyboard.press("y"));
+  await expect(status(page)).toHaveText(/^Copied src\/Text/);
+  await noSideways(page);
+  const cut = await status(page).evaluate(
+    (el) => el.scrollWidth > el.clientWidth,
+  );
+  expect(cut).toBe(true);
 });
