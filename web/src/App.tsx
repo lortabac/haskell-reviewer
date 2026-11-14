@@ -9,6 +9,7 @@ import { Home } from "./Home";
 import { RefsView } from "./refs/RefsView";
 import { ProjectNotices } from "./modules/ProjectNotices";
 import { ModulesProvider } from "./modules/store";
+import { CopyLocation } from "./copy/CopyLocation";
 import { KeysProvider, KeysStatus } from "./keys/KeysProvider";
 import { ShortcutsButton } from "./keys/ShortcutsButton";
 import { ViewSwitch } from "./keys/ViewSwitch";
@@ -66,6 +67,7 @@ function Root(
             search={<SearchBox placement="header" />}
             controls={
               <>
+                <CopyLocation />
                 <ThemeSwitch />
                 <ShortcutsButton />
                 <PrefsStatus />

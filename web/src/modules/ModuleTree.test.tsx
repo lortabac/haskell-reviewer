@@ -87,7 +87,7 @@ describe("ModuleTree", () => {
       "bad/bad.cabal broken",
       "Other files",
     ]);
-    for (const b of p.querySelectorAll("button")) {
+    for (const b of p.querySelectorAll("button.tree-folder")) {
       expect(b.getAttribute("aria-expanded")).toBe("false");
     }
     // Only the broken package's link: modules render when opened.
@@ -98,7 +98,7 @@ describe("ModuleTree", () => {
     const p = await panel("modules");
     const a = link(p, "bad/bad.cabal broken");
     expect(a?.getAttribute("href")).toBe("/tok/src/tree/bad/bad.cabal");
-    expect(a?.parentElement?.querySelector(".tree-problem")?.textContent).toBe(
+    expect(a?.closest("li")?.querySelector(".tree-problem")?.textContent).toBe(
       "can't parse: bad/bad.cabal:3:1: unexpected end of input",
     );
   });
@@ -391,5 +391,25 @@ describe("ModuleTree alone", () => {
     button(root, "b 1").click();
     button(root, "c").click();
     expect(button(root, "b:c").getAttribute("aria-expanded")).toBe("false");
+  });
+});
+
+describe("RefInfo.name", () => {
+  it("the module's name", () => {
+    const tree = decodeModuleTree(fixture("modules"));
+    const refs = indexRefs(tree);
+    const m = tree.packages[0]?.components[0]?.modules[0];
+    expect(m).toBeDefined();
+    if (m !== undefined) expect(refs.get(m.ref)?.name).toBe(m.name);
+    for (const i of refs.values()) expect(i.name).not.toBe("");
+  });
+
+  it("a loose module with no name: null, not its path", () => {
+    const tree = decodeModuleTree(fixture("modules"));
+    const o = tree.other.find((x) => x.kind === "module");
+    expect(o).toBeDefined();
+    if (o === undefined) return;
+    const named = { ...tree, other: [{ ...o, name: null }] };
+    expect(indexRefs(named).get(o.ref)?.name).toBeNull();
   });
 });

@@ -12,6 +12,7 @@ export type ActionId =
   | "references"
   | "source"
   | "find"
+  | "copy"
   | "docsView"
   | "sourceView"
   | "escape"
@@ -94,6 +95,14 @@ export const keymap: readonly KeyRow[] = [
     label: "Find in file",
     where: "Source",
     control: "Find button",
+  },
+  {
+    id: "copy",
+    bindings: ["y"],
+    keys: ["y"],
+    label: "Copy the name or path of the focused item",
+    where: "Everywhere",
+    control: "Copy buttons, Copy location in the header",
   },
   {
     id: "docsView",

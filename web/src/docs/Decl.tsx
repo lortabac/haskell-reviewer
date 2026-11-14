@@ -11,7 +11,9 @@ import type {
   DeclInfo,
   Handle,
 } from "../api/module";
+import { CopyButton } from "../copy/CopyButton";
 import { Signature } from "./Code";
+import { declCopyText, hasCopyText } from "./copyText";
 import { usePage, useAnchor } from "./context";
 import { ClassDetails } from "./decls/Classes";
 import {
@@ -80,6 +82,17 @@ export function Decl(props: {
       data-handle={n(props.decl)}
       aria-labelledby={headId}
     >
+      {/* Before the heading: it floats right, text wraps around it. */}
+      <Show when={hasCopyText(props.decl)}>
+        <CopyButton
+          text={() => declCopyText(props.decl, page.ix, page.moduleName)}
+          label={
+            props.decl.kind === "instance" || props.decl.kind === "faminst"
+              ? "Copy instance head"
+              : `Copy ${props.decl.name}`
+          }
+        />
+      </Show>
       <Dynamic
         component={headingTag(props.level)}
         id={headId}

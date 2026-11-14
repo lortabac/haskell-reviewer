@@ -10,6 +10,7 @@ import {
   Show,
   type Signal,
 } from "solid-js";
+import { CopyButton } from "../copy/CopyButton";
 import { ancestors, type DirNode, type FileNode } from "./tree";
 
 // The file tree in the sidebar: nested lists, folders as disclosure
@@ -145,17 +146,22 @@ function File(props: { file: FileNode; ctx: Ctx }) {
   };
   return (
     <li>
-      <a
-        ref={(el) => (link = el)}
-        class="tree-file"
-        href={props.ctx.href(path())}
-        aria-current={props.ctx.isCurrent(path()) ? "page" : undefined}
-      >
-        {props.file.name}
-        <Show when={marker()}>
-          {(m) => <span class="tree-marker"> {m()}</span>}
-        </Show>
-      </a>
+      <div class="tree-row">
+        <a
+          ref={(el) => (link = el)}
+          class="tree-file"
+          href={props.ctx.href(path())}
+          data-copy={path()}
+          aria-current={props.ctx.isCurrent(path()) ? "page" : undefined}
+        >
+          {props.file.name}
+          <Show when={marker()}>
+            {(m) => <span class="tree-marker"> {m()}</span>}
+          </Show>
+        </a>
+        {/* Mouse only: the keyboard has y. */}
+        <CopyButton text={path} label={`Copy path ${path()}`} mouseOnly />
+      </div>
     </li>
   );
 }

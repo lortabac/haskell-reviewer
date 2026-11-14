@@ -22,10 +22,15 @@ import { bannerText } from "../modules/notices";
 import { useModules } from "../modules/store";
 import { declAtLine, outlineStep } from "../keys/outline";
 import {
+  useCopyLocation,
   useKeyActions,
+  useKeys,
   useViewLinks,
   type ViewTarget,
 } from "../keys/KeysProvider";
+import { copyText } from "../copy/clipboard";
+import { CopyButton } from "../copy/CopyButton";
+import { location as locationText, targetCopyText } from "../copy/names";
 import { usePrefs } from "../prefs/store";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
@@ -44,6 +49,7 @@ import { highlightDecor, highlightedLine } from "../source/decor";
 import { type Highlight, highlightOf } from "../source/highlight";
 import { jumpOf, linkInfos } from "../source/links";
 import { lineIndex, lineText } from "../source/lines";
+import { tokenAt } from "../source/refTarget";
 import { createDelay, focusInMain, focusLost } from "../ui/focus";
 import { bytes, limit } from "../ui/format";
 import { bringOnPage } from "../ui/scroll";
@@ -127,9 +133,12 @@ function FilePage(props: { path: string }): JSX.Element {
   return (
     <Show when={!notFound()} fallback={<NotFound />}>
       <PageTitle text={props.path} />
-      <h1 class="file-path" tabindex="-1">
-        {props.path}
-      </h1>
+      <div class="copy-host">
+        <CopyButton text={() => props.path} label="Copy path" />
+        <h1 class="file-path" tabindex="-1">
+          {props.path}
+        </h1>
+      </div>
       <Show when={banner()}>{(b) => <p class="file-banner">{b()}</p>}</Show>
       <Switch
         fallback={
@@ -424,6 +433,41 @@ function FileText(props: {
       }
       return api?.clearSelection() ?? false;
     },
+  });
+  // y: the name at the cursor, else its place. Copy location: the
+  // selected lines, else the cursor line.
+  const keys = useKeys();
+  const modules = useModules();
+  const here = () => locationText(props.path, api?.cursor().line ?? 1);
+  const nameAtCursor = (): string | undefined => {
+    const a = api;
+    const h = hl();
+    const s = props.source;
+    if (a === undefined || h === undefined || s === undefined) return undefined;
+    const tok = tokenAt(
+      h.runs,
+      s.targets,
+      // eslint-disable-next-line solid/reactivity -- run by a key
+      (n) => lineText(props.text, index(), n),
+      a.cursor(),
+    );
+    const t = tok?.target;
+    if (tok === undefined || t === undefined) return undefined;
+    return targetCopyText(
+      tok.text,
+      t,
+      (ref) => modules.byRef().get(ref)?.name ?? undefined,
+    );
+  };
+  useKeyActions({
+    copy: () => {
+      void copyText(nameAtCursor() ?? here(), keys?.say);
+      return true;
+    },
+  });
+  useCopyLocation(() => {
+    const r = api?.selectedLines();
+    return r === undefined ? here() : locationText(props.path, r.from, r.to);
   });
   // 1: the docs of the declaration at the cursor.
   // eslint-disable-next-line solid/reactivity -- given once

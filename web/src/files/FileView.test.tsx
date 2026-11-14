@@ -195,7 +195,7 @@ describe("FileView", () => {
       expect(main.querySelector(".file-banner")?.textContent).toBe(text);
     });
     // Right under the heading.
-    expect(main.querySelector("h1 + .file-banner")).not.toBeNull();
+    expect(main.querySelector(".copy-host + .file-banner")).not.toBeNull();
   });
 
   it.each([

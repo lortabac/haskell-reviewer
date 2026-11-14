@@ -30,13 +30,12 @@ describe("keymap", () => {
     }
   });
 
-  it("the G8 keys, and no y yet (T14)", () => {
+  it("the G8 keys, and y", () => {
     const keys = keymap.flatMap((r) => r.keys);
     for (const k of ["/", "j", "k", "Enter", "g", "d", "r", "s", "f"]) {
       expect(keys).toContain(k);
     }
-    for (const k of ["1", "2", "Esc", "?"]) expect(keys).toContain(k);
-    expect(keys).not.toContain("y");
+    for (const k of ["1", "2", "Esc", "?", "y"]) expect(keys).toContain(k);
     expect(keymap.find((r) => r.id === "open")?.bindings).toEqual([]);
   });
 

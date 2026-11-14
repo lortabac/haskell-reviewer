@@ -44,6 +44,8 @@ declare global {
     __pwned?: unknown;
     // What each copy put on the clipboard (source.spec.ts).
     __copies: (string | null)[];
+    // The texts given to writeText (copy.spec.ts).
+    __written: string[];
   }
 }
 

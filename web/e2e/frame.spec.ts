@@ -7,7 +7,11 @@ import {
   tabKey,
   test,
 } from "./support/fixtures";
-import { expectNoAxeViolations as axe, themes } from "./support/a11y";
+import {
+  expectNoAxeViolations as axe,
+  noSideways,
+  themes,
+} from "./support/a11y";
 
 const csp =
   "default-src 'self'; img-src 'self' data:; connect-src 'self'; " +
@@ -90,4 +94,19 @@ test("skip link", async ({ page, server, browserName }) => {
   await expect(skip).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.locator("#main")).toBeFocused();
+});
+
+test("320 px: the header with Copy location, no sideways scroll", async ({
+  page,
+  server,
+}) => {
+  await page.setViewportSize({ width: 320, height: 700 });
+  await page.goto(server.base + "src/tree/src/Main.hs");
+  const b = page.getByRole("button", { name: "Copy location", exact: true });
+  await expect(b).toBeVisible();
+  await noSideways(page);
+  const box = await b.boundingBox();
+  expect(box?.x).toBeGreaterThanOrEqual(0);
+  expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(320);
+  await axe(page, "header at 320 px with Copy location");
 });

@@ -266,8 +266,8 @@ The UI has a fixed **frame** and one **main view** at a time.
 
 - **Header**: project name, mode and revisions (`main..feature`, abbreviated
   hashes), tiers, a global search box, a switch between views (Docs /
-  Source; a view the page has none of is shown muted, D-298), and a
-  Shortcuts button (§5.3).
+  Source; a view the page has none of is shown muted, D-298), "Copy
+  location" (§5.7) and a Shortcuts button (§5.3).
 - **Sidebar**: the module tree, grouped by package and component. In diff
   mode every module carries a change marker (added / removed / modified /
   renamed) and a filter "changed only". The tree also has the "Other
@@ -697,7 +697,8 @@ keep the column (D-284).
 ### 5.7 Copying
 
 (D-32) Copying important information must take one action.
-- A **copy button** appears on hover or focus next to:
+- A **copy button** appears on hover or focus next to (D-299; in the
+  sidebar trees it is mouse only, and `y` works there):
   - file paths (copied relative to ROOT);
   - module names;
   - qualified declaration names (`Data.Foo.bar`; for instances, the
@@ -707,7 +708,7 @@ keep the column (D-284).
   - LLM messages, both questions and answers (copied as raw Markdown);
   - each code block inside an LLM answer.
 - **Copy current location**, in the header, copies `path:line` (or
-  `path:line-line` for a selection) on the current side.
+  `path:12-15` for a selection) on the current side (D-299).
 - The `y` key copies the focused item's primary identifier.
 - Every copy gives brief visual feedback ("Copied"), and the same message
   is announced to screen readers. Copying never includes UI chrome such as

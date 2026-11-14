@@ -4,6 +4,7 @@ import {
   domPoint,
   type Point,
   replaceKeepingSelection,
+  selectedLines,
   textBetween,
 } from "./selection";
 
@@ -193,5 +194,64 @@ describe("replaceKeepingSelection", () => {
     const sel = getSelection();
     expect([sel?.anchorNode, sel?.anchorOffset]).toEqual([box, 0]);
     expect([sel?.focusNode, sel?.focusOffset]).toEqual([box, 2]);
+  });
+});
+
+describe("selectedLines", () => {
+  afterEach(() => {
+    getSelection()?.removeAllRanges();
+    document.body.replaceChildren();
+  });
+
+  function pick(
+    v: HTMLElement,
+    a: [Node, number],
+    b: [Node, number],
+  ): { from: number; to: number } | undefined {
+    getSelection()?.setBaseAndExtent(a[0], a[1], b[0], b[1]);
+    return selectedLines(v, getSelection(), 4);
+  }
+  const cell = (v: HTMLElement, n: number) =>
+    v.querySelector(`.code-row[data-line="${n}"] .code-cell`)
+      ?.firstChild as Node;
+
+  it("one line, a range, either order", () => {
+    const v = viewOf(["aaa", "bbb", "ccc", "ddd"]);
+    expect(pick(v, [cell(v, 2), 1], [cell(v, 2), 3])).toEqual({
+      from: 2,
+      to: 2,
+    });
+    expect(pick(v, [cell(v, 2), 1], [cell(v, 3), 2])).toEqual({
+      from: 2,
+      to: 3,
+    });
+    expect(pick(v, [cell(v, 3), 2], [cell(v, 2), 1])).toEqual({
+      from: 2,
+      to: 3,
+    });
+  });
+
+  it("an end at the start of a later line doesn't count it", () => {
+    const v = viewOf(["aaa", "bbb", "ccc", "ddd"]);
+    expect(pick(v, [cell(v, 2), 0], [cell(v, 3), 0])).toEqual({
+      from: 2,
+      to: 2,
+    });
+  });
+
+  it("collapsed or outside: undefined; ends outside are clamped", () => {
+    const v = viewOf(["aaa", "bbb", "ccc", "ddd"]);
+    const p = document.createElement("p");
+    p.textContent = "out";
+    document.body.prepend(p);
+    expect(pick(v, [cell(v, 2), 1], [cell(v, 2), 1])).toBeUndefined();
+    expect(
+      pick(v, [p.firstChild as Node, 0], [p.firstChild as Node, 2]),
+    ).toBeUndefined();
+    expect(pick(v, [p.firstChild as Node, 0], [cell(v, 2), 1])).toEqual({
+      from: 1,
+      to: 2,
+    });
+    expect(selectedLines(v, null, 4)).toBeUndefined();
   });
 });

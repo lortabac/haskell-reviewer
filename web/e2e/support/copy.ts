@@ -1,5 +1,5 @@
 // Copy and selection helpers for the source view specs.
-import { expect, type Page } from "@playwright/test";
+import { type BrowserContext, expect, type Page } from "@playwright/test";
 import { lines } from "./project";
 
 export type At = [line: number, col: number];
@@ -85,4 +85,49 @@ export async function selectAt(
 export async function select(page: Page, a: At, b: At): Promise<void> {
   await selectAt(page, "start", ...a);
   await selectAt(page, "extend", ...b);
+}
+
+// Record what goes to navigator.clipboard.writeText, and let the real
+// result through: a write that starts too late (an await before it,
+// outside the gesture) must fail the spec. Chromium needs the
+// clipboard permissions (grantClipboard). reject: every write fails,
+// as with a blocked clipboard.
+export async function stubWriteText(page: Page, reject = false): Promise<void> {
+  await page.addInitScript((rej) => {
+    window.__written = [];
+    const clip = navigator.clipboard;
+    const orig = clip.writeText.bind(clip);
+    clip.writeText = (text: string) => {
+      window.__written.push(text);
+      if (rej) return Promise.reject(new Error("blocked"));
+      return orig(text);
+    };
+  }, reject);
+}
+
+// Chromium only: the others write with no permission.
+export async function grantClipboard(
+  context: BrowserContext,
+  browserName: string,
+): Promise<void> {
+  if (browserName !== "chromium") return;
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+}
+
+// The texts written so far.
+export function written(page: Page): Promise<string[]> {
+  return page.evaluate(() => window.__written);
+}
+
+// Wait for one more write, and give it.
+export async function nextWrite(
+  page: Page,
+  act: () => Promise<void>,
+): Promise<string> {
+  const before = (await written(page)).length;
+  await act();
+  await expect
+    .poll(async () => (await written(page)).length)
+    .toBeGreaterThan(before);
+  return (await written(page))[before] ?? "";
 }

@@ -16,6 +16,7 @@ import {
   useContext,
 } from "solid-js";
 import { usePrefs } from "../prefs/store";
+import { copyText } from "../copy/clipboard";
 import { createDispatcher } from "./dispatch";
 import type { ActionId } from "./keymap";
 import { KeysHelp } from "./KeysHelp";
@@ -44,6 +45,9 @@ export interface ViewLinks {
   at?: (to: "docs" | "source") => ViewTarget | undefined;
 }
 
+// What Copy location copies: a text, or words to say instead.
+export type LocationText = string | { say: string };
+
 export interface KeysApi {
   links: Accessor<ViewLinks | undefined>;
   // Go to the other view, keeping the place.
@@ -53,11 +57,17 @@ export interface KeysApi {
   openHelp: (opener?: HTMLElement) => void;
   // For the polite status in the header.
   status: Accessor<string>;
+  // Say something on the status line.
+  say: (text: string) => void;
+  // The view's Copy location, if it has one (the header button).
+  location: Accessor<(() => LocationText | undefined) | undefined>;
+  copyLocation: () => void;
   register: (actions: KeyActions) => () => void;
   addLinks: (links: ViewLinks) => () => void;
+  addLocation: (f: () => LocationText | undefined) => () => void;
 }
 
-const KeysContext = createContext<KeysApi>();
+export const KeysContext = createContext<KeysApi>();
 
 export function useKeys(): KeysApi | undefined {
   return useContext(KeysContext);
@@ -77,6 +87,13 @@ export function useViewLinks(links: ViewLinks): void {
   onCleanup(keys.addLinks(links));
 }
 
+// Copy location of a view, while it lives.
+export function useCopyLocation(f: () => LocationText | undefined): void {
+  const keys = useKeys();
+  if (keys === undefined) return;
+  onCleanup(keys.addLocation(f));
+}
+
 const missingWords = {
   docs: "No docs for this page.",
   source: "No source for this page.",
@@ -90,6 +107,10 @@ export function KeysProvider(props: ParentProps): JSX.Element {
   const [actions, setActions] = createSignal<readonly KeyActions[]>([]);
   const [linkList, setLinkList] = createSignal<readonly ViewLinks[]>([]);
   const links = () => linkList().at(-1);
+  const [locationList, setLocationList] = createSignal<
+    readonly (() => LocationText | undefined)[]
+  >([]);
+  const locationFn = () => locationList().at(-1);
 
   // The same text again isn't read: it gets a no-break space at the
   // end, or loses it (as in FindBar). Cleared after a while.
@@ -159,17 +180,45 @@ export function KeysProvider(props: ParentProps): JSX.Element {
       case "sourceView":
         goView("source");
         return true;
-      default: {
-        const list = actions();
-        for (let i = list.length - 1; i >= 0; i--) {
-          const h = list[i]?.[id];
-          if (h === undefined) continue;
-          if (done(h())) return true;
-          break;
+      case "copy": {
+        // A tree row, a refs row: the text is in the element.
+        const own = document.activeElement?.closest<HTMLElement>("[data-copy]");
+        if (own !== null && own !== undefined) {
+          void copyText(own.dataset.copy ?? "", say);
+          return true;
         }
-        return id === "escape" ? clearSelection() : false;
+        // In the sidebar, the view's idea of "current" is not ours.
+        if (document.activeElement?.closest(".frame-sidebar") != null) {
+          return sayNothing();
+        }
+        return runView(id) || sayNothing();
       }
+      default:
+        return runView(id) || (id === "escape" && clearSelection());
     }
+  };
+
+  const sayNothing = (): boolean => {
+    say("Nothing to copy here.");
+    return true;
+  };
+
+  // The latest view with a handler for id.
+  const runView = (id: ActionId): boolean => {
+    const list = actions();
+    for (let i = list.length - 1; i >= 0; i--) {
+      const h = list[i]?.[id];
+      if (h === undefined) continue;
+      return done(h());
+    }
+    return false;
+  };
+
+  const copyLocation = (): void => {
+    const t = locationFn()?.();
+    if (t === undefined) say("No location here.");
+    else if (typeof t === "string") void copyText(t, say);
+    else say(t.say);
   };
 
   const api: KeysApi = {
@@ -180,6 +229,9 @@ export function KeysProvider(props: ParentProps): JSX.Element {
       setHelpOpen(true);
     },
     status,
+    say,
+    location: locationFn,
+    copyLocation,
     register: (a) => {
       setActions((l) => [...l, a]);
       return () => setActions((l) => l.filter((x) => x !== a));
@@ -187,6 +239,10 @@ export function KeysProvider(props: ParentProps): JSX.Element {
     addLinks: (l) => {
       setLinkList((xs) => [...xs, l]);
       return () => setLinkList((xs) => xs.filter((x) => x !== l));
+    },
+    addLocation: (f) => {
+      setLocationList((xs) => [...xs, f]);
+      return () => setLocationList((xs) => xs.filter((x) => x !== f));
     },
   };
 
