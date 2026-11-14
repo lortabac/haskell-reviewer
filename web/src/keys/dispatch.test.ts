@@ -77,7 +77,7 @@ describe("createDispatcher", () => {
   });
 
   it("keys with no binding do nothing", () => {
-    const e = press("y");
+    const e = press("z");
     press("Enter");
     expect(ran).toEqual([]);
     expect(e.defaultPrevented).toBe(false);

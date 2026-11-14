@@ -199,7 +199,9 @@ test.describe("cabal project", () => {
       if (text === null) {
         await expect(page.locator(".file-banner")).toHaveCount(0);
       } else {
-        await expect(page.locator("main h1 + .file-banner")).toHaveText(text);
+        await expect(page.locator("main .copy-host + .file-banner")).toHaveText(
+          text,
+        );
       }
     }
   });

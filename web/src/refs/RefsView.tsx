@@ -25,7 +25,16 @@ import { anchorName } from "../docs/urls";
 import { createRefetchLoop } from "../events/refetchLoop";
 import { IndexingContext } from "../events/indexing";
 import { hrefFor, lineHref } from "../files/paths";
-import { useViewLinks } from "../keys/KeysProvider";
+import { copyText } from "../copy/clipboard";
+import { CopyButton } from "../copy/CopyButton";
+import { lastFocus } from "../copy/lastFocus";
+import { location as locationText, qualified } from "../copy/names";
+import {
+  useCopyLocation,
+  useKeyActions,
+  useKeys,
+  useViewLinks,
+} from "../keys/KeysProvider";
 import { useModules } from "../modules/store";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
@@ -197,6 +206,21 @@ function RefsPage(props: { module: string; decl: string }): JSX.Element {
     },
   });
 
+  // y: the focused row or link copies itself (data-copy, in the
+  // dispatcher). Else the name of the subject.
+  const keys = useKeys();
+  const subject = () => qualified(treeName() ?? meta()?.home ?? module, name);
+  useKeyActions({
+    copy: () => {
+      void copyText(subject(), keys?.say);
+      return true;
+    },
+  });
+  const focus = lastFocus(() => list, "[data-ref-key]");
+  useCopyLocation(
+    () => focus.get()?.dataset.copy ?? { say: "No location here." },
+  );
+
   const slow = createDelay(() => state() === "loading", 300);
   // Focus the heading when a link in main brought us here.
   // On a 404 the heading is a new one (NotFound).
@@ -234,13 +258,16 @@ function RefsPage(props: { module: string; decl: string }): JSX.Element {
       </Match>
       <Match when={true}>
         <PageTitle text={`References to ${name}`} />
-        <h1 ref={(el) => (h1 = el)} class="refs-title" tabindex="-1">
-          References to <code>{name}</code>
-          <Show when={word}> ({word})</Show> in{" "}
-          <A href={docsHref(module, decl)}>
-            {treeName() ?? meta()?.home ?? module}
-          </A>
-        </h1>
+        <div class="copy-host">
+          <CopyButton text={subject} label={`Copy ${name}`} />
+          <h1 ref={(el) => (h1 = el)} class="refs-title" tabindex="-1">
+            References to <code>{name}</code>
+            <Show when={word}> ({word})</Show> in{" "}
+            <A href={docsHref(module, decl)}>
+              {treeName() ?? meta()?.home ?? module}
+            </A>
+          </h1>
+        </div>
         <Switch>
           <Match when={state() === "error"}>
             <p>Couldn't load the references.</p>
@@ -285,15 +312,30 @@ function GroupView(props: { g: Group; home: string }): JSX.Element {
   const id = createUniqueId();
   return (
     <section class="refs-group" aria-labelledby={id}>
-      <h2 id={id} class="refs-group-head">
-        <A href={docsHref(props.g.ref)}>{props.g.module}</A>
-        <Show when={props.g.ref === props.home}>
-          <span class="refs-home"> (declared here)</span>
-        </Show>
-      </h2>
+      <div class="copy-host">
+        <CopyButton
+          text={() => props.g.module}
+          label={`Copy module name ${props.g.module}`}
+        />
+        <h2 id={id} class="refs-group-head">
+          <A href={docsHref(props.g.ref)} data-copy={props.g.module}>
+            {props.g.module}
+          </A>
+          <Show when={props.g.ref === props.home}>
+            <span class="refs-home"> (declared here)</span>
+          </Show>
+        </h2>
+      </div>
       <p class="refs-group-meta">
         <Show when={props.g.path}>
-          {(p) => <A href={hrefFor(p())}>{p()}</A>}
+          {(p) => (
+            <>
+              <A href={hrefFor(p())} data-copy={p()}>
+                {p()}
+              </A>
+              <CopyButton text={p} label={`Copy path ${p()}`} />
+            </>
+          )}
         </Show>{" "}
         <span class="refs-count">
           {props.g.items.length}{" "}
@@ -344,6 +386,7 @@ function ItemView(props: { r: Item; path: string | null }): JSX.Element {
             href={lineHref(p(), props.r.span[0])}
             state={{ codeJump: true, cp: props.r.span[1] }}
             data-ref-key={props.r.key}
+            data-copy={locationText(p(), props.r.span[0])}
             on:click={(e: MouseEvent) => {
               if (e.button !== 0 || e.ctrlKey || e.metaKey) return;
               if (e.shiftKey || e.altKey) return;

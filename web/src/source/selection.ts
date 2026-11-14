@@ -192,6 +192,27 @@ export function selectionLines(view: Element, sel: Selection | null): number[] {
   return out;
 }
 
+// The lines the selection covers, for "Copy location". Undefined: no
+// selection, a collapsed one, or one fully outside the view. An end
+// before the view is line 1, one after it the last line. An end at the
+// start of a later line doesn't count that line (a triple click).
+export function selectedLines(
+  view: Element,
+  sel: Selection | null,
+  lastLine: number,
+): { from: number; to: number } | undefined {
+  if (sel === null || sel.isCollapsed || sel.rangeCount === 0) return undefined;
+  const first = sel.getRangeAt(0);
+  const last = sel.getRangeAt(sel.rangeCount - 1);
+  const a = domPoint(view, first.startContainer, first.startOffset);
+  const b = domPoint(view, last.endContainer, last.endOffset);
+  if (a.kind !== "at" && a.kind === b.kind) return undefined;
+  const from = a.kind === "at" ? a.line : a.kind === "before" ? 1 : lastLine;
+  let to = b.kind === "at" ? b.line : b.kind === "before" ? 1 : lastLine;
+  if (b.kind === "at" && b.col === 0 && b.line > from) to = b.line - 1;
+  return { from, to: Math.max(from, to) };
+}
+
 // The largest offset in a node.
 export function size(n: Node): number {
   return n instanceof CharacterData ? n.length : n.childNodes.length;

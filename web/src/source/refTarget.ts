@@ -79,3 +79,20 @@ export function refTargetAt(
       return { kind: "other" };
   }
 }
+
+// The token at the cursor and its link target, if it has one (copy).
+export function tokenAt(
+  runs: readonly (readonly Seg[])[],
+  targets: readonly Target[],
+  lineText: (n: number) => string,
+  cursor: { line: number; col: number },
+): { text: string; target: Target | undefined } | undefined {
+  const text = lineText(cursor.line);
+  const cp = cpOf(text, cursor.col);
+  const seg = (runs[cursor.line] ?? []).find((s) => s.from <= cp && cp < s.to);
+  if (seg === undefined) return undefined;
+  return {
+    text: segText(text, seg),
+    target: seg.link === 0 ? undefined : targets[seg.link - 1],
+  };
+}

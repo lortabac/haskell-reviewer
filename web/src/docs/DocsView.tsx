@@ -32,7 +32,17 @@ import {
   ownOf,
   stepSection,
 } from "../keys/docsKeys";
-import { useKeyActions, useViewLinks } from "../keys/KeysProvider";
+import {
+  useCopyLocation,
+  useKeyActions,
+  useKeys,
+  useViewLinks,
+} from "../keys/KeysProvider";
+import { copyText } from "../copy/clipboard";
+import { lastFocus } from "../copy/lastFocus";
+import { CopyButton } from "../copy/CopyButton";
+import { location as locationText } from "../copy/names";
+import { declCopyText, declLine } from "./copyText";
 import { useModules } from "../modules/store";
 import { firstCodeLine } from "./source";
 import { NotFound } from "../NotFound";
@@ -66,6 +76,8 @@ import {
   refFromPathname,
   unescapeHaddock,
 } from "./urls";
+
+const noSource = "No source for this module.";
 
 export function DocsView(): JSX.Element {
   const location = useLocation();
@@ -202,7 +214,12 @@ function Meta(props: { page: Page }): JSX.Element {
     if (props.page.component !== null) out.push(props.page.component);
     const path = props.page.path;
     if (path !== null) {
-      out.push(<a href={withBase(base(), hrefFor(path))}>{path}</a>);
+      out.push(
+        <>
+          <a href={withBase(base(), hrefFor(path))}>{path}</a>
+          <CopyButton text={() => path} label={`Copy path ${path}`} />
+        </>,
+      );
     }
     return out.flatMap((x, i) => (i === 0 ? [x] : [" · ", x]));
   });
@@ -275,6 +292,16 @@ function TextOnlyPage(props: {
 }): JSX.Element {
   const source = useSourceHref(() => props.page);
   const line = () => reasonLine(props.parse.reason) ?? 1;
+  const keys = useKeys();
+  useKeyActions({
+    copy: () => {
+      const path = props.page.path;
+      if (path === null) return noSource;
+      void copyText(path, keys?.say);
+      return true;
+    },
+  });
+  useCopyLocation(() => props.page.path ?? { say: noSource });
   return (
     <>
       <PageTitle text={props.page.ref} />
@@ -345,6 +372,7 @@ function ModulePage(props: {
   };
   const header = () => props.parsed.header;
   const name = () => header().name?.value ?? props.page.ref;
+  const moduleName = () => header().name?.value ?? "Main";
   const ext = () => props.parsed.extensions;
   // Elements for anchors, by scope and handle (no DOM ids from
   // declaration ids).
@@ -364,7 +392,20 @@ function ModulePage(props: {
   const b = createMemo(() => body(props.parsed, ix(), prefs.exportedOnly()));
   // Keys (D-298): the declaration with focus, else the first on screen.
   const rootEl = () => root;
+  const keys = useKeys();
+  const handleOf = (el: HTMLElement) =>
+    ix().byHandle.get(Number(el.dataset.handle));
   useKeyActions({
+    copy: () => {
+      const r = rootEl();
+      const item = r === undefined ? undefined : currentItem(r);
+      const d = item === undefined ? undefined : handleOf(item);
+      const text =
+        d === undefined ? undefined : declCopyText(d, ix(), moduleName());
+      if (text === undefined) return "Nothing to copy here.";
+      void copyText(text, keys?.say);
+      return true;
+    },
     next: () => {
       const r = rootEl();
       return r !== undefined && stepSection(r, 1);
@@ -402,6 +443,15 @@ function ModulePage(props: {
       return true;
     },
   });
+  // Copy location: the declaration with focus, else the file.
+  const focus = lastFocus(rootEl, "li.subdecl, section.decl");
+  useCopyLocation(() => {
+    const path = props.page.path;
+    if (path === null) return { say: noSource };
+    const item = focus.get();
+    const d = item === undefined ? undefined : handleOf(item);
+    return d === undefined ? path : locationText(path, declLine(d));
+  });
   // 2: the source at the declaration with focus, else the first on
   // screen.
   useViewLinks({
@@ -433,6 +483,9 @@ function ModulePage(props: {
   const ctx: PageCtx = {
     get ix() {
       return ix();
+    },
+    get moduleName() {
+      return moduleName();
     },
     get sourceHref() {
       return sourceHref();
@@ -614,9 +667,15 @@ function ModulePage(props: {
                 : `${name()} (${props.page.ref})`
             }
           />
-          <h1 class="docs-title" tabindex="-1">
-            {name()}
-          </h1>
+          <div class="copy-host">
+            <CopyButton
+              text={moduleName}
+              label={`Copy module name ${moduleName()}`}
+            />
+            <h1 class="docs-title" tabindex="-1">
+              {name()}
+            </h1>
+          </div>
           <Show when={missing()} keyed>
             {(a) => (
               <div class="docs-notice decl-missing">

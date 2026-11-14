@@ -1,0 +1,74 @@
+/* Copy buttons (D-299): shown on hover and focus. The word is CSS
+   content and not selectable, so it never gets into a copy. */
+.copy-button {
+  margin-left: var(--space-2);
+  padding: 0 var(--space-1);
+  font: inherit;
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  font-weight: normal;
+  line-height: 1.4;
+  color: var(--color-muted);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.copy-button::before {
+  content: "copy";
+}
+
+.copy-button[data-state="copied"]::before {
+  content: "copied";
+}
+
+:hover > .copy-button,
+.copy-button:focus {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .copy-button {
+    opacity: 1;
+  }
+}
+
+/* A heading or a declaration: the button floats right, before the
+   heading, so the text wraps around it and is never covered. The host
+   is a plain block: the heading keeps its margins. */
+.copy-host > .copy-button,
+.decl > .copy-button {
+  float: right;
+  margin: 0 0 0 var(--space-2);
+}
+
+/* A tree row: the link and the button on one line. */
+.tree-row {
+  display: flex;
+  align-items: baseline;
+}
+
+.tree-row > .tree-file {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+}
+
+.tree-row > .copy-button {
+  flex: none;
+  margin-left: 0;
+}
+
+.copy-location {
+  padding: var(--space-1) var(--space-2);
+  font: inherit;
+  color: var(--color-fg);
+  background: var(--color-bg);
+  border: 1px solid var(--color-muted);
+  border-radius: 4px;
+  cursor: pointer;
+}

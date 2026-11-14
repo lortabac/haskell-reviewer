@@ -43,6 +43,8 @@ export interface Copy {
   afterMount: () => void;
   // Select-all is off now (a click that will change the selection).
   endSelectAll: () => void;
+  // The selection is the one made by selectAll.
+  isAllSelected: () => boolean;
 }
 
 export function createCopy(opts: {
@@ -124,5 +126,6 @@ export function createCopy(opts: {
     endSelectAll: () => {
       allSelected = undefined;
     },
+    isAllSelected: () => allSelected !== undefined,
   };
 }

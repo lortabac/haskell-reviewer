@@ -19,6 +19,7 @@ import type {
   OtherFile,
   PackageModules,
 } from "../api/modules";
+import { CopyButton } from "../copy/CopyButton";
 import { compareCodePoints } from "../files/tree";
 import { moduleMarker } from "./notices";
 import {
@@ -258,6 +259,8 @@ function Module(props: { mod: ModuleEntry; ctx: Ctx }): JSX.Element {
           <Link
             target={{ kind: "ref", ref: props.mod.ref }}
             path={p()}
+            copy={props.mod.name}
+            copyIs="module name"
             ctx={props.ctx}
           >
             {props.mod.name}
@@ -275,6 +278,8 @@ function Broken(props: { pkg: BrokenPackage; ctx: Ctx }): JSX.Element {
       <Link
         target={{ kind: "path", path: props.pkg.cabalFile }}
         path={props.pkg.cabalFile}
+        copy={props.pkg.cabalFile}
+        copyIs="path"
         ctx={props.ctx}
       >
         {props.pkg.cabalFile}
@@ -293,7 +298,21 @@ function Other(props: { file: OtherFile; ctx: Ctx }): JSX.Element {
       : { kind: "path", path: props.file.path };
   return (
     <li>
-      <Link target={target()} path={props.file.path} ctx={props.ctx}>
+      <Link
+        target={target()}
+        path={props.file.path}
+        copy={
+          props.file.kind === "module"
+            ? (props.file.name ?? props.file.path)
+            : props.file.path
+        }
+        copyIs={
+          props.file.kind === "module" && props.file.name != null
+            ? "module name"
+            : "path"
+        }
+        ctx={props.ctx}
+      >
         {props.file.path}
         <Marker text={props.file.kind === "boot" ? "boot" : undefined} />
       </Link>
@@ -313,6 +332,9 @@ function Marker(props: { text: string | undefined }): JSX.Element {
 function Link(props: {
   target: Target;
   path: string;
+  // What Copy gives: the module name, or the path.
+  copy: string;
+  copyIs: "module name" | "path";
   ctx: Ctx;
   children: JSX.Element;
 }): JSX.Element {
@@ -330,15 +352,24 @@ function Link(props: {
     if (link !== undefined) props.ctx.removeLink(keys(), link);
   });
   return (
-    <a
-      ref={(el) => (link = el)}
-      class="tree-file"
-      href={props.ctx.href(props.target)}
-      aria-current={
-        props.ctx.isCurrent(props.target, props.path) ? "page" : undefined
-      }
-    >
-      {props.children}
-    </a>
+    <div class="tree-row">
+      <a
+        ref={(el) => (link = el)}
+        class="tree-file"
+        href={props.ctx.href(props.target)}
+        data-copy={props.copy}
+        aria-current={
+          props.ctx.isCurrent(props.target, props.path) ? "page" : undefined
+        }
+      >
+        {props.children}
+      </a>
+      {/* Mouse only: the keyboard has y. */}
+      <CopyButton
+        text={() => props.copy}
+        label={`Copy ${props.copyIs} ${props.copy}`}
+        mouseOnly
+      />
+    </div>
   );
 }

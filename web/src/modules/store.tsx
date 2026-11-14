@@ -60,6 +60,8 @@ export function indexSources(tree: ModuleTree): Map<string, SourceInfo> {
 export interface RefInfo {
   // The ref URLs use (the tree's, even when looked up by id).
   ref: string;
+  // The module's name. Null: a loose file with no module name.
+  name: string | null;
   // Null: no source.
   path: string | null;
   // The groups to open to show it.
@@ -78,6 +80,7 @@ export function indexRefs(tree: ModuleTree): Map<string, RefInfo> {
       for (const m of c.modules) {
         add([m.ref, m.id], {
           ref: m.ref,
+          name: m.name,
           path: m.source.kind === "no-source" ? null : m.source.path,
           groups: [packageKey(p.cabalFile), componentKey(p.cabalFile, c.name)],
         });
@@ -86,7 +89,12 @@ export function indexRefs(tree: ModuleTree): Map<string, RefInfo> {
   }
   for (const o of tree.other) {
     if (o.kind !== "module") continue;
-    add([o.ref, o.id], { ref: o.ref, path: o.path, groups: [otherKey] });
+    add([o.ref, o.id], {
+      ref: o.ref,
+      name: o.name,
+      path: o.path,
+      groups: [otherKey],
+    });
   }
   return out;
 }

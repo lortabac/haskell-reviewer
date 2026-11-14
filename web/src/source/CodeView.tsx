@@ -47,6 +47,7 @@ import {
   nodesAt,
   pointAt,
   replaceKeepingSelection,
+  selectedLines,
 } from "./selection";
 import { createRowHeight, mountRows, withPins } from "./virtual";
 
@@ -84,6 +85,9 @@ export interface CodeApi {
   // The selection's ends in the view, as lines. For T08/T09 (copy
   // location, find from the selection).
   selectionLines: () => number[];
+  // The lines the selection covers (select-all: the whole file), for
+  // Copy location. Undefined: no selection, or none in this view.
+  selectedLines: () => { from: number; to: number } | undefined;
   // The row of a line, if it is mounted.
   row: (line: number) => HTMLElement | undefined;
   // The link at the cursor: the one it is on, else the one under its
@@ -345,6 +349,10 @@ export function CodeView(props: CodeViewProps): JSX.Element {
     hasFocus: () => box.contains(document.activeElement),
     pin: (ls) => setExtraPins([...ls]),
     selectionLines: selLines,
+    selectedLines: () =>
+      copy.isAllSelected()
+        ? { from: 1, to: props.index.count }
+        : selectedLines(box, getSelection(), props.index.count),
     row,
     cursorLink: () => {
       const c = cursor();

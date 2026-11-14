@@ -14,6 +14,8 @@ import type { PageIndex } from "./pageIndex";
 
 export interface PageCtx {
   ix: PageIndex;
+  // The module's name (Main with no header), for Copy.
+  moduleName: string;
   // The file view URL at a line, if the module has a source.
   sourceHref: ((line: number) => string) | undefined;
   // The refs page of a declaration (T12); undefined for one with no
