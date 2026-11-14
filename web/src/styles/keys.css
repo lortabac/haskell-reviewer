@@ -41,6 +41,10 @@
 .keys-status {
   margin: 0;
   color: var(--color-muted);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .keys-status:empty {

@@ -46,3 +46,20 @@ export function targetCopyText(
       return undefined;
   }
 }
+
+// The most characters of a copied text shown in the status line.
+export const maxShown = 40;
+
+// One line, at most maxShown code points: spaces collapsed, then the
+// middle cut with "…" (start and end stay).
+export function shorten(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  const cps = Array.from(flat);
+  if (cps.length <= maxShown) return flat;
+  const keep = maxShown - 1;
+  const head = Math.ceil(keep / 2);
+  const tail = keep - head;
+  return (
+    cps.slice(0, head).join("") + "…" + cps.slice(cps.length - tail).join("")
+  );
+}
