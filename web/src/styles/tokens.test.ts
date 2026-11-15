@@ -61,7 +61,15 @@ const hl = [
 ];
 
 // Backgrounds behind source view text.
-const codeBgs = ["bg", "surface", "mark", "selection", "find", "find-current"];
+const codeBgs = [
+  "bg",
+  "surface",
+  "mark",
+  "selection",
+  "find",
+  "find-current",
+  "cursor-line",
+];
 
 describe("design tokens: contrast (SPEC §5.4, tokens.css header)", () => {
   it("found every token used below", () => {
@@ -77,6 +85,7 @@ describe("design tokens: contrast (SPEC §5.4, tokens.css header)", () => {
       "selection",
       "find",
       "find-current",
+      "cursor-line",
       "decl-head",
       "accent",
       "warn",
@@ -102,6 +111,7 @@ describe("design tokens: contrast (SPEC §5.4, tokens.css header)", () => {
     // Control glyphs (muted) inside a find hit.
     ["muted", "find"],
     ["muted", "find-current"],
+    ["muted", "cursor-line"],
     // The docs page: the head band, and the warn colour.
     ...[
       "fg",
@@ -127,6 +137,7 @@ describe("design tokens: contrast (SPEC §5.4, tokens.css header)", () => {
     ["focus", "find"],
     ["focus", "find-current"],
     ["focus", "mark"],
+    ["focus", "cursor-line"],
     ["focus", "selection"],
     ["muted", "bg"],
     ["muted", "surface"],
