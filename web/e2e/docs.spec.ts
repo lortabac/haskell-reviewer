@@ -112,6 +112,7 @@ test("details: constructors, fields, methods, instances, pragmas", async ({
     "type Elem f :: Type",
     "empty :: f",
     "insert :: Elem f -> f -> f",
+    "wide :: Elem f -> aaaaaaaaaaaaaaaaaaaa -> bbbbbbbbbbbbbbbbbbbb -> cccccccccccccccccccc -> dddddddddddddddddddd -> f",
   ]);
   await expect(container).toContainText("{-# MINIMAL empty, insert #-}");
 
