@@ -12,6 +12,7 @@ import {
 import { copy, recordCopies } from "./support/copy";
 import { expect, test } from "./support/fixtures";
 import { lineOf, linksMainHs, shapesLine } from "./support/project";
+import { settle } from "./support/settle";
 
 const mainUrl = "src/tree/Links/Main.hs";
 const shapesUrl = "docs/tree/Shapes";
@@ -368,6 +369,7 @@ test("off: the keys do nothing, remembered over a reload and a restart", async (
   await expect(sections(page).first()).toBeVisible();
   await page.keyboard.press("/");
   await expect(search(page)).not.toBeFocused();
+  await settle(page);
   await a.stop();
 
   const b = await startServer({ root: docsProject.root });
@@ -380,6 +382,7 @@ test("off: the keys do nothing, remembered over a reload and a restart", async (
   await toggle(page).check();
   await on;
   await page.keyboard.press("Escape");
+  await expect(dialog(page)).toBeHidden();
   await page.keyboard.press("j");
   await expect(sections(page).nth(0)).toBeFocused();
 });
