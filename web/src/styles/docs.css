@@ -161,6 +161,7 @@
   font-style: normal;
   line-height: 1.5;
   white-space: nowrap;
+  text-indent: 0;
   text-decoration: none;
   color: var(--color-bg);
   background: var(--color-fg);
@@ -232,6 +233,20 @@
 
 .subdecl-head {
   margin: 0 0 var(--space-1);
+  /* The signature, badges and "refs" share the lines: the hang is
+     here, the signature is inline. */
+  padding-left: 2em;
+  text-indent: -2em;
+}
+
+.subdecl-head > .sig {
+  display: inline;
+  padding-left: 0;
+  text-indent: 0;
+}
+
+.subdecl-head > .decl-badges {
+  text-indent: 0;
 }
 
 /* Closed lists: synopsis, instances, pragmas. */
@@ -435,9 +450,25 @@ a.link-guess {
   text-decoration: underline dotted;
 }
 
-/* "refs" in the head of a nested declaration. */
+/* "refs" in the head of a nested declaration: after the signature,
+   shown while the mouse or focus is in that head (child combinators:
+   not from a parent or a child item). Hidden keeps the space, the name
+   and the Tab stop. To widen the hover area, change the selector in
+   the next rule. */
 .subdecl-refs {
   margin-left: var(--space-2);
   font-family: var(--font-sans);
   font-size: 0.85em;
+  opacity: 0;
+}
+
+.subdecl-head:hover > .subdecl-refs,
+.subdecl-head:focus-within > .subdecl-refs {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .subdecl-refs {
+    opacity: 1;
+  }
 }

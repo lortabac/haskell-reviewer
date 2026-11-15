@@ -287,3 +287,136 @@ test("copy button of a nested instance is not shown by the parent's hover", asyn
   ).toHaveCSS("opacity", "1");
   await expect(inner.first()).toHaveCSS("opacity", "0");
 });
+
+// Nested "refs" (T14f): inline after the signature, shown on the
+// item's own head line only.
+function sub(page: Page, name: string): Locator {
+  return page
+    .locator("li.subdecl")
+    .filter({
+      has: page.locator(":scope > .subdecl-head .sig", {
+        hasText: new RegExp("^" + name),
+      }),
+    })
+    .first();
+}
+
+const opacity = (l: Locator): Promise<string> =>
+  l.evaluate((e) => getComputedStyle(e).opacity);
+
+test("nested refs: inline, hidden, shown on its own head only", async ({
+  page,
+  startServer,
+  docsProject,
+}) => {
+  const server = await startServer({ root: docsProject.root });
+  await page.goto(server.base + url);
+  const width = sub(page, "width");
+  const height = sub(page, "height");
+  const rect = sub(page, "Rect");
+  const link = (l: Locator) => l.locator(":scope > .subdecl-head > a");
+  await expect(link(width)).toHaveAccessibleName(
+    "Find references (refs) of width",
+  );
+  // Same line as the signature (boxes overlap in y).
+  const sig = await width.locator(":scope > .subdecl-head .sig").boundingBox();
+  const box = await link(width).boundingBox();
+  expect(sig).not.toBeNull();
+  expect(box).not.toBeNull();
+  expect(box!.y).toBeLessThan(sig!.y + sig!.height);
+  expect(box!.y + box!.height).toBeGreaterThan(sig!.y);
+  // Hidden by default, still in the page.
+  await page.mouse.move(0, 0);
+  expect(await opacity(link(width))).toBe("0");
+  // Own head: shown.
+  await width.locator(":scope > .subdecl-head").hover();
+  await expect.poll(() => opacity(link(width))).toBe("1");
+  // Its docs area: not shown.
+  await width.locator(":scope > .subdecl-head ~ .doc").first().hover();
+  expect(await opacity(link(width))).toBe("0");
+  // A sibling: shown there, not on the first.
+  await height.locator(":scope > .subdecl-head").hover();
+  await expect.poll(() => opacity(link(height))).toBe("1");
+  expect(await opacity(link(width))).toBe("0");
+  // The parent's head: not the children's links.
+  await rect.locator(":scope > .subdecl-head").hover();
+  await expect.poll(() => opacity(link(rect))).toBe("1");
+  expect(await opacity(link(width))).toBe("0");
+  expect(await opacity(link(height))).toBe("0");
+  // A child's head: not the parent's link.
+  await width.locator(":scope > .subdecl-head").hover();
+  await expect.poll(() => opacity(link(width))).toBe("1");
+  expect(await opacity(link(rect))).toBe("0");
+});
+
+test("nested refs: shown on focus, tip not while hidden", async ({
+  page,
+  startServer,
+  docsProject,
+}) => {
+  const server = await startServer({ root: docsProject.root });
+  await page.goto(server.base + url);
+  const refs = sub(page, "width").locator(":scope > .subdecl-head > a");
+  await page.mouse.move(0, 0);
+  expect(await opacity(refs)).toBe("0");
+  expect(await tipShown(refs)).toBe(false);
+  await page.keyboard.press("Shift");
+  await refs.focus();
+  await expect(refs).toBeFocused();
+  await expect.poll(() => opacity(refs)).toBe("1");
+  await expect.poll(() => tipShown(refs)).toBe(true);
+  // The tip text is not cut by an inherited indent.
+  const tip = (l: Locator) =>
+    l.evaluate((e) => {
+      const c = getComputedStyle(e, "::after");
+      return { indent: c.textIndent, width: Number.parseFloat(c.width) };
+    });
+  const a = await tip(refs);
+  const top = decl(page, "area").locator("a.decl-refs");
+  await top.focus();
+  await expect.poll(() => tipShown(top)).toBe(true);
+  const b = await tip(top);
+  expect(a.indent).toBe("0px");
+  expect(Math.abs(a.width - b.width)).toBeLessThan(2);
+});
+
+for (const t of themes) {
+  test(`axe, a nested refs link shown, ${t.scheme} theme`, async ({
+    page,
+    startServer,
+    docsProject,
+  }) => {
+    await page.emulateMedia({ colorScheme: t.scheme });
+    const server = await startServer({ root: docsProject.root });
+    await page.goto(server.base + url);
+    await sub(page, "width").locator(":scope > .subdecl-head").hover();
+    await expect
+      .poll(() =>
+        opacity(sub(page, "width").locator(":scope > .subdecl-head > a")),
+      )
+      .toBe("1");
+    await axe(page, `nested refs, ${t.scheme}`);
+  });
+}
+
+test("nested refs: 320 px, a long signature wraps, link after its last part", async ({
+  page,
+  startServer,
+  docsProject,
+}) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  const server = await startServer({ root: docsProject.root });
+  await page.goto(server.base + url);
+  const head = sub(page, "wide").locator(":scope > .subdecl-head");
+  await head.hover();
+  await noSideways(page);
+  const parts = head.locator(".sig-part");
+  const last = await parts.last().boundingBox();
+  const first = await parts.first().boundingBox();
+  const box = await head.locator(".subdecl-refs").boundingBox();
+  // The signature wraps (more than one line), refs is on its last line.
+  expect(last!.y).toBeGreaterThan(first!.y);
+  expect(box!.y + box!.height).toBeGreaterThan(last!.y);
+  expect(box!.y).toBeLessThan(last!.y + last!.height);
+  expect(box!.x).toBeGreaterThan(last!.x);
+});
