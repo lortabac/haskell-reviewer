@@ -5,6 +5,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, test } from "./support/fixtures";
 import { expectNoAxeViolations as axe } from "./support/a11y";
+import { settle } from "./support/settle";
 
 async function writeConfig(configHome: string, toml: string): Promise<void> {
   const dir = join(configHome, "haskell-reviewer");
@@ -41,6 +42,7 @@ test("restart persistence: theme and exported only survive a restart", async ({
   await box.check();
   await exportedOnlySaved;
   await expect(page.locator("main")).not.toContainText("helper");
+  await settle(page);
   await a.stop();
 
   // A new server, same state dir (the xdg fixture): a fresh port and
@@ -72,6 +74,7 @@ test("config default: Light wins over it, and survives a restart", async ({
   await page.getByRole("button", { name: "Light", exact: true }).click();
   await lightSaved;
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await settle(page);
   await a.stop();
 
   const b = await startServer({ root: docsProject.root });
