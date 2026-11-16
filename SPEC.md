@@ -1114,6 +1114,7 @@ benchmarks that are part of the project.
 | Navigation within an indexed module | < 100 ms |
 | Opening a not-yet-indexed module on demand | < 300 ms |
 | Find references after indexing (p95 over the bench's refs queries, D-303) | < 300 ms |
+| Text search after indexing, store loaded (limit 8; median / p95 over the bench's text queries, D-308) | ≤ 50 ms / ≤ 150 ms |
 | Large project, precise tier, **cold** HIE cache (first run, all `.hie` converted) | Syntactic UI within the 10 s target; precise tier fills in progressively, with no fixed bound in v1 (to be set from benchmarks) |
 
 Diff-mode targets cover **both sides**. Except where marked *cold*,
@@ -1466,6 +1467,15 @@ keystrokes. Results that come from an incomplete index are labelled
 *partial*; a search never waits for indexing. Route and limits: D-207.
 Target: ≤ 30 ms median server time on a large indexed project (D-208).
 
+Text search (D-306) looks for plain text, case-sensitive, in every text
+file of the snapshot (UTF-8, no NUL, ≤ 1 MiB). It reads the files once, on
+the first text search, into a per-snapshot store (256 MiB at most), and
+searches that. One result per matching line, at most 1000, with a total.
+A search stops after 1 s and says so. The search takes a path filter, for
+the LLM tools later. Route: D-307. Target: ≤ 50 ms median server time for
+the search box's 8 results, on a large project once the store is loaded
+(D-308).
+
 ### 11.5 State and concurrency
 
 (D-60)
@@ -1540,7 +1550,10 @@ a framework would cost more than it saves.
   `GET api/search/<side>?q=` (D-207). Find references is
   `GET api/refs/<side>?module=<ref>&decl=<id>` (JSON, D-294): at most
   1000 results with their line, a total and the same `partial` flag; a
-  missing module or declaration is a 404 with a small JSON body. Every response
+  missing module or declaration is a 404 with a small JSON body. Text search is
+  `GET api/text-search/<side>?q=&limit=` (JSON, D-307): one result per
+  matching line, cut to 240 code points, with its hit columns; a total, a
+  file count, the files not searched by why, and a `stopped` flag. Every response
   carries its snapshot generation id, and the client caches by
   *(generation, resource)*. Preferences (`api/prefs`) are the exception:
   they don't belong to a snapshot, so they have no generation (D-197). A

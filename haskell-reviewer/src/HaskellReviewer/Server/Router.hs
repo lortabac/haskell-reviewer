@@ -40,6 +40,7 @@ import HaskellReviewer.Server.Security
     notFound,
     withSecurityHeaders,
   )
+import HaskellReviewer.Server.TextSearch (textSearchApp)
 import HaskellReviewer.Session.Prefs (PrefsStore)
 import Network.HTTP.Types
   ( Header,
@@ -101,6 +102,10 @@ Paths below are what the router sees, after the token.
   "HaskellReviewer.Server.Refs"). Same sides and methods; bad params
   are a plain 400, an unknown module or declaration a 404 with a JSON
   body.
+- api/text-search/<side>?q=<text>&limit=<n>: the lines of the text
+  files that have the text, as JSON (Note [Text search route] in
+  "HaskellReviewer.Server.TextSearch"). Same sides and methods; bad
+  params are a plain 400.
 - api/prefs: the UI preferences, as JSON. GET, and POST with an
   application/json body (Note [Prefs route] in
   "HaskellReviewer.Server.Prefs"); 405 otherwise, HEAD too.
@@ -216,6 +221,7 @@ router shell routes req respond = case req.pathInfo of
   ["api", "indexing", side] -> indexingApp routes.files side req respond
   ["api", "search", side] -> searchApp routes.files side req respond
   ["api", "refs", side] -> refsApp routes.files side req respond
+  ["api", "text-search", side] -> textSearchApp routes.files side req respond
   ["api", "prefs"] -> prefsApp routes.prefs req respond
   _ -> respond notFound
   where

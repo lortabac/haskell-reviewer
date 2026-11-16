@@ -17,6 +17,7 @@ module HaskellReviewer.Server.Wire
     encodeRefs,
     RefsMissing (..),
     encodeRefsNotFound,
+    encodeTextSearch,
     helloPayload,
 
     -- * Shared
@@ -89,10 +90,17 @@ import HaskellReviewer.Core.Search
     SearchResult (..),
   )
 import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
+import HaskellReviewer.Core.TextSearch
+  ( LineHit (..),
+    Match (..),
+    TextAnswer (..),
+    TextHit (..),
+  )
 import HaskellReviewer.Server.Cbor qualified as Cbor
 import HaskellReviewer.Server.Wire.Targets (reasonName)
 import HaskellReviewer.Session.Index (Progress (..))
 import HaskellReviewer.Session.Snapshot (Generation (..))
+import HaskellReviewer.Session.TextStore (Skipped (..))
 
 {- Note [API fixtures]
 
@@ -423,6 +431,52 @@ encodeRefsNotFound (Generation g) what =
     whatText = case what of
       MissingModule -> "module"
       MissingDecl -> "decl"
+
+-- | GET api\/text-search\/\<side>?q=…&limit=…:
+--
+-- > {"generation":1,"query":"main","partial":false,"stopped":false,"total":2,
+-- >  "files":1,"skipped":{"binary":1,"tooLarge":0,"unreadable":0,"overBudget":0},
+-- >  "results":[{"path":"app/Main.hs","line":4,"lineCol":1,
+-- >    "text":"main :: IO ()","matches":[[1,5]]}]}
+--
+-- - @query@: q as sent. @partial@: always false for now (the store is
+--   loaded before we answer).
+-- - @stopped@: the deadline came, some files weren't searched.
+-- - @total@: every matching line; @files@: files with a hit.
+-- - @skipped@: files not searched, by why (Note [Text store] in
+--   "HaskellReviewer.Session.TextStore"). All 0 when nothing was
+--   searched (an empty q).
+-- - Each result is one line: @text@ cut to 240 code points around the
+--   first hit, @lineCol@ the column of its first code point;
+--   @matches@: the hits as @[start, end]@ columns of the whole line
+--   (code points, from 1, end exclusive), at most 20.
+--
+-- See Note [Text search] in "HaskellReviewer.Core.TextSearch".
+encodeTextSearch :: Generation -> Text -> Skipped -> TextAnswer -> LBS.ByteString
+encodeTextSearch (Generation g) query sk a =
+  Encoding.encodingToLazyByteString . Aeson.pairs $
+    ("generation" .= g)
+      <> ("query" .= query)
+      <> ("partial" .= False)
+      <> ("stopped" .= a.stopped)
+      <> ("total" .= a.total)
+      <> ("files" .= a.files)
+      <> Encoding.pair "skipped" skipped
+      <> Encoding.pair "results" (Encoding.list result a.results)
+  where
+    skipped =
+      Aeson.pairs $
+        ("binary" .= sk.binary)
+          <> ("tooLarge" .= sk.tooLarge)
+          <> ("unreadable" .= sk.unreadable)
+          <> ("overBudget" .= sk.overBudget)
+    result r =
+      Aeson.pairs $
+        ("path" .= relPathText r.path)
+          <> ("line" .= r.hit.line)
+          <> ("lineCol" .= r.hit.lineCol)
+          <> ("text" .= r.hit.text)
+          <> ("matches" .= [[m.start, m.end] | m <- r.hit.matches])
 
 -- * Internal
 

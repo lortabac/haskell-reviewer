@@ -5,15 +5,19 @@ import Bench.Queries
   ( RefsAnswer (..),
     RefsQuery (..),
     SearchAnswer (..),
+    TextAnswer (..),
     parseNotFoundWhat,
     parseRefsAnswer,
     parseSearchAnswer,
+    parseTextAnswer,
     queries,
     refsQueries,
     refsQueryText,
+    textQueries,
   )
 import Data.ByteString qualified as BS
 import Data.Either (isLeft)
+import Data.Foldable (toList)
 import Data.List (nub)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -63,6 +67,21 @@ tests =
         assertBool "not found" (isLeft (parseRefsAnswer notFound))
         let noResults = "{\"partial\":true,\"total\":1}"
         assertBool "no results" (isLeft (parseRefsAnswer noResults)),
+      testCase "10 text queries, no duplicates, none with a line break" $ do
+        length textQueries @?= 10
+        nub (toList textQueries) @?= toList textQueries
+        assertBool "a line break" (not (any (Text.any (`elem` ['\n', '\r'])) textQueries))
+        assertBool "over 128" (all ((<= 128) . Text.length) textQueries),
+      testCase "the text search fixtures parse" $ do
+        full <- BS.readFile "../fixtures/api/text-search.json"
+        parseTextAnswer full
+          @?= Right TextAnswer {stopped = False, total = 7, files = 5, sent = 7}
+        capped <- BS.readFile "../fixtures/api/text-search-capped.json"
+        parseTextAnswer capped
+          @?= Right TextAnswer {stopped = False, total = 7, files = 5, sent = 2},
+      testCase "not a text search answer" $ do
+        search <- BS.readFile "../fixtures/api/search.json"
+        assertBool "a search answer" (isLeft (parseTextAnswer search)),
       testCase "a not-found body" $ do
         notFound <- BS.readFile "../fixtures/api/refs-not-found.json"
         parseNotFoundWhat notFound @?= Just "decl"

@@ -1,5 +1,5 @@
 -- | Builds the benchmark's two outputs: the stdout table, and the JSON
--- report (schema 3).
+-- report (schema 4).
 module Bench.Report
   ( -- * Types
     Report (..),
@@ -46,7 +46,7 @@ import Bench.IndexLog (IndexDone (..))
 import Bench.Machine (LoadAvg (..), MachineInfo (..))
 import Bench.ModuleList (OnDemandStatus (..), Sample (..), sampleKindText)
 import Bench.Projects (Project (..), Role (..))
-import Bench.Queries (RefsQuery (..))
+import Bench.Queries (RefsQuery (..), textLimitBox, textLimitPage)
 import Bench.Refs
   ( RefsSummary (..),
     RefsTime (..),
@@ -65,7 +65,7 @@ import Bench.Startup
     UiParts (..),
   )
 import Bench.Stats (Latency (..), Summary (..), latency, summarize)
-import Bench.Steady (PageTime (..), Route (..), SteadyRun (..))
+import Bench.Steady (PageTime (..), Route (..), SteadyRun (..), TextTime (..))
 import Bench.Targets
   ( Target (..),
     Verdict (..),
@@ -80,6 +80,8 @@ import Bench.Targets
     searchAfterMedian,
     searchAfterP95,
     statText,
+    textSearchAfterMedian,
+    textSearchAfterP95,
     uiUsable,
     urlAndAccepting,
     verdict,
@@ -88,7 +90,7 @@ import Data.Aeson ((.=))
 import Data.Aeson.Encoding qualified as Aeson.Encoding
 import Data.Aeson.Key qualified as Aeson.Key
 import Data.ByteString.Lazy qualified as LBS
-import Data.List (sortOn)
+import Data.List (nub, sortOn)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as Map
@@ -191,7 +193,9 @@ projectVerdicts pr =
       p95Of navigationSourceIdle (map (.us) (concatMap (.idleSources) pr.steady)),
       medianOf searchAfterMedian (searchAfterTimes pr),
       p95Of searchAfterP95 (searchAfterTimes pr),
-      p95Of refsAfterP95 (map (.us) (refsAfter pr))
+      p95Of refsAfterP95 (map (.us) (refsAfter pr)),
+      medianOf textSearchAfterMedian (map (.us) (textAfter pr)),
+      p95Of textSearchAfterP95 (map (.us) (textAfter pr))
     ]
   where
     medianOf t xs = do
@@ -209,6 +213,46 @@ searchAfterTimes pr = map (.us) (concatMap (.searchTimes) pr.steady)
 
 refsAfter :: ProjectReport -> [RefsTime]
 refsAfter pr = concatMap (.refsTimes) pr.steady
+
+-- | Text searches with the box's limit, after the first (the load).
+textAfter :: ProjectReport -> [TextTime]
+textAfter pr = concatMap (.textTimes) pr.steady
+
+-- | The first text search of each run: it loads the store.
+textFirsts :: ProjectReport -> [TextTime]
+textFirsts pr = mapMaybe (.textFirst) pr.steady
+
+-- | Text searches with the results page's limit.
+textPagesOf :: ProjectReport -> [TextTime]
+textPagesOf pr = concatMap (.textPages) pr.steady
+
+-- | Latency over all samples of one query; counts from the last sample
+-- (they don't change after indexing).
+data TextSummary = TextSummary
+  { query :: Text,
+    latency :: Latency,
+    total :: Int,
+    files :: Int,
+    sent :: Int,
+    wireBytes :: Int
+  }
+
+-- | One summary per query, in first-seen order.
+textByQuery :: [TextTime] -> [TextSummary]
+textByQuery ts = mapMaybe one (nub (map (.query) ts))
+  where
+    one q = do
+      mine <- NE.nonEmpty [t | t <- ts, t.query == q]
+      let lastOne = NE.last mine
+      Just
+        TextSummary
+          { query = q,
+            latency = latency (NE.map (fromInteger . (.us)) mine),
+            total = lastOne.total,
+            files = lastOne.files,
+            sent = lastOne.sent,
+            wireBytes = lastOne.wireBytes
+          }
 
 -- * Rendering: the table
 
@@ -248,7 +292,10 @@ renderTable report =
     targetLines = case concatMap verdictLines report.projects of
       [] -> []
       ls ->
-        ["", "Targets (SPEC §10.1, D-208, D-303; a MISS never fails the bench, §10.3):"]
+        [ "",
+          "Targets (SPEC §10.1, D-208, D-303, D-308; a MISS never fails the bench, \
+          \§10.3):"
+        ]
           <> ls
     verdictLines pr = map (("  " <>) . renderVerdict pr.project.name) (projectVerdicts pr)
     smallRunsNote
@@ -352,6 +399,7 @@ steadyLines pr = case pr.steady of
       "  search: " <> maybe "-" latencyText (latencyUs (searchAfterTimes pr))
     ]
       <> refsLines
+      <> textLines
       <> slowLines
       <> gcLines
       <> phaseLines
@@ -380,6 +428,42 @@ steadyLines pr = case pr.steady of
         <> ", "
         <> fmtKiB q.wireBytes
         <> " KiB"
+    textLines = case textAfter pr of
+      [] -> []
+      ts ->
+        [ "  text search (limit "
+            <> showT textLimitBox
+            <> ", after the load): "
+            <> maybe "-" latencyText (latencyUs (map (.us) ts)),
+          "    first (loads the store): "
+            <> Text.intercalate ", " [fmtMs (fromInteger t.us) | t <- textFirsts pr]
+            <> "; page (limit "
+            <> showT textLimitPage
+            <> "): "
+            <> maybe "-" shortLatency (latencyUs (map (.us) (textPagesOf pr)))
+        ]
+          <> map textQueryLine (textByQuery ts)
+          <> [ "    page "
+                 <> quoted q.query
+                 <> ": "
+                 <> fmtMs q.latency.median
+                 <> ", sent "
+                 <> showT q.sent
+                 <> ", "
+                 <> fmtKiB q.wireBytes
+                 <> " KiB"
+             | q <- textByQuery (textPagesOf pr)
+             ]
+    textQueryLine q =
+      "    "
+        <> quoted q.query
+        <> ": "
+        <> shortLatency q.latency
+        <> "; total "
+        <> plural q.total "line"
+        <> " in "
+        <> plural q.files "file"
+    quoted q = "\"" <> q <> "\""
     phaseLines = case phaseSummary pr.steady of
       [] -> []
       ps -> ["  major GC by phase: " <> Text.intercalate ", " (map phaseText ps)]
@@ -692,7 +776,7 @@ roleText Typical = "typical"
 roleText Large = "large"
 roleText Extra = "extra"
 
--- * JSON (schema 3)
+-- * JSON (schema 4)
 
 -- | Encode the whole report. Built by hand with 'Data.Aeson.Encoding',
 -- like "HaskellReviewer.Effects.Trace", to keep the key order fixed and
@@ -709,7 +793,7 @@ nullable = maybe Aeson.Encoding.null_
 reportEncoding :: Report -> Encoding
 reportEncoding report =
   Aeson.Encoding.pairs $
-    ("schema" .= (3 :: Int))
+    ("schema" .= (4 :: Int))
       <> ("started" .= iso8601Show report.started)
       <> ("label" .= report.label)
       <> Aeson.Encoding.pair "settings" (settingsEncoding report.settings)
@@ -891,6 +975,7 @@ steadyEncoding pr =
         (maybeLatency (latencyUs (map (.us) idleSources)))
       <> Aeson.Encoding.pair "search_after" (maybeLatency (latencyUs (searchAfterTimes pr)))
       <> Aeson.Encoding.pair "refs_after" refsAfterEncoding
+      <> Aeson.Encoding.pair "text_search_after" textAfterEncoding
       <> Aeson.Encoding.pair "gc" (nullable gcEncoding (gcSummary pr.steady))
       <> Aeson.Encoding.pair "slow_pages" (Aeson.Encoding.list slowEncoding (slowPages pr))
   where
@@ -909,6 +994,22 @@ steadyEncoding pr =
                 refsSummaryEncoding
                 (byQuery pr.refsQueries refs)
             )
+    textAfterEncoding =
+      Aeson.Encoding.pairs $
+        Aeson.Encoding.pair "latency" (maybeLatency (latencyUs (map (.us) texts)))
+          <> ("first_us" .= map (.us) (textFirsts pr))
+          <> Aeson.Encoding.pair
+            "page_latency"
+            (maybeLatency (latencyUs (map (.us) (textPagesOf pr))))
+          <> ("stopped" .= length (filter (.stopped) allText))
+          <> Aeson.Encoding.pair
+            "by_query"
+            (Aeson.Encoding.list textSummaryEncoding (textByQuery texts))
+          <> Aeson.Encoding.pair
+            "page_by_query"
+            (Aeson.Encoding.list textSummaryEncoding (textByQuery (textPagesOf pr)))
+    texts = textAfter pr
+    allText = textFirsts pr <> texts <> textPagesOf pr
     runEncoding r =
       Aeson.Encoding.pairs $
         ("done_us" .= r.doneUs)
@@ -919,6 +1020,8 @@ steadyEncoding pr =
           <> ("sources_idle" .= length r.idleSources)
           <> ("searches" .= length r.searchTimes)
           <> ("refs" .= length r.refsTimes)
+          <> ("text_searches" .= length r.textTimes)
+          <> ("text_first_us" .= fmap (.us) r.textFirst)
           <> ("peak_mem_bytes" .= r.rts.peakMemBytes)
           <> ("max_live_bytes" .= r.rts.maxLiveBytes)
           <> ("idle_rss_bytes" .= r.idleRssBytes)
@@ -954,6 +1057,19 @@ refsSummaryEncoding q =
       <> ("p95_us" .= q.latency.p95)
       <> ("max_us" .= q.latency.max)
       <> ("total" .= q.total)
+      <> ("sent" .= q.sent)
+      <> ("wire_bytes" .= q.wireBytes)
+
+textSummaryEncoding :: TextSummary -> Encoding
+textSummaryEncoding q =
+  Aeson.Encoding.pairs $
+    ("query" .= q.query)
+      <> ("count" .= q.latency.count)
+      <> ("median_us" .= q.latency.median)
+      <> ("p95_us" .= q.latency.p95)
+      <> ("max_us" .= q.latency.max)
+      <> ("total" .= q.total)
+      <> ("files" .= q.files)
       <> ("sent" .= q.sent)
       <> ("wire_bytes" .= q.wireBytes)
 

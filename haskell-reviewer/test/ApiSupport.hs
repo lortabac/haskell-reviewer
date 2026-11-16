@@ -13,6 +13,7 @@ module ApiSupport
     gatedOn,
     refsApi,
     refsGatedOn,
+    textSearchApi,
     forceFixtures,
     indexed,
     indexAll,
@@ -217,6 +218,11 @@ gatedOn path gate =
 refsApi :: TestApi
 refsApi = apiFor refsSnapshot
 
+-- | Files for text search: one of each kind, a BOM, CRLF, a long
+-- line, many hits on a line, non-ASCII text, an unreadable file.
+textSearchApi :: TestApi
+textSearchApi = apiFor textSearchSnapshot
+
 -- | 'refsApi', with the parse of this file (a path of 'refsTexts') held
 -- until the gate is full. Each request gets a fresh snapshot, so each
 -- parses it again.
@@ -366,7 +372,8 @@ forceFixtures = do
       pageSnapshot,
       searchSnapshot,
       sourceSnapshot,
-      refsSnapshot
+      refsSnapshot,
+      textSearchSnapshot
     ]
     void
   forM_ contents $ \(p, c) -> evaluate p >> evaluate (forceContent c)
@@ -667,6 +674,26 @@ pageSnapshot =
     (fileList [("Page.hs", EntryFile), ("Sections.hs", EntryFile)])
     noProject
 
+textSearchSnapshot :: IO Snapshot
+textSearchSnapshot =
+  newSnapshot
+    fixtureRoot
+    ( fileList
+        [ ("app/Main.hs", EntryFile),
+          ("assets/logo.png", EntryFile),
+          ("data/big.csv", EntryFile),
+          ("docs/guide.md", EntrySymlink),
+          ("t/bom.md", EntryFile),
+          ("t/gone.txt", EntryFile),
+          ("t/long.txt", EntryFile),
+          ("t/many.txt", EntryFile),
+          ("t/ops.txt", EntryFile),
+          ("t/\xc3\xbcn\xc3\xaf.txt", EntryFile),
+          ("vendor/dep", EntrySubmodule commit)
+        ]
+    )
+    noProject
+
 searchSnapshot :: IO Snapshot
 searchSnapshot =
   newSnapshot
@@ -786,6 +813,14 @@ contents =
         \a <+> b = a\n\
         \mapHelper = 1\n"
     ),
+    -- Files of the text search fixture. t/gone.txt has none: gone.
+    ("t/bom.md", TextContent "\xFEFFmain: the BOM is not a column\n"),
+    ( "t/long.txt",
+      TextContent (Text.replicate 300 "." <> " main " <> Text.replicate 300 ".")
+    ),
+    ("t/many.txt", TextContent (Text.unwords (replicate 25 "main") <> "\n")),
+    ("t/ops.txt", TextContent "x = a+b\ny = a b\n"),
+    ("t/ünï.txt", TextContent "naïve main\n"),
     -- Modules of the source fixture.
     ("s/src/Bin.hs", Binary (FileSize 10)),
     ( "s/src/Big.hs",

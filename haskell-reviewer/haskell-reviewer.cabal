@@ -90,6 +90,7 @@ library
     HaskellReviewer.Core.SourceLinks
     HaskellReviewer.Core.SourceText
     HaskellReviewer.Core.Span
+    HaskellReviewer.Core.TextSearch
     HaskellReviewer.Core.Tokens
     HaskellReviewer.Core.Xdg
 
@@ -115,6 +116,7 @@ library
     HaskellReviewer.Session.Project
     HaskellReviewer.Session.Resolve
     HaskellReviewer.Session.Snapshot
+    HaskellReviewer.Session.TextStore
 
     -- Server
     HaskellReviewer.Server.Api
@@ -128,6 +130,7 @@ library
     HaskellReviewer.Server.Router
     HaskellReviewer.Server.Search
     HaskellReviewer.Server.Security
+    HaskellReviewer.Server.TextSearch
     HaskellReviewer.Server.Wire
     HaskellReviewer.Server.Wire.Page
     HaskellReviewer.Server.Wire.Source
@@ -267,6 +270,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.SearchTest
     HaskellReviewer.Core.SourceLinksTest
     HaskellReviewer.Core.SourceTextTest
+    HaskellReviewer.Core.TextSearchTest
     HaskellReviewer.Core.TokensTest
     HaskellReviewer.Core.XdgTest
     HaskellReviewer.Effects.AtomicFileTest
@@ -288,11 +292,13 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Server.ListenTest
     HaskellReviewer.Server.RouterTest
     HaskellReviewer.Server.SourceTest
+    HaskellReviewer.Server.TextSearchTest
     HaskellReviewer.Session.ClientsTest
     HaskellReviewer.Session.IndexTest
     HaskellReviewer.Session.PrefsTest
     HaskellReviewer.Session.ResolveTest
     HaskellReviewer.Session.SnapshotTest
+    HaskellReviewer.Session.TextStoreTest
     HighlightDump
     IndexSupport
     ModulesDump
@@ -336,6 +342,7 @@ test-suite haskell-reviewer-test
     , text
     , time
     , unix
+    , vector
     , wai
     , warp
     , zlib              >=0.7  && <0.8

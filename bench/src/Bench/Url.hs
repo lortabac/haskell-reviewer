@@ -5,6 +5,7 @@ module Bench.Url
     sourcePath,
     searchPath,
     refsPath,
+    textSearchPath,
 
     -- * Encoding
     encodePath,
@@ -41,6 +42,11 @@ refsPath q =
     <> encodeQueryValue q.moduleRef
     <> "&decl="
     <> encodeQueryValue q.decl
+
+-- | A text search (D-307) with a limit, under the token.
+textSearchPath :: Text -> Int -> String
+textSearchPath q limit =
+  "api/text-search/tree?q=" <> encodeQueryValue q <> "&limit=" <> show limit
 
 -- | A path (a module ref, say), as UTF-8 with every byte but the
 -- unreserved ones and @/@ encoded. @/@ stays: it splits segments, as a

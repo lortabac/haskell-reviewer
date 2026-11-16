@@ -49,6 +49,7 @@ import {
   searchUrl,
 } from "./search";
 import { blockKinds, inlineKinds } from "./richtext";
+import { decodeTextSearch, textSearchUrl } from "./textSearch";
 import {
   decodeSourceNotFound,
   decodeSourceView,
@@ -112,6 +113,8 @@ const decoders: Record<string, (value: unknown) => unknown> = {
   "source-plain": decodeSourceView,
   "source-warm-up": decodeSourceView,
   "source-not-found": decodeSourceNotFound,
+  "text-search": decodeTextSearch,
+  "text-search-capped": decodeTextSearch,
 };
 
 // The fixtures that are CBOR (D-51), with a JSON dump next to them.
@@ -343,6 +346,20 @@ describe("API fixtures", () => {
     ]);
     expect(refs.total).toBe(refs.results.length);
     expect(decodeRefsNotFound(fixture("refs-not-found")).what).toBe("decl");
+  });
+
+  it("the text search fixtures: kinds skipped, capped, long line", () => {
+    const all = decodeTextSearch(fixture("text-search"));
+    const capped = decodeTextSearch(fixture("text-search-capped"));
+    expect(all.total).toBe(all.results.length);
+    expect(capped.total).toBe(all.total);
+    expect(capped.results).toEqual(all.results.slice(0, 2));
+    expect(all.skipped.binary).toBeGreaterThan(0);
+    expect(all.skipped.tooLarge).toBeGreaterThan(0);
+    expect(all.skipped.unreadable).toBeGreaterThan(0);
+    // A long line is cut; 25 hits on a line send 20.
+    expect(all.results.some((r) => r.lineCol > 1)).toBe(true);
+    expect(Math.max(...all.results.map((r) => r.matches.length))).toBe(20);
   });
 
   it("the source fixtures cover every value", () => {
@@ -806,6 +823,56 @@ describe("decoders reject bad shapes", () => {
     );
     expect(refsUrl("p:lib:A", "field:T.f")).toBe(
       "/api/refs/tree?module=p%3Alib%3AA&decl=field%3AT.f",
+    );
+  });
+
+  it("text search", () => {
+    const hit = {
+      path: "a.hs",
+      line: 3,
+      lineCol: 1,
+      text: "main = x",
+      matches: [[1, 5]],
+    };
+    const good = {
+      generation: 1,
+      query: "main",
+      partial: false,
+      stopped: false,
+      total: 2,
+      files: 1,
+      skipped: { binary: 0, tooLarge: 1, unreadable: 0, overBudget: 0 },
+      results: [hit],
+    };
+    expect(decodeTextSearch(good)).toEqual(good);
+    const withHit = (h: object) => ({ ...good, results: [h] });
+    for (const bad of [
+      null,
+      { ...good, generation: -1 },
+      { ...good, stopped: "no" },
+      { ...good, total: 0 },
+      { ...good, files: 3 },
+      { ...good, skipped: { ...good.skipped, overBudget: -1 } },
+      { ...good, skipped: undefined },
+      withHit({ ...hit, line: 0 }),
+      withHit({ ...hit, lineCol: 0 }),
+      withHit({ ...hit, matches: [[1]] }),
+      withHit({ ...hit, matches: [[3, 3]] }),
+      withHit({ ...hit, matches: [[0, 2]] }),
+      withHit({ ...hit, text: undefined }),
+    ]) {
+      expect(() => decodeTextSearch(bad), JSON.stringify(bad)).toThrow(
+        DecodeError,
+      );
+    }
+  });
+
+  it("text search URL: q encoded, + and spaces too; limit if given", () => {
+    expect(textSearchUrl('a "b+c')).toBe(
+      "/api/text-search/tree?q=a%20%22b%2Bc",
+    );
+    expect(textSearchUrl("where", 8)).toBe(
+      "/api/text-search/tree?q=where&limit=8",
     );
   });
 

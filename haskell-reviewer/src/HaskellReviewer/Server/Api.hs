@@ -100,6 +100,7 @@ import HaskellReviewer.Session.Resolve
     resolveModuleWith,
   )
 import HaskellReviewer.Session.Snapshot (Snapshot (..), firstGeneration)
+import HaskellReviewer.Session.TextStore (newTextStore)
 import Network.HTTP.Types
   ( Status,
     hContentLength,
@@ -141,7 +142,9 @@ and of our CBOR code are built before request threads race on them. The
 gzip path gets the same before warp listens (Note [Compression] in
 "HaskellReviewer.Server.Router"), and so does the search route
 (warmUpSearch in "HaskellReviewer.Server.Search"). The listing thread
-runs the refs route too (warmUpRefs in "HaskellReviewer.Server.Refs").
+runs the refs route too (warmUpRefs in "HaskellReviewer.Server.Refs"),
+and the text search route runs before warp listens (warmUpTextSearch in
+"HaskellReviewer.Server.TextSearch").
 
 What the workers put in the slots is forced before it gets there (Note
 [Indexing] in "HaskellReviewer.Session.Index").
@@ -161,6 +164,7 @@ newSnapshot root fl project = do
   mapM_ (evaluate . LBS.length . encodeFileView firstGeneration) cborWarmUp
   index <- newIndex modules
   resolver <- newResolver modules index
+  textStore <- newTextStore
   pure
     Snapshot
       { generation = firstGeneration,
@@ -171,7 +175,8 @@ newSnapshot root fl project = do
         moduleTreeJson = moduleTreeJson,
         searchModules = searchModules,
         index = index,
-        resolver = resolver
+        resolver = resolver,
+        textStore = textStore
       }
 
 -- | Force both JSON bodies, the module index (strict fields), every

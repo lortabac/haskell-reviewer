@@ -19,6 +19,7 @@ import ApiSupport
     refsGatedOn,
     searchApi,
     sourceApi,
+    textSearchApi,
   )
 import Control.Concurrent.MVar (newEmptyMVar)
 import Data.ByteString (ByteString)
@@ -156,6 +157,10 @@ cases =
       r.status @?= 404
       lookup "Content-Type" r.headers @?= Just "application/json"
       pure (r.body <> "\n"),
+    -- Text search: one file of each kind, a BOM, CRLF, a long line, 25
+    -- hits on a line (20 sent), non-ASCII; and capped.
+    json "text-search" (okTextSearch textSearchApi "?q=main"),
+    json "text-search-capped" (okTextSearch textSearchApi "?q=main&limit=2"),
     -- Every value other than the built-in one.
     json "prefs" (okJson fixtureApi {prefs = configured} ["api", "prefs"])
   ]
@@ -214,6 +219,15 @@ okSearch api query = do
 okRefs :: TestApi -> ByteString -> IO LBS.ByteString
 okRefs api query = do
   r <- getApiQuery api ["api", "refs", "tree"] query
+  r.status @?= 200
+  lookup "Content-Type" r.headers @?= Just "application/json"
+  pure (r.body <> "\n")
+
+-- | GET api/text-search/tree with this query string; must be a 200
+-- with JSON.
+okTextSearch :: TestApi -> ByteString -> IO LBS.ByteString
+okTextSearch api query = do
+  r <- getApiQuery api ["api", "text-search", "tree"] query
   r.status @?= 200
   lookup "Content-Type" r.headers @?= Just "application/json"
   pure (r.body <> "\n")
