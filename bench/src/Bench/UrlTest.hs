@@ -1,6 +1,7 @@
 module Bench.UrlTest (tests) where
 
-import Bench.Url (encodePath, encodeQueryValue)
+import Bench.Queries (RefsQuery (..))
+import Bench.Url (encodePath, encodeQueryValue, refsPath, sourcePath)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 
@@ -19,5 +20,13 @@ tests =
       testCase "query: operators and plus" $ do
         encodeQueryValue "<$>" @?= "%3C%24%3E"
         encodeQueryValue "+" @?= "%2B"
-        encodeQueryValue "a/b" @?= "a%2Fb"
+        encodeQueryValue "a/b" @?= "a%2Fb",
+      testCase "a source path keeps its slashes" $
+        sourcePath "services/proxy/test/unit/Main.hs"
+          @?= "api/source/tree/services/proxy/test/unit/Main.hs",
+      testCase "a source path: space and Unicode" $
+        sourcePath "a b/Ü.hs" @?= "api/source/tree/a%20b/%C3%9C.hs",
+      testCase "a refs path" $
+        refsPath (RefsQuery "R.Shape" "val:<+>")
+          @?= "api/refs/tree?module=R.Shape&decl=val%3A%3C%2B%3E"
     ]

@@ -1113,6 +1113,7 @@ benchmarks that are part of the project.
 | Large project (2,000 modules / 500k lines): UI usable | < 10 s (D-24) |
 | Navigation within an indexed module | < 100 ms |
 | Opening a not-yet-indexed module on demand | < 300 ms |
+| Find references after indexing (p95 over the bench's refs queries, D-303) | < 300 ms |
 | Large project, precise tier, **cold** HIE cache (first run, all `.hie` converted) | Syntactic UI within the 10 s target; precise tier fills in progressively, with no fixed bound in v1 (to be set from benchmarks) |
 
 Diff-mode targets cover **both sides**. Except where marked *cold*,

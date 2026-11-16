@@ -70,7 +70,9 @@ is updated if needed (§10.3).
 - **Q-PERF-COLD**: Set a bound for the cold HIE-conversion cache from the
   first benchmarks (§10.1).
 - **Q-GC**: closed for M1 (D-219): keep the copying GC and the D-162
-  defaults; re-check when M2 grows the index. Check that major GC pauses
+  defaults; re-check when M2 grows the index. T15b re-checks it with source and
+  refs pages in the window (D-303: `max_major_after_us` now covers them;
+  majors are split by phase). Check that major GC pauses
   stay within the < 100 ms navigation target with large indexes. Options:
   compact regions for finished module models, or the non-moving collector
   (§11.5). M1 reference run: wire-server max major pause after indexing

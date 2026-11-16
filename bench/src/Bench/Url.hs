@@ -2,7 +2,9 @@
 module Bench.Url
   ( -- * API paths
     modulePath,
+    sourcePath,
     searchPath,
+    refsPath,
 
     -- * Encoding
     encodePath,
@@ -10,9 +12,11 @@ module Bench.Url
   )
 where
 
+import Bench.Queries (RefsQuery (..))
 import Data.ByteString qualified as BS
 import Data.Char (chr)
 import Data.Text (Text)
+import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
 import Data.Word (Word8)
 import Numeric (showHex)
@@ -21,9 +25,22 @@ import Numeric (showHex)
 modulePath :: Text -> String
 modulePath ref = "api/module/tree/" <> encodePath ref
 
+-- | A source page, by file path (relative to the root), under the
+-- token.
+sourcePath :: FilePath -> String
+sourcePath p = "api/source/tree/" <> encodePath (Text.pack p)
+
 -- | A search (D-207), under the token.
 searchPath :: Text -> String
 searchPath q = "api/search/tree?q=" <> encodeQueryValue q
+
+-- | Find references (D-294), under the token.
+refsPath :: RefsQuery -> String
+refsPath q =
+  "api/refs/tree?module="
+    <> encodeQueryValue q.moduleRef
+    <> "&decl="
+    <> encodeQueryValue q.decl
 
 -- | A path (a module ref, say), as UTF-8 with every byte but the
 -- unreserved ones and @/@ encoded. @/@ stays: it splits segments, as a

@@ -1,13 +1,16 @@
--- | A steady run (plan §2.2): after indexing, every module page once,
--- back to back; then pages with idle gaps; then search. With @+RTS -S@,
--- for the GC pauses. The first run also does the fallback census, in a
--- pass of its own before the timed one.
+-- | A steady run (plan §2.2, D-303): after indexing, every module page
+-- once, back to back, then every source page; then module pages with
+-- idle gaps, then the same source pages with the same gaps; then
+-- search, then find references. With @+RTS -S@, for the GC pauses. The
+-- first run also does the fallback census, in a pass of its own before
+-- the timed one.
 module Bench.Steady
   ( -- * Types
     SteadyPlan (..),
     CensusPass (..),
     TimedPass (..),
     PageTime (..),
+    Route (..),
     SteadyRun (..),
 
     -- * Running
@@ -16,12 +19,21 @@ module Bench.Steady
 where
 
 import Bench.Fallbacks (Category (..), Census, Hit (..), Slot (..), classifyPage)
-import Bench.GcLog (GcLog, GcLogError)
+import Bench.GcLog (GcLog, GcLogError, PhaseMark (..))
 import Bench.Http (Gzip (..), HttpResponse (..))
 import Bench.IndexLog (IndexDone)
 import Bench.Machine (LoadAvg, getLoadAvg)
-import Bench.ModuleList (IdleStep (..), ModuleItem (..), idlePlan, isSlot)
-import Bench.Queries (queries)
+import Bench.ModuleList
+  ( IdleStep (..),
+    ModuleItem (..),
+    Queued (..),
+    idlePlan,
+    isSlot,
+    queueOrder,
+  )
+import Bench.Queries (RefsQuery, queries)
+import Bench.Refs (RefsTime)
+import Bench.RefsDuring (timeRefs)
 import Bench.RtsStats (RtsStats)
 import Bench.Run
   ( DoneAt (..),
@@ -32,6 +44,7 @@ import Bench.Run
     SessionConfig,
     Timed (..),
     awaitDone,
+    elapsedUs,
     failWith,
     getApi,
     procMemory,
@@ -39,7 +52,7 @@ import Bench.Run
     withSession,
   )
 import Bench.SearchDuring (QueryTime, timeQuery)
-import Bench.Url (modulePath)
+import Bench.Url (modulePath, sourcePath)
 import Control.Concurrent (threadDelay)
 import Control.Monad (forM, replicateM)
 import Data.Aeson qualified as Aeson
@@ -62,6 +75,9 @@ data SteadyPlan = SteadyPlan
     idlePages :: Int,
     -- | Rounds of every query after indexing.
     searchRounds :: Int,
+    -- | Refs queries, and rounds of them after the search.
+    refs :: [RefsQuery],
+    refsRounds :: Int,
     -- | Picks the idle pages and gaps: the run index.
     seed :: Int
   }
@@ -75,9 +91,15 @@ data CensusPass = CensusPass | NoCensusPass
 data TimedPass = TimedPass | NoTimedPass
   deriving (Eq, Show)
 
--- | One module page.
+-- | Which page of a module.
+data Route = ModuleRoute | SourceRoute
+  deriving (Eq, Show)
+
+-- | One module or source page.
 data PageTime = PageTime
-  { ref :: Text,
+  { route :: Route,
+    -- | The module's ref, also for a source page.
+    ref :: Text,
     -- | From request to the last byte.
     us :: Integer,
     wireBytes :: Int
@@ -90,15 +112,25 @@ data SteadyRun = SteadyRun
     -- | Back to back, modules we parse only (the others answer from
     -- the module index, no slot to wait for).
     pages :: [PageTime],
+    -- | The source pages of the same modules, back to back.
+    sources :: [PageTime],
     idlePages :: [PageTime],
+    -- | The source pages of 'idlePages', with the same gaps.
+    idleSources :: [PageTime],
     searchTimes :: [QueryTime],
+    refsTimes :: [RefsTime],
+    -- | When each phase started, the first at the done line. Named like
+    -- the JSON keys.
+    phases :: [PhaseMark],
     -- | Only if the plan asked for it.
     census :: Maybe Census,
     -- | See 'Ended'.
     gc :: Maybe (Either GcLogError GcLog),
     rts :: RtsStats,
-    -- | At the end; Linux only.
-    rssBytes :: Maybe Integer,
+    -- | Linux only. RSS 1 s after the last request, the peak RSS right
+    -- after the done line, and the peak at the end.
+    idleRssBytes :: Maybe Integer,
+    hwmAtDoneBytes :: Maybe Integer,
     hwmBytes :: Maybe Integer,
     loadAvg :: Maybe LoadAvg
   }
@@ -114,6 +146,10 @@ runSteady cfg items plan = (>>= finish) <$> withSession cfg (steps items plan)
 steps :: [ModuleItem] -> SteadyPlan -> Session -> IO (Ended -> RtsStats -> SteadyRun)
 steps items plan s = do
   doneAt <- awaitDone s
+  atDone <- procMemory s
+  let mark name = (\t -> PhaseMark {name = name, startUs = t}) <$> elapsedUs s
+      -- From the done line: the phases cover all of "after indexing".
+      m0 = PhaseMark {name = "census", startUs = doneAt.atUs}
 
   census <- case plan.census of
     NoCensusPass -> pure Nothing
@@ -121,41 +157,85 @@ steps items plan s = do
       hits <- forM items $ \m -> getApi s Gzip (modulePath m.ref) >>= classify m
       pure (Just (Map.fromListWith (flip (<>)) [(c, [h]) | Just (c, h) <- hits]))
 
-  let slots = filter isSlot items
-  pages <- case plan.timed of
-    NoTimedPass -> pure []
-    TimedPass -> mapM (timePage s) slots
+  let slots = queueOrder items
+      timed f = case plan.timed of
+        NoTimedPass -> pure []
+        TimedPass -> mapM f slots
+      idleSteps = idlePlan plan.seed plan.idlePages (length slots)
+      idlePass f = forM idleSteps $ \step -> do
+        threadDelay (step.gapMs * 1000)
+        f (slots !! step.index)
+  m1 <- mark "pages"
+  pages <- timed (timePage s)
+  m2 <- mark "sources"
+  sources <- timed (timeSource s)
+  m3 <- mark "pages_idle"
+  idle <- idlePass (timePage s)
+  m4 <- mark "sources_idle"
+  idleSources <- idlePass (timeSource s)
 
-  idle <- forM (idlePlan plan.seed plan.idlePages (length slots)) $ \step -> do
-    threadDelay (step.gapMs * 1000)
-    timePage s (slots !! step.index)
-
+  m5 <- mark "search"
   searched <-
     concatMap NE.toList <$> replicateM plan.searchRounds (mapM (timeQuery s) queries)
+  m6 <- mark "refs"
+  refsTimes <- concat <$> replicateM plan.refsRounds (mapM (timeRefs s) plan.refs)
+  m7 <- mark "end_idle"
 
+  -- Over the RTS idle-GC delay (0.3 s), so this is the idle size.
+  threadDelay 1_000_000
   mem <- procMemory s
+  -- Till the run ends: the stop, and the RTS's last GC.
+  m8 <- mark "stop"
   load <- getLoadAvg
   pure $ \ended rts ->
     SteadyRun
       { doneUs = doneAt.atUs,
         done = doneAt.line,
         pages = pages,
+        sources = sources,
         idlePages = idle,
+        idleSources = idleSources,
         searchTimes = searched,
+        refsTimes = refsTimes,
+        phases = [m0, m1, m2, m3, m4, m5, m6, m7, m8],
         census = census,
         gc = ended.gc,
         rts = rts,
-        rssBytes = mem.rssBytes,
+        idleRssBytes = mem.rssBytes,
+        hwmAtDoneBytes = atDone.hwmBytes,
         hwmBytes = mem.hwmBytes,
         loadAvg = load
       }
 
 -- | Ask for one module page and time it. Any status is fine here: the
 -- census looks at statuses.
-timePage :: Session -> ModuleItem -> IO PageTime
+timePage :: Session -> Queued -> IO PageTime
 timePage s m = do
   t <- getApi s Gzip (modulePath m.ref)
-  pure PageTime {ref = m.ref, us = t.us, wireBytes = t.response.wireBytes}
+  pure
+    PageTime
+      { route = ModuleRoute,
+        ref = m.ref,
+        us = t.us,
+        wireBytes = t.response.wireBytes
+      }
+
+-- | Ask for one module's source page and time it. Fails the run unless
+-- it's a 200: every parsed module's file is in the file list.
+timeSource :: Session -> Queued -> IO PageTime
+timeSource s m = do
+  t <- getApi s Gzip (sourcePath m.path)
+  if t.response.status /= 200
+    then
+      failWith ("source " <> m.path <> ": expected 200, got " <> show t.response.status)
+    else
+      pure
+        PageTime
+          { route = SourceRoute,
+            ref = m.ref,
+            us = t.us,
+            wireBytes = t.response.wireBytes
+          }
 
 -- | The fallback category of one module page, if any. A 200 must be a
 -- module page; anything else is 'Failed', with the body as the detail.

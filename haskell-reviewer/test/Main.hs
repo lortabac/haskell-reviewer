@@ -8,6 +8,7 @@ import Bench.ModuleListTest qualified
 import Bench.PathTest qualified
 import Bench.ProjectsTest qualified
 import Bench.QueriesTest qualified
+import Bench.RefsTest qualified
 import Bench.RtsStatsTest qualified
 import Bench.ShellTest qualified
 import Bench.StatsTest qualified
@@ -128,6 +129,7 @@ main = do
         Bench.PathTest.tests,
         Bench.ProjectsTest.tests,
         Bench.QueriesTest.tests,
+        Bench.RefsTest.tests,
         Bench.RtsStatsTest.tests,
         Bench.ShellTest.tests,
         Bench.StatsTest.tests,

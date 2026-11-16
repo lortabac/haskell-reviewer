@@ -10,6 +10,7 @@ module Bench.SearchDuring
     -- * Running
     timeQuery,
     runSearchDuring,
+    maxRounds,
   )
 where
 
@@ -65,6 +66,7 @@ data SearchDuringRun = SearchDuringRun
 
 -- | One run: rounds of every query until the last answer of a round is
 -- full, at most 'maxRounds'; then wait for the done line and stop.
+-- 'Bench.RefsDuring.runRefsDuring' has the same loop.
 runSearchDuring :: SessionConfig -> IO (Either RunError SearchDuringRun)
 runSearchDuring cfg = fmap fst <$> withSession cfg steps
   where
@@ -87,6 +89,6 @@ runSearchDuring cfg = fmap fst <$> withSession cfg steps
         else pure (ts : acc, n)
 
 -- | A bound, so a server that never finishes can't keep us here. Way
--- more than wire-server needs (a few rounds).
+-- more than wire-server needs (a few rounds). Also for refs.
 maxRounds :: Int
 maxRounds = 200

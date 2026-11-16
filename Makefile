@@ -20,8 +20,9 @@ build:
 test:
 	$(CABAL) test all --test-show-details=direct
 
-# Runs the three reference projects (SPEC §10, §11.9; D-76, D-82, D-215):
-# the §10.1 targets, memory, GC pauses and the fallback census. A few
+# Runs the three reference projects (SPEC §10, §11.9; D-76, D-82, D-215,
+# D-303): the §10.1 targets (module and source pages, search, find
+# references), memory, GC pauses and the fallback census. 10-20
 # minutes. By hand, before a release: shared CI runners are too noisy for
 # timings. Needs network the first time, to fetch the projects into
 # bench/projects/ (git-ignored). Exit 1 for a broken run or wrong fallback
@@ -39,13 +40,14 @@ bench: build
 	    $(BENCH_PROJECTS)
 
 # CI smoke test (D-76): checks the harness itself works, on one small
-# project, with no timing checks; the fallback census is checked. Needs
-# network the first time.
+# project, with no timing checks; the fallback census and the refs
+# queries are checked. Needs network the first time.
 bench-smoke: build
 	bench/fetch-projects.sh optparse-applicative
 	"$$($(CABAL) list-bin bench:haskell-reviewer-bench)" \
 	    --exe "$$($(CABAL) list-bin exe:haskell-reviewer)" \
-	    --runs 1 --warmup 0 --steady-runs 1 --search-runs 1 --nav-idle 2 \
+	    --runs 1 --warmup 0 --steady-runs 1 --search-runs 1 --refs-runs 1 \
+	    --nav-idle 2 \
 	    optparse-applicative
 
 # Dev only, not in CI: compare our CPP with gcc -traditional, run as GHC

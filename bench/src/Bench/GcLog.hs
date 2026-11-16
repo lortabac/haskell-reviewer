@@ -12,6 +12,8 @@ module Bench.GcLog
     GcLogError (..),
     GcRun (..),
     GcSummary (..),
+    PhaseMark (..),
+    PhaseGc (..),
 
     -- * Parsing
     parseGcLog,
@@ -19,12 +21,14 @@ module Bench.GcLog
 
     -- * Summary
     summarizeGc,
+    phaseMajors,
   )
 where
 
 import Bench.Stats (percentile)
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (mapMaybe)
+import Data.Text (Text)
 import Text.Read (readMaybe)
 
 {- Note [Reading -S]
@@ -36,7 +40,8 @@ A collection line has nine numbers and the generation:
 >  1109608    640896    665488  0.000  0.000    0.002    0.001    0    0  (Gen:  0)
 
 "GC elap" is the pause, "TOT elap" the time since the RTS started (so
-roughly since the process started). Both in seconds, 1 ms steps.
+roughly since the process started). Both in seconds, 1 ms steps. "Live
+bytes" is what the heap holds after this collection.
 
 The nonmoving GC adds "# sync  0.000" lines: the short pause at the end
 of a concurrent mark. They have no timestamp, so we give them the one of
@@ -69,7 +74,9 @@ data Pause = Pause
     gen :: Int,
     durationUs :: Integer,
     -- | When it ended, since the RTS started.
-    atUs :: Integer
+    atUs :: Integer,
+    -- | Live bytes after it. 'Nothing' for a sync.
+    liveBytes :: Maybe Integer
   }
   deriving (Eq, Show)
 
@@ -121,8 +128,29 @@ data GcSummary = GcSummary
     -- | Max pause of a major collection after indexing, from the
     -- per-GC lines. The Q-GC rule's input (plan §4).
     maxMajorAfterUs :: Maybe Integer,
+    -- | Max live bytes after a major collection after indexing: how big
+    -- the index (and the rest) is once built. Minor collections don't
+    -- count: their live bytes aren't the whole heap's.
+    maxLiveAfterBytes :: Maybe Integer,
     -- | Sum of all pauses.
     pausedUs :: Integer
+  }
+  deriving (Eq, Show)
+
+-- | When a phase of a run started (since the process started). The
+-- next mark ends it; the last phase lasts to the end of the run.
+data PhaseMark = PhaseMark
+  { name :: Text,
+    startUs :: Integer
+  }
+  deriving (Eq, Show)
+
+-- | The major collections of one phase.
+data PhaseGc = PhaseGc
+  { name :: Text,
+    majors :: Int,
+    -- | 'Nothing': no major collection in the phase.
+    maxMajorUs :: Maybe Integer
   }
   deriving (Eq, Show)
 
@@ -149,13 +177,21 @@ pauseLine :: String -> Maybe Pause
 pauseLine l = case words l of
   ["#", "sync", secs] -> do
     d <- seconds secs
-    Just Pause {kind = Sync, gen = 1, durationUs = d, atUs = 0}
+    Just Pause {kind = Sync, gen = 1, durationUs = d, atUs = 0, liveBytes = Nothing}
   ws
-    | [_, _, _, _, elap, _, tot, _, _, "(Gen:", genClose] <- ws,
+    | [_, _, live, _, elap, _, tot, _, _, "(Gen:", genClose] <- ws,
       Just g <- readMaybe (takeWhile (/= ')') genClose) -> do
         d <- seconds elap
         at <- seconds tot
-        Just Pause {kind = Collection, gen = g, durationUs = d, atUs = at}
+        lb <- readMaybe live
+        Just
+          Pause
+            { kind = Collection,
+              gen = g,
+              durationUs = d,
+              atUs = at,
+              liveBytes = Just lb
+            }
   _ -> Nothing
 
 -- | A summary line with a max pause.
@@ -204,6 +240,7 @@ summarizeGc runs = do
         maxAfterUs = maxOf [p.durationUs | (d, p) <- tagged, p.atUs > d],
         majorsAfter = length majorsAfterDone,
         maxMajorAfterUs = maxOf (map (.durationUs) majorsAfterDone),
+        maxLiveAfterBytes = maxOf [b | p <- majorsAfterDone, Just b <- [p.liveBytes]],
         pausedUs = sum durations
       }
   where
@@ -217,5 +254,28 @@ summarizeGc runs = do
     totals = [t | r <- runs, t <- r.gcLog.totals]
     totalMaxes = map (.maxPauseUs) totals
     majorTotals = [t.maxPauseUs | t <- totals, t.kind == Collection, t.gen >= 1]
-    maxOf [] = Nothing
-    maxOf xs = Just (maximum xs)
+
+-- | Major collections per phase of one run. A pause counts in the
+-- phase @(start, next start]@ it ended in, like the done split in
+-- 'summarizeGc'; the last phase has no end. So with a first mark at the
+-- done time, the phases add up to 'majorsAfter'. Phases with none get
+-- @0@ and 'Nothing'.
+phaseMajors :: [PhaseMark] -> GcLog -> [PhaseGc]
+phaseMajors marks gcLog =
+  zipWith one marks (map (Just . (.startUs)) (drop 1 marks) <> [Nothing])
+  where
+    one start end =
+      let ds =
+            [ p.durationUs
+            | p <- gcLog.pauses,
+              p.kind == Collection,
+              p.gen >= 1,
+              p.atUs > start.startUs,
+              maybe True (p.atUs <=) end
+            ]
+       in PhaseGc {name = start.name, majors = length ds, maxMajorUs = maxOf ds}
+
+-- | 'Nothing' for an empty list.
+maxOf :: (Ord a) => [a] -> Maybe a
+maxOf [] = Nothing
+maxOf xs = Just (maximum xs)
