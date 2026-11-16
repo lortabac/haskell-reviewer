@@ -1484,8 +1484,8 @@ Target: ≤ 30 ms median server time on a large indexed project (D-208).
   Unchanged blobs hit the shared parse results (§11.4.4), so a reload
   re-parses only what changed.
 - **GC.** Big indexes may cause long GC pauses. Benchmarks pick the fix:
-  compact regions or the non-moving GC (Q-GC). M1 keeps the copying GC
-  with the D-162 defaults: pauses are well under target (D-219).
+  compact regions or the non-moving GC (Q-GC). M1 and M2 keep the copying
+  GC with the D-162 defaults: pauses are well under target (D-219, D-305).
 - **Session state** also lives in STM: LLM threads, budgets (§6.5), SSE
   clients and preferences.
 - **Files the tool writes** (§1): the HIE cache (`$XDG_CACHE_HOME`), UI

@@ -1,0 +1,132 @@
+haskell-reviewer bench - M2 reference
+runs: 10 start-up + 1 warm-up, 3 steady, 3 search-during, 3 refs-during; RTS: product defaults
+RLIMIT_NOFILE: soft=1024 hard=524288
+load average at start: 1.44 1.57 2.29
+
+== optparse-applicative (small, 34 modules listed, 34 parsed)
+start-up, 10 runs, ms, median [min-max]:
+  URL 16.6 [14.7-17.2] | accepting 18.3 [16.1-18.8]
+  UI usable 202.6 [165.7-244.0] (107.0 KiB on the wire, first run)
+    shell 18.3, assets 23.8, prefs 191.0, modules 191.3, search 190.8, module 202.2, files 190.1 (first search partial in 10)
+  on-demand module: median 34.6, p95 61.2, max 61.2 (10); last-queued Setup, largest Main, middle Examples.Alternatives
+  indexing done (harness) 223.4 [181.6-275.5] | product 57.0 [40.0-69.0] | span 57.6
+  done line: 34 modules, 34 ready, 0 failed, 0 text only (first run)
+  stop 39.1 [33.5-45.1]
+steady, 3 runs after indexing, ms:
+  navigation back to back: median 1.1, p95 5.2, max 7.4 (102)
+  navigation with idle gaps: median 2.4, p95 6.3, max 8.8 (150)
+  source back to back: median 1.0, p95 4.0, max 10.9 (102)
+  source with idle gaps: median 2.5, p95 6.1, max 12.5 (150)
+  search: median 0.3, p95 0.8, max 1.6 (300)
+  refs: median 3.6, p95 7.0, max 7.3 (90)
+    Options.Applicative.Types type:Parser: median 6.1, p95 7.3, max 7.3; total 145, sent 145, 3.4 KiB
+    Options.Applicative.Types type:ParserInfo: median 4.5, p95 7.1, max 7.1; total 45, sent 45, 1.7 KiB
+    Options.Applicative.Types field:ParserInfo.infoParser: median 2.6, p95 3.2, max 3.2; total 15, sent 15, 0.8 KiB
+    Options.Applicative.Builder val:long: median 4.2, p95 5.6, max 5.6; total 105, sent 105, 2.7 KiB
+    Options.Applicative.Builder val:strOption: median 3.6, p95 4.0, max 4.0; total 45, sent 45, 1.3 KiB
+    Options.Applicative.Extra val:hsubparser: median 1.4, p95 2.6, max 2.6; total 15, sent 15, 0.6 KiB
+  GC: 416 pauses, 413 major (413 after indexing); max 6.0, max major 6.0, p99 4.0; max major after indexing 6.0, max live after indexing 3.4 MiB
+      max during indexing 3.0, after 6.0; paused 1034.0 in total
+  major GC by phase: census 0, pages 0, sources 0, pages_idle 202 (max 6.0), sources_idle 202 (max 4.0), search 0, refs 0, end_idle 6 (max 3.0), stop 3 (max 1.0)
+search during indexing, 3 runs, report only, ms: median 0.2, p95 0.9, max 152.6 (267); 300 queries, 267 partial
+refs during indexing, 3 runs, report only, ms: median 5.9, p95 209.0, max 209.0 (9); 9 of them partial
+  first answer median 200.1; rounds 1, 1, 1; indexing +7.0% vs start-up
+fallbacks: as expected; got: none
+memory, MiB, max over runs: max_mem_in_use start-up 616.0 / steady 616.0, max_live 3.5, idle RSS after indexing 571.1 / after the steady work 592.0, peak RSS 597.2 (at done 560.6)
+
+== pandoc (typical, 367 modules listed, 366 parsed)
+start-up, 10 runs, ms, median [min-max]:
+  URL 16.3 [15.5-16.9] | accepting 18.0 [17.2-18.6]
+  UI usable 389.2 [255.0-450.4] (113.9 KiB on the wire, first run)
+    shell 18.0, assets 23.5, prefs 281.6, modules 285.0, search 286.6, module 389.2, files 265.5 (first search partial in 10)
+  on-demand module: median 144.6, p95 208.4, max 208.4 (10); last-queued test/command/6466-whole.hs, largest Text.Pandoc.Writers.Powerpoint.Output, middle Text.Pandoc.Readers.RST
+  indexing done (harness) 732.7 [694.4-796.0] | product 489.0 [477.0-554.0] | span 489.8
+  done line: 366 modules, 366 ready, 0 failed, 0 text only (first run)
+  stop 45.2 [43.0-49.4]
+steady, 3 runs after indexing, ms:
+  navigation back to back: median 1.3, p95 5.2, max 17.8 (1098)
+  navigation with idle gaps: median 2.7, p95 6.7, max 11.0 (150)
+  source back to back: median 1.6, p95 8.2, max 25.9 (1098)
+  source with idle gaps: median 2.8, p95 10.0, max 23.0 (150)
+  search: median 1.4, p95 3.1, max 4.5 (300)
+  refs: median 24.2, p95 52.9, max 65.7 (90)
+    Text.Pandoc.Class.PandocMonad class:PandocMonad: median 50.5, p95 65.7, max 65.7; total 2851, sent 1000, 22.9 KiB
+    Text.Pandoc.Options type:ReaderOptions: median 25.8, p95 47.3, max 47.3; total 135, sent 135, 4.1 KiB
+    Text.Pandoc.Options field:ReaderOptions.readerExtensions: median 14.0, p95 26.8, max 26.8; total 89, sent 89, 3.0 KiB
+    Text.Pandoc.Class.PandocMonad val:report: median 39.4, p95 48.9, max 48.9; total 288, sent 288, 8.3 KiB
+    Text.Pandoc.Shared val:stringify: median 16.3, p95 30.6, max 30.6; total 58, sent 58, 2.4 KiB
+    Text.Pandoc.Shared val:trimr: median 7.5, p95 12.4, max 12.4; total 32, sent 32, 1.4 KiB
+  GC: 503 pauses, 422 major (411 after indexing); max 8.1, max major 8.1, p99 7.0; max major after indexing 8.0, max live after indexing 37.5 MiB
+      max during indexing 8.0, after 8.0; paused 2361.0 in total
+  major GC by phase: census 1 (max 5.0), pages 0, sources 0, pages_idle 201 (max 8.0), sources_idle 200 (max 8.0), search 0, refs 0, end_idle 6 (max 7.0), stop 3 (max 4.0)
+search during indexing, 3 runs, report only, ms: median 5.5, p95 54.8, max 198.4 (102); 120 queries, 102 partial
+refs during indexing, 3 runs, report only, ms: median 73.4, p95 222.7, max 225.7 (24); 24 of them partial
+  first answer median 222.7; rounds 2, 2, 2; indexing +1.4% vs start-up
+fallbacks: as expected; got: no-source/autogen 1
+memory, MiB, max over runs: max_mem_in_use start-up 677.0 / steady 675.0, max_live 49.4, idle RSS after indexing 659.3 / after the steady work 680.8, peak RSS 717.5 (at done 664.6)
+
+== wire-server (large, 2061 modules listed, 1972 parsed)
+start-up, 10 runs, ms, median [min-max]:
+  URL 16.6 [16.2-18.2] | accepting 18.3 [17.6-20.0]
+  UI usable 636.1 [381.0-828.3] (153.5 KiB on the wire, first run)
+    shell 18.3, assets 23.9, prefs 486.9, modules 494.3, search 485.0, module 636.1, files 482.3 (first search partial in 10)
+  on-demand module: median 174.7, p95 299.8, max 299.8 (10); last-queued services/proxy/test/unit/Main.hs, largest Test.Wire.API.Golden.Generated, middle Wire.ConversationStore.Cassandra
+  indexing done (harness) 1690.4 [1566.3-1758.9] | product 1252.0 [1199.0-1262.0] | span 1252.8
+  done line: 1972 modules, 1972 ready, 0 failed, 11 text only (first run)
+  stop 60.5 [55.4-66.1]
+steady, 3 runs after indexing, ms:
+  navigation back to back: median 2.0, p95 6.3, max 28.7 (5916)
+  navigation with idle gaps: median 4.2, p95 12.1, max 102.4 (150)
+  source back to back: median 2.4, p95 8.1, max 48.9 (5916)
+  source with idle gaps: median 4.7, p95 13.6, max 28.4 (150)
+  search: median 8.0, p95 16.1, max 18.3 (300)
+  refs: median 78.1, p95 149.6, max 230.7 (90)
+    Data.Id type:UserId: median 144.7, p95 230.7, max 230.7; total 4145, sent 1000, 24.1 KiB
+    Data.Qualified type:Qualified: median 83.3, p95 114.3, max 114.3; total 773, sent 773, 19.6 KiB
+    Data.Qualified con:Qualified: median 84.5, p95 121.3, max 121.3; total 801, sent 801, 21.5 KiB
+    Data.Qualified val:tUnqualified: median 45.7, p95 67.7, max 67.7; total 626, sent 626, 20.5 KiB
+    Data.Qualified field:Qualified.qUnqualified: median 62.2, p95 82.1, max 82.1; total 647, sent 647, 19.2 KiB
+    Data.Qualified val:tSplit: median 3.7, p95 5.5, max 5.5; total 5, sent 5, 0.4 KiB
+  pages over 100 ms: 1
+    idle module Web.Scim.Filter 102.4
+  GC: 704 pauses, 426 major (411 after indexing); max 18.0, max major 18.0, p99 16.0; max major after indexing 18.0, max live after indexing 121.2 MiB
+      max during indexing 14.0, after 18.0; paused 6653.0 in total
+  major GC by phase: census 0, pages 0, sources 0, pages_idle 201 (max 18.0), sources_idle 201 (max 17.0), search 0, refs 0, end_idle 6 (max 16.0), stop 3 (max 10.0)
+search during indexing, 3 runs, report only, ms: median 16.2, p95 59.7, max 459.3 (192); 220 queries, 192 partial
+refs during indexing, 3 runs, report only, ms: median 32.4, p95 231.7, max 387.5 (84); 84 of them partial
+  first answer median 385.5; rounds 6, 5, 5; indexing +8.5% vs start-up
+fallbacks: as expected; got: preprocessed 11, generated 1, no-source/autogen 85, no-source/missing 3
+memory, MiB, max over runs: max_mem_in_use start-up 824.0 / steady 825.0, max_live 121.2, idle RSS after indexing 806.6 / after the steady work 847.0, peak RSS 847.0 (at done 759.9)
+  §10.2 budget 2048.0 (max_mem_in_use): ok
+
+Targets (SPEC §10.1, D-208, D-303; a MISS never fails the bench, §10.3):
+  §10.1 URL + accepting < 300 ms (median): optparse-applicative: ok (18.3 ms; max 18.8)
+  §10.1 UI usable < 1 s (median): optparse-applicative: ok (202.6 ms; max 244.0)
+  §10.1 on-demand module < 300 ms (p95): optparse-applicative: ok (61.2 ms; max 61.2)
+  §10.1 navigation < 100 ms (back to back) (p95): optparse-applicative: ok (5.2 ms; max 7.4)
+  §10.1 navigation < 100 ms (idle gaps) (p95): optparse-applicative: ok (6.3 ms; max 8.8)
+  §10.1 navigation < 100 ms (source, back to back) (p95): optparse-applicative: ok (4.0 ms; max 10.9)
+  §10.1 navigation < 100 ms (source, idle gaps) (p95): optparse-applicative: ok (6.1 ms; max 12.5)
+  D-208 search after indexing ≤ 30 ms (median): optparse-applicative: ok (0.3 ms; max 1.6)
+  D-208 search after indexing ≤ 100 ms (p95): optparse-applicative: ok (0.8 ms; max 1.6)
+  D-303 find references after indexing < 300 ms (p95): optparse-applicative: ok (7.0 ms; max 7.3)
+  §10.1 URL + accepting < 300 ms (median): pandoc: ok (18.0 ms; max 18.6)
+  §10.1 UI usable < 1 s (median): pandoc: ok (389.2 ms; max 450.4)
+  §10.1 on-demand module < 300 ms (p95): pandoc: ok (208.4 ms; max 208.4)
+  §10.1 navigation < 100 ms (back to back) (p95): pandoc: ok (5.2 ms; max 17.8)
+  §10.1 navigation < 100 ms (idle gaps) (p95): pandoc: ok (6.7 ms; max 11.0)
+  §10.1 navigation < 100 ms (source, back to back) (p95): pandoc: ok (8.2 ms; max 25.9)
+  §10.1 navigation < 100 ms (source, idle gaps) (p95): pandoc: ok (10.0 ms; max 23.0)
+  D-208 search after indexing ≤ 30 ms (median): pandoc: ok (1.4 ms; max 4.5)
+  D-208 search after indexing ≤ 100 ms (p95): pandoc: ok (3.1 ms; max 4.5)
+  D-303 find references after indexing < 300 ms (p95): pandoc: ok (52.9 ms; max 65.7)
+  §10.1 URL + accepting < 300 ms (median): wire-server: ok (18.3 ms; max 20.0)
+  §10.1 UI usable < 10 s (median): wire-server: ok (636.1 ms; max 828.3)
+  §10.1 on-demand module < 300 ms (p95): wire-server: ok (299.8 ms; max 299.8)
+  §10.1 navigation < 100 ms (back to back) (p95): wire-server: ok (6.3 ms; max 28.7)
+  §10.1 navigation < 100 ms (idle gaps) (p95): wire-server: ok (12.1 ms; max 102.4)
+  §10.1 navigation < 100 ms (source, back to back) (p95): wire-server: ok (8.1 ms; max 48.9)
+  §10.1 navigation < 100 ms (source, idle gaps) (p95): wire-server: ok (13.6 ms; max 28.4)
+  D-208 search after indexing ≤ 30 ms (median): wire-server: ok (8.0 ms; max 18.3)
+  D-208 search after indexing ≤ 100 ms (p95): wire-server: ok (16.1 ms; max 18.3)
+  D-303 find references after indexing < 300 ms (p95): wire-server: ok (149.6 ms; max 230.7)
