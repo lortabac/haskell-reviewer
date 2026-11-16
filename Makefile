@@ -21,8 +21,8 @@ test:
 	$(CABAL) test all --test-show-details=direct
 
 # Runs the three reference projects (SPEC §10, §11.9; D-76, D-82, D-215,
-# D-303): the §10.1 targets (module and source pages, search, find
-# references), memory, GC pauses and the fallback census. 10-20
+# D-303, D-308): the §10.1 targets (module and source pages, search, find
+# references, text search), memory, GC pauses and the fallback census. 10-20
 # minutes. By hand, before a release: shared CI runners are too noisy for
 # timings. Needs network the first time, to fetch the projects into
 # bench/projects/ (git-ignored). Exit 1 for a broken run or wrong fallback

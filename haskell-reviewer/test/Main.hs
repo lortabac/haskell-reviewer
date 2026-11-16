@@ -57,6 +57,7 @@ import HaskellReviewer.Core.RootTest qualified
 import HaskellReviewer.Core.SearchTest qualified
 import HaskellReviewer.Core.SourceLinksTest qualified
 import HaskellReviewer.Core.SourceTextTest qualified
+import HaskellReviewer.Core.TextSearchTest qualified
 import HaskellReviewer.Core.TokensTest qualified
 import HaskellReviewer.Core.XdgTest qualified
 import HaskellReviewer.Effects.AtomicFileTest qualified
@@ -85,6 +86,8 @@ import HaskellReviewer.Server.Router (warmUpGzip)
 import HaskellReviewer.Server.RouterTest qualified
 import HaskellReviewer.Server.Search (warmUpSearch)
 import HaskellReviewer.Server.SourceTest qualified
+import HaskellReviewer.Server.TextSearch (warmUpTextSearch)
+import HaskellReviewer.Server.TextSearchTest qualified
 import HaskellReviewer.Server.Wire.Page (warmUpPages)
 import HaskellReviewer.Server.Wire.Source (warmUpSource)
 import HaskellReviewer.Session.ClientsTest qualified
@@ -93,6 +96,7 @@ import HaskellReviewer.Session.PrefsTest qualified
 import HaskellReviewer.Session.Resolve (warmUpResolve)
 import HaskellReviewer.Session.ResolveTest qualified
 import HaskellReviewer.Session.SnapshotTest qualified
+import HaskellReviewer.Session.TextStoreTest qualified
 import Test.Tasty (defaultMain, testGroup, withResource)
 import TestSupport (warmUpTempDirs)
 
@@ -117,6 +121,8 @@ main = do
   -- The same for the refs route. It parses and resolves the warm-up
   -- project too, here on one thread.
   warmUpRefs
+  -- And for the text search route.
+  warmUpTextSearch
   -- Tests run in parallel: share expensive values through withResource.
   -- See Note [Shared values in tests] in HaskellReviewer.Core.PackageGlobTest.
   defaultMain $
@@ -166,6 +172,7 @@ main = do
         HaskellReviewer.Core.RelPathTest.tests,
         HaskellReviewer.Core.RootTest.tests,
         HaskellReviewer.Core.SearchTest.tests,
+        HaskellReviewer.Core.TextSearchTest.tests,
         HaskellReviewer.Core.TokensTest.tests,
         HaskellReviewer.Core.XdgTest.tests,
         HaskellReviewer.Effects.AtomicFileTest.tests,
@@ -231,7 +238,8 @@ main = do
                     [ HaskellReviewer.Server.ApiGoldenTest.tests,
                       HaskellReviewer.Server.ApiTest.tests,
                       HaskellReviewer.Server.RefsTest.tests,
-                      HaskellReviewer.Server.SourceTest.tests
+                      HaskellReviewer.Server.SourceTest.tests,
+                      HaskellReviewer.Server.TextSearchTest.tests
                     ],
                 HaskellReviewer.Server.PageLinksTest.tests,
                 HaskellReviewer.Server.PageLinksTest.linearTests,
@@ -245,5 +253,6 @@ main = do
         HaskellReviewer.Session.ClientsTest.tests,
         HaskellReviewer.Session.IndexTest.tests,
         HaskellReviewer.Session.SnapshotTest.tests,
+        HaskellReviewer.Session.TextStoreTest.tests,
         ExeTest.tests
       ]

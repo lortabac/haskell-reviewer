@@ -12,6 +12,8 @@ import Bench.Targets
     refsAfterP95,
     renderVerdict,
     searchAfterMedian,
+    textSearchAfterMedian,
+    textSearchAfterP95,
     uiUsable,
     urlAndAccepting,
     verdict,
@@ -52,6 +54,13 @@ tests =
         (refsAfterP95.stat, refsAfterP95.bound) @?= (P95, Below)
         (verdict refsAfterP95 299_999 Nothing).met @?= True
         (verdict refsAfterP95 300_000 Nothing).met @?= False,
+      testCase "text search after load: ≤ 50 ms median, ≤ 150 ms p95" $ do
+        (textSearchAfterMedian.stat, textSearchAfterMedian.bound) @?= (Median, AtMost)
+        (verdict textSearchAfterMedian 50_000 Nothing).met @?= True
+        (verdict textSearchAfterMedian 50_001 Nothing).met @?= False
+        (textSearchAfterP95.stat, textSearchAfterP95.bound) @?= (P95, AtMost)
+        (verdict textSearchAfterP95 150_000 Nothing).met @?= True
+        (verdict textSearchAfterP95 150_001 Nothing).met @?= False,
       testCase "a refs line" $
         renderVerdict "wire-server" (verdict refsAfterP95 216_000 (Just 250_000))
           @?= "D-303 find references after indexing < 300 ms (p95): wire-server: ok \

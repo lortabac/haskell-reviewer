@@ -147,6 +147,7 @@ import HaskellReviewer.Server.Prefs (warmUpPrefs)
 import HaskellReviewer.Server.Refs (warmUpRefs)
 import HaskellReviewer.Server.Router (Routes (..), application, warmUpGzip)
 import HaskellReviewer.Server.Search (warmUpSearch)
+import HaskellReviewer.Server.TextSearch (warmUpTextSearch)
 import HaskellReviewer.Server.Wire.Page (warmUpPages)
 import HaskellReviewer.Server.Wire.Source (warmUpSource)
 import HaskellReviewer.Session.Clients (newClients, waitIdle)
@@ -485,6 +486,7 @@ serve deps logger opts root defaults lister tracer shutdown t0 w0 = do
           prefs <- newPrefsStore logger defaults location
           warmUpPrefs
           warmUpSearch
+          warmUpTextSearch
           slot <- newSnapshotSlot
           -- Filled by ready: the listing starts after the URL line.
           start <- newEmptyMVar

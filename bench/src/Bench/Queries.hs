@@ -1,5 +1,6 @@
--- | The search queries (D-208) and find-references queries (D-303) the
--- bench sends, and how it reads the answers.
+-- | The search queries (D-208), find-references queries (D-303) and
+-- text search queries (D-308) the bench sends, and how it reads the
+-- answers.
 module Bench.Queries
   ( -- * Search queries
     queries,
@@ -9,6 +10,11 @@ module Bench.Queries
     refsQueries,
     refsQueryText,
 
+    -- * Text search queries
+    textQueries,
+    textLimitBox,
+    textLimitPage,
+
     -- * Answers
     SearchAnswer (..),
     SearchAnswerError (..),
@@ -17,6 +23,9 @@ module Bench.Queries
     RefsAnswerError (..),
     parseRefsAnswer,
     parseNotFoundWhat,
+    TextAnswer (..),
+    TextAnswerError (..),
+    parseTextAnswer,
   )
 where
 
@@ -98,6 +107,32 @@ refsQueries = \case
 refsQueryText :: RefsQuery -> Text
 refsQueryText q = q.moduleRef <> " " <> q.decl
 
+-- | 10 fixed text queries (D-308): one char that hits nearly every
+-- line, common words, an operator, no match, non-ASCII, a long line
+-- (71 chars, a line of wire-server's AGPL licence header), inner
+-- quotes, a marker. Raw text; 'Bench.Url.textSearchPath' encodes it.
+textQueries :: NonEmpty Text
+textQueries =
+  "e"
+    :| [ "where",
+         "import qualified",
+         "ByteString",
+         "<$>",
+         "zzqqxx",
+         "ü",
+         "-- This program is free software: you can redistribute it and/or modify",
+         "a \"b",
+         "TODO"
+       ]
+
+-- | The limit the search box sends (D-308's target is for it).
+textLimitBox :: Int
+textLimitBox = 8
+
+-- | The limit of the results page (report only).
+textLimitPage :: Int
+textLimitPage = 1000
+
 -- | The parts of an @api\/search@ answer (D-207) the bench looks at.
 data SearchAnswer = SearchAnswer
   { partial :: Bool,
@@ -156,3 +191,32 @@ parseNotFoundWhat body = do
     parser = Aeson.withObject "not-found" $ \o -> do
       k <- o .: "kind"
       if k == ("not-found" :: Text) then o .: "what" else fail "not a not-found"
+
+-- | The parts of an @api\/text-search@ answer (D-307) the bench looks
+-- at.
+data TextAnswer = TextAnswer
+  { stopped :: Bool,
+    -- | Every matching line.
+    total :: Int,
+    files :: Int,
+    -- | Results in the answer.
+    sent :: Int
+  }
+  deriving (Eq, Show)
+
+-- | The body is not a text search answer: aeson's message.
+newtype TextAnswerError = TextAnswerError String
+  deriving (Eq, Show)
+
+-- | Read an @api\/text-search@ body.
+parseTextAnswer :: ByteString -> Either TextAnswerError TextAnswer
+parseTextAnswer body = either (Left . TextAnswerError) Right $ do
+  v <- Aeson.eitherDecodeStrict body
+  Aeson.Types.parseEither parser v
+  where
+    parser = Aeson.withObject "text-search" $ \o -> do
+      st <- o .: "stopped"
+      t <- o .: "total"
+      f <- o .: "files"
+      rs <- o .: "results" :: Aeson.Types.Parser [Aeson.Value]
+      pure TextAnswer {stopped = st, total = t, files = f, sent = length rs}

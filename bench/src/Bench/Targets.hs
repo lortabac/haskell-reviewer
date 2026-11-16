@@ -1,6 +1,7 @@
--- | The SPEC §10.1 targets (and D-208's search and D-303's refs
--- targets), and whether a run met them. Missing one never fails the
--- bench (§10.3): the table says MISS and the human decides.
+-- | The SPEC §10.1 targets (and D-208's search, D-303's refs and
+-- D-308's text search targets), and whether a run met them. Missing
+-- one never fails the bench (§10.3): the table says MISS and the human
+-- decides.
 module Bench.Targets
   ( -- * Types
     Stat (..),
@@ -19,6 +20,8 @@ module Bench.Targets
     searchAfterMedian,
     searchAfterP95,
     refsAfterP95,
+    textSearchAfterMedian,
+    textSearchAfterP95,
     memoryBudgetBytes,
 
     -- * Verdicts
@@ -180,6 +183,29 @@ refsAfterP95 =
       stat = P95,
       bound = Below,
       limitUs = 300_000
+    }
+
+-- | Text search after indexing, the store loaded, limit 8 (the box),
+-- median over the text queries.
+textSearchAfterMedian :: Target
+textSearchAfterMedian =
+  Target
+    { key = "text_search_after_median",
+      label = "D-308 text search after load ≤ 50 ms",
+      stat = Median,
+      bound = AtMost,
+      limitUs = 50_000
+    }
+
+-- | The same, p95.
+textSearchAfterP95 :: Target
+textSearchAfterP95 =
+  Target
+    { key = "text_search_after_p95",
+      label = "D-308 text search after load ≤ 150 ms",
+      stat = P95,
+      bound = AtMost,
+      limitUs = 150_000
     }
 
 -- | SPEC §10.2's provisional budget, for the large project only.

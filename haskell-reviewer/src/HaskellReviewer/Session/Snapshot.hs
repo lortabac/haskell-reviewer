@@ -36,6 +36,7 @@ import HaskellReviewer.Core.Search (ModuleCandidate)
 import HaskellReviewer.Effects.FileSystem (ListError)
 import HaskellReviewer.Session.Index (Index, Progress, readProgress)
 import HaskellReviewer.Session.Resolve (Resolver)
+import HaskellReviewer.Session.TextStore (TextStore)
 
 -- | Which snapshot a response comes from. Goes up on reload (later); the
 -- client caches by it (SPEC §11.6.2).
@@ -67,7 +68,10 @@ data Snapshot = Snapshot
     index :: Index,
     -- | Resolution over the index. See Note [Session resolution] in
     -- "HaskellReviewer.Session.Resolve".
-    resolver :: Resolver
+    resolver :: Resolver,
+    -- | The texts for text search, loaded on the first one. See Note
+    -- [Text store] in "HaskellReviewer.Session.TextStore".
+    textStore :: TextStore
   }
 
 -- | Where the snapshot goes once listed. Requests wait on it: the list

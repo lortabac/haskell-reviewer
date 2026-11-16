@@ -1,7 +1,7 @@
 module Bench.UrlTest (tests) where
 
 import Bench.Queries (RefsQuery (..))
-import Bench.Url (encodePath, encodeQueryValue, refsPath, sourcePath)
+import Bench.Url (encodePath, encodeQueryValue, refsPath, sourcePath, textSearchPath)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 
@@ -28,5 +28,8 @@ tests =
         sourcePath "a b/Ü.hs" @?= "api/source/tree/a%20b/%C3%9C.hs",
       testCase "a refs path" $
         refsPath (RefsQuery "R.Shape" "val:<+>")
-          @?= "api/refs/tree?module=R.Shape&decl=val%3A%3C%2B%3E"
+          @?= "api/refs/tree?module=R.Shape&decl=val%3A%3C%2B%3E",
+      testCase "a text search path: spaces, quotes, plus, non-ASCII" $ do
+        textSearchPath "a \"b+" 8 @?= "api/text-search/tree?q=a%20%22b%2B&limit=8"
+        textSearchPath "ü" 1000 @?= "api/text-search/tree?q=%C3%BC&limit=1000"
     ]

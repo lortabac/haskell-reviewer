@@ -73,14 +73,16 @@ import Bench.Steady
   ( CensusPass (..),
     SteadyPlan (..),
     SteadyRun (..),
+    TextTime (..),
     TimedPass (..),
     runSteady,
   )
 import Control.Exception (Exception, IOException, throwIO, try)
 import Control.Monad (forM, mfilter, unless)
 import Data.ByteString.Lazy qualified as LBS
+import Data.List (nub)
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, maybeToList)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as Text.IO
@@ -333,6 +335,7 @@ runProject opts rows tmp project = do
                       searchRounds = 0,
                       refs = refs,
                       refsRounds = 1,
+                      textRounds = 0,
                       seed = 1
                     }
             s <- loop "census run" 1 $ \_ ->
@@ -352,6 +355,7 @@ runProject opts rows tmp project = do
                         searchRounds = 5,
                         refs = refs,
                         refsRounds = 5,
+                        textRounds = 5,
                         seed = i
                       }
                in runSteady (cfg ("steady-" <> show i) GcStats) items plan >>= orFail
@@ -401,7 +405,17 @@ runProject opts rows tmp project = do
                 )
                 diffs
                 <> refsWarnings (concatMap (.refsTimes) steadies)
+                <> textWarnings steadies
           }
+
+-- | Text searches that hit the deadline (stopped): once per query.
+textWarnings :: [SteadyRun] -> [Text]
+textWarnings runs =
+  [ "text search \"" <> q <> "\": stopped at the deadline"
+  | q <- nub [t.query | t <- ts, t.stopped]
+  ]
+  where
+    ts = concat [maybeToList r.textFirst <> r.textTimes <> r.textPages | r <- runs]
 
 -- | Which kind of run a done line came from, for the warnings.
 data RunKind = StartupRunKind | SteadyRunKind | CensusRunKind

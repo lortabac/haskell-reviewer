@@ -1,0 +1,1 @@
+{"generation":1,"query":"main","partial":false,"stopped":false,"total":7,"files":5,"skipped":{"binary":1,"tooLarge":1,"unreadable":1,"overBudget":0},"results":[{"path":"app/Main.hs","line":1,"lineCol":1,"text":"module Main (main) where","matches":[[14,18]]},{"path":"app/Main.hs","line":4,"lineCol":1,"text":"main :: IO ()","matches":[[1,5]]}]}

@@ -26,6 +26,7 @@ module HaskellReviewer.Core.References
     -- * Lines
     lineCap,
     refLine,
+    lineWindow,
   )
 where
 
@@ -337,32 +338,46 @@ lineCap :: Int
 lineCap = 240
 
 -- | The line a span starts on: all of it, if it's short; else
--- 'lineCap' code points with the span in the middle, moved to stay on
--- the line. A span over several lines counts to the end of its first.
--- Cost bounded by 'lineCap', after the line's offsets (Note [Slicing]
--- in "HaskellReviewer.Core.SourceText").
+-- 'lineCap' code points with the span in the middle ('lineWindow'). A
+-- span over several lines counts to the end of its first. Cost bounded
+-- by 'lineCap', after the line's offsets (Note [Slicing] in
+-- "HaskellReviewer.Core.SourceText").
 refLine :: SourceLines -> Span -> RefLine
-refLine ls s
-  -- Short line: all of it.
-  | Text.length lineHead <= lineCap = RefLine (Col 1) lineHead
-  -- Near the end: the last 'lineCap' code points.
-  | Text.length window < lineCap =
-      windowAt (max 1 (windowStart + Text.length window - lineCap))
-  -- Else the window around the span.
-  | otherwise = RefLine (toCol windowStart) window
+refLine ls s = RefLine (toCol col) text
   where
     Col startCol = s.startCol
     Col endCol = s.endCol
     spanStart = fromIntegral startCol :: Int
-    -- The span's length on its first line, at most the cap.
+    -- The span's length on its first line.
     spanLength
-      | s.endLine == s.startLine = min lineCap (max 0 (fromIntegral endCol - spanStart))
+      | s.endLine == s.startLine = fromIntegral endCol - spanStart
       | otherwise = lineCap
-    windowStart = max 1 (spanStart - (lineCap - spanLength) `div` 2)
-    window = codePoints windowStart lineCap
-    windowAt a = RefLine (toCol a) (codePoints a lineCap)
-    -- One more than the cap: tells a short line from a long one.
-    lineHead = codePoints 1 (lineCap + 1)
+    (col, text) = lineWindow codePoints spanStart spanLength
     -- n code points from column a.
     codePoints a n = sliceSpan ls (Span s.startLine (toCol a) s.startLine (toCol (a + n)))
     toCol = Col . fromIntegral
+
+-- | The window of a line around a range of it: all the line, if it's
+-- short; else 'lineCap' code points with the range in the middle, moved
+-- to stay on the line. Gives the column of the window's first code
+-- point, and its text. Also for text search.
+--
+-- The cutter gives @n@ code points from column @a@ (from 1), fewer at
+-- the end of the line. The range starts at this column and has this
+-- many code points (cut to 'lineCap').
+lineWindow :: (Int -> Int -> Text) -> Int -> Int -> (Int, Text)
+lineWindow cut start len
+  -- Short line: all of it.
+  | Text.length lineHead <= lineCap = (1, lineHead)
+  -- Near the end: the last 'lineCap' code points.
+  | Text.length window < lineCap =
+      windowAt (max 1 (windowStart + Text.length window - lineCap))
+  -- Else the window around the range.
+  | otherwise = (windowStart, window)
+  where
+    rangeLength = min lineCap (max 0 len)
+    windowStart = max 1 (start - (lineCap - rangeLength) `div` 2)
+    window = cut windowStart lineCap
+    windowAt a = (a, cut a lineCap)
+    -- One more than the cap: tells a short line from a long one.
+    lineHead = cut 1 (lineCap + 1)

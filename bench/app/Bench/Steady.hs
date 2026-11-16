@@ -1,9 +1,9 @@
 -- | A steady run (plan §2.2, D-303): after indexing, every module page
 -- once, back to back, then every source page; then module pages with
 -- idle gaps, then the same source pages with the same gaps; then
--- search, then find references. With @+RTS -S@, for the GC pauses. The
--- first run also does the fallback census, in a pass of its own before
--- the timed one.
+-- search, then find references, then text search (D-308). With
+-- @+RTS -S@, for the GC pauses. The first run also does the fallback
+-- census, in a pass of its own before the timed one.
 module Bench.Steady
   ( -- * Types
     SteadyPlan (..),
@@ -11,6 +11,7 @@ module Bench.Steady
     TimedPass (..),
     PageTime (..),
     Route (..),
+    TextTime (..),
     SteadyRun (..),
 
     -- * Running
@@ -31,7 +32,15 @@ import Bench.ModuleList
     isSlot,
     queueOrder,
   )
-import Bench.Queries (RefsQuery, queries)
+import Bench.Queries
+  ( RefsQuery,
+    TextAnswer (..),
+    parseTextAnswer,
+    queries,
+    textLimitBox,
+    textLimitPage,
+    textQueries,
+  )
 import Bench.Refs (RefsTime)
 import Bench.RefsDuring (timeRefs)
 import Bench.RtsStats (RtsStats)
@@ -52,7 +61,7 @@ import Bench.Run
     withSession,
   )
 import Bench.SearchDuring (QueryTime, timeQuery)
-import Bench.Url (modulePath, sourcePath)
+import Bench.Url (modulePath, sourcePath, textSearchPath)
 import Control.Concurrent (threadDelay)
 import Control.Monad (forM, replicateM)
 import Data.Aeson qualified as Aeson
@@ -78,6 +87,9 @@ data SteadyPlan = SteadyPlan
     -- | Refs queries, and rounds of them after the search.
     refs :: [RefsQuery],
     refsRounds :: Int,
+    -- | Rounds of every text query (limit 8) after the refs. With 0,
+    -- no text search at all.
+    textRounds :: Int,
     -- | Picks the idle pages and gaps: the run index.
     seed :: Int
   }
@@ -105,6 +117,18 @@ data PageTime = PageTime
     wireBytes :: Int
   }
 
+-- | One text search request.
+data TextTime = TextTime
+  { query :: Text,
+    -- | From request to the last byte.
+    us :: Integer,
+    stopped :: Bool,
+    total :: Int,
+    files :: Int,
+    sent :: Int,
+    wireBytes :: Int
+  }
+
 -- | Everything one steady run measures.
 data SteadyRun = SteadyRun
   { doneUs :: Integer,
@@ -119,6 +143,12 @@ data SteadyRun = SteadyRun
     idleSources :: [PageTime],
     searchTimes :: [QueryTime],
     refsTimes :: [RefsTime],
+    -- | The first text search: it loads the store. Limit 8.
+    textFirst :: Maybe TextTime,
+    -- | Text searches after it, limit 8.
+    textTimes :: [TextTime],
+    -- | One round with the results page's limit (1000).
+    textPages :: [TextTime],
     -- | When each phase started, the first at the done line. Named like
     -- the JSON keys.
     phases :: [PhaseMark],
@@ -179,13 +209,24 @@ steps items plan s = do
     concatMap NE.toList <$> replicateM plan.searchRounds (mapM (timeQuery s) queries)
   m6 <- mark "refs"
   refsTimes <- concat <$> replicateM plan.refsRounds (mapM (timeRefs s) plan.refs)
-  m7 <- mark "end_idle"
+  -- Last: the store it loads would change the memory of the phases
+  -- before.
+  m7 <- mark "text"
+  (textFirst, textTimes, textPages) <-
+    if plan.textRounds <= 0
+      then pure (Nothing, [], [])
+      else do
+        first <- timeText s textLimitBox (NE.head textQueries)
+        rounds <- replicateM plan.textRounds (mapM (timeText s textLimitBox) textQueries)
+        page <- mapM (timeText s textLimitPage) textQueries
+        pure (Just first, concatMap NE.toList rounds, NE.toList page)
+  m8 <- mark "end_idle"
 
   -- Over the RTS idle-GC delay (0.3 s), so this is the idle size.
   threadDelay 1_000_000
   mem <- procMemory s
   -- Till the run ends: the stop, and the RTS's last GC.
-  m8 <- mark "stop"
+  m9 <- mark "stop"
   load <- getLoadAvg
   pure $ \ended rts ->
     SteadyRun
@@ -197,7 +238,10 @@ steps items plan s = do
         idleSources = idleSources,
         searchTimes = searched,
         refsTimes = refsTimes,
-        phases = [m0, m1, m2, m3, m4, m5, m6, m7, m8],
+        textFirst = textFirst,
+        textTimes = textTimes,
+        textPages = textPages,
+        phases = [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9],
         census = census,
         gc = ended.gc,
         rts = rts,
@@ -236,6 +280,28 @@ timeSource s m = do
             us = t.us,
             wireBytes = t.response.wireBytes
           }
+
+-- | One text search, timed. Fails the run unless it's a 200 with a text
+-- search answer.
+timeText :: Session -> Int -> Text -> IO TextTime
+timeText s limit q = do
+  t <- getApi s Gzip (textSearchPath q limit)
+  let what = "text search " <> show q
+  if t.response.status /= 200
+    then failWith (what <> ": expected 200, got " <> show t.response.status)
+    else case parseTextAnswer t.response.body of
+      Left e -> failWith (what <> ": " <> show e)
+      Right a ->
+        pure
+          TextTime
+            { query = q,
+              us = t.us,
+              stopped = a.stopped,
+              total = a.total,
+              files = a.files,
+              sent = a.sent,
+              wireBytes = t.response.wireBytes
+            }
 
 -- | The fallback category of one module page, if any. A 200 must be a
 -- module page; anything else is 'Failed', with the body as the detail.
