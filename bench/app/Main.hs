@@ -1,12 +1,12 @@
--- | The benchmark harness (SPEC §10, §11.9; D-76, D-215). Runs the
--- product binary against the pinned reference projects (D-82) and
+-- | The benchmark harness (SPEC §10, §11.9; D-76, D-215, D-303). Runs
+-- the product binary against the pinned reference projects (D-82) and
 -- reports the SPEC §10.1 targets, memory, GC pauses and the fallback
 -- census.
 --
 -- Exit codes: 0 when every run worked, even if a target was missed
--- (§10.3: being slow never fails this); 1 for a broken run or a
--- fallback count that is wrong for a reason other than time; 2 for a
--- usage error.
+-- (§10.3: being slow never fails this); 1 for a broken run (a refs
+-- query that 404s at the pinned sha is one) or a fallback count that
+-- is wrong for a reason other than time; 2 for a usage error.
 module Main (main) where
 
 import Bench.Fallbacks
@@ -43,6 +43,9 @@ import Bench.Projects
     renderProjectsError,
     selectProjects,
   )
+import Bench.Queries (refsQueries)
+import Bench.Refs (refsWarnings)
+import Bench.RefsDuring (runRefsDuring)
 import Bench.Report
   ( FallbackCheck (..),
     ProjectReport (..),
@@ -76,6 +79,7 @@ import Bench.Steady
 import Control.Exception (Exception, IOException, throwIO, try)
 import Control.Monad (forM, mfilter, unless)
 import Data.ByteString.Lazy qualified as LBS
+import Data.List.NonEmpty qualified as NE
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -125,6 +129,7 @@ data Options = Options
     warmup :: Int,
     steadyRuns :: Int,
     searchRuns :: Int,
+    refsRuns :: Int,
     navIdle :: Int,
     rts :: [String],
     censusOnly :: Bool,
@@ -167,8 +172,9 @@ optionsParser =
       )
     <*> count "runs" 10 "Timed start-up runs per project"
     <*> count "warmup" 1 "Warm-up start-up runs per project (discarded)"
-    <*> count "steady-runs" 3 "Runs after indexing: navigation, search, GC (+ census)"
+    <*> count "steady-runs" 3 "Runs after indexing: pages, search, refs, GC (+ census)"
     <*> count "search-runs" 3 "Runs searching while indexing"
+    <*> count "refs-runs" 3 "Runs finding references while indexing"
     <*> count "nav-idle" 50 "Pages with 0.2-1 s gaps, per steady run"
     <*> ( maybe [] words
             <$> Opt.optional
@@ -247,6 +253,7 @@ runBench opts rows projects = do
                     warmup = opts.warmup,
                     steadyRuns = opts.steadyRuns,
                     searchRuns = opts.searchRuns,
+                    refsRuns = opts.refsRuns,
                     navIdle = opts.navIdle,
                     rtsOpts = opts.rts,
                     censusOnly = opts.censusOnly,
@@ -308,25 +315,29 @@ runProject opts rows tmp project = do
             [] -> Nothing
             _ -> Just (samples !! (i `mod` length samples))
           expected = lookupExpected project.name project.sha rows
+          refs = refsQueries project.name
           loop :: String -> Int -> (Int -> IO a) -> IO [a]
           loop what n f =
             forM [1 .. n] $ \i -> do
               progress (what <> " " <> show i <> "/" <> show n)
               f i
-      (startups, steadies, during) <-
+      (startups, steadies, during, refsDuring) <-
         if opts.censusOnly
           then do
+            -- One round of refs: a stale list shows up at once.
             let plan =
                   SteadyPlan
                     { census = CensusPass,
                       timed = NoTimedPass,
                       idlePages = 0,
                       searchRounds = 0,
+                      refs = refs,
+                      refsRounds = 1,
                       seed = 1
                     }
             s <- loop "census run" 1 $ \_ ->
               runSteady (cfg "census" TStats) items plan >>= orFail
-            pure ([], s, [])
+            pure ([], s, [], [])
           else do
             _ <- loop "warm-up run" opts.warmup $ \i ->
               runStartup (cfg ("warmup-" <> show i) TStats) (sampleFor (i - 1)) >>= orFail
@@ -339,12 +350,18 @@ runProject opts rows tmp project = do
                         timed = TimedPass,
                         idlePages = opts.navIdle,
                         searchRounds = 5,
+                        refs = refs,
+                        refsRounds = 5,
                         seed = i
                       }
                in runSteady (cfg ("steady-" <> show i) GcStats) items plan >>= orFail
             sr <- loop "search-during run" opts.searchRuns $ \i ->
               runSearchDuring (cfg ("search-" <> show i) TStats) >>= orFail
-            pure (st, sd, sr)
+            rd <- case NE.nonEmpty refs of
+              Nothing -> pure []
+              Just qs -> loop "refs-during run" opts.refsRuns $ \i ->
+                runRefsDuring (cfg ("refs-" <> show i) TStats) qs >>= orFail
+            pure (st, sd, sr, rd)
       let census = case steadies of
             s : _ -> s.census
             [] -> Nothing
@@ -365,6 +382,8 @@ runProject opts rows tmp project = do
             startup = startups,
             steady = if opts.censusOnly then [] else steadies,
             searchDuring = during,
+            refsQueries = refs,
+            refsDuring = refsDuring,
             fallbacks =
               FallbackCheck
                 { got = census,
@@ -381,6 +400,7 @@ runProject opts rows tmp project = do
                     <> [(runKind, r.done, r.loadAvg) | r <- steadies]
                 )
                 diffs
+                <> refsWarnings (concatMap (.refsTimes) steadies)
           }
 
 -- | Which kind of run a done line came from, for the warnings.

@@ -211,6 +211,8 @@ test-suite haskell-reviewer-test
     Bench.ProjectsTest
     Bench.Queries
     Bench.QueriesTest
+    Bench.Refs
+    Bench.RefsTest
     Bench.RtsStats
     Bench.RtsStatsTest
     Bench.Shell
@@ -358,6 +360,8 @@ benchmark haskell-reviewer-bench
     Bench.Path
     Bench.Projects
     Bench.Queries
+    Bench.Refs
+    Bench.RefsDuring
     Bench.Report
     Bench.RtsStats
     Bench.Run

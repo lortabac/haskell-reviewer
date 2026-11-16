@@ -1,6 +1,6 @@
--- | The SPEC §10.1 targets (and D-208's search target), and whether a
--- run met them. Missing one never fails the bench (§10.3): the table
--- says MISS and the human decides.
+-- | The SPEC §10.1 targets (and D-208's search and D-303's refs
+-- targets), and whether a run met them. Missing one never fails the
+-- bench (§10.3): the table says MISS and the human decides.
 module Bench.Targets
   ( -- * Types
     Stat (..),
@@ -14,8 +14,11 @@ module Bench.Targets
     onDemandModule,
     navigation,
     navigationIdle,
+    navigationSource,
+    navigationSourceIdle,
     searchAfterMedian,
     searchAfterP95,
+    refsAfterP95,
     memoryBudgetBytes,
 
     -- * Verdicts
@@ -123,6 +126,29 @@ navigationIdle =
       limitUs = 100_000
     }
 
+-- | Every source page once, back to back, after indexing. Apart from
+-- 'navigation', so the module pages stay comparable with M1.
+navigationSource :: Target
+navigationSource =
+  Target
+    { key = "navigation_source",
+      label = "§10.1 navigation < 100 ms (source, back to back)",
+      stat = P95,
+      bound = Below,
+      limitUs = 100_000
+    }
+
+-- | Source pages with the same gaps as 'navigationIdle'.
+navigationSourceIdle :: Target
+navigationSourceIdle =
+  Target
+    { key = "navigation_source_idle",
+      label = "§10.1 navigation < 100 ms (source, idle gaps)",
+      stat = P95,
+      bound = Below,
+      limitUs = 100_000
+    }
+
 -- | Search after indexing, median.
 searchAfterMedian :: Target
 searchAfterMedian =
@@ -143,6 +169,17 @@ searchAfterP95 =
       stat = P95,
       bound = AtMost,
       limitUs = 100_000
+    }
+
+-- | Find references after indexing, pooled over the project's queries.
+refsAfterP95 :: Target
+refsAfterP95 =
+  Target
+    { key = "refs_after_p95",
+      label = "D-303 find references after indexing < 300 ms",
+      stat = P95,
+      bound = Below,
+      limitUs = 300_000
     }
 
 -- | SPEC §10.2's provisional budget, for the large project only.

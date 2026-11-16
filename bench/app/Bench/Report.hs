@@ -1,5 +1,5 @@
 -- | Builds the benchmark's two outputs: the stdout table, and the JSON
--- report (schema 2).
+-- report (schema 3).
 module Bench.Report
   ( -- * Types
     Report (..),
@@ -34,11 +34,27 @@ import Bench.Fallbacks
     failsBench,
     renderDiff,
   )
-import Bench.GcLog (GcRun (..), GcSummary (..), renderGcLogError, summarizeGc)
+import Bench.GcLog
+  ( GcRun (..),
+    GcSummary (..),
+    PhaseGc (..),
+    phaseMajors,
+    renderGcLogError,
+    summarizeGc,
+  )
 import Bench.IndexLog (IndexDone (..))
 import Bench.Machine (LoadAvg (..), MachineInfo (..))
 import Bench.ModuleList (OnDemandStatus (..), Sample (..), sampleKindText)
 import Bench.Projects (Project (..), Role (..))
+import Bench.Queries (RefsQuery (..))
+import Bench.Refs
+  ( RefsSummary (..),
+    RefsTime (..),
+    byQuery,
+    slowdownPercent,
+    startedBefore,
+  )
+import Bench.RefsDuring (RefsDuringRun (..))
 import Bench.RtsStats (RtsStats (..))
 import Bench.SearchDuring (QueryTime (..), SearchDuringRun (..))
 import Bench.Startup
@@ -49,14 +65,17 @@ import Bench.Startup
     UiParts (..),
   )
 import Bench.Stats (Latency (..), Summary (..), latency, summarize)
-import Bench.Steady (PageTime (..), SteadyRun (..))
+import Bench.Steady (PageTime (..), Route (..), SteadyRun (..))
 import Bench.Targets
   ( Target (..),
     Verdict (..),
     memoryBudgetBytes,
     navigation,
     navigationIdle,
+    navigationSource,
+    navigationSourceIdle,
     onDemandModule,
+    refsAfterP95,
     renderVerdict,
     searchAfterMedian,
     searchAfterP95,
@@ -103,6 +122,7 @@ data Settings = Settings
     warmup :: Int,
     steadyRuns :: Int,
     searchRuns :: Int,
+    refsRuns :: Int,
     navIdle :: Int,
     -- | @--rts@, split on spaces.
     rtsOpts :: [String],
@@ -133,6 +153,9 @@ data ProjectReport = ProjectReport
     startup :: [StartupRun],
     steady :: [SteadyRun],
     searchDuring :: [SearchDuringRun],
+    -- | What the refs runs asked (none for an extra project).
+    refsQueries :: [RefsQuery],
+    refsDuring :: [RefsDuringRun],
     fallbacks :: FallbackCheck,
     -- | Things the human should look at, e.g. a text-only count that
     -- isn't the expected one.
@@ -164,8 +187,11 @@ projectVerdicts pr =
       p95Of onDemandModule (onDemandTimes pr),
       p95Of navigation (map (.us) (concatMap (.pages) pr.steady)),
       p95Of navigationIdle (map (.us) (concatMap (.idlePages) pr.steady)),
+      p95Of navigationSource (map (.us) (concatMap (.sources) pr.steady)),
+      p95Of navigationSourceIdle (map (.us) (concatMap (.idleSources) pr.steady)),
       medianOf searchAfterMedian (searchAfterTimes pr),
-      p95Of searchAfterP95 (searchAfterTimes pr)
+      p95Of searchAfterP95 (searchAfterTimes pr),
+      p95Of refsAfterP95 (map (.us) (refsAfter pr))
     ]
   where
     medianOf t xs = do
@@ -180,6 +206,9 @@ onDemandTimes pr = [o.us | r <- pr.startup, Just o <- [r.onDemand], o.status == 
 
 searchAfterTimes :: ProjectReport -> [Integer]
 searchAfterTimes pr = map (.us) (concatMap (.searchTimes) pr.steady)
+
+refsAfter :: ProjectReport -> [RefsTime]
+refsAfter pr = concatMap (.refsTimes) pr.steady
 
 -- * Rendering: the table
 
@@ -206,7 +235,9 @@ renderTable report =
             <> showT st.steadyRuns
             <> " steady, "
             <> showT st.searchRuns
-            <> " search-during; RTS: "
+            <> " search-during, "
+            <> showT st.refsRuns
+            <> " refs-during; RTS: "
             <> (if null st.rtsOpts then "product defaults" else Text.pack (unwords st.rtsOpts))
     -- A high RLIMIT_NOFILE makes every process spawn slower (D-85).
     nofileLine =
@@ -216,7 +247,9 @@ renderTable report =
         <> maybe "unlimited" showT report.machine.nofileHard
     targetLines = case concatMap verdictLines report.projects of
       [] -> []
-      ls -> ["", "Targets (SPEC §10.1, D-208; a MISS never fails the bench, §10.3):"] <> ls
+      ls ->
+        ["", "Targets (SPEC §10.1, D-208, D-303; a MISS never fails the bench, §10.3):"]
+          <> ls
     verdictLines pr = map (("  " <>) . renderVerdict pr.project.name) (projectVerdicts pr)
     smallRunsNote
       | not st.censusOnly && st.runs < 3 = ["", "with --runs < 3, medians mean little"]
@@ -238,6 +271,7 @@ projectSection fallbacksFile pr =
     <> startupLines pr
     <> steadyLines pr
     <> searchDuringLines pr
+    <> refsDuringLines pr
     <> fallbackLines fallbacksFile pr.fallbacks
     <> memoryLines pr
     <> map ("warning: " <>) pr.warnings
@@ -312,14 +346,48 @@ steadyLines pr = case pr.steady of
     [ "steady, " <> plural (length runs) "run" <> " after indexing, ms:",
       "  navigation back to back: " <> maybe "-" latencyText (latencyUs (map (.us) pages)),
       "  navigation with idle gaps: " <> maybe "-" latencyText (latencyUs (map (.us) idle)),
+      "  source back to back: " <> maybe "-" latencyText (latencyUs (map (.us) sources)),
+      "  source with idle gaps: "
+        <> maybe "-" latencyText (latencyUs (map (.us) idleSources)),
       "  search: " <> maybe "-" latencyText (latencyUs (searchAfterTimes pr))
     ]
+      <> refsLines
       <> slowLines
       <> gcLines
+      <> phaseLines
       <> gcWarnings
   where
     pages = concatMap (.pages) pr.steady
     idle = concatMap (.idlePages) pr.steady
+    sources = concatMap (.sources) pr.steady
+    idleSources = concatMap (.idleSources) pr.steady
+    refsLines
+      | null pr.refsQueries = []
+      | otherwise =
+          ("  refs: " <> maybe "-" latencyText (latencyUs (map (.us) (refsAfter pr))))
+            : map refsQueryLine (byQuery pr.refsQueries (refsAfter pr))
+    refsQueryLine q =
+      "    "
+        <> q.query.moduleRef
+        <> " "
+        <> q.query.decl
+        <> ": "
+        <> shortLatency q.latency
+        <> "; total "
+        <> showT q.total
+        <> ", sent "
+        <> showT q.sent
+        <> ", "
+        <> fmtKiB q.wireBytes
+        <> " KiB"
+    phaseLines = case phaseSummary pr.steady of
+      [] -> []
+      ps -> ["  major GC by phase: " <> Text.intercalate ", " (map phaseText ps)]
+    phaseText p =
+      p.name
+        <> " "
+        <> showT p.majors
+        <> maybe "" (\m -> " (max " <> fmtMs (fromInteger m) <> ")") p.maxMajorUs
     slow = slowPages pr
     slowLines
       | null slow = []
@@ -327,7 +395,14 @@ steadyLines pr = case pr.steady of
           ("  pages over 100 ms: " <> showT (length slow))
             : map slowLine (take 10 slow)
     slowLine p =
-      "    " <> navPatternText p.pattern <> " " <> p.ref <> " " <> fmtMs (fromInteger p.us)
+      "    "
+        <> navPatternText p.pattern
+        <> " "
+        <> routeText p.route
+        <> " "
+        <> p.ref
+        <> " "
+        <> fmtMs (fromInteger p.us)
     gcWarnings =
       [ "  warning: steady run " <> showT i <> ": " <> Text.pack (renderGcLogError e)
       | (i, Just (Left e)) <- zip [1 :: Int ..] (map (.gc) pr.steady)
@@ -348,7 +423,10 @@ steadyLines pr = case pr.steady of
             <> ", p99 "
             <> fmtMs (fromInteger g.p99PauseUs)
             <> "; max major after indexing "
-            <> maybe "-" (fmtMs . fromInteger) g.maxMajorAfterUs,
+            <> maybe "-" (fmtMs . fromInteger) g.maxMajorAfterUs
+            <> ", max live after indexing "
+            <> maybe "-" fmtMiB g.maxLiveAfterBytes
+            <> " MiB",
           "      max during indexing "
             <> maybe "-" (fmtMs . fromInteger) g.maxDuringUs
             <> ", after "
@@ -374,6 +452,41 @@ searchDuringLines pr = case pr.searchDuring of
     ]
     where
       qs = concatMap (.queryTimes) runs
+
+refsDuringLines :: ProjectReport -> [Text]
+refsDuringLines pr = case pr.refsDuring of
+  [] -> []
+  runs ->
+    [ "refs during indexing, "
+        <> plural (length runs) "run"
+        <> ", report only, ms: "
+        <> maybe "-" latencyText (latencyUs (map (.us) during))
+        <> "; "
+        <> showT (length (filter (.partial) during))
+        <> " of them partial",
+      "  first answer median "
+        <> maybe "-" fmtMs (median (firstTimes runs))
+        <> "; rounds "
+        <> Text.intercalate ", " (map (showT . (.rounds)) runs)
+        <> maybe "" (\x -> "; indexing " <> signed x <> "% vs start-up") slowdown
+    ]
+    where
+      during = refsDuringTimes runs
+      median xs = (.median) <$> summaryUs xs
+      slowdown = do
+        base <- median (map (.done.ms) pr.startup)
+        slow <- median (map (.done.ms) runs)
+        slowdownPercent base slow
+      signed x = (if x >= 0 then "+" else "") <> fmtDouble x
+
+-- | Refs answers of refs-during runs whose request started before the
+-- done line.
+refsDuringTimes :: [RefsDuringRun] -> [RefsTime]
+refsDuringTimes runs = [t | r <- runs, t <- r.refsTimes, startedBefore r.doneUs t]
+
+-- | The first answer of each run: it waits for its home module.
+firstTimes :: [RefsDuringRun] -> [Integer]
+firstTimes runs = [t.us | r <- runs, t : _ <- [r.refsTimes]]
 
 fallbackLines :: FilePath -> FallbackCheck -> [Text]
 fallbackLines file fc =
@@ -409,18 +522,26 @@ memoryLines pr =
   case NE.nonEmpty (map (.rts) pr.startup <> map (.rts) pr.steady) of
     Nothing -> []
     Just rs ->
-      [ "memory, MiB, max over runs: max_mem_in_use "
-          <> fmtMiB peak
+      [ "memory, MiB, max over runs: max_mem_in_use start-up "
+          <> orDash (peakStartup pr)
+          <> " / steady "
+          <> orDash (peakSteady pr)
           <> ", max_live "
-          <> maybe "-" fmtMiB (maxOf (mapMaybe (.maxLiveBytes) (NE.toList rs)))
-          <> ", idle RSS "
-          <> maybe "-" fmtMiB (maxOf (mapMaybe (.idleRssBytes) pr.startup))
+          <> orDash (maxOf (mapMaybe (.maxLiveBytes) (NE.toList rs)))
+          <> ", idle RSS after indexing "
+          <> orDash (maxOf (mapMaybe (.idleRssBytes) pr.startup))
+          <> " / after the steady work "
+          <> orDash (maxOf (mapMaybe (.idleRssBytes) pr.steady))
           <> ", peak RSS "
-          <> maybe "-" fmtMiB (maxOf (hwms pr))
+          <> orDash (maxOf (hwms pr))
+          <> " (at done "
+          <> orDash (maxOf (mapMaybe (.hwmAtDoneBytes) pr.steady))
+          <> ")"
       ]
         <> budgetLine
       where
         peak = maximum (NE.map (.peakMemBytes) rs)
+        orDash = maybe "-" fmtMiB
         budgetLine = case memoryBudgetBytes pr.project.role of
           Nothing -> []
           Just b ->
@@ -430,6 +551,12 @@ memoryLines pr =
                 <> (if peak < b then "ok" else "MISS → §10.3: record, decide, log")
             ]
 
+-- | max_mem_in_use of the start-up runs (@-t@, bytes) and of the
+-- steady ones (@-S@, MiB steps).
+peakStartup, peakSteady :: ProjectReport -> Maybe Integer
+peakStartup pr = maxOf (map (.rts.peakMemBytes) pr.startup)
+peakSteady pr = maxOf (map (.rts.peakMemBytes) pr.steady)
+
 -- | Peak RSS of every run that has one.
 hwms :: ProjectReport -> [Integer]
 hwms pr = mapMaybe (.hwmBytes) pr.startup <> mapMaybe (.hwmBytes) pr.steady
@@ -437,6 +564,7 @@ hwms pr = mapMaybe (.hwmBytes) pr.startup <> mapMaybe (.hwmBytes) pr.steady
 -- | A page over the navigation limit.
 data SlowPage = SlowPage
   { pattern :: NavPattern,
+    route :: Route,
     ref :: Text,
     us :: Integer
   }
@@ -446,8 +574,14 @@ slowPages :: ProjectReport -> [SlowPage]
 slowPages pr =
   sortOn
     (Down . (.us))
-    ( [SlowPage BackToBack p.ref p.us | p <- concatMap (.pages) pr.steady, slow p]
-        <> [SlowPage IdleGaps p.ref p.us | p <- concatMap (.idlePages) pr.steady, slow p]
+    ( [ SlowPage BackToBack p.route p.ref p.us
+      | p <- concatMap (\r -> r.pages <> r.sources) pr.steady,
+        slow p
+      ]
+        <> [ SlowPage IdleGaps p.route p.ref p.us
+           | p <- concatMap (\r -> r.idlePages <> r.idleSources) pr.steady,
+             slow p
+           ]
     )
   where
     slow p = p.us >= navigation.limitUs
@@ -456,9 +590,37 @@ navPatternText :: NavPattern -> Text
 navPatternText BackToBack = "back-to-back"
 navPatternText IdleGaps = "idle"
 
+routeText :: Route -> Text
+routeText ModuleRoute = "module"
+routeText SourceRoute = "source"
+
 -- | Pooled over the steady runs whose @-S@ file had GC lines.
 gcSummary :: [SteadyRun] -> Maybe GcSummary
 gcSummary runs = summarizeGc [GcRun r.doneUs g | r <- runs, Just (Right g) <- [r.gc]]
+
+-- | Major collections per phase of one run, if its @-S@ file had GC
+-- lines.
+runPhases :: SteadyRun -> [PhaseGc]
+runPhases r = case r.gc of
+  Just (Right g) -> phaseMajors r.phases g
+  _ -> []
+
+-- | 'runPhases' pooled over runs: counts added, the max of the maxes.
+-- In the first run's order: every run has the same phases.
+phaseSummary :: [SteadyRun] -> [PhaseGc]
+phaseSummary runs = case filter (not . null) (map runPhases runs) of
+  [] -> []
+  firstRun : _ -> map (pool . (.name)) firstRun
+  where
+    everyPhase = concatMap runPhases runs
+    pool n =
+      PhaseGc
+        { name = n,
+          majors = sum (map (.majors) same),
+          maxMajorUs = maxOf (mapMaybe (.maxMajorUs) same)
+        }
+      where
+        same = [p | p <- everyPhase, p.name == n]
 
 -- * Rendering: helpers
 
@@ -474,6 +636,11 @@ ms1 field runs = fmt1 (summarize (NE.map ((/ 1000) . fromInteger . field) runs))
 
 msMedian :: (StartupRun -> Integer) -> NonEmpty StartupRun -> Text
 msMedian field runs = fmtMs (summarize (NE.map (fromInteger . field) runs)).median
+
+-- | Median, p95 and max, no count.
+shortLatency :: Latency -> Text
+shortLatency l =
+  "median " <> fmtMs l.median <> ", p95 " <> fmtMs l.p95 <> ", max " <> fmtMs l.max
 
 latencyText :: Latency -> Text
 latencyText l =
@@ -525,7 +692,7 @@ roleText Typical = "typical"
 roleText Large = "large"
 roleText Extra = "extra"
 
--- * JSON (schema 2)
+-- * JSON (schema 3)
 
 -- | Encode the whole report. Built by hand with 'Data.Aeson.Encoding',
 -- like "HaskellReviewer.Effects.Trace", to keep the key order fixed and
@@ -542,7 +709,7 @@ nullable = maybe Aeson.Encoding.null_
 reportEncoding :: Report -> Encoding
 reportEncoding report =
   Aeson.Encoding.pairs $
-    ("schema" .= (2 :: Int))
+    ("schema" .= (3 :: Int))
       <> ("started" .= iso8601Show report.started)
       <> ("label" .= report.label)
       <> Aeson.Encoding.pair "settings" (settingsEncoding report.settings)
@@ -558,6 +725,7 @@ settingsEncoding s =
       <> ("warmup" .= s.warmup)
       <> ("steady_runs" .= s.steadyRuns)
       <> ("search_runs" .= s.searchRuns)
+      <> ("refs_runs" .= s.refsRuns)
       <> ("nav_idle" .= s.navIdle)
       <> ("rts_opts" .= s.rtsOpts)
       <> ("census_only" .= s.censusOnly)
@@ -599,11 +767,15 @@ projectEncoding pr =
       <> ("modules_listed" .= pr.modulesListed)
       <> ("modules_parsed" .= pr.modulesParsed)
       <> Aeson.Encoding.pair "samples" (Aeson.Encoding.list sampleEncoding pr.samples)
+      <> Aeson.Encoding.pair
+        "refs_queries"
+        (Aeson.Encoding.list refsQueryEncoding pr.refsQueries)
       <> Aeson.Encoding.pair "startup_runs" (Aeson.Encoding.list startupEncoding pr.startup)
       <> Aeson.Encoding.pair "summary" (startupSummaryEncoding pr.startup)
       <> Aeson.Encoding.pair "on_demand" (maybeLatency (latencyUs (onDemandTimes pr)))
       <> Aeson.Encoding.pair "steady" (steadyEncoding pr)
       <> Aeson.Encoding.pair "search_during" (searchDuringEncoding pr.searchDuring)
+      <> Aeson.Encoding.pair "refs_during" (refsDuringEncoding pr.refsDuring)
       <> Aeson.Encoding.pair "fallbacks" (fallbacksEncoding pr.fallbacks)
       <> Aeson.Encoding.pair "memory" (memoryEncoding pr)
       <> Aeson.Encoding.pair "targets" targetsEncoding
@@ -617,6 +789,10 @@ projectEncoding pr =
 sourceText :: FileSource -> Text
 sourceText FromGit = "git"
 sourceText FromDisk = "disk"
+
+refsQueryEncoding :: RefsQuery -> Encoding
+refsQueryEncoding q =
+  Aeson.Encoding.pairs (("module" .= q.moduleRef) <> ("decl" .= q.decl))
 
 sampleEncoding :: Sample -> Encoding
 sampleEncoding s = Aeson.Encoding.pairs (("kind" .= sampleKindText s.kind) <> ("ref" .= s.ref))
@@ -708,24 +884,50 @@ steadyEncoding pr =
       <> Aeson.Encoding.pair "pages" (maybeLatency (latencyUs (map (.us) pages)))
       <> ("pages_wire_bytes" .= sum (map (.wireBytes) pages))
       <> Aeson.Encoding.pair "pages_idle" (maybeLatency (latencyUs (map (.us) idle)))
+      <> Aeson.Encoding.pair "sources" (maybeLatency (latencyUs (map (.us) sources)))
+      <> ("sources_wire_bytes" .= sum (map (.wireBytes) sources))
+      <> Aeson.Encoding.pair
+        "sources_idle"
+        (maybeLatency (latencyUs (map (.us) idleSources)))
       <> Aeson.Encoding.pair "search_after" (maybeLatency (latencyUs (searchAfterTimes pr)))
+      <> Aeson.Encoding.pair "refs_after" refsAfterEncoding
       <> Aeson.Encoding.pair "gc" (nullable gcEncoding (gcSummary pr.steady))
       <> Aeson.Encoding.pair "slow_pages" (Aeson.Encoding.list slowEncoding (slowPages pr))
   where
     pages = concatMap (.pages) pr.steady
     idle = concatMap (.idlePages) pr.steady
+    sources = concatMap (.sources) pr.steady
+    idleSources = concatMap (.idleSources) pr.steady
+    refs = refsAfter pr
+    refsAfterEncoding =
+      Aeson.Encoding.pairs $
+        Aeson.Encoding.pair "latency" (maybeLatency (latencyUs (map (.us) refs)))
+          <> ("partial" .= length (filter (.partial) refs))
+          <> Aeson.Encoding.pair
+            "by_query"
+            ( Aeson.Encoding.list
+                refsSummaryEncoding
+                (byQuery pr.refsQueries refs)
+            )
     runEncoding r =
       Aeson.Encoding.pairs $
         ("done_us" .= r.doneUs)
           <> Aeson.Encoding.pair "done" (doneEncoding r.done)
           <> ("pages" .= length r.pages)
           <> ("pages_idle" .= length r.idlePages)
+          <> ("sources" .= length r.sources)
+          <> ("sources_idle" .= length r.idleSources)
           <> ("searches" .= length r.searchTimes)
+          <> ("refs" .= length r.refsTimes)
           <> ("peak_mem_bytes" .= r.rts.peakMemBytes)
           <> ("max_live_bytes" .= r.rts.maxLiveBytes)
-          <> ("rss_bytes" .= r.rssBytes)
+          <> ("idle_rss_bytes" .= r.idleRssBytes)
+          <> ("hwm_at_done_bytes" .= r.hwmAtDoneBytes)
           <> ("hwm_bytes" .= r.hwmBytes)
           <> Aeson.Encoding.pair "gc" (nullable gcEncoding (gcSummary [r]))
+          <> Aeson.Encoding.pair
+            "gc_phases"
+            (Aeson.Encoding.list phaseEncoding (runPhases r))
           <> ("gc_log_error" .= gcLogError r)
           <> Aeson.Encoding.pair "loadavg" (loadEncoding r.loadAvg)
     gcLogError r = case r.gc of
@@ -733,7 +935,27 @@ steadyEncoding pr =
       _ -> Nothing
     slowEncoding p =
       Aeson.Encoding.pairs
-        (("pattern" .= navPatternText p.pattern) <> ("ref" .= p.ref) <> ("us" .= p.us))
+        ( ("pattern" .= navPatternText p.pattern)
+            <> ("route" .= routeText p.route)
+            <> ("ref" .= p.ref)
+            <> ("us" .= p.us)
+        )
+    phaseEncoding p =
+      Aeson.Encoding.pairs
+        (("name" .= p.name) <> ("majors" .= p.majors) <> ("max_major_us" .= p.maxMajorUs))
+
+refsSummaryEncoding :: RefsSummary -> Encoding
+refsSummaryEncoding q =
+  Aeson.Encoding.pairs $
+    ("module" .= q.query.moduleRef)
+      <> ("decl" .= q.query.decl)
+      <> ("count" .= q.latency.count)
+      <> ("median_us" .= q.latency.median)
+      <> ("p95_us" .= q.latency.p95)
+      <> ("max_us" .= q.latency.max)
+      <> ("total" .= q.total)
+      <> ("sent" .= q.sent)
+      <> ("wire_bytes" .= q.wireBytes)
 
 gcEncoding :: GcSummary -> Encoding
 gcEncoding g =
@@ -742,6 +964,7 @@ gcEncoding g =
       <> ("majors" .= g.majors)
       <> ("majors_after" .= g.majorsAfter)
       <> ("max_major_after_us" .= g.maxMajorAfterUs)
+      <> ("max_live_after_bytes" .= g.maxLiveAfterBytes)
       <> ("max_pause_us" .= g.maxPauseUs)
       <> ("max_major_pause_us" .= g.maxMajorPauseUs)
       <> ("p99_pause_us" .= g.p99PauseUs)
@@ -761,6 +984,24 @@ searchDuringEncoding runs =
   where
     qs = concatMap (.queryTimes) runs
     partialTimes = [q.us | q <- qs, q.partial]
+
+refsDuringEncoding :: [RefsDuringRun] -> Encoding
+refsDuringEncoding runs =
+  Aeson.Encoding.pairs $
+    ("runs" .= length runs)
+      <> ("rounds" .= map (.rounds) runs)
+      <> ("done_us" .= map (.doneUs) runs)
+      <> ("indexing_ms" .= map (.done.ms) runs)
+      <> ("answers_during" .= length during)
+      <> ("partial_during" .= length (filter (.partial) during))
+      <> Aeson.Encoding.pair "latency_during" (maybeLatency (latencyUs duringUs))
+      <> ("first_us" .= firstTimes runs)
+      <> Aeson.Encoding.pair
+        "loadavg"
+        (Aeson.Encoding.list (loadEncoding . (.loadAvg)) runs)
+  where
+    during = refsDuringTimes runs
+    duringUs = map (.us) during
 
 fallbacksEncoding :: FallbackCheck -> Encoding
 fallbacksEncoding fc =
@@ -799,8 +1040,12 @@ memoryEncoding :: ProjectReport -> Encoding
 memoryEncoding pr =
   Aeson.Encoding.pairs $
     ("peak_mem_bytes" .= peak)
+      <> ("peak_mem_startup_bytes" .= peakStartup pr)
+      <> ("peak_mem_steady_bytes" .= peakSteady pr)
       <> ("max_live_bytes" .= maxOf (mapMaybe (.maxLiveBytes) rtss))
       <> ("idle_rss_bytes" .= maxOf (mapMaybe (.idleRssBytes) pr.startup))
+      <> ("idle_rss_after_bytes" .= maxOf (mapMaybe (.idleRssBytes) pr.steady))
+      <> ("hwm_at_done_bytes" .= maxOf (mapMaybe (.hwmAtDoneBytes) pr.steady))
       <> ("hwm_bytes" .= maxOf (hwms pr))
       <> ("budget_bytes" .= budget)
       <> ("budget_met" .= ((<) <$> peak <*> budget))
