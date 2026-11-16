@@ -10,7 +10,7 @@ export function refsHref(moduleRef: string, decl: string): string {
 // The first value of a query parameter, percent-decoded by hand: a raw
 // "+" stays "+", as the server reads it (parseQueryReplacePlus False).
 // Undefined if there is none or its own encoding is broken.
-function param(search: string, name: string): string | undefined {
+export function param(search: string, name: string): string | undefined {
   const query = search.startsWith("?") ? search.slice(1) : search;
   for (const part of query.split("&")) {
     const eq = part.indexOf("=");

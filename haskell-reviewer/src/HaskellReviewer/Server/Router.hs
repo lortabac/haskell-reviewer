@@ -74,8 +74,8 @@ import Network.Wai.Middleware.Gzip
 Paths below are what the router sees, after the token.
 
 - The app shell (index.html): [], [""], and any path whose first segment
-  is docs, src, refs, diff or changes. The client router handles the rest. So
-  /<token> (no slash) gets the shell too, with no redirect.
+  is docs, src, refs, search, diff or changes. The client router handles
+  the rest. So /<token> (no slash) gets the shell too, with no redirect.
 - assets/<name>: a file of the bundle, exact name. Hashed names, so they
   are cached as immutable (Note [Caching] in
   "HaskellReviewer.Server.Security").
@@ -233,7 +233,7 @@ isShellPath :: [Text] -> Bool
 isShellPath = \case
   [] -> True
   [""] -> True
-  first : _ -> first `elem` ["docs", "src", "refs", "diff", "changes"]
+  first : _ -> first `elem` ["docs", "src", "refs", "search", "diff", "changes"]
 
 -- | No Cache-Control here: it gets no-store. See Note [Caching] in
 -- "HaskellReviewer.Server.Security".

@@ -285,6 +285,7 @@ back/forward, new tabs and copy-paste between tabs work. Shape:
 /<token>/diff/<path/to/File.hs>[?layout=unified|split][#<side>-L<n>]
 /<token>/changes[#<decl-id>]
 /<token>/refs/<side>/<module>?decl=<decl>
+/<token>/search/<side>?q=<text>
 ```
 
 `<side>` is `head` / `base` in diff mode and `tree` in browse mode.
@@ -300,7 +301,8 @@ printed as in §4.6 and percent-encoded. Haddock's anchors (`#v:<name>`,
 name and puts its `<decl>` in the URL instead (D-182). The `<decl-id>` used by `/changes`
 is the same `<decl>` (fields and instances included) qualified by its
 module. `/refs` lists the references to one declaration; its `<decl>`
-is the same, in the query, percent-encoded (D-296). An
+is the same, in the query, percent-encoded (D-296). `/search` lists the lines
+that have a text; `<text>` is in the query, percent-encoded (D-310). An
 unresolvable URL shows a "not found in this snapshot" page with a search box
 prefilled from the URL, never a blank page.
 
@@ -403,6 +405,10 @@ The whole file, syntax-highlighted (§5.6), with line numbers.
   local the button opens a bar like find: it steps through the binder and
   uses in this file. A name from a dependency or a module has no
   references here, and the button says so.
+- Following a text search result lands on the line, with the cursor on
+  the match and the match marked like a find hit; an open find or
+  references bar closes. Esc removes the mark; find is not prefilled
+  (D-310).
 - A gutter outline shows the top-level declarations, with a link from each
   back to the docs view. The same list, collapsed under the view
   ("Outline (N)"), is the keyboard way in: each entry links to its docs
@@ -555,6 +561,18 @@ none is active), `Escape` closes the header's popup or clears the box
 results are labelled *partial* and refresh as indexing continues, instead of
 the box waiting for it to finish (D-210).
 
+Text in double quotes, like `"where"`, searches the contents of the side's
+text files instead: exact text, case-sensitive, at most 128 characters
+(D-306, D-307). Leading spaces and spaces after the closing quote don't
+count; the text between the quotes is kept as is. While the quote is still
+open nothing is searched, and the only option is "Search text for '…'".
+Every name query ends with that same option, which puts the text in
+quotes. The popup shows the first 8 matching lines (`path:line` and the
+line, the match marked) and "All results (N)", which opens the results
+page; `Enter` with nothing active opens it too. The results page groups
+the lines by file, with a link to each line (D-309, D-310). The box's
+placeholder and the `?` overlay mention the quotes.
+
 ---
 
 ## 5. Cross-cutting behaviour
@@ -594,7 +612,7 @@ are off (D-297, D-298).
 
 | Key | Action |
 |-----|--------|
-| `/` | Focus global search |
+| `/` | Focus global search (`"text"` in quotes searches file contents) |
 | `j` / `k` | Next / previous declaration (docs, expanded diff) or hunk (diff) |
 | `n` / `p` | Next / previous **change** (any view, diff mode) |
 | `]` / `[` | Next / previous changed file or module |

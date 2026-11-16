@@ -33,7 +33,7 @@ function headerBox(page: Page): Locator {
 }
 
 function headerResults(page: Page): Locator {
-  return page.locator(".frame-header .search-results a");
+  return page.locator(".frame-header .search-results a[data-kind=name]");
 }
 
 test("header: type, ArrowDown, Enter opens the declaration", async ({
@@ -138,7 +138,7 @@ test("not-found page: the search box finds a declaration too", async ({
     .locator("main")
     .getByRole("combobox", { name: "Search modules and names" });
   await box.fill("perimeter");
-  const hit = page.locator("main .search-results a");
+  const hit = page.locator("main .search-results a[data-kind=name]");
   await expect(hit).toHaveCount(1);
   await hit.click();
   await expect(page).toHaveURL(
@@ -243,7 +243,7 @@ test("header box shrinks at narrow widths, no sideways scroll from it (C10)", as
   await page.goto(server.base);
   const box = headerBox(page);
   await expect(box).toBeVisible();
-  await expect(box).toHaveAttribute("placeholder", "Search");
+  await expect(box).toHaveAttribute("placeholder", 'Search, or "text"');
   await box.fill("Shapes");
   await expect(headerResults(page).first()).toBeVisible();
   // Scoped to the header: the sidebar's own minimum width (unrelated

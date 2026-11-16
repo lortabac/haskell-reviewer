@@ -254,3 +254,34 @@ describe("RefsView", () => {
     expect(fetchMock.mock.calls.some((c) => c[0] === api)).toBe(false);
   });
 });
+
+describe("RefsView, real navigation", () => {
+  it("Back focuses the followed row (state from the router, not the old entry)", async () => {
+    const { main } = open({ [api]: [200, fixture("refs")] });
+    await vi.waitFor(() =>
+      expect(main.querySelector(".refs-item a")).not.toBeNull(),
+    );
+    const a = main.querySelectorAll<HTMLElement>(".refs-item a")[1]!;
+    const key = a.dataset.refKey!;
+    a.click();
+    await vi.waitFor(() =>
+      expect(window.location.pathname).not.toContain("/refs/"),
+    );
+    window.history.back();
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(
+        main.querySelector(`[data-ref-key="${key}"]`),
+      ),
+    );
+  });
+
+  it("Back with a row that is gone: the h1", async () => {
+    const { main } = open({ [api]: [200, fixture("refs")] }, page, {
+      _depth: 2,
+      refsFollowed: "gone",
+    });
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(main.querySelector("h1")),
+    );
+  });
+});

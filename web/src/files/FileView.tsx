@@ -316,6 +316,51 @@ function FileText(props: {
       jump = j;
     }
   };
+  // The match a text search link landed on (D-310), shown as a find
+  // hit. Find or references replace it; another landing or Esc clears
+  // it. from: the history state it came with: each landing is marked
+  // once, so a redo of the marks (same state) doesn't bring it back.
+  let landed: FindHits | undefined;
+  let landedFrom: unknown;
+  const markLanded = (
+    from: unknown,
+    line: number,
+    cp: unknown,
+    len: unknown,
+  ): void => {
+    if (from === landedFrom) return;
+    landedFrom = from;
+    const had = landed !== undefined && untrack(find) === landed;
+    landed = undefined;
+    if (typeof cp === "number" && typeof len === "number" && cp >= 1) {
+      const t = lineText(props.text, index(), line);
+      // The file changed on disk since the search: no mark.
+      if (len >= 1 && cp + len - 1 <= [...t].length) {
+        const [a, b] = utf16Cols(t, [cp, cp + len]) as [number, number];
+        // An open bar would keep its words over our paint.
+        findBar?.closeQuietly();
+        refsBar?.closeQuietly();
+        landed = {
+          matches: {
+            count: 1,
+            line: Uint32Array.of(line),
+            from: Uint32Array.of(a),
+            to: Uint32Array.of(b),
+          },
+          current: 0,
+        };
+        setFind(landed);
+        return;
+      }
+    }
+    if (had) setFind(undefined);
+  };
+  const clearLanded = (): boolean => {
+    if (landed === undefined || untrack(find) !== landed) return false;
+    landed = undefined;
+    setFind(undefined);
+    return true;
+  };
   // Made before the effect below: its effects (the virtualiser's set
   // up) must run first.
   const view = (
@@ -336,7 +381,9 @@ function FileText(props: {
     </Show>
   );
   createEffect(
-    on(marks, (m) => {
+    // The state too: a link to the line already in the URL (same
+    // hash, new state) is a new landing.
+    on([marks, () => location.state], ([m]) => {
       const a = api;
       if (m === undefined || a === undefined) return;
       // The cursor goes there too, so Tab lands on the line. Focus
@@ -355,6 +402,12 @@ function FileText(props: {
         codeJump && typeof state === "object" && state !== null
           ? (state as { cp?: unknown }).cp
           : undefined;
+      // A text search link also says the length: mark that match.
+      const len =
+        codeJump && typeof state === "object" && state !== null
+          ? (state as { len?: unknown }).len
+          : undefined;
+      markLanded(state, m.from, cp, len);
       if (j !== undefined && j.line === m.from && a.hasFocus()) {
         a.focusAt(j.line, j.col);
       } else if (typeof cp === "number" && cp >= 1) {
@@ -431,7 +484,7 @@ function FileText(props: {
         refsBar.close();
         return true;
       }
-      return api?.clearSelection() ?? false;
+      return (api?.clearSelection() ?? false) || clearLanded();
     },
   });
   // y: the name at the cursor, else its place. Copy location: the

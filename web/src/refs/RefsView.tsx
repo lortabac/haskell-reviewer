@@ -15,6 +15,7 @@ import {
   onCleanup,
   Show,
   Switch,
+  untrack,
   useContext,
 } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
@@ -60,11 +61,12 @@ export function clearRefsCache(): void {
 }
 
 // The history entry of a page says which row was followed from it
-// (history.state.refsFollowed), so Back focuses that row again.
-function followedKey(): string | undefined {
-  const st: unknown = window.history.state;
-  if (typeof st !== "object" || st === null) return undefined;
-  const k = (st as { refsFollowed?: unknown }).refsFollowed;
+// (state.refsFollowed), so Back focuses that row again. From the
+// router's state, which is the new entry's on a push and on Back alike
+// (window.history.state is still the old one while a push renders).
+function followedKey(state: unknown): string | undefined {
+  if (typeof state !== "object" || state === null) return undefined;
+  const k = (state as { refsFollowed?: unknown }).refsFollowed;
   return typeof k === "string" ? k : undefined;
 }
 
@@ -102,7 +104,8 @@ function RefsPage(props: { module: string; decl: string }): JSX.Element {
   /* eslint-enable solid/reactivity */
   const pageKey = `${module}\0${decl}`;
   // Set when we come back to this entry (Back, Forward, reload).
-  const followed = followedKey();
+  const location = useLocation();
+  const followed = followedKey(untrack(() => location.state));
   const indexing = useContext(IndexingContext);
   const name = anchorName(decl);
   // The module's name from the tree, when it is loaded (stable from the
@@ -243,8 +246,13 @@ function RefsPage(props: { module: string; decl: string }): JSX.Element {
           const a = [
             ...document.querySelectorAll<HTMLElement>("[data-ref-key]"),
           ].find((e) => e.dataset.refKey === followed);
-          a?.focus();
-          a?.scrollIntoView({ block: "center" });
+          // Gone since: the h1 instead.
+          if (a === undefined) {
+            h1?.focus();
+            return;
+          }
+          a.focus();
+          a.scrollIntoView({ block: "center" });
         });
         onCleanup(() => cancelAnimationFrame(frame));
       },

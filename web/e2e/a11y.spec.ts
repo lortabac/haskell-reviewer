@@ -4,6 +4,8 @@
 // wait for).
 import type { Page } from "@playwright/test";
 import { expect, moduleNotFound404, tabKey, test } from "./support/fixtures";
+import { makeLongPathProject } from "./support/project";
+import { settle } from "./support/settle";
 import {
   expectNoAxeViolations as axe,
   fakeEventSource,
@@ -237,11 +239,39 @@ test.describe("reflow at 320 px (SPEC §5.4)", () => {
       .getByRole("combobox", { name: "Search modules and names" });
     await box.fill("Shapes");
     await expect(
-      page.locator(".frame-header .search-results a").first(),
+      page.locator(".frame-header .search-results a[data-kind=name]").first(),
     ).toBeVisible();
     await noSideways(page);
     await headerFits(page);
     await sidebarFits(page);
+
+    // Text hits (D-309): long lines are cut, paths wrap.
+    await box.fill('"area"');
+    await expect(
+      page.locator(".frame-header .search-results a[data-kind=hit]").first(),
+    ).toBeVisible();
+    await noSideways(page);
+    await headerFits(page);
+    const popup = await page.evaluate(() => {
+      const p = document.querySelector(".frame-header .search-results");
+      if (p === null) throw new Error("no popup");
+      return { scroll: p.scrollWidth, client: p.clientWidth };
+    });
+    expect(popup.scroll).toBeLessThanOrEqual(popup.client);
+
+    // The results page (D-310): a long query with no spaces and a long
+    // path wrap.
+    const longProject = await makeLongPathProject();
+    try {
+      const long = await startServer({ root: longProject.root });
+      await page.goto(long.base + `search/tree?q=${"x".repeat(120)}`);
+      await expect(page.locator("main .refs-group").first()).toBeVisible();
+      await noSideways(page);
+      await headerFits(page);
+      await settle(page);
+    } finally {
+      await longProject.remove();
+    }
   });
 
   for (const t of themes) {

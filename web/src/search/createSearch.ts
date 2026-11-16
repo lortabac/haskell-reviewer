@@ -1,25 +1,14 @@
 // The server search (D-207), debounced and kept fresh while the index
 // is still filling in (D-209, D-210). One of these per SearchBox: two
 // boxes on one page (the header's and a notice's) each run their own.
-import {
-  batch,
-  createEffect,
-  createSignal,
-  on,
-  onCleanup,
-  untrack,
-  useContext,
-} from "solid-js";
+import { createEffect, createMemo, on, untrack, useContext } from "solid-js";
 import { getJson } from "../api/client";
 import { decodeSearch, searchUrl, type SearchResult } from "../api/search";
 import { IndexingContext } from "../events/indexing";
 import { refetchStep } from "../events/partialRefetch";
+import { createFetch } from "./createFetch";
 
-// Trailing debounce: a keystroke waits this long for a quieter moment
-// before it fetches (plan §4.3). The very first query (e.g. a page
-// prefilled from the URL) fetches at once instead.
-export const debounceMs = 120;
-
+export { debounceMs } from "./createFetch";
 export { refetchThrottleMs } from "../events/partialRefetch";
 
 export interface SearchState {
@@ -56,129 +45,30 @@ export function createSearch(
   visible: () => boolean,
 ): SearchState {
   const indexingCtx = useContext(IndexingContext);
-  const [results, setResults] = createSignal<SearchResult[]>([]);
-  const [matches, setMatches] = createSignal(0);
-  const [partial, setPartial] = createSignal(false);
-  const [loading, setLoading] = createSignal(false);
-  const [error, setError] = createSignal<string>();
-  const [answeredQuery, setAnsweredQuery] = createSignal<string>();
-  const [settledQuery, setSettledQuery] = createSignal<string>();
-
-  // Bumped on every fetch, so a late answer for an earlier one (abort
-  // raced, or just slow) is dropped even if it somehow still arrives.
-  let generation = 0;
-  let controller: AbortController | undefined;
-  // The snapshot generation of the last landed answer (Search.generation,
-  // not ours above): an indexing event for a different one (a reload)
-  // is ignored, not just a stale answer for the same project.
-  let answerSnapshot: number | undefined;
-  // Set whenever a fetch starts (debounced, prefilled or a partial
-  // refetch): the throttle below counts from here, so an indexing
-  // event right after the search's own first answer doesn't refetch
-  // again at once.
-  let lastFetchAt = 0;
-
-  const run = (q: string): void => {
-    controller?.abort();
-    controller = undefined;
-    if (q === "") {
-      // No fetch for an empty query: nothing to search for, and
-      // nothing to clear noisily either.
-      generation++;
-      batch(() => {
-        setResults([]);
-        setMatches(0);
-        setPartial(false);
-        setLoading(false);
-        setError(undefined);
-        setAnsweredQuery("");
-        setSettledQuery("");
-      });
-      return;
-    }
-    const mine = ++generation;
-    lastFetchAt = Date.now();
-    const ac = new AbortController();
-    controller = ac;
-    setLoading(true);
-    void getJson(searchUrl(q), decodeSearch, { signal: ac.signal }).then(
-      (r) => {
-        // A newer run (or a cleared query) already took over.
-        if (mine !== generation) return;
-        // One commit: a reader (SearchBox's "announce once" and
-        // "Enter" logic) must never see loading turn false before the
-        // new results, matches and partial land (Promise callbacks
-        // aren't batched on their own).
-        batch(() => {
-          setLoading(false);
-          if (r.kind === "ok") {
-            // The server echoes the query it answered: a race that
-            // slips past the generation check (same q refetched
-            // twice) still can't show the wrong answer for a
-            // different one.
-            if (r.value.query !== q) return;
-            setResults(r.value.results);
-            setMatches(r.value.matches);
-            setPartial(r.value.partial);
-            setError(undefined);
-            setAnsweredQuery(q);
-            setSettledQuery(q);
-            answerSnapshot = r.value.generation;
-          } else {
-            // C4: never leave a stale list under an error.
-            setResults([]);
-            setMatches(0);
-            setPartial(false);
-            setError(r.kind === "not-found" ? "not found" : r.message);
-            setSettledQuery(q);
-          }
-        });
-      },
-    );
-  };
-
-  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
-  let first = true;
-  createEffect(() => {
-    const q = query();
-    if (debounceTimer !== undefined) clearTimeout(debounceTimer);
-    debounceTimer = undefined;
-    if (first) {
-      // A prefilled query (not-found page, decl notice) fetches right
-      // away: there was no keystroke to debounce.
-      first = false;
-      run(q);
-      return;
-    }
-    if (q === "") {
-      run(q);
-      return;
-    }
-    debounceTimer = setTimeout(() => run(q), debounceMs);
-  });
-
-  const flush = (): void => {
-    if (debounceTimer === undefined) return;
-    clearTimeout(debounceTimer);
-    debounceTimer = undefined;
-    run(query());
-  };
+  const f = createFetch(
+    query,
+    (q, signal) => getJson(searchUrl(q), decodeSearch, { signal }),
+    (v) => v.query,
+  );
+  // A memo: a new answer that is still partial must not count as a
+  // change (the effect below would refetch again at once at done).
+  const partial = createMemo(() => f.value()?.partial ?? false);
 
   // Refresh while the last answer is partial and actually shown: on
   // every indexing change for the same snapshot, but throttled, plus
   // once more as soon as it's done. An event older than the answer's
-  // own snapshot (can't happen in practice, but the server makes no
-  // promise about event order) is just stale, ignored; one newer (a
-  // Reload) means our answer is for a gone snapshot, so it refetches
-  // at once, same as done.
+  // own snapshot is just stale, ignored; one newer (a Reload) means
+  // our answer is for a gone snapshot, so it refetches at once, same
+  // as done. The snapshot is the answer's (Search.generation): an
+  // event for another one is not about this answer.
   createEffect(() => {
     const progress = indexingCtx.indexing();
     if (progress === undefined || !partial() || !visible()) return;
-    const step = refetchStep(progress, answerSnapshot, lastFetchAt, Date.now());
+    const snapshot = untrack(f.value)?.generation;
+    const step = refetchStep(progress, snapshot, f.lastFetchAt(), Date.now());
     if (step === "older" || step === "throttled") return;
-    // Not tracked: a change in the query is the debounce effect's
-    // job, not this one's.
-    run(untrack(query));
+    // Not tracked: a change in the query is the debounce's job.
+    f.run(untrack(query));
   });
 
   // Catching up: the box can go from hidden to shown (the header
@@ -190,25 +80,20 @@ export function createSearch(
     on(
       visible,
       (shown, wasShown) => {
-        if (shown && !wasShown && partial()) run(untrack(query));
+        if (shown && !wasShown && partial()) f.run(untrack(query));
       },
       { defer: true },
     ),
   );
 
-  onCleanup(() => {
-    if (debounceTimer !== undefined) clearTimeout(debounceTimer);
-    controller?.abort();
-  });
-
   return {
-    results,
-    matches,
+    results: () => f.value()?.results ?? [],
+    matches: () => f.value()?.matches ?? 0,
     partial,
-    loading,
-    error,
-    answeredQuery,
-    settledQuery,
-    flush,
+    loading: f.loading,
+    error: f.error,
+    answeredQuery: f.answeredQuery,
+    settledQuery: f.settledQuery,
+    flush: f.flush,
   };
 }

@@ -374,7 +374,7 @@ test("unknown module: not found, search box prefilled", async ({
   await expect(box).toHaveValue("No.Such");
   await expect(page.locator("main .search-status")).toHaveText("No results.");
   await box.fill("Shapes");
-  const hit = page.locator("main .search-results a");
+  const hit = page.locator("main .search-results a[data-kind=name]");
   await expect(hit).toHaveCount(1);
   await expect(hit).toContainText("Shapes");
   await hit.click();
