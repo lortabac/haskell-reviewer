@@ -18,10 +18,12 @@ import Control.Applicative ((<|>))
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.STM (STM, atomically, check, readTVar, registerDelay, retry)
 import Control.Exception (finally)
+import Control.Monad (forM_, when)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Builder (Builder, byteString, word64Dec)
 import Data.ByteString.Char8 qualified as Char8
+import Data.Map.Strict qualified as Map
 import Data.Text qualified as Text
 import HaskellReviewer.Effects.Clock (Microseconds (..))
 import HaskellReviewer.Effects.Log (Logger, logVerbose)
@@ -50,11 +52,14 @@ Framing:
 - Each event has an id (global counter, see Clients), a name and data.
   Data with newlines becomes several data: lines.
 - On open we send `hello` with data {}.
-- Then `indexing`, with the indexing progress (encodeIndexing), as soon
-  as the files are listed. Again each time it changes, at most once per
-  minGap (100 ms): we send the state, not each step, so the last state
-  always gets there and a slow client never piles up a backlog. Never
-  if the listing failed.
+- Then `indexing`, with one side's indexing progress (encodeIndexing),
+  as soon as that side is listed. Again each time it changes. We keep
+  the last state sent for each side, wait until some side differs,
+  send every side that differs (one event each), then wait minGap
+  (100 ms). So at most one event per side per gap, and a side that
+  changes all the time can't starve the other. We send the state, not
+  each step, so the last state always gets there and a slow client
+  never piles up a backlog. Never for a side whose listing failed.
 - Every keepAliveInterval (15 s) we send the comment ": keep-alive".
 - Last-Event-ID is ignored. There is no replay: after a reconnect the
   client fetches what it shows again (SPEC §11.6.2). The indexing
@@ -84,9 +89,9 @@ data EventStream = EventStream
   { clients :: Clients,
     -- | Time between two keep-alives. 'keepAliveInterval' in real use.
     keepAlive :: Microseconds,
-    -- | The indexing progress. Retries until the files are listed;
-    -- 'Nothing' if the listing failed.
-    indexing :: STM (Maybe IndexingState),
+    -- | The indexing progress of every side listed now, head first
+    -- ('indexingStates'). Doesn't wait.
+    indexing :: STM [IndexingState],
     -- | Least time between two @indexing@ events. 'indexingGap' in real
     -- use.
     minGap :: Microseconds,
@@ -116,7 +121,7 @@ eventsApp es req respond
                   write (renderEvent hello "hello" helloPayload)
                   flush
                   timer <- registerDelay delay
-                  loop write flush timer Nothing
+                  loop write flush timer Map.empty
             stream `finally` logCount "event stream closed"
   where
     Microseconds delay = es.keepAlive
@@ -128,21 +133,25 @@ eventsApp es req respond
         atomically $
           (Left <$> changed sent) <|> (Right () <$ (readTVar timer >>= check))
       case next of
-        Left now -> do
-          i <- nextEventId es.clients
-          write (renderEvent i "indexing" (encodeIndexing now.generation now.progress))
+        Left (now, fresh) -> do
+          forM_ fresh $ \st -> do
+            i <- nextEventId es.clients
+            let payload = encodeIndexing st.generation st.side st.progress
+            write (renderEvent i "indexing" payload)
           flush
           threadDelay gap
-          loop write flush timer (Just now)
+          loop write flush timer now
         Right () -> do
           write keepAliveFrame
           flush
           timer' <- registerDelay delay
           loop write flush timer' sent
-    changed sent =
-      es.indexing >>= \case
-        Just now | Just now /= sent -> pure now
-        _ -> retry
+    -- The states now, and the ones that differ from what we sent.
+    changed sent = do
+      states <- es.indexing
+      let fresh = [st | st <- states, Map.lookup st.side sent /= Just st]
+      when (null fresh) retry
+      pure (Map.fromList [(st.side, st) | st <- states], fresh)
     logCount what = do
       n <- openCount es.clients
       logVerbose es.logger (what <> " (" <> Text.pack (show n) <> " open)")

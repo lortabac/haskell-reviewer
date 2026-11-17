@@ -35,7 +35,7 @@ import HaskellReviewer.Core.Search
     searchLimit,
   )
 import HaskellReviewer.Effects.FileSystem (ListError (..))
-import HaskellReviewer.Server.Api (FilesApi (..))
+import HaskellReviewer.Server.Api (FilesApi, fromSideSnapshot)
 import HaskellReviewer.Server.Security (methodNotAllowed, notFound)
 import HaskellReviewer.Server.Wire (encodeSearch)
 import HaskellReviewer.Session.Index (Progress (..), readNames, readProgress)
@@ -62,8 +62,8 @@ import Network.Wai.Internal (ResponseReceived (..))
 
 {- Note [Search route]
 
-D-207. GET api/search/<side>?q=<text>. The only side is tree; another
-one is a plain 404. Other methods, HEAD too: 405 with Allow: GET.
+D-207. GET api/search/<side>?q=<text>. A side the session doesn't
+have is a plain 404 (D-313). Other methods, HEAD too: 405 with Allow: GET.
 
 q is read with parseQueryReplacePlus False: a + stays a + (an
 operator), only %20 is a space. The first q counts. No q, or a blank
@@ -79,7 +79,7 @@ and the progress are read in one transaction, so they agree.
 
 -- | @GET api\/search\/\<side>?q=…@. See Note [Search route].
 searchApp :: FilesApi -> Text -> Application
-searchApp api = searchWith (fmap fromSnapshot <$> api.snapshot)
+searchApp api side = searchWith (fromSideSnapshot api side fromSnapshot)
 
 -- | Run this route once of each kind on fake requests and a small fake
 -- index, so the shared values of the query parser, the scorer and the
@@ -90,8 +90,8 @@ warmUpSearch :: IO ()
 warmUpSearch = do
   void (evaluate (forceCandidates fakeModules))
   mapM_
-    (once (pure (Right fakeSource)))
-    [ ("GET", "tree", q)
+    (once (Just (pure (Right fakeSource))))
+    [ ("GET", q)
     | q <-
         [ "?q=insert",
           "?q=Data.Map.insert",
@@ -118,13 +118,13 @@ warmUpSearch = do
           "?q=%FF"
         ]
     ]
-  once (pure (Right fakeSource)) ("POST", "tree", "?q=a")
-  once (pure (Right fakeSource)) ("GET", "base", "?q=a")
-  once (pure (Left (ListCrashed "x"))) ("GET", "tree", "?q=a")
+  once (Just (pure (Right fakeSource))) ("POST", "?q=a")
+  once Nothing ("GET", "?q=a")
+  once (Just (pure (Left (ListCrashed "x")))) ("GET", "?q=a")
   where
-    once source (method, side, query) = do
+    once found (method, query) = do
       let req = defaultRequest {requestMethod = method, rawQueryString = query}
-      ResponseReceived <- searchWith source side req $ \resp -> do
+      ResponseReceived <- searchWith found req $ \resp -> do
         let (_, _, withBody) = responseToStream resp
         out <- newIORef mempty
         withBody $ \streaming ->
@@ -171,11 +171,13 @@ fromSnapshot snap =
             }
     }
 
-searchWith :: IO (Either ListError Source) -> Text -> Application
-searchWith source side req respond
+-- | The route, over the side's source: 'Nothing' if the session has no
+-- such side.
+searchWith :: Maybe (IO (Either ListError Source)) -> Application
+searchWith found req respond
   | req.requestMethod /= methodGet = respond (methodNotAllowed "GET")
-  | side /= "tree" = respond notFound
-  | otherwise = case queryText req of
+  | Nothing <- found = respond notFound
+  | Just source <- found = case queryText req of
       Left why -> respond (plain status400 (renderQueryError why))
       Right raw ->
         source >>= \case

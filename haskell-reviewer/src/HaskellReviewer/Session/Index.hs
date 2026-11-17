@@ -288,7 +288,11 @@ data IndexDeps = IndexDeps
     -- | Parse one module, fully forced: 'parseGuarded' in
     -- "HaskellReviewer.Effects.Parser".
     parse :: ParseSettings -> Text -> IO ModuleParse,
-    logger :: Logger
+    logger :: Logger,
+    -- | In front of each log line: the side, in diff mode ('sideTag'
+    -- in "HaskellReviewer.Core.Sides"). Empty in browse mode. Text, not
+    -- a side: the index doesn't need to know about sides.
+    label :: Text
   }
 
 -- * Building
@@ -589,7 +593,12 @@ indexOne c =
       | otherwise -> do
           msg <- safeMessage e
           quietly . logInfo deps.logger $
-            "haskell-reviewer: cannot index " <> relPathText path <> ": " <> msg
+            "haskell-reviewer: "
+              <> deps.label
+              <> "cannot index "
+              <> relPathText path
+              <> ": "
+              <> msg
           pure (Broke (IndexCrashed msg))
   where
     deps = c.deps
@@ -599,7 +608,12 @@ indexOne c =
         Left ReadGone -> pure (Broke SourceGone)
         Left (ReadFailed why) -> do
           quietly . logInfo deps.logger $
-            "haskell-reviewer: cannot read " <> relPathText path <> ": " <> why
+            "haskell-reviewer: "
+              <> deps.label
+              <> "cannot read "
+              <> relPathText path
+              <> ": "
+              <> why
           pure (Broke (SourceUnreadable why))
         Right (TextContent t)
           | FileSize (Text.Foreign.lengthWord8 t) > bigFileSize,
@@ -638,7 +652,11 @@ finish c st ns = do
     pure (before, after)
   when (tenth before < tenth after) $
     quietly . logVerbose c.deps.logger $
-      "indexing: " <> showText (doneCount after) <> "/" <> showText after.total
+      c.deps.label
+        <> "indexing: "
+        <> showText (doneCount after)
+        <> "/"
+        <> showText after.total
   where
     tenth p = (doneCount p * 10) `div` max 1 p.total
     doneCount p = p.ready + p.failed

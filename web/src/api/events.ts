@@ -1,5 +1,5 @@
 // Payloads of the event stream (SPEC §11.6.2).
-import { DecodeError, field, nat, object } from "./decode";
+import { DecodeError, field, nat, object, oneOf } from "./decode";
 
 // The hello event: an empty object for now.
 export type Hello = Record<string, never>;
@@ -19,10 +19,16 @@ export function parseEventData(data: unknown): unknown {
   }
 }
 
-// The indexing event, and GET api/indexing/<side>: how far indexing is.
-// Done when ready + failed === total.
+// The sides of a session: tree in browse mode, base and head in diff
+// mode.
+export const sides = ["tree", "base", "head"] as const;
+export type Side = (typeof sides)[number];
+
+// The indexing event, and GET api/indexing/<side>: how far indexing is
+// on one side. Done when ready + failed === total.
 export type Indexing = {
   generation: number;
+  side: Side;
   total: number;
   ready: number;
   failed: number;
@@ -32,6 +38,7 @@ export function decodeIndexing(value: unknown, path = "$"): Indexing {
   const o = object(value, path);
   const indexing = {
     generation: field(o, "generation", path, nat),
+    side: field(o, "side", path, oneOf(sides)),
     total: field(o, "total", path, nat),
     ready: field(o, "ready", path, nat),
     failed: field(o, "failed", path, nat),

@@ -435,6 +435,7 @@ for (const esc of [false, true]) {
       (generation) =>
         window.__hrEmit?.("indexing", {
           generation,
+          side: "tree",
           total: 2,
           ready: 2,
           failed: 0,

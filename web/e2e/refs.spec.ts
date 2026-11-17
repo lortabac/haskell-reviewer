@@ -268,6 +268,7 @@ test("partial: asked again at done, the focused row stays", async ({
     (generation) =>
       window.__hrEmit?.("indexing", {
         generation,
+        side: "tree",
         total: 2,
         ready: 2,
         failed: 0,

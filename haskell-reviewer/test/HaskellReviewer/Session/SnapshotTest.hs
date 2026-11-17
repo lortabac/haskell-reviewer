@@ -2,7 +2,7 @@ module HaskellReviewer.Session.SnapshotTest (tests) where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (poll, wait, withAsync)
-import Control.Concurrent.STM (atomically, orElse)
+import Control.Concurrent.STM (atomically)
 import Data.Maybe (isNothing)
 import HaskellReviewer.Core.FileList (ListSource (..), mkFileList)
 import HaskellReviewer.Core.Project
@@ -13,15 +13,18 @@ import HaskellReviewer.Core.Project
     parserGhcVersion,
   )
 import HaskellReviewer.Core.Root (CanonicalRoot (..))
+import HaskellReviewer.Core.Sides (Pair (..), Side (..), Sides (..))
 import HaskellReviewer.Effects.FileSystem (ListError (..))
+import HaskellReviewer.Effects.Source (EntrySource (..))
 import HaskellReviewer.Server.Api (newSnapshot)
 import HaskellReviewer.Session.Index (Progress (..), newPool)
 import HaskellReviewer.Session.Snapshot
   ( Generation (..),
     IndexingState (..),
+    Snapshot,
     awaitSnapshot,
     fillSnapshot,
-    indexingState,
+    indexingStates,
     newSnapshotSlot,
   )
 import System.Timeout (timeout)
@@ -47,36 +50,54 @@ tests =
         fillSnapshot slot (Left (ListCrashed "second")) >>= (@?= False)
         r <- awaitSnapshot slot
         either Just (const Nothing) r @?= Just (ListCrashed "first"),
-      testCase "indexing state: waits for the fill; none if the listing failed" $ do
-        let now slot = atomically ((Just <$> indexingState slot) `orElse` pure Nothing)
+      testCase "indexing states: none before the fill or if the listing failed" $ do
+        let now = atomically . indexingStates
         failed <- newSnapshotSlot
-        now failed >>= (@?= Nothing)
+        now (BrowseSides failed) >>= (@?= [])
         _ <- fillSnapshot failed (Left (ListCrashed "a"))
-        now failed >>= (@?= Just Nothing)
+        now (BrowseSides failed) >>= (@?= [])
         listed <- newSnapshotSlot
-        pool <- newPool
-        snap <-
-          newSnapshot
-            pool
-            (CanonicalRoot "/x" "/x")
-            (mkFileList FromDisk 0 [])
-            Project
-              { source = ImplicitRootCabalFiles,
-                withCompiler = Nothing,
-                ghc = DetectedGhc {version = parserGhcVersion, source = GhcFromParser},
-                packages = [],
-                brokenPackages = [],
-                warnings = []
-              }
+        snap <- emptySnapshot TreeSide
         _ <- fillSnapshot listed (Right snap)
-        now listed
-          >>= ( @?=
-                  Just
-                    ( Just
-                        IndexingState
-                          { generation = Generation 1,
-                            progress = Progress {total = 0, ready = 0, failed = 0}
-                          }
-                    )
-              )
+        now (BrowseSides listed) >>= (@?= [stateOn TreeSide]),
+      testCase "indexing states: one per listed side, head first" $ do
+        let now = atomically . indexingStates
+        headSlot <- newSnapshotSlot
+        baseSlot <- newSnapshotSlot
+        let sides = DiffSides Pair {head = headSlot, base = baseSlot}
+        now sides >>= (@?= [])
+        _ <- fillSnapshot baseSlot . Right =<< emptySnapshot BaseSide
+        now sides >>= (@?= [stateOn BaseSide])
+        _ <- fillSnapshot headSlot . Right =<< emptySnapshot HeadSide
+        now sides >>= (@?= [stateOn HeadSide, stateOn BaseSide])
+        failed <- newSnapshotSlot
+        _ <- fillSnapshot failed (Left (ListCrashed "a"))
+        now (DiffSides Pair {head = headSlot, base = failed}) >>= (@?= [stateOn HeadSide])
     ]
+
+-- | No modules, nothing indexed.
+stateOn :: Side -> IndexingState
+stateOn side =
+  IndexingState
+    { generation = Generation 1,
+      side = side,
+      progress = Progress {total = 0, ready = 0, failed = 0}
+    }
+
+-- | A snapshot with no files, on this side.
+emptySnapshot :: Side -> IO Snapshot
+emptySnapshot side = do
+  pool <- newPool
+  newSnapshot
+    side
+    pool
+    (DiskEntries (CanonicalRoot "/x" "/x"))
+    (mkFileList FromDisk 0 [])
+    Project
+      { source = ImplicitRootCabalFiles,
+        withCompiler = Nothing,
+        ghc = DetectedGhc {version = parserGhcVersion, source = GhcFromParser},
+        packages = [],
+        brokenPackages = [],
+        warnings = []
+      }

@@ -34,6 +34,7 @@ const plain = (r: Raw) => {
 
 const at = (generation: number, ready: number): Indexing => ({
   generation,
+  side: "tree",
   total: 2,
   ready,
   failed: 0,

@@ -6,14 +6,14 @@ module HaskellReviewer.Effects.FileSystem
     RootError (..),
     ListError (..),
     ReadError (..),
-    Lister (..),
 
     -- * ROOT
     checkRoot,
     renderRootError,
 
     -- * Listing
-    probeFiles,
+    canonicalRoot,
+    listFiles,
     listCommit,
     renderListError,
 
@@ -21,8 +21,6 @@ module HaskellReviewer.Effects.FileSystem
     readEntry,
 
     -- * Internal (for tests)
-    canonicalRoot,
-    listFiles,
     listCommitPlain,
     walkFiles,
     WalkResult (..),
@@ -96,7 +94,6 @@ import HaskellReviewer.Effects.Git
     TreeListing (..),
     lsFiles,
     lsTree,
-    probeGit,
     renderGitError,
   )
 import HaskellReviewer.Effects.Log (Logger, logInfo, logVerbose)
@@ -188,21 +185,6 @@ renderListError = \case
   ListGitFailed e -> renderGitError e
   ListBadGitOutput t -> t
   ListCrashed t -> t
-
--- | Makes the file list of ROOT. Built at start-up, run after the URL
--- is printed.
-data Lister = Lister
-  { root :: CanonicalRoot,
-    list :: IO (Either ListError FileList)
-  }
-
--- | Check git (see Note [Git hardening] in "HaskellReviewer.Effects.Git")
--- and get ready to list. A 'GitError' is exit 2.
-probeFiles :: Logger -> Root -> IO (Either GitError Lister)
-probeFiles logger root = do
-  canon <- canonicalRoot root
-  listing <- probeGit logger root
-  pure (fmap (\l -> Lister {root = canon, list = listFiles logger canon l}) listing)
 
 -- | Make the file list. See Note [File list] in
 -- "HaskellReviewer.Core.FileList". Warnings go to the logger.

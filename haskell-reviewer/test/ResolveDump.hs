@@ -107,6 +107,7 @@ import HaskellReviewer.Core.SourceText (sliceSpan, sourceLines)
 import HaskellReviewer.Core.Span (renderSpan)
 import HaskellReviewer.Core.Tokens (tokenSpanAt)
 import HaskellReviewer.Effects.FileSystem (WalkResult (..), canonicalRoot, walkFiles)
+import HaskellReviewer.Effects.Source (EntrySource (..))
 import HaskellReviewer.Session.Project (readProject)
 import Numeric (showHex)
 import System.Directory (doesDirectoryExist, listDirectory)
@@ -159,7 +160,8 @@ loadFixture dir = do
   canon <- canonicalRoot (Root dir)
   w <- walkFiles canon (fileListCap + 1)
   let fl = mkFileList FromDisk w.skippedNames w.entries
-  project <- readProject canon fl Platform {os = "linux", arch = "x86_64"} Nothing
+  let platform = Platform {os = "linux", arch = "x86_64"}
+  project <- readProject (DiskEntries canon) fl platform Nothing
   let idx = buildModuleIndex project fl
       sources =
         [ (ComponentModule p.name c.name m.name, m.source, c.settings)

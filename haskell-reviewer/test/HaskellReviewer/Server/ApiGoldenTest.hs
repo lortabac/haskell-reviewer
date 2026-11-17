@@ -34,6 +34,7 @@ import HaskellReviewer.Core.ModuleModel
     textOnlyModule,
   )
 import HaskellReviewer.Core.ResolveWarmUp (resolveWarmUpIndex)
+import HaskellReviewer.Core.Sides (Side (..))
 import HaskellReviewer.Core.Xdg (XdgProblem (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), newLogger)
 import HaskellReviewer.Server.CborJson (cborToJson, renderCborJsonError)
@@ -86,7 +87,10 @@ golden c = case c.fixture of
 cases :: [Case]
 cases =
   [ json "events-hello" (pure (LBS.fromStrict helloPayload <> "\n")),
-    json "events-indexing" (pure (event (encodeIndexing (Generation 1) halfway))),
+    -- A diff-mode event: head's progress.
+    json
+      "events-indexing"
+      (pure (event (encodeIndexing (Generation 1) HeadSide halfway))),
     -- Done, with a failed module (a loose file readEntry doesn't have).
     json "indexing" (okJson (indexed projectApi) ["api", "indexing", "tree"]),
     json "files" (okJson fixtureApi ["api", "files", "tree"]),

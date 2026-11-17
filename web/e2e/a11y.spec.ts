@@ -326,6 +326,7 @@ test.describe("indexing progress in the header (SPEC §10.2)", () => {
       await emit(page, "hello", {});
       await emit(page, "indexing", {
         generation: 1,
+        side: "tree",
         total: 10,
         ready: 3,
         failed: 1,
@@ -339,6 +340,7 @@ test.describe("indexing progress in the header (SPEC §10.2)", () => {
 
       await emit(page, "indexing", {
         generation: 1,
+        side: "tree",
         total: 10,
         ready: 9,
         failed: 1,
@@ -352,6 +354,7 @@ test.describe("indexing progress in the header (SPEC §10.2)", () => {
       // A replay of the same settled state says nothing new.
       await emit(page, "indexing", {
         generation: 1,
+        side: "tree",
         total: 10,
         ready: 9,
         failed: 1,
@@ -375,6 +378,7 @@ test.describe("indexing progress in the header (SPEC §10.2)", () => {
     // Done from the very first event: never "shown" by the 1 s delay.
     await emit(page, "indexing", {
       generation: 1,
+      side: "tree",
       total: 10,
       ready: 9,
       failed: 1,

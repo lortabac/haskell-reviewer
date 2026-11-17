@@ -158,8 +158,9 @@ describe("inline source", () => {
 });
 
 describe("refetch while indexing", () => {
-  const at = (ready: number) => ({
+  const at = (ready: number): Indexing => ({
     generation: 1,
+    side: "tree",
     total: 2,
     ready,
     failed: 0,
@@ -247,7 +248,7 @@ describe("a done answer equal to a partial one", () => {
     await vi.waitFor(() => expect(calls).toBe(1));
     now = 3000;
     // Done: 2 of 2.
-    setIx({ generation: 1, total: 2, ready: 2, failed: 0 });
+    setIx({ generation: 1, side: "tree", total: 2, ready: 2, failed: 0 });
     await vi.waitFor(() => expect(calls).toBe(2));
     await new Promise((r) => setTimeout(r, 20));
     unmountApp();

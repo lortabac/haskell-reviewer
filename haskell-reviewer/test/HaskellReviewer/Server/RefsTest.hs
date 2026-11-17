@@ -14,6 +14,7 @@ import ApiSupport
     refsGatedOn,
     requestApi,
     sourceApi,
+    treeSnapshot,
   )
 import Control.Concurrent.Async (wait, withAsync)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar)
@@ -24,6 +25,7 @@ import Data.ByteString (ByteString)
 import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
+import HaskellReviewer.Core.Sides (Sides (..))
 import HaskellReviewer.Effects.FileSystem (ListError (..))
 import HaskellReviewer.Session.Index (IndexJob (..), runWorkers)
 import HaskellReviewer.Session.Snapshot (Snapshot (index))
@@ -81,8 +83,8 @@ tests =
       testCase "partial while a module isn't parsed, complete after" $ do
         gate <- newEmptyMVar
         let gated = refsGatedOn "r/src/R/Use.hs" gate
-        snap <- either (assertFailure . show) pure =<< gated.snapshot
-        let api = gated {snapshot = pure (Right snap), workers = 0}
+        snap <- either (assertFailure . show) pure =<< treeSnapshot gated
+        let api = gated {sides = BrowseSides (pure (Right snap)), workers = 0}
             q = "?module=R.Shape&decl=con:Square"
             job = IndexJob (indexDeps gated snap) snap.index
         withAsync (runWorkers 2 [job]) $ \workers -> do
@@ -105,7 +107,7 @@ tests =
           ]
         $ \q -> do
           -- No workers and a failing listing: the 400 comes first.
-          r <- getApiQuery refsApi {workers = 0, snapshot = listFails} refsPath q
+          r <- getApiQuery refsApi {workers = 0, sides = BrowseSides listFails} refsPath q
           (q, r.status, r.body) @?= (q, 400, "bad query"),
       testCase "not found: 404 with JSON, module or decl" $ do
         let notFound api q what = do
@@ -136,7 +138,8 @@ tests =
           lookup "Allow" r.headers @?= Just "GET"
         base <- getApiQuery refsApi {workers = 0} ["api", "refs", "base"] okQuery
         base.status @?= 404
-        failed <- getApiQuery refsApi {workers = 0, snapshot = listFails} refsPath okQuery
+        let unlisted = refsApi {workers = 0, sides = BrowseSides listFails}
+        failed <- getApiQuery unlisted refsPath okQuery
         failed.status @?= 500
         failed.body @?= "cannot list files"
     ]

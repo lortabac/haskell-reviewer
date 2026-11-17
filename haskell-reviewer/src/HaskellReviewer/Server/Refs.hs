@@ -50,7 +50,7 @@ import HaskellReviewer.Core.ResolveWarmUp
   )
 import HaskellReviewer.Core.Search (ModuleCandidate (..), moduleCandidates)
 import HaskellReviewer.Effects.FileSystem (ListError (..))
-import HaskellReviewer.Server.Api (FilesApi (..))
+import HaskellReviewer.Server.Api (FilesApi, fromSideSnapshot)
 import HaskellReviewer.Server.Security (methodNotAllowed, notFound)
 import HaskellReviewer.Server.Wire (RefsMissing (..), encodeRefs, encodeRefsNotFound)
 import HaskellReviewer.Session.Index
@@ -86,8 +86,8 @@ import Network.Wai.Internal (ResponseReceived (..))
 
 {- Note [Refs route]
 
-D-294. GET api/refs/<side>?module=<ref>&decl=<id>. The only side is
-tree; another one is a plain 404. Other methods, HEAD too: 405 with
+D-294. GET api/refs/<side>?module=<ref>&decl=<id>. A side the session
+doesn't have is a plain 404 (D-313). Other methods, HEAD too: 405 with
 Allow: GET.
 
 Both params are read with parseQueryReplacePlus False: a + stays a +
@@ -117,7 +117,7 @@ with 'encodeRefs'. See Note [Find references] in
 
 -- | @GET api\/refs\/\<side>?module=…&decl=…@. See Note [Refs route].
 refsApp :: FilesApi -> Text -> Application
-refsApp api = refsWith (fmap fromSnapshot <$> api.snapshot)
+refsApp api side = refsWith (fromSideSnapshot api side fromSnapshot)
 
 -- | Builds the shared values (keys, finder, lines, encoder) before
 -- request threads race on them (Q-RTS-BLACKHOLE): runs the route on
@@ -129,16 +129,16 @@ warmUpRefs = do
   forM_ resolveWarmUpModules $ \i -> do
     let ref = moduleRef resolveWarmUpIndex i
     forM_ (namesOf i) $ \e ->
-      once (pure (Right warmUpSource)) "GET" "tree" $
+      once (Just (pure (Right warmUpSource))) "GET" $
         renderSimpleQuery
           True
           [("module", utf8 ref), ("decl", utf8 (renderDeclId e.decl))]
   let anyRef = case resolveWarmUpModules of
         i : _ -> utf8 (moduleRef resolveWarmUpIndex i)
         [] -> "x"
-      fake = pure (Right warmUpSource)
+      fake = Just (pure (Right warmUpSource))
   mapM_
-    (once fake "GET" "tree")
+    (once fake "GET")
     [ renderSimpleQuery True [("module", anyRef), ("decl", "val:nope")],
       renderSimpleQuery True [("module", "Nope"), ("decl", "val:x")],
       renderSimpleQuery True [("module", utf8 gone), ("decl", "val:x")],
@@ -150,14 +150,14 @@ warmUpRefs = do
       "?module=A&module=B&decl=val%3A%2B&x=1",
       ""
     ]
-  once fake "POST" "tree" "?module=A&decl=val:x"
-  once fake "GET" "base" "?module=A&decl=val:x"
-  once (pure (Left (ListCrashed "x"))) "GET" "tree" "?module=A&decl=val:x"
+  once fake "POST" "?module=A&decl=val:x"
+  once Nothing "GET" "?module=A&decl=val:x"
+  once (Just (pure (Left (ListCrashed "x")))) "GET" "?module=A&decl=val:x"
   where
     utf8 = Text.Encoding.encodeUtf8
-    once source method side query = do
+    once found method query = do
       let req = defaultRequest {requestMethod = method, rawQueryString = query}
-      ResponseReceived <- refsWith source side req $ \resp -> do
+      ResponseReceived <- refsWith found req $ \resp -> do
         let (_, _, withBody) = responseToStream resp
         out <- newIORef mempty
         withBody $ \streaming ->
@@ -238,12 +238,14 @@ candidateIn idx cs i =
     i
     cs
 
--- | The route, over any source. See Note [Refs route].
-refsWith :: IO (Either ListError Source) -> Text -> Application
-refsWith source side req respond
+-- | The route, over the side's source: 'Nothing' if the session has no
+-- such side. See Note [Refs route].
+refsWith :: Maybe (IO (Either ListError Source)) -> Application
+refsWith found req respond
   | req.requestMethod /= methodGet = respond (methodNotAllowed "GET")
-  | side /= "tree" = respond notFound
-  | Just ref <- param "module",
+  | Nothing <- found = respond notFound
+  | Just source <- found,
+    Just ref <- param "module",
     Just declText <- param "decl" =
       source >>= \case
         Left _ -> respond (plain status500 "cannot list files")

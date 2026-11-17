@@ -14,6 +14,7 @@ const base = {
 const settle = () => new Promise((r) => setTimeout(r, 20));
 const at = (generation: number, ready: number): Indexing => ({
   generation,
+  side: "tree",
   total: 2,
   ready,
   failed: 0,

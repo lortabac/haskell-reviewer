@@ -75,21 +75,39 @@ describe("createHub", () => {
     const a = listener();
     hub.add(a);
     only().indexing(
-      JSON.stringify({ generation: 1, total: 3, ready: 1, failed: 0 }),
+      JSON.stringify({
+        generation: 1,
+        side: "tree",
+        total: 3,
+        ready: 1,
+        failed: 0,
+      }),
     );
     expect(a.got.at(-1)).toEqual({
       type: "indexing",
-      indexing: { generation: 1, total: 3, ready: 1, failed: 0 },
+      indexing: { generation: 1, side: "tree", total: 3, ready: 1, failed: 0 },
     });
   });
 
   it("a late listener gets the latest indexing state too", () => {
     const hub = createHub("/tok/api/events", FakeSource);
     only().indexing(
-      JSON.stringify({ generation: 1, total: 3, ready: 1, failed: 0 }),
+      JSON.stringify({
+        generation: 1,
+        side: "tree",
+        total: 3,
+        ready: 1,
+        failed: 0,
+      }),
     );
     only().indexing(
-      JSON.stringify({ generation: 1, total: 3, ready: 2, failed: 0 }),
+      JSON.stringify({
+        generation: 1,
+        side: "tree",
+        total: 3,
+        ready: 2,
+        failed: 0,
+      }),
     );
     const late = listener();
     hub.add(late);
@@ -97,7 +115,13 @@ describe("createHub", () => {
       { type: "status", status: "connecting" },
       {
         type: "indexing",
-        indexing: { generation: 1, total: 3, ready: 2, failed: 0 },
+        indexing: {
+          generation: 1,
+          side: "tree",
+          total: 3,
+          ready: 2,
+          failed: 0,
+        },
       },
     ]);
   });
@@ -108,7 +132,7 @@ describe("createHub", () => {
     hub.add(a);
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     only().indexing("[");
-    only().indexing(JSON.stringify({ generation: 1, total: 1 }));
+    only().indexing(JSON.stringify({ generation: 1, side: "tree", total: 1 }));
     expect(a.got).toEqual([{ type: "status", status: "connecting" }]);
     expect(error).toHaveBeenCalledTimes(2);
     error.mockRestore();
@@ -174,7 +198,13 @@ describe("decodeWorkerMessage", () => {
       { type: "hello" },
       {
         type: "indexing",
-        indexing: { generation: 1, total: 3, ready: 1, failed: 0 },
+        indexing: {
+          generation: 1,
+          side: "tree",
+          total: 3,
+          ready: 1,
+          failed: 0,
+        },
       },
       { type: "unsupported" },
     ]) {
@@ -189,7 +219,7 @@ describe("decodeWorkerMessage", () => {
       {},
       { type: "status", status: "bogus" },
       { type: "nope" },
-      { type: "indexing", indexing: { generation: 1, total: 1 } },
+      { type: "indexing", indexing: { generation: 1, side: "tree", total: 1 } },
       { type: "indexing", indexing: "bogus" },
     ]) {
       expect(decodeWorkerMessage(m)).toBeUndefined();

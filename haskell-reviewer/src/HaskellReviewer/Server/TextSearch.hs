@@ -33,6 +33,7 @@ import HaskellReviewer.Core.FileContent
   )
 import HaskellReviewer.Core.FileList (EntryKind (..), FileList (..), ListSource (..))
 import HaskellReviewer.Core.RelPath (RelPath, relPathFromBytes, relPathText)
+import HaskellReviewer.Core.Sides (sideTag)
 import HaskellReviewer.Core.TextSearch
   ( Needle,
     TextAnswer,
@@ -53,7 +54,7 @@ import HaskellReviewer.Effects.Clock
   )
 import HaskellReviewer.Effects.FileSystem (ListError (..), ReadError (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), Logger, logVerbose, newLogger)
-import HaskellReviewer.Server.Api (FilesApi (..))
+import HaskellReviewer.Server.Api (FilesApi (..), fromSideSnapshot)
 import HaskellReviewer.Server.Security (methodNotAllowed, notFound)
 import HaskellReviewer.Server.Wire (encodeTextSearch)
 import HaskellReviewer.Session.Index (withRequest)
@@ -91,8 +92,8 @@ import Network.Wai.Internal (ResponseReceived (..))
 
 {- Note [Text search route]
 
-D-307. GET api/text-search/<side>?q=<text>&limit=<n>. The only side
-is tree; another one is a plain 404. Other methods, HEAD too: 405 with
+D-307. GET api/text-search/<side>?q=<text>&limit=<n>. A side the
+session doesn't have is a plain 404 (D-313). Other methods, HEAD too: 405 with
 Allow: GET.
 
 Params are read with parseQueryReplacePlus False: a + stays a +, only
@@ -116,7 +117,8 @@ stopped. See Note [Text search] in "HaskellReviewer.Core.TextSearch".
 -- | @GET api\/text-search\/\<side>?q=…&limit=…@. See Note [Text search
 -- route].
 textSearchApp :: FilesApi -> Text -> Application
-textSearchApp api = textSearchWith (fmap (fromSnapshot api) <$> api.snapshot)
+textSearchApp api side =
+  textSearchWith (fromSideSnapshot api side (fromSnapshot api))
 
 -- | How long a search may run: 1 s.
 textSearchDeadline :: Nanoseconds
@@ -153,9 +155,9 @@ warmUpTextSearch = do
   _ <- awaitTextFiles silent store (pure fs)
   failing <- newTextStore
   _ <- awaitTextFiles silent failing (ioError (userError "x"))
-  let fake = pure (Right (fakeSource (pure (Right fs))))
+  let fake = Just (pure (Right (fakeSource (pure (Right fs)))))
   mapM_
-    (once fake "GET" "tree")
+    (once fake "GET")
     [ "?q=main",
       "?q=main&limit=1",
       "?q=e",
@@ -181,14 +183,14 @@ warmUpTextSearch = do
       "?q=a&limit",
       "?q=a&limit=99999999999999999999"
     ]
-  once fake "POST" "tree" "?q=a"
-  once fake "GET" "base" "?q=a"
-  once (pure (Right (fakeSource (pure (Left (StoreError "x")))))) "GET" "tree" "?q=a"
-  once (pure (Left (ListCrashed "x"))) "GET" "tree" "?q=a"
+  once fake "POST" "?q=a"
+  once Nothing "GET" "?q=a"
+  once (Just (pure (Right (fakeSource (pure (Left (StoreError "x"))))))) "GET" "?q=a"
+  once (Just (pure (Left (ListCrashed "x")))) "GET" "?q=a"
   where
-    once source method side query = do
+    once found method query = do
       let req = defaultRequest {requestMethod = method, rawQueryString = query}
-      ResponseReceived <- textSearchWith source side req $ \resp -> do
+      ResponseReceived <- textSearchWith found req $ \resp -> do
         let (_, _, withBody) = responseToStream resp
         out <- newIORef mempty
         withBody $ \streaming ->
@@ -227,7 +229,8 @@ fromSnapshot api snap =
       let Nanoseconds ns = elapsed t0 t1
           sk = fs.skipped
       logVerbose api.logger $
-        "text store: "
+        sideTag snap.side
+          <> "text store: "
           <> showText (Vector.length fs.files)
           <> " files, "
           <> showText (storeBytes fs `div` (1024 * 1024))
@@ -252,12 +255,13 @@ renderQueryError = \case
   BadQuery -> "bad query"
   TooLong -> "query too long"
 
--- | The route, over any source. See Note [Text search route].
-textSearchWith :: IO (Either ListError Source) -> Text -> Application
-textSearchWith source side req respond
+-- | The route, over the side's source: 'Nothing' if the session has no
+-- such side. See Note [Text search route].
+textSearchWith :: Maybe (IO (Either ListError Source)) -> Application
+textSearchWith found req respond
   | req.requestMethod /= methodGet = respond (methodNotAllowed "GET")
-  | side /= "tree" = respond notFound
-  | otherwise = case (queryText params, limitOf params) of
+  | Nothing <- found = respond notFound
+  | Just source <- found = case (queryText params, limitOf params) of
       (Left why, _) -> respond (plain status400 (renderQueryError why))
       (_, Left why) -> respond (plain status400 (renderQueryError why))
       (Right q, Right limit) ->

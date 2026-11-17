@@ -1,4 +1,4 @@
--- | The snapshot of the working tree (SPEC §5.2, §11.5).
+-- | The snapshot of one side (SPEC §5.2, §11.5).
 module HaskellReviewer.Session.Snapshot
   ( -- * Types
     Generation (..),
@@ -12,7 +12,7 @@ module HaskellReviewer.Session.Snapshot
     fillSnapshot,
     awaitSnapshot,
     snapshotSTM,
-    indexingState,
+    indexingStates,
   )
 where
 
@@ -22,18 +22,19 @@ import Control.Concurrent.STM
     atomically,
     newEmptyTMVarIO,
     readTMVar,
-    retry,
     tryPutTMVar,
     tryReadTMVar,
   )
 import Data.ByteString.Lazy qualified as LBS
+import Data.Foldable (toList)
 import Data.Map.Strict (Map)
 import Data.Word (Word64)
 import HaskellReviewer.Core.FileList (FileList)
 import HaskellReviewer.Core.Modules (ModuleId, ModuleIndex)
-import HaskellReviewer.Core.Root (CanonicalRoot)
 import HaskellReviewer.Core.Search (ModuleCandidate)
+import HaskellReviewer.Core.Sides (Side, Sides)
 import HaskellReviewer.Effects.FileSystem (ListError)
+import HaskellReviewer.Effects.Source (EntrySource)
 import HaskellReviewer.Session.Index (Index, Progress, readProgress)
 import HaskellReviewer.Session.Resolve (Resolver)
 import HaskellReviewer.Session.TextStore (TextStore)
@@ -53,7 +54,10 @@ firstGeneration = Generation 1
 -- "HaskellReviewer.Server.Api".
 data Snapshot = Snapshot
   { generation :: Generation,
-    root :: CanonicalRoot,
+    -- | Must match its slot in the session's 'Sides'.
+    side :: Side,
+    -- | Where its files are read from.
+    source :: EntrySource,
     files :: FileList,
     modules :: ModuleIndex,
     -- | The body of GET api/files/tree, made once.
@@ -94,20 +98,29 @@ awaitSnapshot (SnapshotSlot v) = atomically (readTMVar v)
 snapshotSTM :: SnapshotSlot -> STM (Maybe (Either ListError Snapshot))
 snapshotSTM (SnapshotSlot v) = tryReadTMVar v
 
--- | How far indexing is, in which snapshot.
+-- | How far indexing is, in which snapshot, on which side.
 data IndexingState = IndexingState
   { generation :: Generation,
+    side :: Side,
     progress :: Progress
   }
   deriving (Eq, Show)
 
--- | The indexing state for the event stream. Waits (retries) until the
--- slot is filled; 'Nothing' if the listing failed: there is nothing to
--- index.
-indexingState :: SnapshotSlot -> STM (Maybe IndexingState)
-indexingState slot =
-  snapshotSTM slot >>= \case
-    Nothing -> retry
-    Just (Left _) -> pure Nothing
-    Just (Right snap) ->
-      Just . IndexingState snap.generation <$> readProgress snap.index
+-- | The indexing states for the event stream: one per side that is
+-- listed, head first. A side not listed yet, or whose listing failed,
+-- has none. Never waits.
+indexingStates :: Sides SnapshotSlot -> STM [IndexingState]
+indexingStates slots = concat <$> mapM stateOf (toList slots)
+  where
+    stateOf slot =
+      snapshotSTM slot >>= \case
+        Just (Right snap) -> do
+          p <- readProgress snap.index
+          pure
+            [ IndexingState
+                { generation = snap.generation,
+                  side = snap.side,
+                  progress = p
+                }
+            ]
+        _ -> pure []

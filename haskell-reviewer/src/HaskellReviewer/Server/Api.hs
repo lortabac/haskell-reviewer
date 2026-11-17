@@ -5,7 +5,10 @@ module HaskellReviewer.Server.Api
     FilesApi (..),
 
     -- * Snapshots
+    snapshotFor,
+    fromSideSnapshot,
     newSnapshot,
+    warmUpSideNames,
 
     -- * Routes
     filesApp,
@@ -57,11 +60,12 @@ import HaskellReviewer.Core.Modules
 import HaskellReviewer.Core.Project (GhcVersion (..), Project)
 import HaskellReviewer.Core.RelPath (RelPath, relPathFromSegments, relPathText)
 import HaskellReviewer.Core.Resolve (ModuleState (..), ParsedInput (..), isPartial)
-import HaskellReviewer.Core.Root (CanonicalRoot)
 import HaskellReviewer.Core.Search (forceCandidates, moduleCandidates)
+import HaskellReviewer.Core.Sides (Side, parseSide, sideName, sideTag)
 import HaskellReviewer.Core.SourceLinks (LinksInput, linksInput, pageLinks, sourceLinks)
 import HaskellReviewer.Effects.FileSystem (ListError, ReadError (..))
 import HaskellReviewer.Effects.Log (Logger, logInfo)
+import HaskellReviewer.Effects.Source (EntrySource)
 import HaskellReviewer.Server.Security (methodNotAllowed, notFound)
 import HaskellReviewer.Server.Wire
   ( encodeFileList,
@@ -115,14 +119,35 @@ import Network.Wai (Application, Request (..), Response, responseLBS)
 
 -- | What the snapshot routes need. Tests plug in fakes.
 data FilesApi = FilesApi
-  { -- | The snapshot. Waits until the list is made.
-    snapshot :: IO (Either ListError Snapshot),
-    -- | Read one entry from disk. See Note [File containment] in
-    -- "HaskellReviewer.Core.RelPath".
+  { -- | The snapshot of a side, if the session has that side. Waits
+    -- until the list is made.
+    snapshotOn :: Side -> Maybe (IO (Either ListError Snapshot)),
+    -- | Read one entry from the snapshot's source. See Note [Entry
+    -- sources] in "HaskellReviewer.Effects.Source".
     readEntry :: Snapshot -> RelPath -> EntryKind -> IO (Either ReadError FileContent),
     -- | For read errors.
     logger :: Logger
   }
+
+-- | The snapshot for the side in a URL. 'Nothing' if it's not a side
+-- of this session: a plain 404, on every route (D-313).
+snapshotFor :: FilesApi -> Text -> Maybe (IO (Either ListError Snapshot))
+snapshotFor api t = parseSide t >>= api.snapshotOn
+
+-- | Build the side names' shared values (the texts 'parseSide' matches
+-- and 'sideName' gives) before request threads race on them
+-- (Q-RTS-BLACKHOLE). Run before warp listens.
+warmUpSideNames :: IO ()
+warmUpSideNames = do
+  mapM_ (evaluate . parseSide) ["tree", "base", "head", "x"]
+  mapM_ (\s -> evaluate (sideName s) >> evaluate (sideTag s)) [minBound .. maxBound]
+
+-- | Like 'snapshotFor', with what a route reads from the snapshot.
+fromSideSnapshot ::
+  FilesApi -> Text -> (Snapshot -> a) -> Maybe (IO (Either ListError a))
+fromSideSnapshot api side f = case snapshotFor api side of
+  Nothing -> Nothing
+  Just get -> Just (fmap f <$> get)
 
 {- Note [Forced snapshot]
 
@@ -151,11 +176,11 @@ What the workers put in the slots is forced before it gets there (Note
 [Indexing] in "HaskellReviewer.Session.Index").
 -}
 
--- | The snapshot of a file list and its project, with the JSON bodies,
--- an index in this pool with every module Pending, and its resolver.
--- Fully built before it returns. See Note [Forced snapshot].
-newSnapshot :: Pool -> CanonicalRoot -> FileList -> Project -> IO Snapshot
-newSnapshot pool root fl project = do
+-- | The snapshot of one side's file list and its project, with the
+-- JSON bodies, an index in this pool with every module Pending, and its
+-- resolver. Fully built before it returns. See Note [Forced snapshot].
+newSnapshot :: Side -> Pool -> EntrySource -> FileList -> Project -> IO Snapshot
+newSnapshot side pool source fl project = do
   let modules = buildModuleIndex project fl
       fileListJson = encodeFileList firstGeneration fl
       moduleTreeJson = encodeModuleTree firstGeneration modules
@@ -169,7 +194,8 @@ newSnapshot pool root fl project = do
   pure
     Snapshot
       { generation = firstGeneration,
-        root = root,
+        side = side,
+        source = source,
         files = fl,
         modules = modules,
         fileListJson = fileListJson,
@@ -198,26 +224,26 @@ forceSnapshot idx fileListJson moduleTreeJson = do
   void (evaluate (LBS.length fileListJson))
   void (evaluate (LBS.length moduleTreeJson))
 
--- | @GET api\/files\/\<side>@: the file list. The only side is @tree@.
+-- | @GET api\/files\/\<side>@: the file list. A side the session
+-- doesn't have is a plain 404 ('snapshotFor').
 filesApp :: FilesApi -> Text -> Application
 filesApp api side req respond
   | req.requestMethod /= methodGet = respond (methodNotAllowed "GET")
-  | side /= "tree" = respond notFound
-  | otherwise =
-      api.snapshot >>= \case
+  | Just snapshot <- snapshotFor api side =
+      snapshot >>= \case
         Left _ -> respond cannotList
         Right snap -> respond (json snap.fileListJson)
+  | otherwise = respond notFound
 
--- | @GET api\/modules\/\<side>@: the module tree. The only side is
--- @tree@.
+-- | @GET api\/modules\/\<side>@: the module tree.
 modulesApp :: FilesApi -> Text -> Application
 modulesApp api side req respond
   | req.requestMethod /= methodGet = respond (methodNotAllowed "GET")
-  | side /= "tree" = respond notFound
-  | otherwise =
-      api.snapshot >>= \case
+  | Just snapshot <- snapshotFor api side =
+      snapshot >>= \case
         Left _ -> respond cannotList
         Right snap -> respond (json snap.moduleTreeJson)
+  | otherwise = respond notFound
 
 -- | @GET api\/file\/\<side>\/\<path segments>@: one file of the list,
 -- as CBOR ('encodeFileView'). Anything not in the list is a 404. See
@@ -225,16 +251,16 @@ modulesApp api side req respond
 fileApp :: FilesApi -> Text -> [Text] -> Application
 fileApp api side segs req respond
   | req.requestMethod /= methodGet = respond (methodNotAllowed "GET")
-  | side /= "tree" = respond notFound
-  | Just path <- relPathFromSegments segs =
-      api.snapshot >>= \case
+  | Just snapshot <- snapshotFor api side,
+    Just path <- relPathFromSegments segs =
+      snapshot >>= \case
         Left _ -> respond cannotList
         Right snap -> case Map.lookup path snap.files.entries of
           Nothing -> respond notFound
           Just kind ->
             api.readEntry snap path kind >>= \case
               Left ReadGone -> respond notFound
-              Left (ReadFailed why) -> respond =<< readFailed api path why
+              Left (ReadFailed why) -> respond =<< readFailed api snap path why
               Right content ->
                 respond (cbor (encodeFileView snap.generation (inSnapshot snap content)))
   | otherwise = respond notFound
@@ -258,9 +284,8 @@ fileApp api side segs req respond
 moduleApp :: FilesApi -> Text -> [Text] -> Application
 moduleApp api side segs req respond
   | req.requestMethod /= methodGet = respond (methodNotAllowed "GET")
-  | side /= "tree" = respond notFound
-  | otherwise =
-      api.snapshot >>= \case
+  | Just snapshot <- snapshotFor api side =
+      snapshot >>= \case
         Left _ -> respond cannotList
         Right snap -> case found snap of
           Nothing -> respond (missing snap)
@@ -272,6 +297,7 @@ moduleApp api side segs req respond
             PreprocessedSource f ->
               answer snap i (Just f.path) (PreprocessedModule f.tool)
             NoSource r -> answer snap i Nothing (NoSourceModule r)
+  | otherwise = respond notFound
   where
     found snap = do
       -- An escaped / (%2F) in a segment: not a path, as on the file route.
@@ -322,14 +348,14 @@ moduleApp api side segs req respond
 sourceApp :: FilesApi -> Text -> [Text] -> Application
 sourceApp api side segs req respond
   | req.requestMethod /= methodGet = respond (methodNotAllowed "GET")
-  | side /= "tree" = respond notFound
-  | otherwise =
-      api.snapshot >>= \case
+  | Just snapshot <- snapshotFor api side =
+      snapshot >>= \case
         Left _ -> respond cannotList
         Right snap -> case relPathFromSegments segs of
           Just path
             | Map.member path snap.files.entries -> answer snap path
           _ -> respond (missing snap)
+  | otherwise = respond notFound
   where
     missing snap = jsonWith status404 (encodeFileNotFound snap.generation)
     view snap v = viewWith snap (pure v)
@@ -379,18 +405,18 @@ linksFor snap i s = do
       p = ParsedInput {text = s.text, parsed = s.parsed}
   pure (linksInput snap.modules state i p res, maybe False isPartial res)
 
--- | @GET api\/indexing\/\<side>@: how far indexing is. The only side is
--- @tree@. The same body as the @indexing@ event.
+-- | @GET api\/indexing\/\<side>@: how far indexing is on that side.
+-- The same body as the @indexing@ event.
 indexingApp :: FilesApi -> Text -> Application
 indexingApp api side req respond
   | req.requestMethod /= methodGet = respond (methodNotAllowed "GET")
-  | side /= "tree" = respond notFound
-  | otherwise =
-      api.snapshot >>= \case
+  | Just snapshot <- snapshotFor api side =
+      snapshot >>= \case
         Left _ -> respond cannotList
         Right snap -> do
           p <- atomically (readProgress snap.index)
-          respond (json (LBS.fromStrict (encodeIndexing snap.generation p)))
+          respond (json (LBS.fromStrict (encodeIndexing snap.generation snap.side p)))
+  | otherwise = respond notFound
 
 -- * Internal
 
@@ -440,10 +466,15 @@ withLength contentType st body =
     body
 
 -- | A read error: logged, then a 500.
-readFailed :: FilesApi -> RelPath -> Text -> IO Response
-readFailed api path why = do
+readFailed :: FilesApi -> Snapshot -> RelPath -> Text -> IO Response
+readFailed api snap path why = do
   logInfo api.logger $
-    "haskell-reviewer: cannot read " <> relPathText path <> ": " <> why
+    "haskell-reviewer: "
+      <> sideTag snap.side
+      <> "cannot read "
+      <> relPathText path
+      <> ": "
+      <> why
   pure (serverError "cannot read file")
 
 -- | A slot with no answer: the route's 404 if the file is gone, else a
