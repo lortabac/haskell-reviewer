@@ -1301,14 +1301,12 @@ calls, all with the hardening below:
 - Commit sides: `ls-tree -r -z --long --full-tree <commit>` per side.
   Paths outside ROOT are counted (D-43), the rest are made relative to
   ROOT. A missing blob (partial clone) has size `BAD` on git 2.56.
-- Partial clone on older git (proposal, to be confirmed): on 2.44.1
+- Partial clone on older git: on 2.44.1
   `ls-tree --long` dies on a missing blob, and `cat-file` dies on each
   one. Then the side is listed with plain `ls-tree -r -z --full-tree`,
   sizes come from `cat-file info`, a dead `cat-file` is restarted
   (about 30 ms per missing blob), and a missing blob shows as a per-file
-  "not in the local repo" note. We never fetch. Alternative: one
-  `rev-list --objects --missing=print <commit>` lists the missing blobs
-  (`?<oid>`) first; it needs a planted-repo row before use.
+  "not in the local repo" note. We never fetch.
 - Objects: a pool of 2 long-lived `git cat-file --batch-command` per
   session. Only `contents <id>` and `info <id>` (hex ids), default
   format. Never `flush`, `remote-object-info` (it goes to the remote),

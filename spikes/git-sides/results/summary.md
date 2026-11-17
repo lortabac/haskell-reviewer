@@ -67,7 +67,7 @@ Known differences from git:
   CR. Git's `convert_is_binary` also counts `(printable >> 7) <
   nonprintable` (a trailing ^Z not counted). T04 does the full rule.
 
-Partial-clone fallback (`list-side.txt`, proposal): on 2.44.1
+Partial-clone fallback (`list-side.txt`, chosen in D-311): on 2.44.1
 `ls-tree --long` dies, so plain `ls-tree` + `cat-file info`, with one
 `cat-file` restart for the one missing blob, no fetch. On 2.56
 `ls-tree --long` works (size BAD).
