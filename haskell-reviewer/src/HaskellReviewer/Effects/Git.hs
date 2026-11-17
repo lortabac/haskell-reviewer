@@ -10,15 +10,24 @@ module HaskellReviewer.Effects.Git
     CannotRun (..),
     Call (..),
     Failure (..),
+    BadOutput (..),
     LsFilesOutput (..),
+    TreeListing (..),
 
     -- * Operations
     probeGit,
     probeGitWith,
     lsFiles,
+    repoInfo,
+    resolveCommit,
+    mergeBase,
+    lsTree,
     renderGitError,
     gitProbeTimeLimit,
     gitListTimeLimit,
+
+    -- * For other git modules
+    gitProcess,
 
     -- * Internal (for tests)
     hardenedArgs,
@@ -39,8 +48,12 @@ import Data.Text.Encoding qualified as Text.Encoding
 import GHC.IO.Exception (IOException (..))
 import HaskellReviewer.Core.Git
   ( GitVersion (..),
+    ObjectId (..),
+    RepoInfo,
     minimumGitVersion,
+    parseCommitIds,
     parseGitVersion,
+    parseRepoInfo,
     renderGitVersion,
   )
 import HaskellReviewer.Core.Root (Root (..))
@@ -90,23 +103,28 @@ index come from someone else. Git must only read. Every call:
 - has stdin on /dev/null and no inherited fds (close_fds; see
   Note [No inherited fds] in "HaskellReviewer.Effects.Spawn" for why
   that stays cheap).
-- has a time limit: 30 s at start-up ('gitProbeTimeLimit'), 120 s for
-  ls-files ('gitListTimeLimit'). A FIFO in the tree (named
+- has a time limit: 30 s for --version, rev-parse and merge-base
+  ('gitProbeTimeLimit'), 120 s for ls-files and ls-tree
+  ('gitListTimeLimit'), 30 s per object read (Note [Object reader] in
+  "HaskellReviewer.Effects.GitObjects"). A FIFO in the tree (named
   .gitignore, say, or set as core.excludesFile) makes git block in
   open() for ever. Past the limit we kill git (SIGKILL) and wait for it.
   We do the same when the call is cancelled (shutdown), so no git is
   left behind.
 - has its output capped: 256 MiB of stdout, 4 KiB of stderr kept.
+- gets --end-of-options before any revision we pass.
 
 git itself is found with findHelper: never a binary inside ROOT. We need
-2.44 or newer (for GIT_NO_LAZY_FETCH). An older one, or one whose
-version we can't read, is exit 2, even if ROOT is not a repo: better to
-say so at once than when diff mode needs it. On macOS, /usr/bin/git
-without the Command Line Tools is a shim that fails --version: also
-exit 2.
+2.44.1 or newer (for GIT_NO_LAZY_FETCH; 2.44.0 lacks it, D-311). An
+older one, or one whose version we can't read, is exit 2, even if ROOT
+is not a repo: better to say so at once than when diff mode needs it.
+On macOS, /usr/bin/git without the Command Line Tools is a shim that
+fails --version: also exit 2.
 
-We only run --version, rev-parse --is-inside-work-tree and ls-files.
-None of them writes.
+We only run --version, rev-parse (--is-inside-work-tree; --show-prefix
+--show-object-format --is-shallow-repository; --verify), merge-base,
+ls-files, ls-tree and cat-file --batch-command (SPEC §11.4.1). None of
+them writes.
 -}
 
 -- | How to run git.
@@ -151,6 +169,15 @@ data GitError
   | GitTimedOut Call
   | -- | More stdout than we take.
     GitOutputTooLarge Call
+  | -- | git printed something we can't read.
+    GitBadOutput BadOutput
+  deriving (Eq, Show)
+
+-- | What git printed that we can't read.
+data BadOutput = BadOutput
+  { call :: Call,
+    problem :: Text
+  }
   deriving (Eq, Show)
 
 -- | git is older than 'minimumGitVersion'.
@@ -227,11 +254,9 @@ renderGitError = \case
   GitFailed f -> "git failed in ROOT: " <> f.stderr
   GitTimedOut c -> "git took too long in ROOT: " <> callText c
   GitOutputTooLarge c -> "git printed too much in ROOT: " <> callText c
+  GitBadOutput b -> "cannot read the output of " <> callText b.call <> ": " <> b.problem
   where
-    needed =
-      Text.pack (show minimumGitVersion.major)
-        <> "."
-        <> Text.pack (show minimumGitVersion.minor)
+    needed = renderGitVersion minimumGitVersion
     callText c = Text.pack (unwords ("git" : c.args))
 
 -- | Find git, check its version, and see if ROOT is in a work tree.
@@ -289,6 +314,58 @@ lsFiles git = do
   pure (LsFilesOutput <$> staged <*> others)
   where
     runOk = runOkWithin git.listTimeLimit
+
+-- | ROOT's prefix, the object format and whether the clone is shallow.
+repoInfo :: Git -> IO (Either GitError RepoInfo)
+repoInfo git = do
+  let args =
+        ["rev-parse", "--show-prefix", "--show-object-format", "--is-shallow-repository"]
+  out <- runOkWithin git.probeTimeLimit git args
+  pure (out >>= badOutput git args . parseRepoInfo)
+
+-- | The commit a revision names, or 'Nothing' if none (unknown, not a
+-- commit, or a range: only the exit code counts, D-311).
+resolveCommit :: Git -> String -> IO (Either GitError (Maybe ObjectId))
+resolveCommit git rev = do
+  let args = ["rev-parse", "--verify", "--quiet", "--end-of-options", rev <> "^{commit}"]
+  result <- runGit git.probeTimeLimit git args
+  pure $ case result of
+    Left e -> Left e
+    Right r -> case r.exitCode of
+      ExitSuccess -> case parseCommitIds r.out of
+        Right [oid] -> Right (Just oid)
+        Right _ -> bad args "expected one commit id"
+        Left e -> bad args e
+      ExitFailure 1 -> Right Nothing
+      ExitFailure c -> Left (GitFailed (failure git args c r))
+  where
+    bad args = badOutput git args . Left
+
+-- | Every merge base of two commits. None (no common history, or a
+-- shallow clone) is an empty list.
+mergeBase :: Git -> ObjectId -> ObjectId -> IO (Either GitError [ObjectId])
+mergeBase git (ObjectId a) (ObjectId b) = do
+  let args = ["merge-base", "--all", "--end-of-options", Text.unpack a, Text.unpack b]
+  result <- runGit git.probeTimeLimit git args
+  pure $ case result of
+    Left e -> Left e
+    Right r -> case r.exitCode of
+      ExitSuccess -> badOutput git args (parseCommitIds r.out)
+      ExitFailure 1 -> Right []
+      ExitFailure c -> Left (GitFailed (failure git args c r))
+
+-- | With or without the size column.
+data TreeListing = WithSizes | WithoutSizes
+  deriving (Eq, Show)
+
+-- | Every entry of a commit, from the top of the repo, raw. Parse it
+-- with 'HaskellReviewer.Core.Git.parseTreeEntries'.
+lsTree :: Git -> TreeListing -> ObjectId -> IO (Either GitError ByteString)
+lsTree git listing (ObjectId commit) =
+  runOkWithin git.listTimeLimit git $
+    ["ls-tree", "-r", "-z"]
+      <> ["--long" | listing == WithSizes]
+      <> ["--full-tree", "--end-of-options", Text.unpack commit]
 
 -- | The flags in front of every call. See Note [Git hardening].
 hardenedArgs :: [String] -> [String]
@@ -381,6 +458,13 @@ runOkWithin limit git args = do
       ExitSuccess -> Right r.out
       ExitFailure c -> Left (GitFailed (failure git args c r))
 
+badOutput :: Git -> [String] -> Either Text a -> Either GitError a
+badOutput git args = \case
+  Right a -> Right a
+  Left problem ->
+    let call = Call {exe = git.exe, args = args}
+     in Left (GitBadOutput BadOutput {call = call, problem = problem})
+
 failure :: Git -> [String] -> Int -> GitResult -> Failure
 failure git args c r =
   Failure
@@ -407,15 +491,10 @@ runGit (Microseconds limit) git args = do
   result <- try @IOException $
     withBinaryFile "/dev/null" ReadMode $ \devNull -> do
       let cp =
-            (proc git.exe (hardenedArgs args))
-              { cwd = Just git.cwd,
-                env = Just git.env,
-                std_in = UseHandle devNull,
+            (gitProcess git args)
+              { std_in = UseHandle devNull,
                 std_out = CreatePipe,
-                std_err = CreatePipe,
-                -- Cheap: see Note [No inherited fds] in
-                -- "HaskellReviewer.Effects.Spawn".
-                close_fds = True
+                std_err = CreatePipe
               }
       bracket (createProcess cp) cleanUp $ \case
         (_, Just hOut, Just hErr, ph) -> do
@@ -445,6 +524,18 @@ runGit (Microseconds limit) git args = do
     reasonOf e
       | null e.ioe_description = Text.pack (displayException e)
       | otherwise = Text.pack e.ioe_description
+
+-- | A hardened git call: flags, env, ROOT as cwd, no inherited fds.
+-- The caller sets the std streams. See Note [Git hardening].
+gitProcess :: Git -> [String] -> CreateProcess
+gitProcess git args =
+  (proc git.exe (hardenedArgs args))
+    { cwd = Just git.cwd,
+      env = Just git.env,
+      -- Cheap: see Note [No inherited fds] in
+      -- "HaskellReviewer.Effects.Spawn".
+      close_fds = True
+    }
 
 -- | Kill git if still there, close the pipes, reap it.
 cleanUp :: (a, Maybe Handle, Maybe Handle, ProcessHandle) -> IO ()

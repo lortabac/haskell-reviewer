@@ -370,7 +370,7 @@ listWithGit :: FilePath -> IO FileList
 listWithGit dir = do
   r <- probe gitProbeTimeLimit [] (Root dir)
   case r of
-    Left e -> assertFailure ("git error (git 2.44 or newer needed): " <> show e)
+    Left e -> assertFailure ("git error (git 2.44.1 or newer needed): " <> show e)
     Right ListFromDisk -> assertFailure "git not used"
     Right listing -> do
       canon <- canonicalRoot (Root dir)

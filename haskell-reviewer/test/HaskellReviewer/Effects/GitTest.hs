@@ -108,7 +108,25 @@ tests =
           r `errorIs` GitTooOld TooOld {exe = exe, version = GitVersion 2 43 0}
           fmap renderGitError (leftOf r)
             @?= Just
-              ("git at " <> Text.pack exe <> " is version 2.43.0; need 2.44 or newer"),
+              ("git at " <> Text.pack exe <> " is version 2.43.0; need 2.44.1 or newer"),
+      testCase "git 2.44.0: too old (no GIT_NO_LAZY_FETCH)" $
+        withDirs $ \root bin -> do
+          exe <- fakeGit bin ["echo 'git version 2.44.0'"]
+          r <- probeIn [bin] root
+          r `errorIs` GitTooOld TooOld {exe = exe, version = GitVersion 2 44 0},
+      testCase "git 2.44.1: fine" $
+        withDirs $ \root bin -> do
+          _ <-
+            fakeGit
+              bin
+              [ "case \"$*\" in",
+                "  *--version*) echo 'git version 2.44.1' ;;",
+                "  *) echo 'fatal: not a git repository (or any of the parent \
+                \directories): .git' >&2; exit 128 ;;",
+                "esac"
+              ]
+          r <- probeIn [bin] root
+          assertDisk r,
       testCase "Apple git 2.39: error" $
         withDirs $ \root bin -> do
           exe <- fakeGit bin ["echo 'git version 2.39.3 (Apple Git-146)'"]

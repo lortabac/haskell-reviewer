@@ -1,16 +1,34 @@
 module HaskellReviewer.Core.GitTest (tests) where
 
+import Data.ByteString qualified as BS
 import Data.Either (isLeft)
+import Data.Text.Encoding qualified as Text.Encoding
+import HaskellReviewer.Core.FileContent (FileSize (..))
 import HaskellReviewer.Core.Git
-  ( GitVersion (..),
+  ( BlobItem (..),
+    CatFileHeader (..),
+    FoundHeader (..),
+    GitVersion (..),
+    History (..),
     IndexMode (..),
+    ObjectFormat (..),
     ObjectId (..),
+    ObjectType (..),
     OtherEntry (..),
+    RepoInfo (..),
     StageEntry (..),
+    TreeEntry (..),
+    TreeItem (..),
+    TreeSize (..),
     minimumGitVersion,
+    parseCatFileHeader,
+    parseCommitIds,
     parseGitVersion,
+    parseObjectId,
     parseOthers,
+    parseRepoInfo,
     parseStageEntries,
+    parseTreeEntries,
     renderGitVersion,
   )
 import Test.Tasty (TestTree, testGroup)
@@ -30,9 +48,10 @@ tests =
         mapM_
           (\t -> (t, parseGitVersion t) @?= (t, Nothing))
           ["", "hello", "git version", "git version x.y.z", "git version 2", "2.44.0"],
-      testCase "version: 2.43.x is too old, 2.44.0 is fine" $ do
+      testCase "version: 2.44.0 is too old, 2.44.1 is fine" $ do
         assertBool "2.43.9" (GitVersion 2 43 9 < minimumGitVersion)
-        assertBool "2.44.0" (GitVersion 2 44 0 >= minimumGitVersion)
+        assertBool "2.44.0" (GitVersion 2 44 0 < minimumGitVersion)
+        assertBool "2.44.1" (GitVersion 2 44 1 >= minimumGitVersion)
         assertBool "3.0.0" (GitVersion 3 0 0 >= minimumGitVersion)
         renderGitVersion (GitVersion 2 43 0) @?= "2.43.0",
       testCase "ls-files --stage: modes" $
@@ -73,11 +92,148 @@ tests =
             ],
       testCase "ls-files --stage: bad records" $
         mapM_
-          (\b -> assertBool (show b) (isLeft (parseStageEntries b)))
+          (\r -> assertBool (show r) (isLeft (parseStageEntries r)))
           ["junk\0", "100644 aaaa 0 a.hs\0", "100644 aaaa x\ta\0", "100644 aaaa 0\t\0"],
       testCase "ls-files --stage: empty" $
         parseStageEntries "" @?= Right [],
       testCase "ls-files --others: files and nested repos" $
         parseOthers "new.hs\0nested/\0dir/f\0"
-          @?= [OtherFile "new.hs", OtherRepo "nested", OtherFile "dir/f"]
+          @?= [OtherFile "new.hs", OtherRepo "nested", OtherFile "dir/f"],
+      testCase "ls-tree --long: modes, padded sizes, gitlink, BAD" $
+        parseTreeEntries
+          ( "100644 blob "
+              <> a
+              <> "      42\ta.hs\0\
+                 \100755 blob "
+              <> b
+              <> "       7\tbin/run\0\
+                 \120000 blob "
+              <> c
+              <> "       4\tlink\0\
+                 \160000 commit "
+              <> d
+              <> "       -\tsub\0\
+                 \100644 blob "
+              <> a
+              <> "     BAD\tgone.txt\0"
+          )
+          @?= Right
+            [ entry "a.hs" (file a (known 42)),
+              entry "bin/run" (ItemBlob (BlobItem (oid b) (known 7))),
+              entry "link" (ItemSymlink (BlobItem (oid c) (known 4))),
+              entry "sub" (ItemGitlink (oid d)),
+              entry "gone.txt" (ItemBlob (BlobItem (oid a) SizeMissing))
+            ],
+      testCase "ls-tree --long: big size, no padding" $
+        parseTreeEntries ("100644 blob " <> a <> " 1200000\tbig.txt\0")
+          @?= Right [entry "big.txt" (file a (known 1200000))],
+      testCase "ls-tree: sha256 ids" $
+        parseTreeEntries ("100644 blob " <> long <> "\tf\0")
+          @?= Right [entry "f" (ItemBlob (BlobItem (oid long) SizeNotListed))],
+      testCase "ls-tree: TAB and newline in a path, non-UTF-8 bytes kept" $
+        parseTreeEntries
+          ( "100644 blob "
+              <> a
+              <> "       1\ta\tb\0\
+                 \100644 blob "
+              <> a
+              <> "\tnew\nline\0\
+                 \100644 blob "
+              <> a
+              <> "\tcaf\xe9\0"
+          )
+          @?= Right
+            [ entry "a\tb" (ItemBlob (BlobItem (oid a) (SizeKnown (FileSize 1)))),
+              entry "new\nline" (ItemBlob (BlobItem (oid a) SizeNotListed)),
+              entry "caf\xe9" (ItemBlob (BlobItem (oid a) SizeNotListed))
+            ],
+      testCase "ls-tree plain: no sizes, gitlink" $
+        parseTreeEntries
+          ("100644 blob " <> a <> "\ta.hs\0\&160000 commit " <> d <> "\tsub\0")
+          @?= Right
+            [ entry "a.hs" (ItemBlob (BlobItem (oid a) SizeNotListed)),
+              entry "sub" (ItemGitlink (oid d))
+            ],
+      testCase "ls-tree: empty, unknown mode" $ do
+        parseTreeEntries "" @?= Right []
+        parseTreeEntries ("100664 blob " <> a <> "       1\tx\0")
+          @?= Right [entry "x" (ItemOther "100664")],
+      testCase "ls-tree: bad records" $
+        mapM_
+          (\r -> assertBool (show r) (isLeft (parseTreeEntries r)))
+          [ "junk\0",
+            "100644 blob " <> a <> " 1 a.hs\0",
+            "100644 blob nothex\ta\0",
+            "100644 blob " <> a <> "       -\ta\0",
+            "100644 blob " <> a <> "      -1\ta\0",
+            "160000 commit " <> d <> "       5\tsub\0",
+            "100644 blob " <> a <> "\t\0"
+          ],
+      testCase "ls-tree: the bad record in the error" $
+        parseTreeEntries ("100644 blob " <> a <> "\tok\0junk\0")
+          @?= Left "bad ls-tree record: junk",
+      testCase "cat-file header: found, missing" $ do
+        parseCatFileHeader (a <> " blob 12")
+          @?= Right (HeaderFound (FoundHeader (oid a) TypeBlob (FileSize 12)))
+        parseCatFileHeader (b <> " tree 0")
+          @?= Right (HeaderFound (FoundHeader (oid b) TypeTree (FileSize 0)))
+        parseCatFileHeader (long <> " commit 200")
+          @?= Right (HeaderFound (FoundHeader (oid long) TypeCommit (FileSize 200)))
+        parseCatFileHeader (c <> " missing") @?= Right (HeaderMissing (oid c)),
+      testCase "cat-file header: junk" $
+        mapM_
+          (\h -> assertBool (show h) (isLeft (parseCatFileHeader h)))
+          [ a <> " ambiguous",
+            "junk",
+            "",
+            a <> " blob -3",
+            a <> " blob 3 extra",
+            a <> " blob",
+            a <> " blob  3",
+            a <> " weird 3",
+            "HEAD blob 3"
+          ],
+      testCase "object ids: only 40 or 64 lowercase hex" $ do
+        parseObjectId a @?= Just (oid a)
+        parseObjectId long @?= Just (oid long)
+        mapM_
+          (\i -> parseObjectId i @?= Nothing)
+          [ "",
+            "ABCDEF0123456789abcdef0123456789abcdef01",
+            BS.take 39 a,
+            a <> "0",
+            BS.take 39 a <> " ",
+            BS.take 39 a <> "\n",
+            "g" <> BS.drop 1 a
+          ],
+      testCase "rev-parse info: top, prefix, sha256, shallow" $ do
+        parseRepoInfo "\nsha1\nfalse\n"
+          @?= Right (RepoInfo "" Sha1 FullHistory)
+        parseRepoInfo "libs/a/\nsha256\ntrue\n"
+          @?= Right (RepoInfo "libs/a/" Sha256 ShallowClone)
+        parseRepoInfo "caf\xe9/\nsha1\nfalse\n"
+          @?= Right (RepoInfo "caf\xe9/" Sha1 FullHistory),
+      testCase "rev-parse info: a prefix with a newline, junk" $
+        mapM_
+          (\o -> assertBool (show o) (isLeft (parseRepoInfo o)))
+          [ "new\nline/\nsha1\nfalse\n",
+            "",
+            "\nsha1\n",
+            "\nmd5\nfalse\n",
+            "\nsha1\nmaybe\n"
+          ],
+      testCase "commit ids: lines, empty, junk" $ do
+        parseCommitIds (a <> "\n" <> b <> "\n") @?= Right [oid a, oid b]
+        parseCommitIds "" @?= Right []
+        assertBool "junk" (isLeft (parseCommitIds (a <> "\n^" <> b <> "\n")))
     ]
+  where
+    a = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    b = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    c = "cccccccccccccccccccccccccccccccccccccccc"
+    d = "0123456789abcdef0123456789abcdef01234567"
+    long = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    oid = ObjectId . Text.Encoding.decodeLatin1
+    entry = TreeEntry
+    file o s = ItemBlob (BlobItem (oid o) s)
+    known = SizeKnown . FileSize

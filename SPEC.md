@@ -1299,14 +1299,16 @@ calls, all with the hardening below:
   `merge-base --all <base> <head>` for `...`, on the resolved ids: the
   first base is used. No base in a shallow clone: the message says so.
 - Commit sides: `ls-tree -r -z --long --full-tree <commit>` per side.
-  Paths outside ROOT are counted (D-43), the rest are made relative to
-  ROOT. A missing blob (partial clone) has size `BAD` on git 2.56.
-- Partial clone on older git: on 2.44.1
+  Paths outside ROOT are counted (D-43; at most 100,000 kept), the
+  rest are made relative to ROOT. A missing blob (partial clone) has
+  size `BAD` on git 2.56.
+- Partial clone on older git (D-312): on 2.44.1
   `ls-tree --long` dies on a missing blob, and `cat-file` dies on each
-  one. Then the side is listed with plain `ls-tree -r -z --full-tree`,
-  sizes come from `cat-file info`, a dead `cat-file` is restarted
-  (about 30 ms per missing blob), and a missing blob shows as a per-file
-  "not in the local repo" note. We never fetch.
+  one. Then the side is listed with plain `ls-tree -r -z --full-tree`
+  only. Sizes are unknown until a blob is read: the first read gives
+  the size, or finds the blob missing, restarts the dead `cat-file`
+  (about 30 ms) and shows a per-file "not in the local repo" note. We
+  never fetch.
 - Objects: a pool of 2 long-lived `git cat-file --batch-command` per
   session. Only `contents <id>` and `info <id>` (hex ids), default
   format. Never `flush`, `remote-object-info` (it goes to the remote),
@@ -1339,8 +1341,8 @@ calls, all with the hardening below:
     is not used;
   - a time limit: 30 s for `--version`, `rev-parse`, `merge-base` and
     `config`; 120 s
-    for `ls-tree`, `ls-files` and `check-attr`; a per-read limit for
-    `cat-file`. A FIFO in the tree (as `.gitattributes`, or set as
+    for `ls-tree`, `ls-files` and `check-attr`; 30 s per `cat-file`
+    read (D-312). A FIFO in the tree (as `.gitattributes`, or set as
     `core.excludesFile`) blocks `check-attr` and `ls-files --others`.
     Past the limit git is killed;
   - `--end-of-options` before any user-given revision;

@@ -40,6 +40,7 @@ library
     HaskellReviewer.Core.CabalCompat
     HaskellReviewer.Core.CabalFile
     HaskellReviewer.Core.Code
+    HaskellReviewer.Core.CommitFiles
     HaskellReviewer.Core.Config
     HaskellReviewer.Core.Cpp
     HaskellReviewer.Core.Cpp.Expand
@@ -101,6 +102,7 @@ library
     HaskellReviewer.Effects.Config
     HaskellReviewer.Effects.FileSystem
     HaskellReviewer.Effects.Git
+    HaskellReviewer.Effects.GitObjects
     HaskellReviewer.Effects.Helper
     HaskellReviewer.Effects.Log
     HaskellReviewer.Effects.Parser
@@ -233,6 +235,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.AddressTest
     HaskellReviewer.Core.CabalFileTest
     HaskellReviewer.Core.CodeTest
+    HaskellReviewer.Core.CommitFilesTest
     HaskellReviewer.Core.ConfigGoldenTest
     HaskellReviewer.Core.CppGoldenTest
     HaskellReviewer.Core.CppPropertyTest
@@ -276,6 +279,8 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Effects.AtomicFileTest
     HaskellReviewer.Effects.ConfigTest
     HaskellReviewer.Effects.FileSystemTest
+    HaskellReviewer.Effects.GitObjectsTest
+    HaskellReviewer.Effects.GitPlantedTest
     HaskellReviewer.Effects.GitTest
     HaskellReviewer.Effects.HelperTest
     HaskellReviewer.Effects.LogTest

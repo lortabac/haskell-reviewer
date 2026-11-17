@@ -21,6 +21,7 @@ import HaskellReviewer.App.RunTest qualified
 import HaskellReviewer.Core.AddressTest qualified
 import HaskellReviewer.Core.CabalFileTest qualified
 import HaskellReviewer.Core.CodeTest qualified
+import HaskellReviewer.Core.CommitFilesTest qualified
 import HaskellReviewer.Core.ConfigGoldenTest qualified
 import HaskellReviewer.Core.CppGoldenTest qualified
 import HaskellReviewer.Core.CppTest qualified
@@ -64,6 +65,8 @@ import HaskellReviewer.Effects.AtomicFileTest qualified
 import HaskellReviewer.Effects.Config (warmUpConfig)
 import HaskellReviewer.Effects.ConfigTest qualified
 import HaskellReviewer.Effects.FileSystemTest qualified
+import HaskellReviewer.Effects.GitObjectsTest qualified
+import HaskellReviewer.Effects.GitPlantedTest qualified
 import HaskellReviewer.Effects.GitTest qualified
 import HaskellReviewer.Effects.HelperTest qualified
 import HaskellReviewer.Effects.LogTest qualified
@@ -159,6 +162,7 @@ main = do
               HaskellReviewer.Effects.ConfigTest.tests,
               HaskellReviewer.Session.PrefsTest.tests
             ],
+        HaskellReviewer.Core.CommitFilesTest.tests,
         HaskellReviewer.Core.FileListTest.tests,
         HaskellReviewer.Core.GitTest.tests,
         HaskellReviewer.Core.IndexQueueTest.tests,
@@ -177,6 +181,8 @@ main = do
         HaskellReviewer.Core.XdgTest.tests,
         HaskellReviewer.Effects.AtomicFileTest.tests,
         HaskellReviewer.Effects.FileSystemTest.tests,
+        HaskellReviewer.Effects.GitObjectsTest.tests,
+        HaskellReviewer.Effects.GitPlantedTest.tests,
         HaskellReviewer.Effects.GitTest.tests,
         HaskellReviewer.Effects.HelperTest.tests,
         HaskellReviewer.Effects.LogTest.tests,

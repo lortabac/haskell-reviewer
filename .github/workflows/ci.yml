@@ -61,7 +61,7 @@ jobs:
       - name: Build
         run: make build
 
-      # The tests need git 2.44 or newer. macOS has Apple's older git in
+      # The tests need git 2.44.1 or newer. macOS has Apple's older git in
       # /usr/bin; Homebrew's should come first on PATH.
       - name: Git version
         run: |
