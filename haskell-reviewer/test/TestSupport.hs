@@ -10,6 +10,12 @@ module TestSupport
     git,
     gitOut,
     gitSetup,
+    fixtureRepo,
+
+    -- * Checks
+    FileState (..),
+    snapshotDir,
+    assertNoMarker,
 
     -- * Scripts
     writeScript,
@@ -25,7 +31,8 @@ where
 
 import Control.Concurrent.MVar (MVar, newMVar, withMVar)
 import Control.Exception (IOException, bracket, try)
-import Control.Monad (unless, void)
+import Control.Monad (unless, void, when)
+import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.List (isPrefixOf, sort)
 import Data.Maybe (fromMaybe)
@@ -57,7 +64,7 @@ import System.Process
     readCreateProcessWithExitCode,
     waitForProcess,
   )
-import Test.Tasty.HUnit (assertFailure)
+import Test.Tasty.HUnit (Assertion, assertFailure)
 
 -- * Temp dirs
 
@@ -131,6 +138,64 @@ gitSetup home limit = do
         probeTimeLimit = limit,
         listTimeLimit = limit
       }
+
+-- | Build a fixture repo: run @fixtures/repos/<name>.sh@ with the
+-- given args (the first is the dir to make), with only PATH from our
+-- environment. Fails the test if the script fails.
+fixtureRepo :: String -> [String] -> IO ()
+fixtureRepo name args = do
+  path <- fromMaybe "/usr/bin:/bin" <$> lookupEnv "PATH"
+  let cp =
+        (proc "/bin/sh" (("../fixtures/repos" </> name <> ".sh") : args))
+          { close_fds = True,
+            env = Just [("PATH", path)]
+          }
+  (code, _, err) <- readCreateProcessWithExitCode cp ""
+  case code of
+    ExitSuccess -> pure ()
+    ExitFailure _ -> assertFailure (name <> ".sh failed: " <> err)
+
+-- * Checks
+
+-- | One file, as seen by 'snapshotDir'.
+data FileState = FileState
+  { path :: FilePath,
+    size :: Integer,
+    mtime :: String,
+    contents :: ByteString
+  }
+  deriving (Eq, Show)
+
+-- | Every file and dir under a dir. A dir is its path with a trailing
+-- slash and nothing else, so a new empty dir shows too.
+snapshotDir :: FilePath -> IO [FileState]
+snapshotDir dir = do
+  entries <- Dir.listDirectory dir
+  concat
+    <$> mapM
+      ( \name -> do
+          let p = dir </> name
+          isLink <- Dir.pathIsSymbolicLink p
+          isDir <- Dir.doesDirectoryExist p
+          if isDir && not isLink
+            then (dirState p :) <$> snapshotDir p
+            else do
+              size <- Dir.getFileSize p
+              mtime <- show <$> Dir.getModificationTime p
+              bytes <- BS.readFile p
+              pure [FileState {path = p, size = size, mtime = mtime, contents = bytes}]
+      )
+      (sort entries)
+  where
+    dirState p = FileState {path = p <> "/", size = 0, mtime = "", contents = ""}
+
+-- | The marker file must not exist. Shows what it holds if it does.
+assertNoMarker :: FilePath -> Assertion
+assertNoMarker marker = do
+  ran <- Dir.doesPathExist marker
+  when ran $ do
+    what <- readFile marker
+    assertFailure ("something ran: " <> what)
 
 -- * Scripts
 

@@ -25,7 +25,7 @@ import Data.ByteString.Lazy qualified as LBS
 import Data.ByteString.Lazy.Char8 qualified as LChar8
 import Data.Char (isDigit, toLower)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
-import Data.List (isInfixOf, isPrefixOf, isSuffixOf, sort)
+import Data.List (isInfixOf, isPrefixOf, isSuffixOf)
 import Data.Maybe (isNothing)
 import Data.Text qualified as Text
 import GHC.Clock (getMonotonicTime)
@@ -77,9 +77,11 @@ import Test.Tasty.HUnit
   )
 import TestSupport
   ( assertFds,
+    assertNoMarker,
     baselineFds,
     git,
     listFdsTo,
+    snapshotDir,
     withCanonicalTemp,
     writeScript,
   )
@@ -634,7 +636,7 @@ gitTests =
           assertContains
             ( "haskell-reviewer: git at "
                 <> exe
-                <> " is version 2.43.0; need 2.44 or newer"
+                <> " is version 2.43.0; need 2.44.1 or newer"
             )
             err,
       testCase "git version unreadable: exit 2" $
@@ -857,13 +859,6 @@ plantGit bin marker = do
       ]
   pure ()
 
-assertNoMarker :: FilePath -> Assertion
-assertNoMarker marker = do
-  ran <- Dir.doesPathExist marker
-  unless (not ran) $ do
-    what <- readFile marker
-    assertFailure ("something ran: " <> what)
-
 -- | The real git, from our PATH.
 realGit :: IO FilePath
 realGit =
@@ -881,35 +876,6 @@ envWith set extra = do
   env <- getEnvironment
   let names = map fst (set <> extra)
   pure (set <> extra <> filter ((`notElem` names) . fst) env)
-
--- | One file, as seen by 'snapshotDir'.
-data FileState = FileState
-  { path :: FilePath,
-    size :: Integer,
-    mtime :: String,
-    contents :: ByteString
-  }
-  deriving (Eq, Show)
-
--- | Every file under a dir.
-snapshotDir :: FilePath -> IO [FileState]
-snapshotDir dir = do
-  entries <- Dir.listDirectory dir
-  concat
-    <$> mapM
-      ( \name -> do
-          let p = dir </> name
-          isLink <- Dir.pathIsSymbolicLink p
-          isDir <- Dir.doesDirectoryExist p
-          if isDir && not isLink
-            then snapshotDir p
-            else do
-              size <- Dir.getFileSize p
-              mtime <- show <$> Dir.getModificationTime p
-              bytes <- BS.readFile p
-              pure [FileState {path = p, size = size, mtime = mtime, contents = bytes}]
-      )
-      (sort entries)
 
 -- * Signals and trace file
 

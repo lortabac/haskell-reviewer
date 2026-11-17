@@ -48,6 +48,9 @@ With git we cut the sorted list, so we keep the first ones by path.
 The disk walk stops once it has enough: each dir is walked in name
 order, so the cut is the same each time, but it is not the first ones
 by path (a/b/c comes before a.hs in the walk, after it by path).
+
+From a commit (diff mode), the list comes from ls-tree: see Note
+[Commit files] in "HaskellReviewer.Core.CommitFiles".
 -}
 
 -- | What a list entry is.

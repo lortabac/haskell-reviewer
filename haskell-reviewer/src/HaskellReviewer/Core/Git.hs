@@ -14,6 +14,28 @@ module HaskellReviewer.Core.Git
     OtherEntry (..),
     parseStageEntries,
     parseOthers,
+
+    -- * Object ids and revisions
+    parseObjectId,
+    parseCommitIds,
+    ObjectFormat (..),
+    History (..),
+    RepoInfo (..),
+    parseRepoInfo,
+
+    -- * ls-tree
+    TreeEntry (..),
+    TreeItem (..),
+    BlobItem (..),
+    TreeSize (..),
+    parseTreeEntries,
+
+    -- * cat-file
+    ObjectType (..),
+    renderObjectType,
+    CatFileHeader (..),
+    FoundHeader (..),
+    parseCatFileHeader,
   )
 where
 
@@ -23,10 +45,12 @@ import Data.ByteString.Char8 qualified as Char8
 import Data.Char (isDigit)
 import Data.Foldable (minimumBy)
 import Data.List.NonEmpty qualified as NonEmpty
+import Data.Maybe (fromMaybe)
 import Data.Ord (comparing)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
+import HaskellReviewer.Core.FileContent (FileSize (..))
 import Text.Read (readMaybe)
 
 -- | A git version, e.g. 2.44.0.
@@ -37,9 +61,10 @@ data GitVersion = GitVersion
   }
   deriving (Eq, Ord, Show)
 
--- | We need 2.44 for GIT_NO_LAZY_FETCH (SPEC §11.4.1).
+-- | We need GIT_NO_LAZY_FETCH (SPEC §11.4.1, D-311): new in 2.45.0, and
+-- backported to 2.44.1. 2.44.0 does lazy-fetch.
 minimumGitVersion :: GitVersion
-minimumGitVersion = GitVersion 2 44 0
+minimumGitVersion = GitVersion 2 44 1
 
 -- | Parse the output of @git --version@. Takes vendor suffixes, as in
 -- @git version 2.39.3 (Apple Git-146)@ or @2.45.1.windows.1@. A missing
@@ -77,9 +102,10 @@ data IndexMode
     ModeOther ByteString
   deriving (Eq, Show)
 
--- | A git object id, in hex.
+-- | A git object id, in hex. Ids from ls-files are taken as they are;
+-- 'parseObjectId' checks one.
 newtype ObjectId = ObjectId Text
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 -- | One entry of @git ls-files --stage -z@.
 data StageEntry = StageEntry
@@ -140,8 +166,194 @@ parseOthers out = map entry (records out)
       Just (dir, '/') -> OtherRepo dir
       _ -> OtherFile r
 
+-- * Object ids and revisions
+
+-- | A SHA-1 or SHA-256 id: 40 or 64 lowercase hex digits, nothing else.
+parseObjectId :: ByteString -> Maybe ObjectId
+parseObjectId b
+  | BS.length b `elem` [40, 64],
+    BS.all hex b =
+      Just (ObjectId (Text.Encoding.decodeLatin1 b))
+  | otherwise = Nothing
+  where
+    hex c = (c >= 48 && c <= 57) || (c >= 97 && c <= 102)
+
+-- | One id per line, as @rev-parse@ and @merge-base --all@ print them.
+-- Empty output is no id.
+parseCommitIds :: ByteString -> Either Text [ObjectId]
+parseCommitIds out = traverse one (filter (not . BS.null) (Char8.lines out))
+  where
+    one l = maybe (Left ("bad commit id: " <> lenient l)) Right (parseObjectId l)
+
+-- | The hash a repo uses.
+data ObjectFormat = Sha1 | Sha256
+  deriving (Eq, Show)
+
+-- | Whether the repo has all of its history.
+data History = FullHistory | ShallowClone
+  deriving (Eq, Show)
+
+-- | What @rev-parse --show-prefix --show-object-format
+-- --is-shallow-repository@ says, run in ROOT.
+data RepoInfo = RepoInfo
+  { -- | ROOT from the top of the work tree: empty at the top, else
+    -- like @libs/a/@. Raw bytes.
+    prefix :: ByteString,
+    format :: ObjectFormat,
+    history :: History
+  }
+  deriving (Eq, Show)
+
+-- | Exactly three lines. A ROOT path with a newline gives more, and
+-- fails: git has no @-z@ here (a known gap, D-311).
+parseRepoInfo :: ByteString -> Either Text RepoInfo
+parseRepoInfo out = case Char8.split '\n' (fromMaybe out (BS.stripSuffix "\n" out)) of
+  [prefix, f, h] -> do
+    format <- case f of
+      "sha1" -> Right Sha1
+      "sha256" -> Right Sha256
+      _ -> Left ("unknown object format: " <> lenient f)
+    history <- case h of
+      "false" -> Right FullHistory
+      "true" -> Right ShallowClone
+      _ -> Left ("bad --is-shallow-repository answer: " <> lenient h)
+    Right RepoInfo {prefix = prefix, format = format, history = history}
+  _ -> Left ("bad rev-parse output: " <> lenient out)
+
+-- * ls-tree
+
+-- | One row of @ls-tree -r -z [--long] --full-tree@.
+data TreeEntry = TreeEntry
+  { -- | Raw bytes, from the top of the repo.
+    path :: ByteString,
+    item :: TreeItem
+  }
+  deriving (Eq, Show)
+
+-- | What a tree row is, as far as we care.
+data TreeItem
+  = -- | Mode 100644 or 100755.
+    ItemBlob BlobItem
+  | -- | Mode 120000. The blob holds the target.
+    ItemSymlink BlobItem
+  | -- | Mode 160000: a submodule, with its commit.
+    ItemGitlink ObjectId
+  | -- | Any other mode. Skipped.
+    ItemOther ByteString
+  deriving (Eq, Show)
+
+-- | A file or symlink in a tree.
+data BlobItem = BlobItem
+  { oid :: ObjectId,
+    size :: TreeSize
+  }
+  deriving (Eq, Show)
+
+-- | The size column of @ls-tree --long@.
+data TreeSize
+  = SizeKnown FileSize
+  | -- | @BAD@: the blob is not in the repo (a partial clone, git 2.56).
+    SizeMissing
+  | -- | Plain @ls-tree@, without @--long@.
+    SizeNotListed
+  deriving (Eq, Show)
+
+-- | Parse @ls-tree -r -z@ with or without @--long@: records
+-- @\<mode> \<type> \<oid>[ \<size>]\\t\<path>\\0@. The size is padded
+-- with spaces; it is @-@ for a gitlink and @BAD@ for a missing blob.
+-- The path is everything after the first TAB (it can hold a TAB or a
+-- newline). Gives back the first bad record on failure.
+parseTreeEntries :: ByteString -> Either Text [TreeEntry]
+parseTreeEntries = traverse record . records
+  where
+    record r = case Char8.break (== '\t') r of
+      (meta, rest)
+        | Just ('\t', path) <- Char8.uncons rest,
+          not (BS.null path),
+          Just item <- itemOf (Char8.words meta) ->
+            Right TreeEntry {path = path, item = item}
+      _ -> Left ("bad ls-tree record: " <> lenient r)
+    itemOf = \case
+      [m, _, o] -> build m o Nothing
+      [m, _, o, s] -> build m o (Just s)
+      _ -> Nothing
+    build m o size = do
+      oid <- parseObjectId o
+      case m of
+        "100644" -> blob oid ItemBlob size
+        "100755" -> blob oid ItemBlob size
+        "120000" -> blob oid ItemSymlink size
+        "160000"
+          | maybe True (== "-") size -> Just (ItemGitlink oid)
+          | otherwise -> Nothing
+        _ -> Just (ItemOther m)
+    blob oid wrap size = do
+      s <- case size of
+        Nothing -> Just SizeNotListed
+        Just "BAD" -> Just SizeMissing
+        Just n -> SizeKnown . FileSize <$> decimal n
+      Just (wrap BlobItem {oid = oid, size = s})
+
+-- * cat-file
+
+-- | The type of a git object.
+data ObjectType = TypeBlob | TypeTree | TypeCommit | TypeTag
+  deriving (Eq, Show)
+
+-- | E.g. @blob@.
+renderObjectType :: ObjectType -> Text
+renderObjectType = \case
+  TypeBlob -> "blob"
+  TypeTree -> "tree"
+  TypeCommit -> "commit"
+  TypeTag -> "tag"
+
+-- | The header line of a @cat-file --batch-command@ answer, default
+-- format.
+data CatFileHeader
+  = HeaderFound FoundHeader
+  | -- | @\<oid> missing@.
+    HeaderMissing ObjectId
+  deriving (Eq, Show)
+
+-- | @\<oid> \<type> \<size>@.
+data FoundHeader = FoundHeader
+  { oid :: ObjectId,
+    kind :: ObjectType,
+    size :: FileSize
+  }
+  deriving (Eq, Show)
+
+-- | Parse one header line, without its LF. Anything else, as
+-- @\<oid> ambiguous@ or junk, is an error.
+parseCatFileHeader :: ByteString -> Either Text CatFileHeader
+parseCatFileHeader line = case Char8.split ' ' line of
+  [o, "missing"] | Just oid <- parseObjectId o -> Right (HeaderMissing oid)
+  [o, t, s]
+    | Just oid <- parseObjectId o,
+      Just kind <- typeOf t,
+      Just size <- decimal s ->
+        Right (HeaderFound FoundHeader {oid = oid, kind = kind, size = FileSize size})
+  _ -> Left ("bad cat-file header: " <> lenient line)
+  where
+    typeOf = \case
+      "blob" -> Just TypeBlob
+      "tree" -> Just TypeTree
+      "commit" -> Just TypeCommit
+      "tag" -> Just TypeTag
+      _ -> Nothing
+
 -- * Internal
 
 -- | NUL-terminated records, empty ones dropped.
 records :: ByteString -> [ByteString]
 records = filter (not . BS.null) . BS.split 0
+
+-- | A non-negative decimal number, digits only.
+decimal :: ByteString -> Maybe Int
+decimal b
+  | BS.null b || BS.length b > 18 || not (Char8.all isDigit b) = Nothing
+  | otherwise = fst <$> Char8.readInt b
+
+lenient :: ByteString -> Text
+lenient = Text.Encoding.decodeUtf8Lenient

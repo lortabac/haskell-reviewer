@@ -14,6 +14,7 @@ module HaskellReviewer.Effects.FileSystem
 
     -- * Listing
     probeFiles,
+    listCommit,
     renderListError,
 
     -- * Reading
@@ -22,6 +23,7 @@ module HaskellReviewer.Effects.FileSystem
     -- * Internal (for tests)
     canonicalRoot,
     listFiles,
+    listCommitPlain,
     walkFiles,
     WalkResult (..),
   )
@@ -43,6 +45,12 @@ import Foreign.C.Error (Errno (..), eLOOP, eNOTDIR)
 import GHC.Foreign qualified
 import GHC.IO.Encoding (getFileSystemEncoding)
 import GHC.IO.Exception (IOException (..))
+import HaskellReviewer.Core.CommitFiles
+  ( CommitFiles (..),
+    Dropped (..),
+    DroppedRow (..),
+    mkCommitFiles,
+  )
 import HaskellReviewer.Core.FileContent
   ( FileContent (..),
     FileSize (..),
@@ -62,9 +70,11 @@ import HaskellReviewer.Core.Git
   ( IndexMode (..),
     ObjectId (..),
     OtherEntry (..),
+    RepoInfo (..),
     StageEntry (..),
     parseOthers,
     parseStageEntries,
+    parseTreeEntries,
   )
 import HaskellReviewer.Core.RelPath
   ( BadPath (..),
@@ -78,10 +88,14 @@ import HaskellReviewer.Core.RelPath
   )
 import HaskellReviewer.Core.Root (CanonicalRoot (..), Root (..))
 import HaskellReviewer.Effects.Git
-  ( GitError,
+  ( Failure (..),
+    Git,
+    GitError (..),
     Listing (..),
     LsFilesOutput (..),
+    TreeListing (..),
     lsFiles,
+    lsTree,
     probeGit,
     renderGitError,
   )
@@ -235,6 +249,53 @@ listFiles logger canon = \case
     -- the files span, and a crash in it is a listing error.
     built fl = fl <$ evaluate (Map.size fl.entries)
     warning = "haskell-reviewer: warning: "
+
+-- | List a commit's files under ROOT. See Note [Commit files] in
+-- "HaskellReviewer.Core.CommitFiles".
+--
+-- If @ls-tree --long@ fails, we list again without sizes. On git
+-- 2.44.1 it dies on a blob missing from a partial clone (D-311); the
+-- sizes then come when a blob is read (D-312). A time out or too much
+-- output is an error.
+listCommit ::
+  Logger -> Git -> RepoInfo -> ObjectId -> IO (Either ListError CommitFiles)
+listCommit logger git info commit = do
+  result <- lsTree git WithSizes commit
+  case result of
+    Left (GitFailed f) -> do
+      let firstLine = Text.takeWhile (/= '\n') f.stderr
+      logVerbose logger $
+        "files: ls-tree --long failed, listing without sizes: " <> firstLine
+      listCommitPlain logger git info commit
+    Left e -> pure (Left (ListGitFailed e))
+    Right out -> commitFiles logger info out
+
+-- | 'listCommit' without sizes.
+listCommitPlain ::
+  Logger -> Git -> RepoInfo -> ObjectId -> IO (Either ListError CommitFiles)
+listCommitPlain logger git info commit = do
+  result <- lsTree git WithoutSizes commit
+  case result of
+    Left e -> pure (Left (ListGitFailed e))
+    Right out -> commitFiles logger info out
+
+commitFiles :: Logger -> RepoInfo -> ByteString -> IO (Either ListError CommitFiles)
+commitFiles logger info out = case parseTreeEntries out of
+  Left e -> pure (Left (ListBadGitOutput e))
+  Right entries -> do
+    let cf = mkCommitFiles info.prefix entries
+        bad = [decode p | DroppedPath p <- cf.dropped]
+        oddModes =
+          [ decode d.path <> " (mode " <> decode d.mode <> ")"
+          | DroppedMode d <- cf.dropped
+          ]
+    logSome (logVerbose logger) "files: skipped bad path " "bad paths" bad
+    logSome (logVerbose logger) "files: skipped " "unknown modes" oddModes
+    -- As in listFiles: build it here, so a crash is a listing error.
+    let sizes = Map.size cf.files.entries + Map.size cf.blobs + Map.size cf.outside
+    Right cf <$ evaluate sizes
+  where
+    decode = Text.Encoding.decodeUtf8Lenient
 
 -- | Log the first 10 lines, then a count of the rest.
 logSome :: (Text -> IO ()) -> Text -> Text -> [Text] -> IO ()

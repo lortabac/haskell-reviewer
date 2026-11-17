@@ -148,7 +148,7 @@ tests =
         out <- readIORef fake.console
         out
           @?= [ "haskell-reviewer: git at /usr/bin/git is version 2.43.0; \
-                \need 2.44 or newer"
+                \need 2.44.1 or newer"
               ]
         readIORef fake.closed >>= (@?= True),
       testCase "config warnings: on the console before the URL, exit 0" $ do
