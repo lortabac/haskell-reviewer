@@ -102,8 +102,9 @@ protect against other local users and DNS-rebinding attacks.
 
 In diff mode there are two **sides**: *base* and *head*. Each side is a
 complete, independently indexed snapshot of the project. Files are read
-straight from git objects (for the working tree: from disk), so no checkout
-takes place and the user's working tree is never touched.
+straight from git objects (for the working tree: clean tracked files from
+their index blobs, the rest from disk, §11.4.1), so no checkout takes place
+and the user's working tree is never touched.
 
 In browse mode there is exactly one side.
 
@@ -1191,7 +1192,7 @@ the spec, it can change from benchmarks (§10.3).
                 └─ fetch: JSON / CBOR, POST for actions ────────┤
                                                                 ▼
                                            haskell-reviewer (main process)
-     git cat-file --batch + plumbing ◄──────────┤
+     git cat-file --batch-command + plumbing ◄──┤
      haskell-reviewer-hie (short-lived) ◄───────┤  CBOR on stdout
      LLM HTTP (anthropic, openai-compatible) ◄──┤
      claude CLI ──stdio MCP──► haskell-reviewer mcp-bridge ──unix socket──┘
@@ -1288,13 +1289,40 @@ revspec ─► git layer ─► snapshot (file list + blobs, per side)
 
 #### 11.4.1 Git layer
 
-(D-53) Git is used **only as a read-only object store**.
-- One long-lived `git cat-file --batch` per session reads blobs and trees.
-  A few plumbing commands do the rest: `rev-parse --verify`,
-  `merge-base`, `ls-tree`, and `ls-files` (for the tracked and
-  untracked-but-not-ignored files of a working-tree side). There is no
-  `git diff` and no `git status`. Nothing writes to `.git`: no index
-  refresh, no temporary index, no new objects.
+(D-53, D-311) Git is used **only as a read-only object store**. The
+calls, all with the hardening below:
+- Start-up: `--version`, `rev-parse --is-inside-work-tree`. In diff mode
+  also `rev-parse --show-prefix --show-object-format
+  --is-shallow-repository`.
+- Revisions: `rev-parse --verify --quiet --end-of-options <rev>^{commit}`
+  per end (only the exit code counts: `a..b` prints ids and fails).
+  `merge-base --all <base> <head>` for `...`, on the resolved ids: the
+  first base is used. No base in a shallow clone: the message says so.
+- Commit sides: `ls-tree -r -z --long --full-tree <commit>` per side.
+  Paths outside ROOT are counted (D-43), the rest are made relative to
+  ROOT. A missing blob (partial clone) has size `BAD` on git 2.56.
+- Partial clone on older git: on 2.44.1
+  `ls-tree --long` dies on a missing blob, and `cat-file` dies on each
+  one. Then the side is listed with plain `ls-tree -r -z --full-tree`,
+  sizes come from `cat-file info`, a dead `cat-file` is restarted
+  (about 30 ms per missing blob), and a missing blob shows as a per-file
+  "not in the local repo" note. We never fetch.
+- Objects: a pool of 2 long-lived `git cat-file --batch-command` per
+  session. Only `contents <id>` and `info <id>` (hex ids), default
+  format. Never `flush`, `remote-object-info` (it goes to the remote),
+  `--filters` or `--textconv`.
+- Working-tree side and browse mode: `ls-files -z --stage [--debug]`,
+  `ls-files -z --others --exclude-standard`, `rev-parse --git-path
+  index`.
+- EOL rules: `check-attr -z --stdin text eol crlf filter ident
+  working-tree-encoding`, `config -z --get-regexp
+  '^core\.(autocrlf|filemode|symlinks|ignorecase|trustctime|checkstat)$'`.
+- There is no `git diff`, `diff-files`, `status` or `hash-object`: they
+  compare file content and can run clean filters (§9.1). Nothing writes
+  to `.git`: no index refresh, no temporary index, no new objects.
+  (Reading a split index makes git itself bump the mtime of its
+  `sharedindex.*` file; nothing stops that, and the content stays the
+  same.)
 - Hardening, for every call:
   - a minimal environment that keeps `HOME` and `XDG_CONFIG_HOME` (so the
     user's `safe.directory` still applies), sets `LC_ALL=C` and a `PATH`
@@ -1309,28 +1337,57 @@ revspec ─► git layer ─► snapshot (file list + blobs, per side)
   - `-c core.untrackedCache=false`: no cache to write;
   - `-c safe.bareRepository=explicit`: a bare repo planted in the tree
     is not used;
-  - a time limit, 30 s at start-up and 120 s for `ls-files` (a FIFO in
-    the tree can block git): then it is killed;
+  - a time limit: 30 s for `--version`, `rev-parse`, `merge-base` and
+    `config`; 120 s
+    for `ls-tree`, `ls-files` and `check-attr`; a per-read limit for
+    `cat-file`. A FIFO in the tree (as `.gitattributes`, or set as
+    `core.excludesFile`) blocks `check-attr` and `ls-files --others`.
+    Past the limit git is killed;
   - `--end-of-options` before any user-given revision;
   - no inherited file descriptors, and a soft fd limit of at most 4096
     (D-86).
 
   Git's `safe.directory` refusal is reported as is. The minimum git version
-  is 2.44 (for `GIT_NO_LAZY_FETCH`), checked at start-up (exit code 2).
+  is 2.44.1 (for `GIT_NO_LAZY_FETCH`: new in 2.45.0, backported to
+  2.44.1 and other 2024-05 security releases; 2.44.0 does lazy-fetch),
+  checked at start-up (exit code 2).
 - **Helper lookup**: `git`, `claude` and the companions are looked up only
   in absolute `PATH` entries, and a binary inside ROOT is never run. A
   change under review can't add a binary that we then start (§9.1).
-- **Working-tree side** (D-75): git's clean filters (CRLF, `ident`,
-  encodings, LFS) mean a file on disk can differ from its blob and still be
-  unchanged. So git says which tracked files are clean: `ls-files -s`
-  gives their blob ids, and `diff-files --name-only` lists the dirty ones.
-  Both are read-only with the settings above. Clean files are read from
-  git objects. Only dirty and untracked files are read from disk; their ids
-  are computed in process, with the EOL rules of `.gitattributes` applied.
-  A dirty file under any other filter (e.g. LFS) is shown as its on-disk
-  text, with a "filtered file" note.
+- **Working-tree side** (D-75, D-311):
+  - A file on disk can differ from its blob and still be unchanged (CRLF,
+    `ident`, encodings, LFS).
+  - The index file is statted first, then read with `ls-files --debug`.
+  - A path with a symlink (or a file) in a leading directory is deleted,
+    as in git. We never read through a symlinked directory: T04 walks
+    the path with `openat` per component (`O_NOFOLLOW|O_DIRECTORY`), since
+    an lstat of the leading directories then an open is a race. A file
+    gone after the check counts as changed.
+  - We compare each index entry's stat data with `lstat`: file type and
+    exec bit (a change there is dirty), size, mtime, ctime, inode and
+    owner.
+  - An entry that differs, has a recorded size of 0 (not the empty blob),
+    or whose mtime seconds are not older than the index file's (racy) is
+    a candidate. We hash candidates in process, after the EOL rules of
+    `.gitattributes` and `core.autocrlf`; "binary" as git's
+    `convert_is_binary`. Config booleans are read as git reads them.
+  - Files are opened with `O_NOFOLLOW` and `O_NONBLOCK`, then checked
+    with `fstat`: only a regular file is read (a FIFO or symlink swapped
+    in after the `lstat` counts as changed).
+  - A tracked file whose stat or hash matches is read from its index
+    blob. Dirty and untracked files are read from disk.
+  - A dirty file under any other filter (e.g. LFS) is shown as its
+    on-disk text, with a "filtered file" note. A touched file under such
+    a filter (or `ident`, `working-tree-encoding`) can't be checked
+    without running the filter, so it shows as dirty and filtered where
+    git would say clean (unless its raw bytes equal the blob). These are
+    extra dirty files, not missed changes.
+  - skip-worktree entries use the index blob; intent-to-add entries count
+    as untracked; unmerged entries are dirty.
 - Submodules are not entered. A submodule shows as one entry with its
-  commit id. Git LFS files show as their pointer text.
+  commit id (on the working-tree side, the index's id: the submodule's
+  HEAD is not compared, so a moved HEAD shows as clean). A gitlink that
+  is missing or not a directory is deleted, as in git. Git LFS files show as their pointer text.
 
 #### 11.4.2 Project model
 

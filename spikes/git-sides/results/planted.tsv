@@ -1,0 +1,195 @@
+repo	state	call	variant	expect	markers	children	gitdir_changed	exit	verdict
+main	r1	--version	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r1	rev-parse --is-inside-work-tree	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r1	rev-parse --show-prefix --show-object-format --is-shallow-repository --git-path index	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r1	rev-parse --verify --quiet --end-of-options HEAD^{commit}	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r1	merge-base --all HEAD HEAD~1	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r1	ls-tree -r -z --long HEAD	top	quiet	-	t2=0;exec=0	no	0	PASS
+main	r1	ls-tree -r -z --long HEAD	lib/	quiet	-	t2=0;exec=0	no	0	PASS
+main	r1	ls-tree -r -z --long --full-tree HEAD	lib/	quiet	-	t2=0;exec=0	no	0	PASS
+main	r1	cat-file --batch-command	contents+info+missing	quiet	-	t2=0;exec=0	no	0	PASS
+main	r1	ls-files -z --stage	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r1	ls-files -z --stage --debug	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r1	ls-files -z --others --exclude-standard	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r1	check-attr -z --stdin text eol crlf filter ident working-tree-encoding	all-paths	quiet	-	t2=0;exec=0	no	0	PASS
+main	r1	config -z --get-regexp core.(...)	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r1	config --get core.autocrlf	plain	quiet	-	t2=0;exec=0	no	1	PASS
+main	r1	config -z --name-only --get-regexp ^filter.	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r1	diff-files --name-only	plain	fires	sub-x-process	t2=2;exec=3	no	128	fires
+main	r1	diff-files --name-only	--attr-source=<empty tree>	fires	-	t2=1;exec=1	no	0	fires
+main	r1	diff-files --name-only	+ -c core.attributesFile=/dev/null	fires	-	t2=1;exec=1	no	0	fires
+main	r1	diff-files --name-only	+ --ignore-submodules=all	fires	-	t2=0;exec=0	no	0	quiet(differs)
+main	r1	diff-files --name-only	+ filters blanked (GIT_CONFIG_COUNT)	quiet	-	t2=0;exec=0	no	0	quiet
+main	r1	diff-files --name-only	filters blanked + --ignore-submodules=all only	quiet	-	t2=0;exec=0	no	0	quiet
+main	r1	git-sides worktree	ours	quiet	-	t2=0;exec=0	no	0	PASS
+main	r1	status (unhardened)	control	fsmonitor-hook	fsmonitor-hook,lfs-filter-process	t2=3;exec=na	no	128	PASS
+main	r1	status (unhardened)	index written, filters off	hook-post-index-change	cl-clean,fsmonitor-hook,hook-post-index-change	t2=7;exec=na	yes	0	PASS
+main	r1	cat-file --filters HEAD:a.x	control	x-	x-process	t2=1;exec=na	no	128	PASS
+main	r1	cat-file --textconv HEAD:a.txt	control	textconv	textconv	t2=1;exec=na	no	0	PASS
+main	r1	hash-object a.x	repo config + .gitattributes	x-	x-process	t2=1;exec=na	no	128	PASS
+main	r1	hash-object a.info	info/attributes	x-	x-process	t2=1;exec=na	no	128	PASS
+main	r1	hash-object a.ca	core.attributesFile	x-	x-process	t2=1;exec=na	no	128	PASS
+main	r1	hash-object a.cl	clean-only driver	cl-clean	cl-clean	t2=1;exec=na	no	0	PASS
+main	r1	hash-object a.bin	LFS from user config	lfs-	lfs-filter-process	t2=1;exec=na	no	128	PASS
+main	r1	hash-object --attr-source=<empty> a.info	attr-source hole	x-	x-process	t2=1;exec=na	no	128	PASS
+main	r1	diff HEAD	filters off	diff-	diff-command,fsmonitor-hook	t2=6;exec=na	yes	0	PASS
+main	r1	hash-object a.x in sub	submodule config	sub-x-	sub-x-process	t2=1;exec=na	no	128	PASS
+main	r1	commit --allow-empty	hooks, filters off	hook-pre-commit	fsmonitor-hook,hook-commit-msg,hook-post-commit,hook-post-index-change,hook-pre-commit,hook-prepare-commit-msg,hook-reference-transaction	t2=17;exec=na	yes	0	PASS
+main	r2	--version	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r2	rev-parse --is-inside-work-tree	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r2	rev-parse --show-prefix --show-object-format --is-shallow-repository --git-path index	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r2	rev-parse --verify --quiet --end-of-options HEAD^{commit}	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r2	merge-base --all HEAD HEAD~1	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r2	ls-tree -r -z --long HEAD	top	quiet	-	t2=0;exec=0	no	0	PASS
+main	r2	ls-tree -r -z --long HEAD	lib/	quiet	-	t2=0;exec=0	no	0	PASS
+main	r2	ls-tree -r -z --long --full-tree HEAD	lib/	quiet	-	t2=0;exec=0	no	0	PASS
+main	r2	cat-file --batch-command	contents+info+missing	quiet	-	t2=0;exec=0	no	0	PASS
+main	r2	ls-files -z --stage	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r2	ls-files -z --stage --debug	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r2	ls-files -z --others --exclude-standard	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r2	check-attr -z --stdin text eol crlf filter ident working-tree-encoding	all-paths	quiet	-	t2=0;exec=0	no	0	PASS
+main	r2	config -z --get-regexp core.(...)	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r2	config --get core.autocrlf	plain	quiet	-	t2=0;exec=0	no	1	PASS
+main	r2	config -z --name-only --get-regexp ^filter.	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r2	diff-files --name-only	plain	fires	lfs-filter-process	t2=1;exec=3	no	128	fires
+main	r2	diff-files --name-only	--attr-source=<empty tree>	fires	x-process	t2=1;exec=2	no	128	fires
+main	r2	diff-files --name-only	+ -c core.attributesFile=/dev/null	fires	x-process	t2=1;exec=2	no	128	fires
+main	r2	diff-files --name-only	+ --ignore-submodules=all	fires	x-process	t2=1;exec=2	no	128	fires
+main	r2	diff-files --name-only	+ filters blanked (GIT_CONFIG_COUNT)	quiet	-	t2=0;exec=0	no	0	quiet
+main	r2	diff-files --name-only	filters blanked + --ignore-submodules=all only	quiet	-	t2=0;exec=0	no	0	quiet
+main	r2	git-sides worktree	ours	quiet	-	t2=0;exec=0	no	0	PASS
+main	r2	status (unhardened)	control	fsmonitor-hook	fsmonitor-hook,lfs-filter-process	t2=3;exec=na	no	128	PASS
+main	r2	status (unhardened)	index written, filters off	hook-post-index-change	cl-clean,fsmonitor-hook,hook-post-index-change	t2=7;exec=na	yes	0	PASS
+main	r2	cat-file --filters HEAD:a.x	control	x-	x-process	t2=1;exec=na	no	128	PASS
+main	r2	cat-file --textconv HEAD:a.txt	control	textconv	textconv	t2=1;exec=na	no	0	PASS
+main	r2	hash-object a.x	repo config + .gitattributes	x-	x-process	t2=1;exec=na	no	128	PASS
+main	r2	hash-object a.info	info/attributes	x-	x-process	t2=1;exec=na	no	128	PASS
+main	r2	hash-object a.ca	core.attributesFile	x-	x-process	t2=1;exec=na	no	128	PASS
+main	r2	hash-object a.cl	clean-only driver	cl-clean	cl-clean	t2=1;exec=na	no	0	PASS
+main	r2	hash-object a.bin	LFS from user config	lfs-	lfs-filter-process	t2=1;exec=na	no	128	PASS
+main	r2	hash-object --attr-source=<empty> a.info	attr-source hole	x-	x-process	t2=1;exec=na	no	128	PASS
+main	r2	diff HEAD	filters off	diff-	cl-clean,diff-command,fsmonitor-hook	t2=7;exec=na	yes	0	PASS
+main	r2	hash-object a.x in sub	submodule config	sub-x-	sub-x-process	t2=1;exec=na	no	128	PASS
+main	r2	commit --allow-empty	hooks, filters off	hook-pre-commit	cl-clean,fsmonitor-hook,hook-commit-msg,hook-post-commit,hook-post-index-change,hook-pre-commit,hook-prepare-commit-msg,hook-reference-transaction	t2=18;exec=na	yes	0	PASS
+main	r3	--version	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r3	rev-parse --is-inside-work-tree	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r3	rev-parse --show-prefix --show-object-format --is-shallow-repository --git-path index	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r3	rev-parse --verify --quiet --end-of-options HEAD^{commit}	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r3	merge-base --all HEAD HEAD~1	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r3	ls-tree -r -z --long HEAD	top	quiet	-	t2=0;exec=0	no	0	PASS
+main	r3	ls-tree -r -z --long HEAD	lib/	quiet	-	t2=0;exec=0	no	0	PASS
+main	r3	ls-tree -r -z --long --full-tree HEAD	lib/	quiet	-	t2=0;exec=0	no	0	PASS
+main	r3	cat-file --batch-command	contents+info+missing	quiet	-	t2=0;exec=0	no	0	PASS
+main	r3	ls-files -z --stage	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r3	ls-files -z --stage --debug	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r3	ls-files -z --others --exclude-standard	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r3	check-attr -z --stdin text eol crlf filter ident working-tree-encoding	all-paths	quiet	-	t2=0;exec=0	no	0	PASS
+main	r3	config -z --get-regexp core.(...)	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r3	config --get core.autocrlf	plain	quiet	-	t2=0;exec=0	no	1	PASS
+main	r3	config -z --name-only --get-regexp ^filter.	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r3	diff-files --name-only	plain	fires	lfs-filter-process	t2=1;exec=3	no	128	fires
+main	r3	diff-files --name-only	--attr-source=<empty tree>	fires	x-process	t2=1;exec=2	no	128	fires
+main	r3	diff-files --name-only	+ -c core.attributesFile=/dev/null	fires	x-process	t2=1;exec=2	no	128	fires
+main	r3	diff-files --name-only	+ --ignore-submodules=all	fires	x-process	t2=1;exec=2	no	128	fires
+main	r3	diff-files --name-only	+ filters blanked (GIT_CONFIG_COUNT)	quiet	-	t2=0;exec=0	no	0	quiet
+main	r3	diff-files --name-only	filters blanked + --ignore-submodules=all only	quiet	-	t2=0;exec=0	no	0	quiet
+main	r3	git-sides worktree	ours	quiet	-	t2=0;exec=0	no	0	PASS
+main	r3	status (unhardened)	control	fsmonitor-hook	fsmonitor-hook,lfs-filter-process	t2=3;exec=na	no	128	PASS
+main	r3	status (unhardened)	index written, filters off	hook-post-index-change	cl-clean,fsmonitor-hook,hook-post-index-change	t2=7;exec=na	yes	0	PASS
+main	r3	cat-file --filters HEAD:a.x	control	x-	x-process	t2=1;exec=na	no	128	PASS
+main	r3	cat-file --textconv HEAD:a.txt	control	textconv	textconv	t2=1;exec=na	no	0	PASS
+main	r3	hash-object a.x	repo config + .gitattributes	x-	x-process	t2=1;exec=na	no	128	PASS
+main	r3	hash-object a.info	info/attributes	x-	x-process	t2=1;exec=na	no	128	PASS
+main	r3	hash-object a.ca	core.attributesFile	x-	x-process	t2=1;exec=na	no	128	PASS
+main	r3	hash-object a.cl	clean-only driver	cl-clean	cl-clean	t2=1;exec=na	no	0	PASS
+main	r3	hash-object a.bin	LFS from user config	lfs-	lfs-filter-process	t2=1;exec=na	no	128	PASS
+main	r3	hash-object --attr-source=<empty> a.info	attr-source hole	x-	x-process	t2=1;exec=na	no	128	PASS
+main	r3	diff HEAD	filters off	diff-	diff-command,fsmonitor-hook	t2=6;exec=na	yes	0	PASS
+main	r3	hash-object a.x in sub	submodule config	sub-x-	sub-x-process	t2=1;exec=na	no	128	PASS
+main	r3	commit --allow-empty	hooks, filters off	hook-pre-commit	fsmonitor-hook,hook-commit-msg,hook-post-commit,hook-post-index-change,hook-pre-commit,hook-prepare-commit-msg,hook-reference-transaction	t2=17;exec=na	yes	0	PASS
+main	r4	--version	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r4	rev-parse --is-inside-work-tree	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r4	rev-parse --show-prefix --show-object-format --is-shallow-repository --git-path index	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r4	rev-parse --verify --quiet --end-of-options HEAD^{commit}	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r4	merge-base --all HEAD HEAD~1	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r4	ls-tree -r -z --long HEAD	top	quiet	-	t2=0;exec=0	no	0	PASS
+main	r4	ls-tree -r -z --long HEAD	lib/	quiet	-	t2=0;exec=0	no	0	PASS
+main	r4	ls-tree -r -z --long --full-tree HEAD	lib/	quiet	-	t2=0;exec=0	no	0	PASS
+main	r4	cat-file --batch-command	contents+info+missing	quiet	-	t2=0;exec=0	no	0	PASS
+main	r4	ls-files -z --stage	plain	quiet	-	t2=0;exec=0	sharedindex-mtime	0	PASS-mtime
+main	r4	ls-files -z --stage --debug	plain	quiet	-	t2=0;exec=0	sharedindex-mtime	0	PASS-mtime
+main	r4	ls-files -z --others --exclude-standard	plain	quiet	-	t2=0;exec=0	sharedindex-mtime	0	PASS-mtime
+main	r4	check-attr -z --stdin text eol crlf filter ident working-tree-encoding	all-paths	quiet	-	t2=0;exec=0	sharedindex-mtime	0	PASS-mtime
+main	r4	config -z --get-regexp core.(...)	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r4	config --get core.autocrlf	plain	quiet	-	t2=0;exec=0	no	1	PASS
+main	r4	config -z --name-only --get-regexp ^filter.	plain	quiet	-	t2=0;exec=0	no	0	PASS
+main	r4	diff-files --name-only	plain	fires	lfs-filter-process	t2=1;exec=3	sharedindex-mtime	128	fires
+main	r4	diff-files --name-only	--attr-source=<empty tree>	fires	x-process	t2=1;exec=2	sharedindex-mtime	128	fires
+main	r4	diff-files --name-only	+ -c core.attributesFile=/dev/null	fires	x-process	t2=1;exec=2	sharedindex-mtime	128	fires
+main	r4	diff-files --name-only	+ --ignore-submodules=all	fires	x-process	t2=1;exec=2	sharedindex-mtime	128	fires
+main	r4	diff-files --name-only	+ filters blanked (GIT_CONFIG_COUNT)	quiet	-	t2=0;exec=0	sharedindex-mtime	0	quiet
+main	r4	diff-files --name-only	filters blanked + --ignore-submodules=all only	quiet	-	t2=0;exec=0	sharedindex-mtime	0	quiet
+main	r4	git-sides worktree	ours	quiet	-	t2=0;exec=0	sharedindex-mtime	0	PASS-mtime
+main	r4	status (unhardened)	control	fsmonitor-hook	fsmonitor-hook,lfs-filter-process	t2=3;exec=na	sharedindex-mtime	128	PASS
+main	r4	status (unhardened)	index written, filters off	hook-post-index-change	cl-clean,fsmonitor-hook,hook-post-index-change	t2=7;exec=na	yes	0	PASS
+main	r4	cat-file --filters HEAD:a.x	control	x-	x-process	t2=1;exec=na	no	128	PASS
+main	r4	cat-file --textconv HEAD:a.txt	control	textconv	textconv	t2=1;exec=na	no	0	PASS
+main	r4	hash-object a.x	repo config + .gitattributes	x-	x-process	t2=1;exec=na	no	128	PASS
+main	r4	hash-object a.info	info/attributes	x-	x-process	t2=1;exec=na	no	128	PASS
+main	r4	hash-object a.ca	core.attributesFile	x-	x-process	t2=1;exec=na	no	128	PASS
+main	r4	hash-object a.cl	clean-only driver	cl-clean	cl-clean	t2=1;exec=na	no	0	PASS
+main	r4	hash-object a.bin	LFS from user config	lfs-	lfs-filter-process	t2=1;exec=na	no	128	PASS
+main	r4	hash-object --attr-source=<empty> a.info	attr-source hole	x-	x-process	t2=1;exec=na	no	128	PASS
+main	r4	diff HEAD	filters off	diff-	cl-clean,diff-command,fsmonitor-hook	t2=7;exec=na	yes	0	PASS
+main	r4	hash-object a.x in sub	submodule config	sub-x-	sub-x-process	t2=1;exec=na	no	128	PASS
+main	r4	commit --allow-empty	hooks, filters off	hook-pre-commit	cl-clean,fsmonitor-hook,hook-commit-msg,hook-post-commit,hook-post-index-change,hook-pre-commit,hook-prepare-commit-msg,hook-reference-transaction	t2=18;exec=na	yes	0	PASS
+fsd	r2	--version	plain	quiet	-	t2=0;exec=0	no	0	PASS
+fsd	r2	rev-parse --is-inside-work-tree	plain	quiet	-	t2=0;exec=0	no	0	PASS
+fsd	r2	rev-parse --show-prefix --show-object-format --is-shallow-repository --git-path index	plain	quiet	-	t2=0;exec=0	no	0	PASS
+fsd	r2	rev-parse --verify --quiet --end-of-options HEAD^{commit}	plain	quiet	-	t2=0;exec=0	no	0	PASS
+fsd	r2	merge-base --all HEAD HEAD~1	plain	quiet	-	t2=0;exec=0	no	0	PASS
+fsd	r2	ls-tree -r -z --long HEAD	top	quiet	-	t2=0;exec=0	no	0	PASS
+fsd	r2	ls-tree -r -z --long HEAD	lib/	quiet	-	t2=0;exec=0	no	0	PASS
+fsd	r2	ls-tree -r -z --long --full-tree HEAD	lib/	quiet	-	t2=0;exec=0	no	0	PASS
+fsd	r2	cat-file --batch-command	contents+info+missing	quiet	-	t2=0;exec=0	no	0	PASS
+fsd	r2	ls-files -z --stage	plain	quiet	-	t2=0;exec=0	no	0	PASS
+fsd	r2	ls-files -z --stage --debug	plain	quiet	-	t2=0;exec=0	no	0	PASS
+fsd	r2	ls-files -z --others --exclude-standard	plain	quiet	-	t2=0;exec=0	no	0	PASS
+fsd	r2	check-attr -z --stdin text eol crlf filter ident working-tree-encoding	all-paths	quiet	-	t2=0;exec=0	no	0	PASS
+fsd	r2	config -z --get-regexp core.(...)	plain	quiet	-	t2=0;exec=0	no	0	PASS
+fsd	r2	config --get core.autocrlf	plain	quiet	-	t2=0;exec=0	no	1	PASS
+fsd	r2	config -z --name-only --get-regexp ^filter.	plain	quiet	-	t2=0;exec=0	no	0	PASS
+fsd	r2	diff-files --name-only	plain	fires	lfs-filter-process	t2=1;exec=3	no	128	fires
+fsd	r2	diff-files --name-only	--attr-source=<empty tree>	fires	x-process	t2=1;exec=2	no	128	fires
+fsd	r2	diff-files --name-only	+ -c core.attributesFile=/dev/null	fires	x-process	t2=1;exec=2	no	128	fires
+fsd	r2	diff-files --name-only	+ --ignore-submodules=all	fires	x-process	t2=1;exec=2	no	128	fires
+fsd	r2	diff-files --name-only	+ filters blanked (GIT_CONFIG_COUNT)	quiet	-	t2=0;exec=0	no	0	quiet
+fsd	r2	diff-files --name-only	filters blanked + --ignore-submodules=all only	quiet	-	t2=0;exec=0	no	0	quiet
+fsd	r2	git-sides worktree	ours	quiet	-	t2=0;exec=0	no	0	PASS
+fsd	r2	status (unhardened)	core.fsmonitor=true	+daemon	cl-clean,fsmonitor-hook,hook-post-index-change+daemon+ipc	t2=7;exec=na	yes	0	PASS
+pc	-	cat-file --batch-command	missing blob	quiet	-	t2=0;exec=0	no	0	PASS
+pc	-	ls-tree -r -z --long HEAD~1	missing blob	quiet	-	t2=0;exec=0	no	0	PASS
+pc	-	ls-tree -r -z HEAD~1	missing blob	quiet	-	t2=0;exec=0	no	0	PASS
+pc	-	--version	plain	quiet	-	t2=0;exec=0	no	0	PASS
+pc	-	rev-parse --is-inside-work-tree	plain	quiet	-	t2=0;exec=0	no	0	PASS
+pc	-	rev-parse --show-prefix --show-object-format --is-shallow-repository --git-path index	plain	quiet	-	t2=0;exec=0	no	0	PASS
+pc	-	rev-parse --verify --quiet --end-of-options HEAD^{commit}	plain	quiet	-	t2=0;exec=0	no	0	PASS
+pc	-	merge-base --all HEAD HEAD~1	plain	quiet	-	t2=0;exec=0	no	0	PASS
+pc	-	ls-tree -r -z --long HEAD	top	quiet	-	t2=0;exec=0	no	0	PASS
+pc	-	cat-file --batch-command	contents+info+missing	quiet	-	t2=0;exec=0	no	0	PASS
+pc	-	ls-files -z --stage	plain	quiet	-	t2=0;exec=0	no	0	PASS
+pc	-	ls-files -z --stage --debug	plain	quiet	-	t2=0;exec=0	no	0	PASS
+pc	-	ls-files -z --others --exclude-standard	plain	quiet	-	t2=0;exec=0	no	0	PASS
+pc	-	check-attr -z --stdin text eol crlf filter ident working-tree-encoding	all-paths	quiet	-	t2=0;exec=0	no	0	PASS
+pc	-	config -z --get-regexp core.(...)	plain	quiet	-	t2=0;exec=0	no	0	PASS
+pc	-	config --get core.autocrlf	plain	quiet	-	t2=0;exec=0	no	1	PASS
+pc	-	config -z --name-only --get-regexp ^filter.	plain	quiet	-	t2=0;exec=0	no	0	PASS
+pc	-	git-sides list-side HEAD~1	missing blob	quiet	-	t2=0;exec=0	no	0	PASS
+pc	-	cat-file -p <missing> (no GIT_NO_LAZY_FETCH)	control	lazy-fetch	lazy-fetch	t2=3;exec=na	no	128	PASS
+fifo	-	ls-files -z --stage		blocks?	-	t2=0;exec=0	no	0	ok
+fifo	-	ls-files -z --stage --debug		blocks?	-	t2=0;exec=0	no	0	ok
+fifo	-	ls-files -z --others --exclude-standard		blocks?	-	t2=0;exec=0	no	124	blocks
+fifo	-	ls-tree -r -z --long HEAD		blocks?	-	t2=0;exec=0	no	0	ok
+fifo	-	check-attr -z --stdin text eol crlf filter ident working-tree-encoding		blocks?	-	t2=0;exec=0	no	124	blocks
+fifo	-	diff-files --name-only		blocks?	-	t2=0;exec=0	no	124	blocks
+fifo	-	git-sides worktree		blocks?	-	t2=0;exec=na	no	124	blocks
