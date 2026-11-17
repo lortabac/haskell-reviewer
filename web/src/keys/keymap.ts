@@ -36,7 +36,7 @@ export const keymap: readonly KeyRow[] = [
     id: "search",
     bindings: ["[Shift]+/"],
     keys: ["/"],
-    label: "Focus the search box",
+    label: 'Focus the search box ("text" in quotes searches files)',
     where: "Everywhere",
     control: "Search box in the header",
   },

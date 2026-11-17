@@ -425,3 +425,25 @@ export async function makeLinksProject(): Promise<Project> {
     remove: () => rm(root, { recursive: true, force: true }),
   };
 }
+
+// A long path and a long line with no spaces (reflow of the text
+// search page, D-310).
+export async function makeLongPathProject(): Promise<Project> {
+  const root = await mkdtemp(join(tmpdir(), "hr-e2e-"));
+  git(root, "init", "-q");
+  const dir = Array.from(
+    { length: 6 },
+    (_, i) => `averyveryverylongdirectoryname${i}`,
+  );
+  await put(
+    root,
+    `${dir.join("/")}/AVeryVeryLongFileNameForReflow.txt`,
+    `${"x".repeat(200)}\n`,
+  );
+  git(root, "add", "-A");
+  git(root, "commit", "-q", "-m", "fixture");
+  return {
+    root,
+    remove: () => rm(root, { recursive: true, force: true }),
+  };
+}

@@ -961,3 +961,162 @@ describe("FileView links and refetch", () => {
     });
   });
 });
+
+// A text search link (D-310): state {codeJump, cp, len} marks the
+// match as a find hit, and the cursor goes there.
+describe("FileView landing mark", () => {
+  class FakeHighlight extends Set<Range> {
+    priority = 0;
+  }
+  let registry: Map<string, FakeHighlight>;
+  beforeEach(() => {
+    registry = new Map();
+    vi.stubGlobal("Highlight", FakeHighlight);
+    vi.stubGlobal("CSS", { highlights: registry });
+  });
+  const texts = (name: string) =>
+    [...(registry.get(name) ?? [])].map((r) => r.toString());
+
+  async function land(
+    state: unknown,
+    body: unknown = cborFixture("file-text"),
+    line = 5,
+  ): Promise<HTMLElement> {
+    stubFetch({
+      "/tok/api/files/tree": [200, fixture("files")],
+      "/tok/api/file/tree/app/Main.hs": [200, body],
+    });
+    const main = mountAppAt(
+      `/tok/src/tree/app/Main.hs#L${line}`,
+      undefined,
+      undefined,
+      state,
+    ).querySelector("main");
+    if (main === null) throw new Error("no main");
+    await vi.waitFor(() => {
+      expect(main.querySelector(".code-row")).not.toBeNull();
+    });
+    return main;
+  }
+
+  it("marks the match, the line and the cursor", async () => {
+    // Line 5: main = putStrLn "héllo, wörld → ✓"
+    const main = await land({ codeJump: true, cp: 18, len: 5 });
+    await vi.waitFor(() => {
+      expect(texts("code-find-current")).toEqual(["héllo"]);
+    });
+    expect(
+      main.querySelector(".code-find-line")?.getAttribute("data-line"),
+    ).toBe("5");
+    // No find bar opened, no query put in it.
+    expect(main.querySelector(".find-bar input")).toBeNull();
+  });
+
+  it("Esc takes the mark away", async () => {
+    await land({ codeJump: true, cp: 18, len: 5 });
+    await vi.waitFor(() => {
+      expect(texts("code-find-current")).toEqual(["héllo"]);
+    });
+    document.body.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Escape",
+        code: "Escape",
+        bubbles: true,
+      }),
+    );
+    await vi.waitFor(() => {
+      expect(texts("code-find-current")).toEqual([]);
+    });
+  });
+
+  it("a match past the line's end (the file changed): no mark", async () => {
+    await land({ codeJump: true, cp: 30, len: 40 });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(texts("code-find-current")).toEqual([]);
+  });
+
+  it("a refs link (no len): no mark", async () => {
+    await land({ codeJump: true, cp: 8 });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(texts("code-find-current")).toEqual([]);
+  });
+});
+
+describe("FileView landing mark, more", () => {
+  class FakeHighlight extends Set<Range> {
+    priority = 0;
+  }
+  let registry: Map<string, FakeHighlight>;
+  beforeEach(() => {
+    registry = new Map();
+    vi.stubGlobal("Highlight", FakeHighlight);
+    vi.stubGlobal("CSS", { highlights: registry });
+  });
+  const texts = (name: string) =>
+    [...(registry.get(name) ?? [])].map((r) => r.toString());
+
+  async function mountAt(text: string, line: number, state: unknown) {
+    stubFetch({
+      "/tok/api/files/tree": [200, fixture("files")],
+      "/tok/api/file/tree/app/Main.hs": [
+        200,
+        cbor({ generation: 1, kind: "text", text }),
+      ],
+    });
+    const main = mountAppAt(
+      `/tok/src/tree/app/Main.hs#L${line}`,
+      undefined,
+      undefined,
+      state,
+    ).querySelector("main");
+    if (main === null) throw new Error("no main");
+    await vi.waitFor(() => {
+      expect(main.querySelector(".code-row")).not.toBeNull();
+    });
+    return main;
+  }
+
+  // A link the router follows, as the box and the results page make.
+  function follow(href: string, state: unknown): void {
+    const a = document.createElement("a");
+    a.href = href;
+    a.setAttribute("state", JSON.stringify(state));
+    document.body.append(a);
+    a.click();
+    a.remove();
+  }
+
+  it("an astral character before the match: columns are code points", async () => {
+    await mountAt("a\n𝑥𝑦 = héllo\n", 2, { codeJump: true, cp: 6, len: 5 });
+    await vi.waitFor(() => {
+      expect(texts("code-find-current")).toEqual(["héllo"]);
+    });
+  });
+
+  it("a hit on the line already in the URL lands again", async () => {
+    await mountAt("one two two\n", 1, { codeJump: true, cp: 5, len: 3 });
+    await vi.waitFor(() => {
+      expect(texts("code-find-current")).toEqual(["two"]);
+    });
+    const before = [...(registry.get("code-find-current") ?? [])][0];
+    follow("/tok/src/tree/app/Main.hs#L1", { codeJump: true, cp: 1, len: 3 });
+    await vi.waitFor(() => {
+      expect(texts("code-find-current")).toEqual(["one"]);
+    });
+    expect([...(registry.get("code-find-current") ?? [])][0]).not.toBe(before);
+  });
+
+  it("a landing closes an open find bar", async () => {
+    const main = await mountAt("one two\nthree\n", 2, null);
+    const button = main.querySelector<HTMLButtonElement>(".code-find-button")!;
+    button.click();
+    await vi.waitFor(() => {
+      expect(button.getAttribute("aria-expanded")).toBe("true");
+    });
+    follow("/tok/src/tree/app/Main.hs#L1", { codeJump: true, cp: 5, len: 3 });
+    await vi.waitFor(() => {
+      expect(texts("code-find-current")).toEqual(["two"]);
+    });
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+  });
+});

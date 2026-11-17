@@ -72,7 +72,17 @@ function key(k: string): KeyboardEvent {
   });
 }
 
+// The name results only (not the "Search text for" row).
 function options(c: ParentNode): HTMLAnchorElement[] {
+  return [
+    ...c.querySelectorAll<HTMLAnchorElement>(
+      'a[role="option"][data-kind="name"]',
+    ),
+  ];
+}
+
+// Every option, of any kind.
+function allOptions(c: ParentNode): HTMLAnchorElement[] {
   return [...c.querySelectorAll<HTMLAnchorElement>('a[role="option"]')];
 }
 
@@ -123,8 +133,18 @@ describe("SearchBox", () => {
     expect(i.maxLength).toBe(128);
     expect(i.closest("form")).toBeNull();
     const label = root.querySelector(`label[for="${i.id}"]`);
-    expect(label?.textContent).toBe("Search modules and names");
+    expect(label?.textContent).toBe(
+      "Search modules and names, or text in double quotes",
+    );
     expect(label?.className).toContain("sr-only");
+    expect(i.placeholder).toBe('Search, or "text"');
+    const hint = document.getElementById(
+      i.getAttribute("aria-describedby") ?? "",
+    );
+    expect(hint?.textContent).toContain(
+      'Put text in double quotes, like "where"',
+    );
+    expect(hint?.className).toContain("sr-only");
   });
 
   it("the page placement shows a visible label and the list whenever there's text", () => {
@@ -1068,5 +1088,396 @@ describe("NotFound page: uses the server search", () => {
     await vi.waitFor(() => {
       expect(window.location.pathname).toBe("/tok/docs/tree/Shapes");
     });
+  });
+});
+
+// Text search in the box (D-309).
+describe("SearchBox — text in double quotes", () => {
+  // Names: none. Text: the text-search fixture, for any q.
+  function textFetch() {
+    const mock = vi.fn((req: RequestInfo | URL): Promise<Response> => {
+      const u = urlOf(req);
+      const q = decodeURIComponent(
+        (u.split("q=")[1] ?? "").split("&")[0] ?? "",
+      );
+      if (u.includes("/api/text-search/")) {
+        const t = fixture("text-search") as Record<string, unknown>;
+        return Promise.resolve(jsonResponse(200, { ...t, query: q }));
+      }
+      return Promise.resolve(
+        jsonResponse(200, {
+          generation: 1,
+          query: q,
+          partial: false,
+          matches: 0,
+          results: [],
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", mock);
+    const calls = (part: string) =>
+      mock.mock.calls.map(([u]) => urlOf(u)).filter((u) => u.includes(part));
+    return { calls };
+  }
+
+  it("name mode: the last option is \"Search text for '…'\"", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn(echoModule));
+    const { root } = mount({ placement: "header" });
+    type(root, "  Other ");
+    // Not before its names land: a quick ArrowDown + Enter would take it.
+    await vi.advanceTimersByTimeAsync(100);
+    expect(allOptions(root)).toEqual([]);
+    await vi.advanceTimersByTimeAsync(20);
+    const all = allOptions(root);
+    expect(all).toHaveLength(2);
+    expect(all[1]?.dataset.kind).toBe("text");
+    expect(all[1]?.textContent).toBe("Search text for 'Other'");
+    expect(all[1]?.getAttribute("href")).toBe("/tok/search/tree?q=Other");
+  });
+
+  it("picking the text row fills the box with quotes and shows hits", async () => {
+    vi.useFakeTimers();
+    const { calls } = textFetch();
+    const { root } = mount({ placement: "header" });
+    const i = input(root);
+    type(root, "main");
+    await vi.advanceTimersByTimeAsync(120);
+    const row = allOptions(root)[0];
+    expect(row?.dataset.kind).toBe("text");
+    row?.click();
+    expect(i.value).toBe('"main"');
+    expect(i.getAttribute("aria-expanded")).toBe("true");
+    // No debounce: the pick was not a keystroke.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls("api/text-search")).toEqual([
+      "/tok/api/text-search/tree?q=main&limit=8",
+    ]);
+    const kinds = allOptions(root).map((a) => a.dataset.kind);
+    expect(kinds).toEqual([...Array<string>(7).fill("hit"), "all"]);
+    expect(allOptions(root)[7]?.textContent).toBe("All results (7)");
+    expect(status(root)).toBe("7 matching lines.");
+    const hit = allOptions(root)[0];
+    expect(hit?.textContent).toContain("app/Main.hs:1");
+    expect(hit?.querySelector("mark")?.textContent).toBe("main");
+  });
+
+  it("no names: Enter takes the text row", async () => {
+    vi.useFakeTimers();
+    textFetch();
+    const { root } = mount({ placement: "header" });
+    const i = input(root);
+    type(root, "zzz");
+    i.dispatchEvent(key("Enter"));
+    await vi.advanceTimersByTimeAsync(130);
+    expect(i.value).toBe('"zzz"');
+    expect(window.location.pathname).toBe("/tok/x");
+  });
+
+  it('unclosed "fo: no request, one row; Enter closes the quote', async () => {
+    vi.useFakeTimers();
+    const { calls } = textFetch();
+    const { root } = mount({ placement: "header" });
+    const i = input(root);
+    type(root, '"fo');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(calls("/api/")).toEqual([]);
+    const all = allOptions(root);
+    expect(all).toHaveLength(1);
+    expect(all[0]?.textContent).toBe("Search text for 'fo'");
+    expect(status(root)).toBe("Close the quote to search text.");
+    expect(root.querySelector(".search-live")?.textContent).toBe(
+      "Close the quote to search text.",
+    );
+    i.dispatchEvent(key("Enter"));
+    expect(i.value).toBe('"fo"');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls("/api/")).toEqual(["/tok/api/text-search/tree?q=fo&limit=8"]);
+  });
+
+  it('closed "…": debounced; a lone quote or "" only shows a hint', async () => {
+    vi.useFakeTimers();
+    const { calls } = textFetch();
+    const { root } = mount({ placement: "header" });
+    for (const q of ['"', '""', ' "" ']) {
+      type(root, q);
+      await vi.advanceTimersByTimeAsync(200);
+      expect(allOptions(root)).toEqual([]);
+      expect(status(root)).toBe("Type text between the quotes.");
+    }
+    expect(calls("/api/")).toEqual([]);
+    type(root, '"a "b" ');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(calls("/api/")).toEqual([]);
+    expect(status(root)).toBe("Searching…");
+    await vi.advanceTimersByTimeAsync(20);
+    expect(calls("/api/")).toEqual([
+      "/tok/api/text-search/tree?q=a%20%22b&limit=8",
+    ]);
+  });
+
+  it("Enter with nothing active opens the results page, without waiting", async () => {
+    vi.useFakeTimers();
+    textFetch();
+    const { root } = mount({ placement: "header" });
+    const i = input(root);
+    type(root, '"a+b"');
+    i.dispatchEvent(key("Enter"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(window.location.pathname).toBe("/tok/search/tree");
+    expect(window.location.search).toBe("?q=a%2Bb");
+    expect(i.getAttribute("aria-expanded")).toBe("false");
+    expect(i.value).toBe('"a+b"');
+  });
+
+  it("a hit: arrows then Enter land on its line, with the match in the state", async () => {
+    vi.useFakeTimers();
+    textFetch();
+    const { root } = mount({ placement: "header" });
+    const i = input(root);
+    type(root, '"main"');
+    await vi.advanceTimersByTimeAsync(120);
+    i.dispatchEvent(key("ArrowDown"));
+    expect(i.getAttribute("aria-activedescendant")).toBe(
+      allOptions(root)[0]?.id,
+    );
+    i.dispatchEvent(key("Enter"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(window.location.pathname).toBe("/tok/src/tree/app/Main.hs");
+    expect(window.location.hash).toBe("#L1");
+    expect(window.history.state).toMatchObject({
+      codeJump: true,
+      cp: 14,
+      len: 4,
+    });
+  });
+
+  it("the hit link carries its landing state for a click", async () => {
+    vi.useFakeTimers();
+    textFetch();
+    const { root } = mount({ placement: "header" });
+    type(root, '"main"');
+    await vi.advanceTimersByTimeAsync(120);
+    const a = allOptions(root)[1];
+    expect(a?.getAttribute("href")).toBe("/tok/src/tree/app/Main.hs#L4");
+    expect(JSON.parse(a?.getAttribute("state") ?? "null")).toEqual({
+      codeJump: true,
+      cp: 1,
+      len: 4,
+    });
+    const last = allOptions(root).at(-1);
+    expect(last?.getAttribute("href")).toBe("/tok/search/tree?q=main");
+  });
+
+  it("the arrows go down to All results and stop there", async () => {
+    vi.useFakeTimers();
+    textFetch();
+    const { root } = mount({ placement: "header" });
+    const i = input(root);
+    type(root, '"main"');
+    await vi.advanceTimersByTimeAsync(120);
+    for (let n = 0; n < 12; n++) i.dispatchEvent(key("ArrowDown"));
+    const last = allOptions(root).at(-1);
+    expect(i.getAttribute("aria-activedescendant")).toBe(last?.id);
+    i.dispatchEvent(key("Enter"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(window.location.pathname + window.location.search).toBe(
+      "/tok/search/tree?q=main",
+    );
+  });
+
+  it("the page box: the hint is visible, the modes work there too", async () => {
+    vi.useFakeTimers();
+    const { calls } = textFetch();
+    const { root } = mount({ placement: "page", initialQuery: '"main"' });
+    const i = input(root);
+    const hint = document.getElementById(
+      i.getAttribute("aria-describedby") ?? "",
+    );
+    expect(hint?.className).toBe("search-hint");
+    await vi.advanceTimersByTimeAsync(0);
+    // Prefilled: at once.
+    expect(calls("api/text-search")).toHaveLength(1);
+    expect(allOptions(root).at(-1)?.dataset.kind).toBe("all");
+  });
+});
+
+describe("SearchBox — text mode, review round 1", () => {
+  // Names: one module named after q. Text: the fixture for q, or what
+  // texts[q] says (a status, or a delay in ms before the answer).
+  function fetchWith(
+    texts: Record<
+      string,
+      { status?: number; delay?: number; stopped?: boolean }
+    > = {},
+  ) {
+    const mock = vi.fn((req: RequestInfo | URL): Promise<Response> => {
+      const u = urlOf(req);
+      if (!u.includes("/api/text-search/")) return echoModule(req);
+      const q = decodeURIComponent(
+        (u.split("q=")[1] ?? "").split("&")[0] ?? "",
+      );
+      const o = texts[q] ?? {};
+      const t = fixture("text-search") as Record<string, unknown>;
+      const res =
+        o.status !== undefined
+          ? jsonResponse(o.status, "bad")
+          : jsonResponse(200, { ...t, query: q, stopped: o.stopped ?? false });
+      if (o.delay === undefined) return Promise.resolve(res);
+      return new Promise((r) => setTimeout(() => r(res), o.delay));
+    });
+    vi.stubGlobal("fetch", mock);
+    return () =>
+      mock.mock.calls
+        .map(([u]) => urlOf(u))
+        .filter((u) => u.includes("/api/text-search/"));
+  }
+  const live = (c: ParentNode) =>
+    c.querySelector(".search-live")?.textContent ?? "";
+
+  it("a mode switch: each answer is announced, never a stale 'No results.'", async () => {
+    vi.useFakeTimers();
+    fetchWith();
+    const { root } = mount({ placement: "header" });
+    type(root, "Other");
+    await vi.advanceTimersByTimeAsync(120);
+    expect(live(root)).toBe("1 result.");
+    type(root, '"Other"');
+    expect(status(root)).toBe("Searching…");
+    await vi.advanceTimersByTimeAsync(120);
+    expect(live(root)).toBe("7 matching lines.");
+    // Back to names: the name search had settled for "" meanwhile.
+    type(root, "Other");
+    expect(status(root)).toBe("Searching…");
+    expect(live(root)).toBe("7 matching lines.");
+    await vi.advanceTimersByTimeAsync(60);
+    expect(live(root)).not.toBe("No results.");
+    await vi.advanceTimersByTimeAsync(60);
+    expect(status(root)).toBe("1 result.");
+    expect(live(root)).toBe("1 result.");
+  });
+
+  it("name to name: the shown count stays until the new answer (D-209)", async () => {
+    vi.useFakeTimers();
+    fetchWith();
+    const { root } = mount({ placement: "header" });
+    type(root, "Other");
+    await vi.advanceTimersByTimeAsync(120);
+    expect(status(root)).toBe("1 result.");
+    type(root, "Othe");
+    expect(status(root)).toBe("1 result.");
+    await vi.advanceTimersByTimeAsync(120);
+    expect(live(root)).toBe("1 result.");
+    expect(options(root)[0]?.textContent).toContain("Othe");
+  });
+
+  it("stopped: the status says the search is incomplete", async () => {
+    vi.useFakeTimers();
+    fetchWith({ main: { stopped: true } });
+    const { root } = mount({ placement: "header" });
+    type(root, '"main"');
+    await vi.advanceTimersByTimeAsync(120);
+    expect(status(root)).toBe(
+      "7 matching lines. Search stopped early: incomplete.",
+    );
+    expect(live(root)).toBe(status(root));
+  });
+
+  it("an error is for its own text: a new text shows Searching…", async () => {
+    vi.useFakeTimers();
+    fetchWith({ bad: { status: 500 }, good: { delay: 500 } });
+    const { root } = mount({ placement: "header" });
+    type(root, '"bad"');
+    await vi.advanceTimersByTimeAsync(120);
+    expect(status(root)).toBe("Search failed.");
+    expect(live(root)).toBe("Search failed.");
+    expect(allOptions(root)).toEqual([]);
+    type(root, '"good"');
+    expect(status(root)).toBe("Searching…");
+    await vi.advanceTimersByTimeAsync(200);
+    expect(status(root)).toBe("Searching…");
+    await vi.advanceTimersByTimeAsync(500);
+    expect(status(root)).toBe("7 matching lines.");
+  });
+
+  it("a stale text answer (out of order) is dropped", async () => {
+    vi.useFakeTimers();
+    fetchWith({ ma: { delay: 1000 } });
+    const { root } = mount({ placement: "header" });
+    type(root, '"ma"');
+    await vi.advanceTimersByTimeAsync(120);
+    type(root, '"main"');
+    await vi.advanceTimersByTimeAsync(120);
+    expect(allOptions(root).at(-1)?.getAttribute("href")).toBe(
+      "/tok/search/tree?q=main",
+    );
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(allOptions(root).at(-1)?.getAttribute("href")).toBe(
+      "/tok/search/tree?q=main",
+    );
+    expect(status(root)).toBe("7 matching lines.");
+  });
+
+  it("too long between the quotes: a note, no request", async () => {
+    vi.useFakeTimers();
+    const calls = fetchWith();
+    const { root } = mount({
+      placement: "page",
+      initialQuery: `"${"a".repeat(129)}"`,
+    });
+    const i = input(root);
+    // Prefilled: capped to 128 code points, so the quote is open.
+    expect(i.value).toHaveLength(128);
+    type(root, `"${"a".repeat(129)}"`);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(calls()).toEqual([]);
+    expect(allOptions(root)).toEqual([]);
+    expect(status(root)).toBe("Text too long: at most 128 characters.");
+    expect(live(root)).toBe("Text too long: at most 128 characters.");
+    type(root, `"${"a".repeat(128)}"`);
+    await vi.advanceTimersByTimeAsync(120);
+    expect(calls()).toHaveLength(1);
+  });
+
+  it("Enter before the names land, then the text row: text hits come at once", async () => {
+    vi.useFakeTimers();
+    // Names: none for zzz.
+    const names = vi.fn((req: RequestInfo | URL) => {
+      const u = urlOf(req);
+      if (u.includes("/api/text-search/")) {
+        const t = fixture("text-search") as Record<string, unknown>;
+        return Promise.resolve(jsonResponse(200, { ...t, query: "zzz" }));
+      }
+      return Promise.resolve(
+        jsonResponse(200, {
+          generation: 1,
+          query: "zzz",
+          partial: false,
+          matches: 0,
+          results: [],
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", names);
+    const { root } = mount({ placement: "header" });
+    const i = input(root);
+    type(root, "zzz");
+    i.dispatchEvent(key("Enter"));
+    // The names land (Enter flushed the debounce), the text row is
+    // taken from an effect: the text fetch must not wait 120 ms more.
+    await vi.advanceTimersByTimeAsync(5);
+    expect(i.value).toBe('"zzz"');
+    const text = names.mock.calls
+      .map(([u]) => urlOf(u))
+      .filter((u) => u.includes("/api/text-search/"));
+    expect(text).toEqual(["/tok/api/text-search/tree?q=zzz&limit=8"]);
+    expect(allOptions(root).at(-1)?.dataset.kind).toBe("all");
+  });
+
+  it("the page box's search region has the input's label", () => {
+    const { root } = mount({ placement: "page" });
+    expect(
+      root.querySelector("[role=search]")?.getAttribute("aria-label"),
+    ).toBe("Search modules and names, or text in double quotes");
   });
 });

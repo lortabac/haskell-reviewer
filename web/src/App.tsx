@@ -7,6 +7,7 @@ import { FileView } from "./files/FileView";
 import { Frame } from "./Frame";
 import { Home } from "./Home";
 import { RefsView } from "./refs/RefsView";
+import { TextSearchView } from "./textsearch/TextSearchView";
 import { ProjectNotices } from "./modules/ProjectNotices";
 import { ModulesProvider } from "./modules/store";
 import { CopyLocation } from "./copy/CopyLocation";
@@ -42,6 +43,7 @@ export function App(props: {
       <Route path="/docs/tree/*ref" component={DocsView} />
       <Route path="/refs/tree/*ref" component={RefsView} />
       <Route path="/src/tree/*path" component={FileView} />
+      <Route path="/search/tree" component={TextSearchView} />
       <Route path="*" component={NotFound} />
     </Router>
   );

@@ -106,3 +106,42 @@
   max-height: 60vh;
   overflow: auto;
 }
+
+/* The hint under the page box (the header's is sr-only). */
+.search-hint {
+  margin: var(--space-1) 0 0;
+  color: var(--color-muted);
+}
+
+/* A text hit (D-309): path:line, then the line on one row, cut with
+   an ellipsis. */
+.search-results a.search-hit {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
+.search-hit-place {
+  display: block;
+  color: var(--color-muted);
+  overflow-wrap: anywhere;
+}
+
+/* The text search page's h1: runs of spaces in the query show. */
+.text-search-q {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Long queries and paths wrap, no sideways scroll. */
+.text-search-title,
+.text-search-path {
+  overflow-wrap: anywhere;
+}
+
+.search-hit-line {
+  display: block;
+  overflow: hidden;
+  white-space: pre;
+  text-overflow: ellipsis;
+}
