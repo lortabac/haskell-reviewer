@@ -55,7 +55,8 @@ import HaskellReviewer.Server.Wire.Source
   )
 import HaskellReviewer.Server.Wire.Targets (howName, reasonName)
 import HaskellReviewer.Session.Index
-  ( SlotState (..),
+  ( IndexJob (..),
+    SlotState (..),
     isRequested,
     requestCount,
     runWorkers,
@@ -338,7 +339,7 @@ gateCase = do
       idOf p = fromMaybe (error (show p)) (moduleAtPath snap.modules (rel p))
       a = idOf "s/src/A.hs"
       cpp = idOf "s/src/Cpp.hs"
-  withAsync (runWorkers (indexDeps api snap) 2 snap.index) $ \_ -> do
+  withAsync (runWorkers 2 [IndexJob (indexDeps api snap) snap.index]) $ \_ -> do
     waitState snap.index a isParsing
     waitState snap.index (idOf "s/src/B.hs") isParsing
     withAsync (okSource api "s/src/Cpp.hs") $ \pending -> do

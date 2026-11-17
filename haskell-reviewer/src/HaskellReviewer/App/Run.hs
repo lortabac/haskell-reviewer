@@ -154,10 +154,13 @@ import HaskellReviewer.Session.Clients (newClients, waitIdle)
 import HaskellReviewer.Session.Index
   ( IndexDeps (..),
     IndexFailure (..),
+    IndexJob (..),
     Indexed (..),
+    Pool,
     Progress (..),
     SlotState (..),
     failUnfinished,
+    newPool,
     readProgress,
     readStates,
     runWorkers,
@@ -488,6 +491,7 @@ serve deps logger opts root defaults lister tracer shutdown t0 w0 = do
           warmUpSearch
           warmUpTextSearch
           slot <- newSnapshotSlot
+          pool <- newPool
           -- Filled by ready: the listing starts after the URL line.
           start <- newEmptyMVar
           let url = sessionUrl listener.port token
@@ -536,7 +540,7 @@ serve deps logger opts root defaults lister tracer shutdown t0 w0 = do
               -- The finally covers a cancel anywhere after the fill.
               listing = do
                 takeMVar start
-                ( runListing deps logger tracer lister slot opts.ghc
+                ( runListing deps logger tracer lister pool slot opts.ghc
                     >>= mapM_ (runIndexing deps logger tracer)
                   )
                   `finally` stopIndexing slot
@@ -565,17 +569,18 @@ runListing ::
   Logger ->
   Tracer ->
   Lister ->
+  Pool ->
   SnapshotSlot ->
   Maybe GhcVersion ->
   IO (Maybe Snapshot)
-runListing deps logger tracer lister slot cliGhc = do
+runListing deps logger tracer lister pool slot cliGhc = do
   result <- try @SomeException $ do
     t0 <- deps.clock.monotonic
     w0 <- deps.clock.now
     listed <- lister.list
     t1 <- deps.clock.monotonic
     w1 <- deps.clock.now
-    made <- traverse (\fl -> snapshotOf deps logger lister.root fl cliGhc) listed
+    made <- traverse (\fl -> snapshotOf deps logger pool lister.root fl cliGhc) listed
     t2 <- deps.clock.monotonic
     w2 <- deps.clock.now
     -- Warm up before the fill: requests parse. See Note [Forced
@@ -666,8 +671,14 @@ runWarmUp deps logger =
 -- crashes, the snapshot has no project, only a warning. See
 -- Note [Listing after the URL].
 snapshotOf ::
-  Deps -> Logger -> CanonicalRoot -> FileList -> Maybe GhcVersion -> IO Snapshot
-snapshotOf deps logger root fl cliGhc = do
+  Deps ->
+  Logger ->
+  Pool ->
+  CanonicalRoot ->
+  FileList ->
+  Maybe GhcVersion ->
+  IO Snapshot
+snapshotOf deps logger pool root fl cliGhc = do
   result <- try @SomeException $ do
     project <- deps.readProject root fl hostPlatform cliGhc
     logVerbose logger $
@@ -676,7 +687,7 @@ snapshotOf deps logger root fl cliGhc = do
         <> " ("
         <> renderGhcSource project.ghc.source
         <> ")"
-    newSnapshot root fl project
+    newSnapshot pool root fl project
   case result of
     Right snap -> pure snap
     Left e
@@ -684,7 +695,7 @@ snapshotOf deps logger root fl cliGhc = do
       | otherwise -> do
           let msg = exceptionMessage e
           logInfo logger ("haskell-reviewer: cannot read the project: " <> msg)
-          newSnapshot root fl (crashed msg)
+          newSnapshot pool root fl (crashed msg)
   where
     -- Not the implicit source: there may be a project we failed to read.
     -- Never got to with-compiler: --ghc, else the parser's version.
@@ -732,7 +743,8 @@ indexAndReport deps logger tracer snap = do
       <> " workers"
   t0 <- deps.clock.monotonic
   w0 <- deps.clock.now
-  result <- try @SomeException (runWorkers indexDeps workers snap.index)
+  let job = IndexJob {deps = indexDeps, index = snap.index}
+  result <- try @SomeException (runWorkers workers [job])
   t1 <- deps.clock.monotonic
   case result of
     Right () -> pure ()

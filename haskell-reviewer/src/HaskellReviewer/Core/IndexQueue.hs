@@ -16,6 +16,7 @@ module HaskellReviewer.Core.IndexQueue
     push,
     pop,
     entries,
+    entriesAt,
     remove,
     putBack,
     isEmpty,
@@ -82,7 +83,7 @@ data Priority
   | -- | Changed in diff mode (not used yet).
     Changed
   | Background
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | Where a module is in the queue: by priority, then first in first
 -- out.
@@ -124,6 +125,14 @@ pop q = do
 -- | Every entry, first one first.
 entries :: Queue -> [(Ticket, ModuleId)]
 entries q = Map.toAscList q.items
+
+-- | The entries at one priority, first one first.
+entriesAt :: Priority -> Queue -> [(Ticket, ModuleId)]
+entriesAt p q =
+  Map.toAscList
+    . Map.takeWhileAntitone (\t -> t.priority <= p)
+    . Map.dropWhileAntitone (\t -> t.priority < p)
+    $ q.items
 
 -- | Drop one entry.
 remove :: Ticket -> Queue -> Queue

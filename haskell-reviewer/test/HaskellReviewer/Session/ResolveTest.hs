@@ -57,10 +57,12 @@ import HaskellReviewer.Session.Index
   ( Index,
     IndexDeps (..),
     IndexFailure (..),
+    IndexJob (..),
     Indexed (..),
     Progress (..),
     SlotState (..),
     newIndex,
+    newPool,
     readProgress,
     runWorkers,
     slotState,
@@ -120,7 +122,7 @@ abc =
 partialThenExact :: Assertion
 partialThenExact = do
   w <- newWorld ["A"] abc
-  withAsync (runWorkers w.deps 2 w.index) $ \_ -> do
+  withAsync (runWorkers 2 [IndexJob w.deps w.index]) $ \_ -> do
     waitState w.index (modId "B") isReady
     waitState w.index (modId "C") isReady
     partial <- resolved w "B"
@@ -142,7 +144,7 @@ partialThenExact = do
 memoFinalOnly :: Assertion
 memoFinalOnly = do
   w <- newWorld ["A"] abc
-  withAsync (runWorkers w.deps 2 w.index) $ \_ -> do
+  withAsync (runWorkers 2 [IndexJob w.deps w.index]) $ \_ -> do
     waitState w.index (modId "B") isReady
     waitState w.index (modId "C") isReady
     _ <- resolved w "B"
@@ -169,7 +171,7 @@ awaitBumps = do
         ("C", "module C where\n"),
         ("D", "module D where\n")
       ]
-  withAsync (runWorkers w.deps 1 w.index) $ \_ -> do
+  withAsync (runWorkers 1 [IndexJob w.deps w.index]) $ \_ -> do
     waitState w.index (modId "B") isParsing
     t0 <- getMonotonicTime
     within (awaitImports w.resolver (Microseconds 20_000) (modId "A"))
@@ -189,7 +191,7 @@ awaitEarly = do
         ("D", "module D where\n"),
         ("E", "module E where\n")
       ]
-  withAsync (runWorkers w.deps 2 w.index) $ \_ -> do
+  withAsync (runWorkers 2 [IndexJob w.deps w.index]) $ \_ -> do
     waitState w.index (modId "A") isReady
     -- 10 s: only the imports can end it within the safety net.
     withAsync (awaitImports w.resolver (Microseconds 10_000_000) (modId "A")) $ \a -> do
@@ -214,7 +216,7 @@ awaitFailedOrNoSlot = do
         ("G", gone),
         ("N", noFile)
       ]
-  within (runWorkers w.deps 1 w.index)
+  within (runWorkers 1 [IndexJob w.deps w.index])
   atomically (slotState w.index (modId "G")) >>= (@?= Just (Failed SourceGone))
   atomically (slotState w.index (modId "N")) >>= (@?= Nothing)
   -- 10 s: only "done" can end it within the safety net.
@@ -229,7 +231,7 @@ waitForModule = do
       [ ("A", "module A (a) where\na = 1\n"),
         ("B", "module B where\nimport A\nb = a\n")
       ]
-  withAsync (runWorkers w.deps 1 w.index) $ \_ -> do
+  withAsync (runWorkers 1 [IndexJob w.deps w.index]) $ \_ -> do
     -- One worker, held on A: B stays Pending.
     waitState w.index (modId "A") isParsing
     withAsync (resolveModule w.resolver (modId "B")) $ \res ->
@@ -258,7 +260,7 @@ nothingCases = do
         ("G", gone),
         ("A", "module A where\n")
       ]
-  within (runWorkers w.deps 2 w.index)
+  within (runWorkers 2 [IndexJob w.deps w.index])
   atomically (slotState w.index (modId "G")) >>= (@?= Just (Failed SourceGone))
   forM_ ["T", "G", "Z"] $ \n -> do
     r <- within (resolveModule w.resolver (modId n))
@@ -271,8 +273,8 @@ newResolverCase :: Assertion
 newResolverCase = do
   w1 <- newWorld [] abc
   w2 <- newWorld [] abc
-  within (runWorkers w1.deps 2 w1.index)
-  within (runWorkers w2.deps 2 w2.index)
+  within (runWorkers 2 [IndexJob w1.deps w1.index])
+  within (runWorkers 2 [IndexJob w2.deps w2.index])
   r1 <- resolved w1 "B"
   memoKeys w1.resolver >>= (@?= [modId "A", modId "C"])
   memoKeys w2.resolver >>= (@?= [])
@@ -305,7 +307,7 @@ concurrent = do
   -- run while indexing.
   w <- newWorld ["M1"] mods
   partials <- newTVarIO (0 :: Int)
-  finals <- withAsync (runWorkers w.deps 2 w.index) $ \_ ->
+  finals <- withAsync (runWorkers 2 [IndexJob w.deps w.index]) $ \_ ->
     withAsync
       (forConcurrently [1 .. 8 :: Int] $ \_ -> forM wanted (untilComplete w partials))
       $ \requests -> do
@@ -314,7 +316,7 @@ concurrent = do
         within (wait requests)
   waitDone w.index
   single <- newWorld [] mods
-  within (runWorkers single.deps 1 single.index)
+  within (runWorkers 1 [IndexJob single.deps single.index])
   expected <- forM wanted (resolved single)
   mapM_ (\got -> map results got @?= map results expected) finals
   mapM_ (\got -> map (.punFields) got @?= map (.punFields) expected) finals
@@ -409,7 +411,7 @@ findRefsCase = do
         ("C", "module C where\nimport A\nc = a\n")
       ]
   let find = within (findReferences w.resolver show (modId "A") (Named DVal "a"))
-  withAsync (runWorkers w.deps 2 w.index) $ \_ -> do
+  withAsync (runWorkers 2 [IndexJob w.deps w.index]) $ \_ -> do
     waitState w.index (modId "A") isReady
     waitState w.index (modId "B") isReady
     during <- find
@@ -472,7 +474,8 @@ newWorld held mods = do
               parseWithin 60_000_000 s t,
             logger = newLogger LevelInfo (\_ -> pure ())
           }
-  index <- newIndex idx
+  pool <- newPool
+  index <- newIndex pool idx
   resolver <- newResolver idx index
   pure
     World

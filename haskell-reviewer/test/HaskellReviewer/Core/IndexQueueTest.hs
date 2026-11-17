@@ -10,6 +10,7 @@ import HaskellReviewer.Core.IndexQueue
   ( Job (..),
     Priority (..),
     Queue,
+    entriesAt,
     fromList,
     indexJobs,
     pop,
@@ -46,6 +47,15 @@ tests =
       testCase "changed between requested and background" $ do
         let q = push Changed (m "C") (push Requested (m "R") (fromList [m "A"]))
         drain q @?= map m ["R", "C", "A"],
+      testCase "entries at one priority, in order" $ do
+        let q =
+              push Changed (m "C") . push Requested (m "R2") . push Requested (m "R1") $
+                fromList (map m ["A", "B"])
+            at p = map snd (entriesAt p q)
+        at Requested @?= map m ["R1", "R2"]
+        at Changed @?= [m "C"]
+        at Background @?= map m ["A", "B"]
+        map snd (entriesAt Changed (fromList [m "A"])) @?= [],
       testCase "empty: nothing to pop" $ do
         drain (fromList []) @?= []
         drain (push Requested (m "A") (fromList [])) @?= [m "A"],

@@ -1566,7 +1566,11 @@ the search box's 8 results, on a large project once the store is loaded
   module that isn't ready raises its priority and waits for it.
   A request computing (resolve, links, encode) parks one worker until
   it ends, never the last one, so its compute gets a core. Waits for
-  slots don't count.
+  slots don't count. There is one pool per session, shared by its sides'
+  indexes, with one big-file lock and one request gate (D-314). Within
+  a priority, head goes before base, whatever came first: a request on
+  any side first, then changed modules, then head's other modules, then
+  base's.
 - **Reload** (§5.2) builds a new generation and swaps it in atomically.
   Unchanged blobs hit the shared parse results (§11.4.4), so a reload
   re-parses only what changed.

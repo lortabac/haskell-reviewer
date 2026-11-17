@@ -88,6 +88,7 @@ import HaskellReviewer.Session.Index
   ( IndexFailure (..),
     Indexed (..),
     ParsedSource (..),
+    Pool,
     awaitModule,
     newIndex,
     readProgress,
@@ -151,10 +152,10 @@ What the workers put in the slots is forced before it gets there (Note
 -}
 
 -- | The snapshot of a file list and its project, with the JSON bodies,
--- an index with every module Pending, and its resolver. Fully built
--- before it returns. See Note [Forced snapshot].
-newSnapshot :: CanonicalRoot -> FileList -> Project -> IO Snapshot
-newSnapshot root fl project = do
+-- an index in this pool with every module Pending, and its resolver.
+-- Fully built before it returns. See Note [Forced snapshot].
+newSnapshot :: Pool -> CanonicalRoot -> FileList -> Project -> IO Snapshot
+newSnapshot pool root fl project = do
   let modules = buildModuleIndex project fl
       fileListJson = encodeFileList firstGeneration fl
       moduleTreeJson = encodeModuleTree firstGeneration modules
@@ -162,7 +163,7 @@ newSnapshot root fl project = do
   searchModules <- evaluate (moduleCandidates modules)
   _ <- evaluate (forceCandidates searchModules)
   mapM_ (evaluate . LBS.length . encodeFileView firstGeneration) cborWarmUp
-  index <- newIndex modules
+  index <- newIndex pool modules
   resolver <- newResolver modules index
   textStore <- newTextStore
   pure

@@ -117,12 +117,13 @@ import HaskellReviewer.Effects.Clock (Microseconds (..))
 import HaskellReviewer.Effects.FileSystem (ListError, ReadError (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), Logger, newLogger)
 import HaskellReviewer.Effects.Parser (parseGuarded)
-import HaskellReviewer.Server.Api (FilesApi (..), newSnapshot)
+import HaskellReviewer.Server.Api (FilesApi (..))
+import HaskellReviewer.Server.Api qualified as Api (newSnapshot)
 import HaskellReviewer.Server.CborJson (cborToJson)
 import HaskellReviewer.Server.Events (EventStream (..))
 import HaskellReviewer.Server.Router (Routes (..), application)
 import HaskellReviewer.Session.Clients (newClients)
-import HaskellReviewer.Session.Index (IndexDeps (..), runWorkers)
+import HaskellReviewer.Session.Index (IndexDeps (..), IndexJob (..), newPool, runWorkers)
 import HaskellReviewer.Session.Prefs (PrefsStore (..), newPrefsStore)
 import HaskellReviewer.Session.Snapshot (Snapshot (files, index))
 import Network.HTTP.Types (Header, Status (..))
@@ -399,7 +400,7 @@ indexed api =
 
 -- | Index every module of the snapshot, with one worker.
 indexAll :: TestApi -> Snapshot -> IO ()
-indexAll api snap = runWorkers (indexDeps api snap) 1 snap.index
+indexAll api snap = runWorkers 1 [IndexJob (indexDeps api snap) snap.index]
 
 apiFor :: IO Snapshot -> TestApi
 apiFor snap =
@@ -436,6 +437,12 @@ indexDeps api snap =
       parse = api.parse,
       logger = api.logger
     }
+
+-- | A snapshot in a pool of its own.
+newSnapshot :: CanonicalRoot -> FileList -> Project -> IO Snapshot
+newSnapshot root fl project = do
+  pool <- newPool
+  Api.newSnapshot pool root fl project
 
 fixtureSnapshot :: IO Snapshot
 fixtureSnapshot =
@@ -1134,7 +1141,9 @@ sendApiQuery method headers reqBody query api path = do
   case listed of
     Right snap
       | api.workers > 0 ->
-          withAsync (runWorkers (indexDeps api snap) api.workers snap.index) (const call)
+          withAsync
+            (runWorkers api.workers [IndexJob (indexDeps api snap) snap.index])
+            (const call)
     _ -> call
 
 -- | Call an app with a request that ends. The path has the token.

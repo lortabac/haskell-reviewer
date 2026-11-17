@@ -6,6 +6,7 @@
 -- timeout only as a safety net.
 module HaskellReviewer.Session.IndexTest (tests, parsingTests) where
 
+import Control.Concurrent (myThreadId, threadDelay)
 import Control.Concurrent.Async (AsyncCancelled (..), cancel, poll, waitCatch, withAsync)
 import Control.Concurrent.MVar
   ( MVar,
@@ -23,14 +24,23 @@ import Control.Concurrent.STM
     newTVarIO,
     readTVar,
     readTVarIO,
+    retry,
   )
-import Control.Exception (AsyncException (..), IOException, fromException, throwIO, try)
+import Control.Exception
+  ( AsyncException (..),
+    ErrorCall (..),
+    IOException,
+    fromException,
+    throwIO,
+    try,
+  )
 import Control.Monad (void, when)
-import Data.List (sort)
+import Data.List (nub, sort)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import GHC.Conc (BlockReason (..), ThreadStatus (..), threadStatus)
 import HaskellReviewer.Core.FileContent (FileContent (..), FileSize (..))
 import HaskellReviewer.Core.FileList (EntryKind (..), ListSource (..), mkFileList)
 import HaskellReviewer.Core.ModuleModel
@@ -58,13 +68,16 @@ import HaskellReviewer.Session.Index
   ( Index,
     IndexDeps (..),
     IndexFailure (..),
+    IndexJob (..),
     Indexed (..),
     ParsedSource (..),
+    Pool,
     Progress (..),
     SlotState (..),
     awaitModule,
     bigFileSize,
     newIndex,
+    newPool,
     readNames,
     readProgress,
     readStates,
@@ -74,19 +87,24 @@ import HaskellReviewer.Session.Index
     slotState,
     withRequest,
   )
+import Hedgehog (Property, evalIO, forAll, property, (===))
+import Hedgehog.Gen qualified as Gen
+import Hedgehog.Range qualified as Range
 import IndexSupport (isParsing, isReady, waitDone, waitState, within)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
+import Test.Tasty.Hedgehog (testProperty)
 
 tests :: TestTree
 tests =
   testGroup
     "Index"
     [ gateTests,
+      poolTests,
       testCase "a request jumps the queue" $ do
         fake <- newFake ["A"]
         index <- indexOf ["A", "B", "C", "D"]
-        withAsync (runWorkers fake.deps 1 index) $ \_ -> do
+        withAsync (runWorkers 1 [IndexJob fake.deps index]) $ \_ -> do
           waitState index (m "A") isParsing
           atomically (requestModule index (m "D"))
           release fake "A"
@@ -95,7 +113,7 @@ tests =
       testCase "a request waits for the module, then gets it" $ do
         fake <- newFake ["A"]
         index <- indexOf ["A", "B"]
-        withAsync (runWorkers fake.deps 1 index) $ \_ ->
+        withAsync (runWorkers 1 [IndexJob fake.deps index]) $ \_ ->
           withAsync (awaitModule index (m "A")) $ \request -> do
             waitState index (m "A") isParsing
             -- Can't be done: A's parse is still held.
@@ -106,7 +124,7 @@ tests =
       testCase "a done module: answered at once; no slot: Nothing" $ do
         fake <- newFake []
         index <- indexOf ["A"]
-        within (runWorkers fake.deps 2 index)
+        within (runWorkers 2 [IndexJob fake.deps index])
         r <- within (awaitModule index (m "A"))
         r @?= Just (Right (IndexedTextOnly textOnlyModule))
         none <- within (awaitModule index (m "Z"))
@@ -114,7 +132,7 @@ tests =
       testCase "two requests for one module: one parse" $ do
         fake <- newFake ["A"]
         index <- indexOf ["A", "B", "C"]
-        withAsync (runWorkers fake.deps 2 index) $ \_ ->
+        withAsync (runWorkers 2 [IndexJob fake.deps index]) $ \_ ->
           withAsync (awaitModule index (m "C")) $ \r1 ->
             withAsync (awaitModule index (m "C")) $ \r2 -> do
               release fake "A"
@@ -137,7 +155,7 @@ tests =
                       else fake.deps.parse s t
                 }
         index <- indexOf ["A", "B", "C", "D", "E"]
-        within (runWorkers deps 2 index)
+        within (runWorkers 2 [IndexJob deps index])
         states <- atomically (readStates index)
         Map.toList states
           @?= [ (m "A", Ready (IndexedTextOnly textOnlyModule)),
@@ -163,7 +181,7 @@ tests =
                     _ -> fake.deps.readModule p
                 }
         index <- indexOf ["A", "B", "C"]
-        within (runWorkers deps 1 index)
+        within (runWorkers 1 [IndexJob deps index])
         states <- atomically (readStates index)
         Map.elems states
           @?= [ Ready (IndexedNotText (FileSize 10)),
@@ -181,7 +199,7 @@ tests =
                 }
         index <- indexOf ["A", "B", "C", "D"]
         let progress = atomically (readProgress index)
-        withAsync (runWorkers deps 1 index) $ \workers -> do
+        withAsync (runWorkers 1 [IndexJob deps index]) $ \workers -> do
           waitState index (m "A") isParsing
           progress >>= (@?= Progress {total = 4, ready = 0, failed = 0})
           release fake "A"
@@ -202,13 +220,13 @@ tests =
       testCase "no modules: workers exit at once" $ do
         fake <- newFake []
         index <- indexOf []
-        within (runWorkers fake.deps 4 index)
+        within (runWorkers 4 [IndexJob fake.deps index])
         atomically (readProgress index)
           >>= (@?= Progress {total = 0, ready = 0, failed = 0}),
       testCase "a cancel goes through; nothing is left Pending or Parsing" $ do
         fake <- newFake ["A"]
         index <- indexOf ["A", "B"]
-        withAsync (runWorkers fake.deps 1 index) $ \workers -> do
+        withAsync (runWorkers 1 [IndexJob fake.deps index]) $ \workers -> do
           waitState index (m "A") isParsing
           cancel workers
           r <- within (waitCatch workers)
@@ -228,7 +246,7 @@ tests =
                     if t == "C" then throwIO HeapOverflow else fake.deps.parse st t
                 }
         index <- indexOf ["A", "B", "C", "D"]
-        withAsync (runWorkers deps 1 index) $ \workers -> do
+        withAsync (runWorkers 1 [IndexJob deps index]) $ \workers -> do
           waitState index (m "A") isParsing
           -- C first, then B: B is never parsed.
           atomically (requestModule index (m "C") >> requestModule index (m "B"))
@@ -256,7 +274,7 @@ tests =
                   logger = Logger {emit = \_ _ -> ioError (userError "stderr gone")}
                 }
         index <- indexOf ["A", "B", "C"]
-        within (runWorkers deps 1 index)
+        within (runWorkers 1 [IndexJob deps index])
         states <- atomically (readStates index)
         Map.elems states
           @?= [ Ready (IndexedTextOnly textOnlyModule),
@@ -276,7 +294,7 @@ tests =
                 }
             bigRunning = atomically (readTVar fake.bigRunning >>= check . (>= 1))
         index <- indexOf ["C", "D", "E", "F"]
-        withAsync (runWorkers deps 2 index) $ \_ -> do
+        withAsync (runWorkers 2 [IndexJob deps index]) $ \_ -> do
           -- One big file parses; the other worker skips the other big
           -- one and takes the small ones.
           within bigRunning
@@ -311,7 +329,7 @@ tests =
                     other -> pure (Right (TextContent (big (Text.dropEnd 3 other))))
                 }
         index <- indexOf ["A", "B", "C"]
-        withAsync (runWorkers deps 2 index) $ \_ -> do
+        withAsync (runWorkers 2 [IndexJob deps index]) $ \_ -> do
           within (takeMVar cEntered)
           within (atomically (readTVar fake.bigRunning >>= check . (>= 1)))
           -- The one whose parse started holds the lock.
@@ -342,7 +360,7 @@ gateTests =
         fake <- newFake ["A", "B", "C"]
         index <- indexOf ["A", "B", "C", "D"]
         withHeldRequest index $ \done ->
-          withAsync (runWorkers fake.deps 2 index) $ \_ -> do
+          withAsync (runWorkers 2 [IndexJob fake.deps index]) $ \_ -> do
             waitState index (m "A") isParsing
             release fake "A"
             waitState index (m "B") isParsing
@@ -358,7 +376,7 @@ gateTests =
       testCase "one worker never parks" $ do
         fake <- newFake []
         index <- indexOf ["A", "B"]
-        withHeldRequest index $ \_ -> within (runWorkers fake.deps 1 index)
+        withHeldRequest index $ \_ -> within (runWorkers 1 [IndexJob fake.deps index])
         readTVarIO fake.parsed >>= (@?= ["A", "B"]),
       testCase "a throw or a cancel gives the gate back" $ do
         fake <- newFake ["B", "C"]
@@ -375,7 +393,7 @@ gateTests =
           void (within (waitCatch req))
         atomically (requestCount index) >>= (@?= 0)
         -- So both workers run.
-        withAsync (runWorkers fake.deps 2 index) $ \_ -> do
+        withAsync (runWorkers 2 [IndexJob fake.deps index]) $ \_ -> do
           waitState index (m "B") isParsing
           waitState index (m "C") isParsing
           release fake "B"
@@ -394,7 +412,7 @@ gateTests =
                     other -> pure (Right (TextContent (big (Text.dropEnd 3 other))))
                 }
         index <- indexOf ["A", "B", "C"]
-        withAsync (runWorkers deps 2 index) $ \_ -> do
+        withAsync (runWorkers 2 [IndexJob deps index]) $ \_ -> do
           within (atomically (readTVar fake.bigRunning >>= check . (>= 1)))
           waitState index (m "C") isParsing
           readTVarIO fake.bigRunning >>= (@?= 1)
@@ -407,6 +425,219 @@ gateTests =
           release fake waiting
           waitDone index
     ]
+
+-- | One pool, two indexes: @head@ first, then @base@. Their module
+-- names differ, so the fake tells them apart. See Note [Indexing].
+poolTests :: TestTree
+poolTests =
+  testGroup
+    "pool"
+    [ testCase "head's background before base's" $ do
+        fake <- newFake []
+        (h, b) <- twoIndexes ["A", "B"] ["C", "D"]
+        within (runWorkers 1 (headBase fake.deps h b))
+        readTVarIO fake.parsed >>= (@?= ["A", "B", "C", "D"]),
+      testCase "a request on base beats head's background" $ do
+        fake <- newFake ["A"]
+        (h, b) <- twoIndexes ["A", "B", "C"] ["D", "E"]
+        withAsync (runWorkers 1 (headBase fake.deps h b)) $ \_ -> do
+          waitState h (m "A") isParsing
+          atomically (requestModule b (m "E"))
+          release fake "A"
+          waitDone h
+          waitDone b
+        readTVarIO fake.parsed >>= (@?= ["A", "E", "B", "C", "D"]),
+      testCase "head's requests before base's, whatever came first" $ do
+        fake <- newFake ["A"]
+        (h, b) <- twoIndexes ["A", "B", "C"] ["D", "E"]
+        withAsync (runWorkers 1 (headBase fake.deps h b)) $ \_ -> do
+          waitState h (m "A") isParsing
+          atomically (requestModule b (m "E"))
+          atomically (requestModule h (m "C"))
+          release fake "A"
+          waitDone h
+          waitDone b
+        readTVarIO fake.parsed >>= (@?= ["A", "C", "E", "B", "D"]),
+      testCase "only big modules left, lock busy: the other worker waits" $ do
+        -- Both big, both held in their parse. The worker without the
+        -- lock must wait in STM, not exit.
+        let FileSize limit = bigFileSize
+            big n = n <> Text.replicate limit "x"
+        fake <- newFake [big "A", big "B"]
+        readers <- newTVarIO []
+        parsers <- newTVarIO []
+        let deps =
+              fake.deps
+                { readModule = \p -> do
+                    me <- myThreadId
+                    atomically (modifyTVar' readers (me :))
+                    pure (Right (TextContent (big (Text.dropEnd 3 (relPathText p))))),
+                  parse = \st t -> do
+                    me <- myThreadId
+                    atomically (modifyTVar' parsers (me :))
+                    fake.deps.parse st t
+                }
+        (h, b) <- twoIndexes ["A"] ["B"]
+        withAsync (runWorkers 2 (headBase deps h b)) $ \_ -> do
+          -- Both workers read; one parses with the lock.
+          (holder, other) <- within . atomically $ do
+            rs <- readTVar readers
+            ps <- readTVar parsers
+            case (ps, nub rs) of
+              ([p], [x, y]) -> pure (p, if x == p then y else x)
+              _ -> retry
+          let settled = \case
+                ThreadBlocked BlockedOnSTM -> True
+                ThreadFinished -> True
+                _ -> False
+          st <- within (waitFor settled (threadStatus other))
+          st @?= ThreadBlocked BlockedOnSTM
+          assertBool "the holder is the other one" (holder /= other)
+          started <- readTVarIO fake.parsed
+          let (running, waiting)
+                | big "A" `elem` started = (big "A", big "B")
+                | otherwise = (big "B", big "A")
+          release fake running
+          release fake waiting
+          waitDone h
+          waitDone b
+        readTVarIO fake.bigMost >>= (@?= 1),
+      testCase "big files on head and base never parse at once" $ do
+        let FileSize limit = bigFileSize
+            big n = n <> Text.replicate limit "x"
+        fake <- newFake [big "C", big "D"]
+        let deps =
+              fake.deps
+                { readModule = \p -> case relPathText p of
+                    "C.hs" -> pure (Right (TextContent (big "C")))
+                    "D.hs" -> pure (Right (TextContent (big "D")))
+                    _ -> fake.deps.readModule p
+                }
+        (h, b) <- twoIndexes ["C", "E"] ["D", "F"]
+        withAsync (runWorkers 2 (headBase deps h b)) $ \_ -> do
+          within (atomically (readTVar fake.bigRunning >>= check . (>= 1)))
+          -- The other worker skips the other big one and does the
+          -- small ones.
+          waitState h (m "E") isReady
+          waitState b (m "F") isReady
+          readTVarIO fake.bigRunning >>= (@?= 1)
+          started <- readTVarIO fake.parsed
+          let (running, waiting)
+                | big "C" `elem` started = (big "C", big "D")
+                | otherwise = (big "D", big "C")
+          release fake running
+          release fake waiting
+          waitDone h
+          waitDone b
+        readTVarIO fake.bigMost >>= (@?= 1)
+        sort <$> readTVarIO fake.parsed >>= (@?= [big "C", big "D", "E", "F"]),
+      testCase "a request on base parks a worker that takes head's modules" $ do
+        fake <- newFake ["A", "B", "C"]
+        (h, b) <- twoIndexes ["A", "B", "C", "D"] ["E"]
+        withHeldRequest b $ \done ->
+          withAsync (runWorkers 2 (headBase fake.deps h b)) $ \_ -> do
+            atomically (requestCount h) >>= (@?= 1)
+            waitState h (m "A") isParsing
+            release fake "A"
+            waitState h (m "B") isParsing
+            readTVarIO fake.most >>= (@?= 1)
+            done
+            within (atomically (readTVar fake.running >>= check . (== 2)))
+            release fake "B"
+            release fake "C"
+            waitDone h
+            waitDone b,
+      testCase "a cancel fails what is not done, on both" $ do
+        fake <- newFake ["A"]
+        (h, b) <- twoIndexes ["A", "B"] ["C"]
+        withAsync (runWorkers 1 (headBase fake.deps h b)) $ \workers -> do
+          waitState h (m "A") isParsing
+          cancel workers
+          void (within (waitCatch workers))
+        let stopped = Failed (IndexCrashed "indexing was stopped")
+        Map.elems <$> atomically (readStates h) >>= (@?= [stopped, stopped])
+        Map.elems <$> atomically (readStates b) >>= (@?= [stopped])
+        atomically (readProgress b)
+          >>= (@?= Progress {total = 1, ready = 0, failed = 1}),
+      testCase "workers die: what is not done fails, on both" $ do
+        fake <- newFake []
+        let deps =
+              fake.deps
+                { parse = \st t ->
+                    if t == "B" then throwIO HeapOverflow else fake.deps.parse st t
+                }
+        (h, b) <- twoIndexes ["A", "B"] ["C"]
+        r <- try @AsyncException (within (runWorkers 1 (headBase deps h b)))
+        r @?= Left HeapOverflow
+        Map.elems <$> atomically (readStates h)
+          >>= (@?= [Ready textOnlyResult, Failed crashed])
+        Map.elems <$> atomically (readStates b) >>= (@?= [Failed crashed]),
+      testCase "an empty index finishes" $ do
+        fake <- newFake []
+        (h, b) <- twoIndexes ["A"] []
+        within (runWorkers 2 [IndexJob fake.deps b, IndexJob fake.deps h])
+        within (runWorkers 2 [IndexJob fake.deps b])
+        atomically (readProgress h)
+          >>= (@?= Progress {total = 1, ready = 1, failed = 0})
+        atomically (readProgress b)
+          >>= (@?= Progress {total = 0, ready = 0, failed = 0})
+        within (runWorkers 2 [])
+        readTVarIO fake.parsed >>= (@?= ["A"]),
+      testCase "an index from another pool: throws, and nothing is left to do" $ do
+        fake <- newFake []
+        h <- indexOf ["A"]
+        b <- indexOf ["B"]
+        r <- try @ErrorCall (within (runWorkers 1 (headBase fake.deps h b)))
+        let why = "runWorkers: indexes from different pools"
+        r @?= Left (ErrorCall why)
+        let failed i = Map.elems <$> atomically (readStates i)
+        mapM_ (\i -> failed i >>= (@?= [Failed (IndexCrashed (Text.pack why))])) [h, b]
+        readTVarIO fake.parsed >>= (@?= []),
+      testProperty "random requests on both: all done, each parsed once" poolProperty
+    ]
+  where
+    crashed = IndexCrashed "heap overflow"
+
+-- | Poll until the value is right. For a thread's status, which has no
+-- STM to wait on.
+waitFor :: (a -> Bool) -> IO a -> IO a
+waitFor ok get = do
+  x <- get
+  if ok x then pure x else threadDelay 1_000 >> waitFor ok get
+
+-- | Jobs for two indexes, head first, with the same deps.
+headBase :: IndexDeps -> Index -> Index -> [IndexJob]
+headBase deps h b = [IndexJob deps h, IndexJob deps b]
+
+-- | Two indexes in one pool.
+twoIndexes :: [Text] -> [Text] -> IO (Index, Index)
+twoIndexes hs bs = do
+  pool <- newPool
+  h <- indexIn pool hs
+  b <- indexIn pool bs
+  pure (h, b)
+
+-- | Some workers on two indexes; requests on either, while they run.
+poolProperty :: Property
+poolProperty = property $ do
+  nh <- forAll (Gen.int (Range.linear 0 6))
+  nb <- forAll (Gen.int (Range.linear 0 6))
+  workers <- forAll (Gen.int (Range.linear 1 3))
+  let hs = [Text.pack ('h' : show i) | i <- [1 .. nh]]
+      bs = [Text.pack ('b' : show i) | i <- [1 .. nb]]
+  asks <- forAll (Gen.list (Range.linear 0 8) (Gen.element (hs <> bs <> ["none"])))
+  (parsed, states) <- evalIO $ do
+    fake <- newFake []
+    (h, b) <- twoIndexes hs bs
+    let onIndex n = if "h" `Text.isPrefixOf` n then h else b
+    withAsync (runWorkers workers (headBase fake.deps h b)) $ \run -> do
+      mapM_ (\n -> within (awaitModule (onIndex n) (m n))) asks
+      within (waitCatch run) >>= either throwIO pure
+    states <- atomically ((<>) <$> readStates h <*> readStates b)
+    parsed <- readTVarIO fake.parsed
+    pure (parsed, states)
+  sort parsed === sort (hs <> bs)
+  Map.elems states === replicate (nh + nb) (Ready textOnlyResult)
 
 -- | Hold a request in 'withRequest'. The action gets a way to end it;
 -- it ends anyway on return.
@@ -437,7 +668,7 @@ parsingTests =
                     parseGuarded s t
                 }
         index <- indexOf ["A", "B"]
-        withAsync (runWorkers deps 1 index) $ \_ -> do
+        withAsync (runWorkers 1 [IndexJob deps index]) $ \_ -> do
           waitState index (m "B") isParsing
           names <- atomically (readNames index)
           fmap (map (\e -> (e.name, e.exported))) names
@@ -536,8 +767,15 @@ textOnlyResult = IndexedTextOnly textOnlyModule
 
 -- | An index of loose modules, one per name (@A@ is @A.hs@).
 indexOf :: [Text] -> IO Index
-indexOf ns =
+indexOf ns = do
+  pool <- newPool
+  indexIn pool ns
+
+-- | An index of loose modules, one per name, in this pool.
+indexIn :: Pool -> [Text] -> IO Index
+indexIn pool ns =
   newIndex
+    pool
     ( buildModuleIndex
         project
         (mkFileList FromDisk 0 [(path (n <> ".hs"), EntryFile) | n <- ns])
