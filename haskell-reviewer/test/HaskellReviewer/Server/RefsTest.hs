@@ -25,7 +25,7 @@ import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
 import HaskellReviewer.Effects.FileSystem (ListError (..))
-import HaskellReviewer.Session.Index (runWorkers)
+import HaskellReviewer.Session.Index (IndexJob (..), runWorkers)
 import HaskellReviewer.Session.Snapshot (Snapshot (index))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
@@ -84,7 +84,8 @@ tests =
         snap <- either (assertFailure . show) pure =<< gated.snapshot
         let api = gated {snapshot = pure (Right snap), workers = 0}
             q = "?module=R.Shape&decl=con:Square"
-        withAsync (runWorkers (indexDeps gated snap) 2 snap.index) $ \workers -> do
+            job = IndexJob (indexDeps gated snap) snap.index
+        withAsync (runWorkers 2 [job]) $ \workers -> do
           before <- refsOk api q
           before.partial @?= True
           map (.ref) before.results @?= ["R.Shape", "R.Shape"]

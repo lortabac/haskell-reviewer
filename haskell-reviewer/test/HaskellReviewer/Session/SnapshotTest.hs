@@ -15,7 +15,7 @@ import HaskellReviewer.Core.Project
 import HaskellReviewer.Core.Root (CanonicalRoot (..))
 import HaskellReviewer.Effects.FileSystem (ListError (..))
 import HaskellReviewer.Server.Api (newSnapshot)
-import HaskellReviewer.Session.Index (Progress (..))
+import HaskellReviewer.Session.Index (Progress (..), newPool)
 import HaskellReviewer.Session.Snapshot
   ( Generation (..),
     IndexingState (..),
@@ -54,8 +54,10 @@ tests =
         _ <- fillSnapshot failed (Left (ListCrashed "a"))
         now failed >>= (@?= Just Nothing)
         listed <- newSnapshotSlot
+        pool <- newPool
         snap <-
           newSnapshot
+            pool
             (CanonicalRoot "/x" "/x")
             (mkFileList FromDisk 0 [])
             Project
