@@ -264,7 +264,8 @@ nicer than a web diff, because every line links into the right snapshot.
 **In**
 - `--diff` with `BASE..HEAD`, `BASE...HEAD` and `REV` (working tree) (§2).
 - Git as a read-only object store (D-53, §11.4.1), on top of the M0 git
-  layer: one `cat-file --batch` plus plumbing; nothing writes to `.git`.
+  layer: a pool of 2 `cat-file --batch-command` plus plumbing (D-311);
+  nothing writes to `.git`.
 - Sides read from git objects, never checked out (§2.2). Working-tree side
   (D-75): clean tracked files from git, dirty and untracked files from
   disk, with EOL rules. Submodules as one entry, LFS files as pointer text.

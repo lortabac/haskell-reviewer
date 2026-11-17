@@ -1,0 +1,391 @@
+git: git version 2.44.1
+
+### version
+$ git --version   (in $T/repo)
+--- stdout
+git version 2.44.1
+--- stderr
+--- exit 0
+
+### inside work tree
+$ git rev-parse --is-inside-work-tree   (in $T/repo)
+--- stdout
+true
+--- stderr
+--- exit 0
+
+### prefix, format, shallow, index path (top)
+$ git rev-parse --show-prefix --show-object-format --is-shallow-repository --git-path index   (in $T/repo)
+--- stdout
+
+sha1
+false
+.git/index
+--- stderr
+--- exit 0
+
+### prefix etc. from ROOT=libs/a
+$ git rev-parse --show-prefix --show-object-format --is-shallow-repository --git-path index   (in $T/repo/libs/a)
+--- stdout
+libs/a/
+sha1
+false
+../../.git/index
+--- stderr
+--- exit 0
+
+### verify HEAD
+$ git rev-parse --verify --quiet --end-of-options HEAD^{commit}   (in $T/repo)
+--- stdout
+873634abc13789b644e75844e856969d2aa91fa3
+--- stderr
+--- exit 0
+
+### verify unknown rev
+$ git rev-parse --verify --quiet --end-of-options nope^{commit}   (in $T/repo)
+--- stdout
+--- stderr
+--- exit 1
+
+### verify a tree oid as a commit
+$ git rev-parse --verify --quiet --end-of-options ee11d5fa966406ec4f0268877b687a0231acb354^{commit}   (in $T/repo)
+--- stdout
+--- stderr
+error: ee11d5fa966406ec4f0268877b687a0231acb354^{commit}: expected commit type, but the object dereferences to tree type
+--- exit 1
+
+### verify an annotated tag (peeled)
+$ git rev-parse --verify --quiet --end-of-options v1^{commit}   (in $T/repo)
+--- stdout
+873634abc13789b644e75844e856969d2aa91fa3
+--- stderr
+--- exit 0
+
+### verify tag without ^{commit} (tag object id)
+$ git rev-parse --verify --quiet --end-of-options v1   (in $T/repo)
+--- stdout
+4102eca93f8a60a8fa693e181b5aa8ba483268fd
+--- stderr
+--- exit 0
+
+### verify a rev starting with -, behind --end-of-options
+$ git rev-parse --verify --quiet --end-of-options -dash^{commit}   (in $T/repo)
+--- stdout
+873634abc13789b644e75844e856969d2aa91fa3
+--- stderr
+--- exit 0
+
+### same rev without --end-of-options (taken as an option)
+$ git rev-parse --verify --quiet -dash^{commit}   (in $T/repo)
+--- stdout
+--- stderr
+--- exit 1
+
+### a..b to --verify must fail
+$ git rev-parse --verify --quiet --end-of-options 48adffee86ec86011f8f0f2f60b7bb8f76938859..HEAD   (in $T/repo)
+--- stdout
+873634abc13789b644e75844e856969d2aa91fa3
+^48adffee86ec86011f8f0f2f60b7bb8f76938859
+--- stderr
+--- exit 1
+
+### a...b to --verify must fail
+$ git rev-parse --verify --quiet --end-of-options 48adffee86ec86011f8f0f2f60b7bb8f76938859...HEAD   (in $T/repo)
+--- stdout
+873634abc13789b644e75844e856969d2aa91fa3
+48adffee86ec86011f8f0f2f60b7bb8f76938859
+^48adffee86ec86011f8f0f2f60b7bb8f76938859
+--- stderr
+--- exit 1
+
+### merge-base, orphan (none)
+$ git merge-base --all 48adffee86ec86011f8f0f2f60b7bb8f76938859 4f137101ec3d46d74355e2fdb3945d7fc723d1f9   (in $T/repo)
+--- stdout
+--- stderr
+--- exit 1
+
+### merge-base, linear
+$ git merge-base --all 48adffee86ec86011f8f0f2f60b7bb8f76938859 HEAD   (in $T/repo)
+--- stdout
+48adffee86ec86011f8f0f2f60b7bb8f76938859
+--- stderr
+--- exit 0
+
+### merge-base --end-of-options?
+$ git merge-base --all --end-of-options 48adffee86ec86011f8f0f2f60b7bb8f76938859 HEAD   (in $T/repo)
+--- stdout
+48adffee86ec86011f8f0f2f60b7bb8f76938859
+--- stderr
+--- exit 0
+
+### merge-base --all, criss-cross (2 bases)
+$ git merge-base --all main b   (in $T/cross)
+--- stdout
+fffd1c38643336e2b6b1755766f53b134779f194
+2d0a01d6f1b9c56047293cbbaae65465b476e3b7
+--- stderr
+--- exit 0
+
+### merge-base (no --all), criss-cross
+$ git merge-base main b   (in $T/cross)
+--- stdout
+fffd1c38643336e2b6b1755766f53b134779f194
+--- stderr
+--- exit 0
+
+note: the two merges are 6739ff1d1dd1cbddce5a85daa093f2c6eebda4fb and 104c84b71374f6c5f980758a972a1a50ed7238d5
+
+### shallow: is-shallow
+$ git rev-parse --is-shallow-repository   (in $T/shallow)
+--- stdout
+true
+--- stderr
+--- exit 0
+
+### shallow: merge-base none
+$ git merge-base --all HEAD FETCH_HEAD   (in $T/shallow)
+--- stdout
+--- stderr
+--- exit 1
+
+### ls-tree from libs/a (relative)
+$ git ls-tree -r -z --long HEAD   (in $T/repo/libs/a)
+--- stdout
+1   0   0   6   4   4       b   l   o   b       d   8   4   3   c   0   0   b   7   8   2   7   5   c   5   b   b   d   f   c   d   e   9   9   2   0   a   8   1   1   b   b   0   1   0   3   8   a   2   d                           1   5  \t   A   .   h
+s  \0   1   0   0   6   4   4       b   l   o   b       9   a   9   1   5   a   4   c   7   1   7   c   a   6   4   5   6   2   e   0   9   3   f   0   c   d   2   4   5   c   5   0   6   4   f   c   4   a   9   c                               6  \t   c
+r   l   f   .   t   x   t  \0
+--- stderr
+--- exit 0
+
+### ls-tree from libs/a --full-tree
+$ git ls-tree -r -z --long --full-tree HEAD   (in $T/repo/libs/a)
+--- stdout
+1   0   0   6   4   4       b   l   o   b       d   8   4   3   c   0   0   b   7   8   2   7   5   c   5   b   b   d   f   c   d   e   9   9   2   0   a   8   1   1   b   b   0   1   0   3   8   a   2   d                           1   5  \t   l   i   b
+s   /   a   /   A   .   h   s  \0   1   0   0   6   4   4       b   l   o   b       9   a   9   1   5   a   4   c   7   1   7   c   a   6   4   5   6   2   e   0   9   3   f   0   c   d   2   4   5   c   5   0   6   4   f   c   4   a   9   c            
+6  \t   l   i   b   s   /   a   /   c   r   l   f   .   t   x   t  \0   1   0   0   6   4   4       b   l   o   b       f   7   1   9   e   f   d   4   3   0   d   5   2   b   c   f   c   8   5   6   6   a   4   3   b   2   e   b   6   5
+5   6   8   8   d   3   8   8   7   1                               4  \t   t   o   p   .   t   x   t  \0
+--- stderr
+--- exit 0
+
+### ls-tree --full-tree --end-of-options
+$ git ls-tree -r -z --long --full-tree --end-of-options HEAD   (in $T/repo/libs/a)
+--- stdout
+1   0   0   6   4   4       b   l   o   b       d   8   4   3   c   0   0   b   7   8   2   7   5   c   5   b   b   d   f   c   d   e   9   9   2   0   a   8   1   1   b   b   0   1   0   3   8   a   2   d                           1   5  \t   l   i   b
+s   /   a   /   A   .   h   s  \0   1   0   0   6   4   4       b   l   o   b       9   a   9   1   5   a   4   c   7   1   7   c   a   6   4   5   6   2   e   0   9   3   f   0   c   d   2   4   5   c   5   0   6   4   f   c   4   a   9   c            
+6  \t   l   i   b   s   /   a   /   c   r   l   f   .   t   x   t  \0   1   0   0   6   4   4       b   l   o   b       f   7   1   9   e   f   d   4   3   0   d   5   2   b   c   f   c   8   5   6   6   a   4   3   b   2   e   b   6   5
+5   6   8   8   d   3   8   8   7   1                               4  \t   t   o   p   .   t   x   t  \0
+--- stderr
+--- exit 0
+
+### ls-files --stage from libs/a
+$ git ls-files -z --stage   (in $T/repo/libs/a)
+--- stdout
+1   0   0   6   4   4       d   8   4   3   c   0   0   b   7   8   2   7   5   c   5   b   b   d   f   c   d   e   9   9   2   0   a   8   1   1   b   b   0   1   0   3   8   a   2   d       0  \t   A   .   h   s  \0   1   0   0   6   4   4       9   a
+9   1   5   a   4   c   7   1   7   c   a   6   4   5   6   2   e   0   9   3   f   0   c   d   2   4   5   c   5   0   6   4   f   c   4   a   9   c       0  \t   c   r   l   f   .   t   x   t  \0
+--- stderr
+--- exit 0
+
+### check-attr from libs/a (input: crlf.txt A.hs)
+$ git check-attr -z --stdin text eol crlf filter ident working-tree-encoding   (in $T/repo/libs/a)
+--- stdout
+c   r   l   f   .   t   x   t  \0   t   e   x   t  \0   u   n   s   p   e   c   i   f   i   e   d  \0   c   r   l   f   .   t   x   t  \0   e   o   l  \0   u   n   s   p   e   c   i   f   i   e   d  \0   c   r   l   f   .   t   x   t  \0   c   r   l   f
+\0   u   n   s   p   e   c   i   f   i   e   d  \0   c   r   l   f   .   t   x   t  \0   f   i   l   t   e   r  \0   u   n   s   p   e   c   i   f   i   e   d  \0   c   r   l   f   .   t   x   t  \0   i   d   e   n   t  \0   u   n   s   p   e   c   i   f
+i   e   d  \0   c   r   l   f   .   t   x   t  \0   w   o   r   k   i   n   g   -   t   r   e   e   -   e   n   c   o   d   i   n   g  \0   u   n   s   p   e   c   i   f   i   e   d  \0   A   .   h   s  \0   t   e   x   t  \0   u   n   s   p   e   c   i
+f   i   e   d  \0   A   .   h   s  \0   e   o   l  \0   u   n   s   p   e   c   i   f   i   e   d  \0   A   .   h   s  \0   c   r   l   f  \0   u   n   s   p   e   c   i   f   i   e   d  \0   A   .   h   s  \0   f   i   l   t   e   r  \0   u   n   s   p
+e   c   i   f   i   e   d  \0   A   .   h   s  \0   i   d   e   n   t  \0   u   n   s   p   e   c   i   f   i   e   d  \0   A   .   h   s  \0   w   o   r   k   i   n   g   -   t   r   e   e   -   e   n   c   o   d   i   n   g  \0   u   n   s   p   e   c
+i   f   i   e   d  \0
+--- stderr
+--- exit 0
+
+### cat-file --batch-command (info, contents, tree, missing, a rev, flush without --buffer)
+$ git cat-file --batch-command   (in $T/repo)
+--- stdout
+f719efd430d52bcfc8566a43b2eb655688d38871 blob 4
+f719efd430d52bcfc8566a43b2eb655688d38871 blob 4
+two
+
+ee11d5fa966406ec4f0268877b687a0231acb354 tree 66
+0000000000000000000000000000000000000001 missing
+f719efd430d52bcfc8566a43b2eb655688d38871 blob 4
+two
+
+--- stderr
+fatal: flush is only for --buffer mode
+--- exit 128
+
+### cat-file -Z --batch-command
+$ git cat-file -Z --batch-command   (in $T/repo)
+--- stdout
+f   7   1   9   e   f   d   4   3   0   d   5   2   b   c   f   c   8   5   6   6   a   4   3   b   2   e   b   6   5   5   6   8   8   d   3   8   8   7   1  \n   c   o   n   t   e   n   t   s       f   7   1   9   e   f   d   4   3   0   d   5   2   b
+c   f   c   8   5   6   6   a   4   3   b   2   e   b   6   5   5   6   8   8   d   3   8   8   7   1  \n   i   n   f   o       e   e   1   1   d   5   f   a   9   6   6   4   0   6   e   c   4   f   0   2   6   8   8   7   7   b   6   8   7   a   0   2
+3   1   a   c   b   3   5   4  \n   i   n   f   o       0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   0   1  \n   c   o   n   t   e   n   t   s    
+H   E   A   D   :   t   o   p   .   t   x   t  \n   f   l   u   s   h  \n       m   i   s   s   i   n   g  \0
+--- stderr
+--- exit 0
+
+### sha256: object format
+$ git rev-parse --show-object-format   (in $T/sha256)
+--- stdout
+sha256
+--- stderr
+--- exit 0
+
+### sha256: ls-files --stage
+$ git ls-files -z --stage   (in $T/sha256)
+--- stdout
+1   0   0   6   4   4       9   6   c   1   8   f   0   2   9   7   e   3   8   d   0   1   f   4   b   2   d   a   c   d   d   e   a   4   2   5   9   a   e   a   6   b   2   9   6   1   e   b   0   8   2   2   b   d   2   c   0   c   3   f   6   0   2
+9   0   3   0   0   4   5       0  \t   f  \0
+--- stderr
+--- exit 0
+
+### sha256: empty tree oid
+$ git hash-object -t tree /dev/null   (in $T/sha256)
+--- stdout
+6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321
+--- stderr
+--- exit 0
+
+### sha1: empty tree oid
+$ git hash-object -t tree /dev/null   (in $T/repo)
+--- stdout
+4b825dc642cb6eb9a060e54bf8d69288fbee4904
+--- stderr
+--- exit 0
+
+ours (git-sides is the check): blob of "hi\n" sha256 = 96c18f0297e38d01f4b2dacddea4259aea6b2961eb0822bd2c0c3f6029030045
+
+### linked worktree: --git-path index
+$ git rev-parse --git-path index   (in $T/wt)
+--- stdout
+$T/repo/.git/worktrees/wt/index
+--- stderr
+--- exit 0
+
+### linked worktree: --git-dir --git-common-dir
+$ git rev-parse --git-dir --git-common-dir   (in $T/wt)
+--- stdout
+$T/repo/.git/worktrees/wt
+$T/repo/.git
+--- stderr
+--- exit 0
+
+### partial clone: ls-tree --long HEAD~1 (missing blob)
+$ git ls-tree -r -z --long HEAD~1   (in $T/pc)
+--- stdout
+--- stderr
+warning: lazy fetching disabled; some objects may not be available
+fatal: could not fetch 626799f0f85326a8c1fc522db584e86cdfccd51f from promisor remote
+--- exit 128
+
+### partial clone: ls-tree HEAD~1 (no --long)
+$ git ls-tree -r -z HEAD~1   (in $T/pc)
+--- stdout
+1   0   0   6   4   4       b   l   o   b       6   2   6   7   9   9   f   0   f   8   5   3   2   6   a   8   c   1   f   c   5   2   2   d   b   5   8   4   e   8   6   c   d   f   c   c   d   5   1   f  \t   f  \0
+--- stderr
+--- exit 0
+
+### partial clone: cat-file info/contents of the missing blob
+$ git cat-file --batch-command   (in $T/pc)
+--- stdout
+--- stderr
+warning: lazy fetching disabled; some objects may not be available
+fatal: could not fetch 626799f0f85326a8c1fc522db584e86cdfccd51f from promisor remote
+--- exit 128
+
+### gitlink: ls-tree --long (size -)
+$ git ls-tree -z --long HEAD sub   (in $T/repo)
+--- stdout
+1   6   0   0   0   0       c   o   m   m   i   t       c   4   2   a   6   1   1   d   6   e   8   0   3   7   0   4   a   6   e   f   d   f   7   0   a   5   8   8   d   9   0   d   b   b   a   b   a   c   3   b                               -  \t   s
+u   b  \0
+--- stderr
+--- exit 0
+
+### gitlink: ls-files --stage --debug
+$ git ls-files -z --stage --debug sub   (in $T/repo)
+--- stdout
+1   6   0   0   0   0       c   4   2   a   6   1   1   d   6   e   8   0   3   7   0   4   a   6   e   f   d   f   7   0   a   5   8   8   d   9   0   d   b   b   a   b   a   c   3   b       0  \t   s   u   b  \0           c   t   i   m   e   :       1
+7   9   4   9   1   2   0   4   6   :   4   7   3   7   2   1   6   8   6  \n           m   t   i   m   e   :       1   7   9   4   9   1   2   0   4   6   :   4   7   3   7   2   1   6   8   6  \n           d   e   v   :       9   9  \t   i   n   o   :
+4   9   0   0   9   3   9  \n           u   i   d   :       1   0   0   0  \t   g   i   d   :       1   0   0   0  \n           s   i   z   e   :       1   2   0  \t   f   l   a   g   s   :       0  \n
+--- stderr
+--- exit 0
+
+### non-UTF-8 and newline names: ls-files -z
+$ git ls-files -z --stage   (in $T/names)
+--- stdout
+1   0   0   6   4   4       5   8   7   b   e   6   b   4   c   3   f   9   3   f   9   3   c   4   8   9   c   0   1   1   1   b   b   a   5   5   9   6   1   4   7   a   2   6   c   b       0  \t   c   a   f 351  \0   1   0   0   6   4   4       9   7
+5   f   b   e   c   8   2   5   6   d   3   e   8   a   3   7   9   7   e   7   a   3   6   1   1   3   8   0   f   2   7   c   4   9   f   4   a   c       0  \t   n   e   w  \n   l   i   n   e  \0
+--- stderr
+--- exit 0
+
+### non-UTF-8 and newline names: ls-tree -z
+$ git ls-tree -r -z HEAD   (in $T/names)
+--- stdout
+1   0   0   6   4   4       b   l   o   b       5   8   7   b   e   6   b   4   c   3   f   9   3   f   9   3   c   4   8   9   c   0   1   1   1   b   b   a   5   5   9   6   1   4   7   a   2   6   c   b  \t   c   a   f 351  \0   1   0   0   6   4   4
+b   l   o   b       9   7   5   f   b   e   c   8   2   5   6   d   3   e   8   a   3   7   9   7   e   7   a   3   6   1   1   3   8   0   f   2   7   c   4   9   f   4   a   c  \t   n   e   w  \n   l   i   n   e  \0
+--- stderr
+--- exit 0
+
+### same without -z (quoted)
+$ git ls-tree -r HEAD   (in $T/names)
+--- stdout
+100644 blob 587be6b4c3f93f93c489c0111bba5596147a26cb	"caf\351"
+100644 blob 975fbec8256d3e8a3797e7a3611380f27c49f4ac	"new\nline"
+--- stderr
+--- exit 0
+
+### config: key unset
+$ git config --get core.autocrlf   (in $T/repo)
+--- stdout
+--- stderr
+--- exit 1
+
+### config: key set twice (--get)
+$ git config --get core.autocrlf   (in $T/repo)
+--- stdout
+true
+--- stderr
+--- exit 0
+
+### config: key set twice (-z --get-regexp)
+$ git config -z --get-regexp ^core\.(autocrlf|filemode|symlinks|ignorecase|trustctime|checkstat)$   (in $T/repo)
+--- stdout
+c   o   r   e   .   f   i   l   e   m   o   d   e  \n   t   r   u   e  \0   c   o   r   e   .   a   u   t   o   c   r   l   f  \n   i   n   p   u   t  \0   c   o   r   e   .   a   u   t   o   c   r   l   f  \n   t   r   u   e  \0
+--- stderr
+--- exit 0
+
+### config -z: value-less filemode (prints key NUL, no newline), autocrlf=yes
+$ git config -z --get-regexp ^core\.(autocrlf|filemode|symlinks|ignorecase|trustctime|checkstat)$   (in $T/repo)
+--- stdout
+c   o   r   e   .   f   i   l   e   m   o   d   e  \n   t   r   u   e  \0   c   o   r   e   .   f   i   l   e   m   o   d   e  \0   c   o   r   e   .   a   u   t   o   c   r   l   f  \n   y   e   s  \0
+--- stderr
+--- exit 0
+
+### config --type=bool for the same keys
+$ git config -z --type=bool --get-regexp ^core\.(autocrlf|filemode)$   (in $T/repo)
+--- stdout
+c   o   r   e   .   f   i   l   e   m   o   d   e  \n   t   r   u   e  \0   c   o   r   e   .   f   i   l   e   m   o   d   e  \n   t   r   u   e  \0   c   o   r   e   .   a   u   t   o   c   r   l   f  \n   t   r   u   e  \0
+--- stderr
+--- exit 0
+
+### ls-files --debug flags: skip-worktree, intent-to-add, assume-unchanged
+$ git ls-files -z --stage --debug top.txt ita.txt libs/a/A.hs   (in $T/repo)
+--- stdout
+1   0   0   6   4   4       e   6   9   d   e   2   9   b   b   2   d   1   d   6   4   3   4   b   8   b   2   9   a   e   7   7   5   a   d   8   c   2   e   4   8   c   5   3   9   1       0  \t   i   t   a   .   t   x   t  \0           c   t   i   m
+e   :       0   :   0  \n           m   t   i   m   e   :       0   :   0  \n           d   e   v   :       0  \t   i   n   o   :       0  \n           u   i   d   :       0  \t   g   i   d   :       0  \n           s   i   z   e   :       0  \t   f   l
+a   g   s   :       2   0   0   0   4   0   0   0  \n   1   0   0   6   4   4       d   8   4   3   c   0   0   b   7   8   2   7   5   c   5   b   b   d   f   c   d   e   9   9   2   0   a   8   1   1   b   b   0   1   0   3   8   a   2   d       0  \t
+l   i   b   s   /   a   /   A   .   h   s  \0           c   t   i   m   e   :       1   7   9   4   9   1   2   0   4   5   :   6   9   7   7   2   8   6   2   9  \n           m   t   i   m   e   :       1   7   9   4   9   1   2   0   4   5   :   6   9
+7   7   2   8   6   2   9  \n           d   e   v   :       9   9  \t   i   n   o   :       4   9   0   0   3   8   4  \n           u   i   d   :       1   0   0   0  \t   g   i   d   :       1   0   0   0  \n           s   i   z   e   :       1   5  \t
+f   l   a   g   s   :       8   0   0   0  \n   1   0   0   6   4   4       f   7   1   9   e   f   d   4   3   0   d   5   2   b   c   f   c   8   5   6   6   a   4   3   b   2   e   b   6   5   5   6   8   8   d   3   8   8   7   1       0  \t   t   o
+p   .   t   x   t  \0           c   t   i   m   e   :       1   7   9   4   9   1   2   0   4   5   :   7   0   6   7   2   8   5   4   8  \n           m   t   i   m   e   :       1   7   9   4   9   1   2   0   4   5   :   7   0   6   7   2   8   5   4
+8  \n           d   e   v   :       9   9  \t   i   n   o   :       4   9   0   0   3   8   3  \n           u   i   d   :       1   0   0   0  \t   g   i   d   :       1   0   0   0  \n           s   i   z   e   :       4  \t   f   l   a   g   s   :    
+4   0   0   0   4   0   0   0  \n
+--- stderr
+--- exit 0
+
+### cat-file --batch-command: remote-object-info (never sent by us)
+$ git cat-file --batch-command   (in $T/pc)
+--- stdout
+--- stderr
+fatal: unknown command: 'remote-object-info origin 626799f0f85326a8c1fc522db584e86cdfccd51f'
+--- exit 128
+

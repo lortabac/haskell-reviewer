@@ -1,0 +1,34 @@
+cabal-version: 3.0
+name:          git-sides
+version:       0
+synopsis:      Throwaway M3 spike (T01): git plumbing for sides.
+license:       BSD-3-Clause
+build-type:    Simple
+
+executable git-sides
+  main-is:          Main.hs
+  hs-source-dirs:   src
+  other-modules:    BlobId Pool Proc Stat
+  default-language: GHC2021
+  default-extensions:
+    DuplicateRecordFields
+    LambdaCase
+    NoFieldSelectors
+    OverloadedRecordDot
+    OverloadedStrings
+  ghc-options:      -O1 -Wall -threaded -rtsopts
+  build-depends:
+    , async
+    , base
+    , bytestring
+    , containers
+    , crypton
+    , directory
+    , filepath
+    , haskell-reviewer
+    , process
+    , stm
+    , text
+    , time
+    , unix
+    , vector

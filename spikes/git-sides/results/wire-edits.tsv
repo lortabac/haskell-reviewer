@@ -1,0 +1,6 @@
+edit	path
+content	libs/bilge/examples/google.hs
+touch	libs/bilge/src/Bilge.hs
+crlf	libs/bilge/src/Bilge/Assert.hs (attrs: libs/bilge/src/Bilge/Assert.hs: text: unspecified libs/bilge/src/Bilge/Assert.hs: eol: unspecified )
+ours	libs/bilge/examples/google.hs (content (size));libs/bilge/src/Bilge/Assert.hs (content (size));
+diff-files	libs/bilge/examples/google.hs;libs/bilge/src/Bilge.hs;libs/bilge/src/Bilge/Assert.hs;

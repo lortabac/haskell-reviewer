@@ -1,0 +1,4 @@
+git: git version 2.56.0
+method	ls-tree --long
+entries	1
+missing	1

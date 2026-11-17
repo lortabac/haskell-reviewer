@@ -1,0 +1,7 @@
+git: git version 2.44.1
+method	fallback (ls-tree --long failed)
+ls_tree_long_stderr	warning: lazy fetching disabled; some objects may not be available
+entries	1
+blobs	1
+missing	1
+restarts	1

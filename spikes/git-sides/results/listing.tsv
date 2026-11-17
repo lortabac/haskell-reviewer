@@ -1,0 +1,15 @@
+call	median_ms	min_ms	max_ms	stddev_ms	stdout_bytes
+ls-tree -r -z (head)	8.4	4.7	10.6	1.5	761344
+ls-tree -r -z --long (head)	13.9	8.9	18.4	2.9	816352
+ls-tree -r -z --long (head), ROOT=libs/	11.9	6.4	15.1	2.8	599065
+ls-tree -r -z --long --full-tree (head), ROOT=libs/	16.6	7.7	18.9	3.8	816352
+ls-tree -r -z (base)	8.2	4.6	10.6	1.7	759246
+ls-tree -r -z --long (base)	14.5	7.9	19.1	3.1	814102
+ls-tree -r -z --long (base), ROOT=libs/	12.5	7.8	16.2	1.9	597394
+ls-tree -r -z --long --full-tree (base), ROOT=libs/	15.8	9.2	18.7	3.0	814102
+rev-parse --show-prefix --show-object-format --is-shallow-repository	2.7	2.2	4.1	0.5	11
+merge-base --all base head	3.2	2.3	4.9	0.7	41
+ls-files -z --stage	5.9	3.7	10.0	1.5	740712
+ls-files -z --stage --debug	9.6	6.4	11.7	1.6	1615864
+ls-files -z --others --exclude-standard	13.7	9.3	23.7	4.5	0
+diff-files --name-only (refreshed copy)	5.7	4.4	9.8	1.2	0

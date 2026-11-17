@@ -1,0 +1,13 @@
+state	copy	ours	diff_files	only_ours	only_diff_files
+r1	in-place	b.txt 	b.txt 		
+r1	cp-a	b.txt 	.gitattributes .gitmodules a.bin a.ca a.cl a.info a.txt a.x b.txt lib/L.hs plain.hs 		.gitattributes .gitmodules a.bin a.ca a.cl a.info a.txt a.x lib/L.hs plain.hs 
+r2	in-place	b.txt 	b.txt 		
+r2	cp-a	b.txt 	.gitattributes .gitmodules a.bin a.ca a.cl a.info a.txt a.x b.txt lib/L.hs plain.hs 		.gitattributes .gitmodules a.bin a.ca a.cl a.info a.txt a.x lib/L.hs plain.hs 
+r3	in-place	b.txt 	b.txt 		
+r3	cp-a	b.txt 	.gitattributes .gitmodules a.bin a.ca a.cl a.info a.txt a.x b.txt lib/L.hs plain.hs 		.gitattributes .gitmodules a.bin a.ca a.cl a.info a.txt a.x lib/L.hs plain.hs 
+r4	in-place	b.txt 	b.txt 		
+r4	cp-a	b.txt 	.gitattributes .gitmodules a.bin a.ca a.cl a.info a.txt a.x b.txt lib/L.hs plain.hs 		.gitattributes .gitmodules a.bin a.ca a.cl a.info a.txt a.x lib/L.hs plain.hs 
+edge-symlink-dir	vs status	a/b 	a/b 		
+edge-filemode-novalue	vs status	x.sh 	x.sh 		
+edge-autocrlf-yes	vs status				
+edge-text-input	vs status				

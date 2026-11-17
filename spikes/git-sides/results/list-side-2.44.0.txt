@@ -1,0 +1,7 @@
+git: git version 2.44.0
+method	fallback (ls-tree --long failed)
+ls_tree_long_stderr	fatal: Could not read from remote repository.
+entries	1
+blobs	1
+missing	1
+restarts	1
