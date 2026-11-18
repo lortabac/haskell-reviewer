@@ -20,6 +20,7 @@ import HaskellReviewer.Core.Eol
   ( CleanEol (..),
     Filtering (..),
     attrNames,
+    defaultCoreConfig,
     parseCheckAttr,
     parseCoreConfig,
   )
@@ -121,10 +122,19 @@ tests =
       testCase "config: no core key is empty" $ withCanonicalTemp $ \tmp -> do
         let repo = tmp </> "r"
         git tmp ["init", "-q", "r"]
-        git repo ["config", "--unset", "core.filemode"]
+        -- git init writes some of these (core.filemode; on macOS
+        -- core.ignorecase too). Unset each one the regexp asks for; a
+        -- key that isn't set is exit 5, fine here.
+        forM_ coreKeys $ \k -> gitBytes repo ["config", "--unset-all", k] ""
         Dir.createDirectory (tmp </> "home")
         g <- realGitAt (tmp </> "home") repo
         coreConfig g >>= (@?= Right "")
+        -- As on macOS: a key we read but don't use is skipped.
+        git repo ["config", "core.ignorecase", "true"]
+        out0 <- either (assertFailure . show) pure =<< coreConfig g
+        out0 @?= "core.ignorecase\ntrue\0"
+        parseCoreConfig out0 @?= Right defaultCoreConfig
+        git repo ["config", "--unset-all", "core.ignorecase"]
         git repo ["config", "core.symlinks", "false"]
         out <- either (assertFailure . show) pure =<< coreConfig g
         parseCoreConfig out @?= parseCoreConfig "core.symlinks\nfalse\0",
@@ -449,6 +459,14 @@ binRepo name t dir =
   listed (t </> "home") (dir </> name) $ \wt _ -> do
     states wt [("a.bat", "clean"), ("a.png", "clean")]
     crossCheck (dir </> name) "" wt []
+
+-- | The keys 'coreConfig' asks for, but the filter.* ones (git init
+-- never writes those).
+coreKeys :: [String]
+coreKeys =
+  map
+    ("core." <>)
+    ["autocrlf", "filemode", "symlinks", "ignorecase", "trustctime", "checkstat"]
 
 -- | The states of these paths are the given ones.
 states :: WorkTreeFiles -> [(String, String)] -> Assertion
