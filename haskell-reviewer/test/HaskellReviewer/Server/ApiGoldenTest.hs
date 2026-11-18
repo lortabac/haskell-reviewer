@@ -28,6 +28,8 @@ import Data.List (sort)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import HaskellReviewer.Core.Config (SidebarView (..), Theme (..), UiDefaults (..))
+import HaskellReviewer.Core.Eol (Filtering (..))
+import HaskellReviewer.Core.FileContent (FileNotes (..))
 import HaskellReviewer.Core.ModuleModel
   ( ModuleParse (..),
     TextOnlyReason (..),
@@ -99,6 +101,8 @@ cases =
     cbor "file-too-large" (okCbor fixtureApi (file ["data", "big.csv"])),
     cbor "file-symlink" (okCbor fixtureApi (file ["docs", "guide.md"])),
     cbor "file-submodule" (okCbor fixtureApi (file ["vendor", "dep"])),
+    -- Read from disk, and git would filter it (LFS, say).
+    cbor "file-filtered" (okCbor filteredApi (file ["app", "Main.hs"])),
     json "modules" (okJson projectApi ["api", "modules", "tree"]),
     json "modules-implicit" (okJson implicitApi ["api", "modules", "tree"]),
     -- One per reason a module is text only, a parsed one and one after
@@ -174,6 +178,7 @@ cases =
     file p = ["api", "file", "tree"] <> p
     modulePath ref = ["api", "module", "tree", ref]
     source p = ["api", "source", "tree"] <> p
+    filteredApi = fixtureApi {fileNotes = \_ _ -> FileNotes {filtered = Filtered}}
     crashingApi = answering (ParserCrashed "boom")
     slowApi = answering TooSlow
     halfway = Progress {total = 358, ready = 120, failed = 2}

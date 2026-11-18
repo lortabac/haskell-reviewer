@@ -26,6 +26,7 @@ import Data.Text qualified as Text
 import Data.Word (Word64)
 import GHC.Clock (getMonotonicTime)
 import HaskellReviewer.Core.Address (Port (..), Token, tokenFromBytes, tokenText)
+import HaskellReviewer.Core.FileContent (unfiltered)
 import HaskellReviewer.Core.Sides (Side (..))
 import HaskellReviewer.Effects.Clock (Microseconds (..))
 import HaskellReviewer.Effects.FileSystem (ListError (..), ReadError (..))
@@ -462,6 +463,7 @@ routesFor events =
         FilesApi
           { snapshotOn = browseOnly (pure (Left (ListCrashed "no files here"))),
             readEntry = \_ _ _ -> pure (Left ReadGone),
+            fileNotes = \_ _ -> unfiltered,
             logger = newLogger LevelInfo (\_ -> pure ())
           },
       prefs = fixedPrefs

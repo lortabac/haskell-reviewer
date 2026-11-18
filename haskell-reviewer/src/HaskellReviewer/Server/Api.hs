@@ -34,11 +34,14 @@ import Data.Map.Strict qualified as Map
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
+import HaskellReviewer.Core.Eol (Filtering (..))
 import HaskellReviewer.Core.FileContent
   ( FileContent (..),
+    FileNotes (..),
     FileSize (..),
     LinkInfo (..),
     TooLargeInfo (..),
+    unfiltered,
   )
 import HaskellReviewer.Core.FileList (CommitId (..), EntryKind (..), FileList (..))
 import HaskellReviewer.Core.Modules
@@ -125,6 +128,9 @@ data FilesApi = FilesApi
     -- | Read one entry from the snapshot's source. See Note [Entry
     -- sources] in "HaskellReviewer.Effects.Source".
     readEntry :: Snapshot -> RelPath -> EntryKind -> IO (Either ReadError FileContent),
+    -- | What the snapshot's source says about a file (@filtered@).
+    -- Production: 'HaskellReviewer.Effects.Source.fileNotes'.
+    fileNotes :: Snapshot -> RelPath -> FileNotes,
     -- | For read errors.
     logger :: Logger
   }
@@ -187,7 +193,11 @@ newSnapshot side pool source fl project = do
   forceSnapshot modules fileListJson moduleTreeJson
   searchModules <- evaluate (moduleCandidates modules)
   _ <- evaluate (forceCandidates searchModules)
-  mapM_ (evaluate . LBS.length . encodeFileView firstGeneration) cborWarmUp
+  sequence_
+    [ evaluate (LBS.length (encodeFileView firstGeneration n c))
+    | n <- [unfiltered, FileNotes {filtered = Filtered}],
+      c <- cborWarmUp
+    ]
   index <- newIndex pool modules
   resolver <- newResolver modules index
   textStore <- newTextStore
@@ -262,7 +272,11 @@ fileApp api side segs req respond
               Left ReadGone -> respond notFound
               Left (ReadFailed why) -> respond =<< readFailed api snap path why
               Right content ->
-                respond (cbor (encodeFileView snap.generation (inSnapshot snap content)))
+                respond . cbor $
+                  encodeFileView
+                    snap.generation
+                    (api.fileNotes snap path)
+                    (inSnapshot snap content)
   | otherwise = respond notFound
 
 -- | @GET api\/module\/\<side>\/\<ref segments>@: one module's page, as
@@ -361,26 +375,32 @@ sourceApp api side segs req respond
     view snap v = viewWith snap (pure v)
     viewWith snap mk =
       computed snap (encodeSource snap.generation snap.modules <$> mk) >>= respond
-    plain path i = viewOf path i False PlainBody
-    viewOf path i partial b =
-      SourceView {path = path, moduleId = i, partial = partial, body = b}
+    plain snap path i = viewOf snap path i False PlainBody
+    viewOf snap path i partial b =
+      SourceView
+        { path = path,
+          moduleId = i,
+          partial = partial,
+          notes = api.fileNotes snap path,
+          body = b
+        }
     answer snap path = case moduleAtPath snap.modules path of
-      Nothing -> view snap (plain path Nothing)
+      Nothing -> view snap (plain snap path Nothing)
       Just i -> case (.source) <$> findModule snap.modules i of
         Just (HaskellSource _) -> do
           awaitImports snap.resolver importWait i
           fromIndex snap path i
-        _ -> view snap (plain path (Just i))
+        _ -> view snap (plain snap path (Just i))
     fromIndex snap path i =
       awaitModule snap.index i >>= \case
         Just (Right (IndexedParsed s)) -> viewWith snap $ do
           (input, partial) <- linksFor snap i s
           let lexed = parsedSource s.parsed (sourceLinks input)
-          pure (viewOf path (Just i) partial (LexedBody lexed))
+          pure (viewOf snap path (Just i) partial (LexedBody lexed))
         Just (Right (IndexedTextOnly t)) ->
-          view snap (viewOf path (Just i) False (textOnlySource t))
-        Just (Right (IndexedNotText _)) -> view snap (plain path (Just i))
-        Just (Right (IndexedTooLarge _)) -> view snap (plain path (Just i))
+          view snap (viewOf snap path (Just i) False (textOnlySource t))
+        Just (Right (IndexedNotText _)) -> view snap (plain snap path (Just i))
+        Just (Right (IndexedTooLarge _)) -> view snap (plain snap path (Just i))
         Just (Left e) -> respond (indexFailed (missing snap) e)
         -- Every Haskell source has a slot.
         Nothing -> respond (missing snap)

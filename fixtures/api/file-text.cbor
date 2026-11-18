@@ -1,5 +1,6 @@
-£jgenerationdkinddtextdtextxsmodule Main (main) where
+¤jgenerationdkinddtextdtextxsmodule Main (main) where
 
 -- <script>alert(1)</script>
 main :: IO ()
 main = putStrLn "hÃ©llo, wÃ¶rld â†’ âœ“"
+hfilteredô

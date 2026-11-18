@@ -137,11 +137,13 @@ tests =
         cborToJson r.body
           @?= Right
             "{\"generation\":1,\"kind\":\"symlink\",\
-            \\"target\":\"gone.md\",\"resolved\":null}",
+            \\"target\":\"gone.md\",\"resolved\":null,\"filtered\":false}",
       testCase "nested repo: a submodule with commit null" $ do
         r <- getApi fixtureApi ["api", "file", "tree", "vendor", "nested"]
         cborToJson r.body
-          @?= Right "{\"generation\":1,\"kind\":\"submodule\",\"commit\":null}",
+          @?= Right
+            "{\"generation\":1,\"kind\":\"submodule\",\"commit\":null,\
+            \\"filtered\":false}",
       testCase "gone from disk: 404; read error: 500, reason logged" $ do
         logged <- newIORef []
         let with e =

@@ -130,6 +130,8 @@ interface SourceHead {
   tier: { kind: "syntactic"; reason: "no-hie" };
   // Resolution read a module not ready yet: ask again later.
   partial: boolean;
+  // As on the file view.
+  filtered: boolean;
 }
 
 export type PlainSource = SourceHead & { highlight: "plain" };
@@ -336,6 +338,7 @@ export function decodeSourceView(value: unknown): SourceView {
     ref: field(o, "ref", path, nullable(str)),
     tier: field(o, "tier", path, decodeTier),
     partial: field(o, "partial", path, bool),
+    filtered: field(o, "filtered", path, bool),
   };
   const highlight = field(
     o,

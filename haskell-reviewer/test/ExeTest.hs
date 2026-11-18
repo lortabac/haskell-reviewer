@@ -242,7 +242,8 @@ quickExitTests =
         (code, err) <- runExe ["--help"]
         code @?= ExitSuccess
         assertContains "--port" err
-        assertContains "--diff REVSPEC" err,
+        assertContains "--diff REVSPEC" err
+        assertContains "working tree" (unwords (words err)),
       testCase "--version: exit 0, same version as the library" $ do
         (code, err) <- runExe ["--version"]
         code @?= ExitSuccess
@@ -489,7 +490,7 @@ filesTests =
             cborToJson (LBS.fromStrict r.body)
               @?= Right
                 "{\"generation\":1,\"kind\":\"text\",\
-                \\"text\":\"<script>alert(1)</script>\\n\"}"
+                \\"text\":\"<script>alert(1)</script>\\n\",\"filtered\":false}"
             assertSecurityHeaders r,
       testCase "gzip: a big file is gzipped, the event stream never" $
         withCanonicalTemp $ \dir -> do
@@ -915,11 +916,47 @@ diffTests =
           exit2With id [t </> "shallow", "--diff", "main...origin/feature"] $
             "haskell-reviewer: --diff: no merge base for main...origin/feature; \
             \this is a shallow clone: fetch more history",
-        testCase "--diff REV: not supported yet, exit 2" $ do
+        testCase "--diff REV: unknown revision, exit 2" $ do
           t <- get
-          exit2With id [t </> "repo", "--diff", "HEAD"] $
-            "haskell-reviewer: --diff REV (against the working tree) is not supported \
-            \yet; use BASE..HEAD or BASE...HEAD",
+          exit2With id [t </> "edits", "--diff", "nope"] $
+            "haskell-reviewer: --diff: unknown revision or not a commit: nope",
+        testCase "--diff REV: head the working tree, base the commit" $ do
+          t <- get
+          let root = t </> "edits"
+          short <- take 7 <$> gitOut root ["rev-parse", "HEAD"]
+          withServer id ["--verbose", root, "--diff", "HEAD"] $ \server -> do
+            waitForLine server ("indexing: done, " `isPrefixOf`)
+            let cborAt route side p = do
+                  r <- getPath server ("api/" <> route <> "/" <> side <> "/" <> p)
+                  (route, side, p, r.status) @?= (route, side, p, 200)
+                  either
+                    (assertFailure . Text.unpack . renderCborJsonError)
+                    (pure . LChar8.unpack)
+                    (cborToJson (LBS.fromStrict r.body))
+                file = cborAt "file"
+            -- Edited, staged-only, LFS (filtered on head only).
+            file "head" "src/A.hs" >>= assertContains "a = 2\\n"
+            file "base" "src/A.hs" >>= assertContains "a = 1\\n"
+            file "head" "src/S.hs" >>= assertContains "s = 2\\n"
+            file "base" "src/S.hs" >>= assertContains "s = 1\\n"
+            file "head" "data.bin"
+              >>= assertContains "\"text\":\"big data\\n\",\"filtered\":true}"
+            file "base" "data.bin" >>= assertContains "\"filtered\":false}"
+            file "head" "src/B.hs" >>= assertContains "\"filtered\":false}"
+            cborAt "source" "head" "data.bin" >>= assertContains "\"filtered\":true"
+            cborAt "source" "head" "src/A.hs" >>= assertContains "\"filtered\":false"
+            files <- getPath server "api/files/head"
+            assertContains "\"path\":\"src/New.hs\"" (Char8.unpack files.body)
+            base <- getPath server "api/files/base"
+            let baseBody = Char8.unpack base.body
+            assertBool baseBody (not ("src/New.hs" `isInfixOf` baseBody))
+            noTree <- getPath server "api/modules/tree"
+            noTree.status @?= 404
+            (_, err) <- stopServer server sigTERM
+            assertContains "diff: HEAD (against the working tree)\n" err
+            assertContains "head: working tree\n" err
+            assertContains ("base: HEAD = " <> short <> "\n") err
+            assertContains "changed: 3 on head, 2 on base, indexed first\n" err,
         testCase "BASE..HEAD: both sides served, tree 404, one done line" $ do
           t <- get
           let root = t </> "repo" </> "pkg"
@@ -970,7 +1007,8 @@ diffTests =
       ]
 
 -- | The revspecs repo, a shallow clone of it with every branch tip, a
--- bare clone, a plain dir, an empty dir, and the planted repos.
+-- bare clone, a plain dir, an empty dir, the planted repos, and the
+-- edits repo (changes not committed).
 makeDiffRepos :: IO FilePath
 makeDiffRepos = do
   tmp <- getCanonicalTemporaryDirectory
@@ -981,6 +1019,7 @@ makeDiffRepos = do
   git t ["clone", "-q", "--depth", "1", "--no-single-branch", url, "shallow"]
   git t ["clone", "-q", "--bare", url, "bare.git"]
   fixtureRepo "planted" [t </> "planted"]
+  fixtureRepo "edits" [t </> "edits"]
   pure t
 
 -- | Exit 2, and stderr is this one line.

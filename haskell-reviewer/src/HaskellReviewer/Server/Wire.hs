@@ -22,6 +22,7 @@ module HaskellReviewer.Server.Wire
 
     -- * Shared
     noSourceReason,
+    filteredValue,
   )
 where
 
@@ -33,8 +34,10 @@ import Data.ByteString.Lazy qualified as LBS
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import HaskellReviewer.Core.Config (sidebarName, themeName)
+import HaskellReviewer.Core.Eol (Filtering (..))
 import HaskellReviewer.Core.FileContent
   ( FileContent (..),
+    FileNotes (..),
     FileSize (..),
     LinkInfo (..),
     TooLargeInfo (..),
@@ -149,16 +152,19 @@ encodeFileList (Generation g) fl =
 
 -- | GET api\/file\/\<side>\/\<path>, as CBOR. In JSON terms, one of
 --
--- > {"generation":1,"kind":"text","text":"..."}
--- > {"generation":1,"kind":"binary","size":123}
--- > {"generation":1,"kind":"too-large","size":123,"limit":1048576}
--- > {"generation":1,"kind":"symlink","target":"../x","resolved":"x"}
--- > {"generation":1,"kind":"submodule","commit":"0123..."}
+-- > {"generation":1,"kind":"text","text":"...","filtered":false}
+-- > {"generation":1,"kind":"binary","size":123,"filtered":false}
+-- > {"generation":1,"kind":"too-large","size":123,"limit":1048576,"filtered":false}
+-- > {"generation":1,"kind":"symlink","target":"../x","resolved":"x","filtered":false}
+-- > {"generation":1,"kind":"submodule","commit":"0123...","filtered":false}
 --
--- @resolved@ may be null, and @commit@ too (a nested repo).
-encodeFileView :: Generation -> FileContent -> LBS.ByteString
-encodeFileView (Generation g) content =
-  Cbor.cborBody . Cbor.obj $ ("generation", Cbor.word64 g) : fields
+-- @resolved@ may be null, and @commit@ too (a nested repo). @filtered@
+-- is true for a file read from disk that git would filter (see
+-- 'FileNotes').
+encodeFileView :: Generation -> FileNotes -> FileContent -> LBS.ByteString
+encodeFileView (Generation g) notes content =
+  Cbor.cborBody . Cbor.obj $
+    ("generation", Cbor.word64 g) : fields <> [("filtered", filteredValue notes)]
   where
     fields = case content of
       TextContent t -> [kind "text", ("text", Cbor.text t)]
@@ -174,6 +180,12 @@ encodeFileView (Generation g) content =
       NestedRepo -> [kind "submodule", ("commit", Cbor.null_)]
     kind k = ("kind", Cbor.text k)
     bytes (FileSize n) = Cbor.int n
+
+-- | The @filtered@ field of the file and source views.
+filteredValue :: FileNotes -> Cbor.Encoding
+filteredValue notes = Cbor.bool $ case notes.filtered of
+  Filtered -> True
+  Unfiltered -> False
 
 -- | GET api\/modules\/\<side>: the module tree.
 --

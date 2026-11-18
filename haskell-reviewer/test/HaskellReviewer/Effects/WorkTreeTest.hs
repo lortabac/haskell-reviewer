@@ -24,7 +24,7 @@ import HaskellReviewer.Core.Eol
     parseCheckAttr,
     parseCoreConfig,
   )
-import HaskellReviewer.Core.FileContent (FileContent (..), LinkInfo (..))
+import HaskellReviewer.Core.FileContent (FileContent (..), FileNotes (..), LinkInfo (..))
 import HaskellReviewer.Core.FileList (CommitId (..), EntryKind (..), FileList (..))
 import HaskellReviewer.Core.Git (ObjectId (..))
 import HaskellReviewer.Core.RelPath (RelPath, parseRelPath, relPathText)
@@ -53,7 +53,6 @@ import HaskellReviewer.Effects.Log (LogLevel (..), Logger, newLogger)
 import HaskellReviewer.Effects.PosixAt (lstatAt)
 import HaskellReviewer.Effects.Source
   ( EntrySource (..),
-    FileNotes (..),
     WorkTreeSource (..),
     fileNotes,
     readSourceEntry,

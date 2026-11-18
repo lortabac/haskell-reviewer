@@ -18,6 +18,7 @@ import Data.Word (Word32)
 import HaskellReviewer.Core.Code (codeEnv)
 import HaskellReviewer.Core.Decls (DeclInfo (..), NamedDecl (..), namedDecls)
 import HaskellReviewer.Core.DocLinks (noLocalNames)
+import HaskellReviewer.Core.FileContent (unfiltered)
 import HaskellReviewer.Core.Highlight
   ( Run (..),
     highlightLinked,
@@ -896,6 +897,7 @@ allocated mods = do
             { path = libFile "U",
               moduleId = Just u,
               partial = False,
+              notes = unfiltered,
               body = LexedBody lexed
             }
   bytes <- evaluate (fromIntegral (LBS.length body))

@@ -137,6 +137,7 @@ import HaskellReviewer.Effects.Source
     Probe (..),
     ProbeError,
     WorkTreeSource (..),
+    fileNotes,
     readSourceEntry,
     renderProbeError,
     warmUpListing,
@@ -599,6 +600,7 @@ serveSides deps logger opts root defaults listers tracer shutdown t0 w0 = do
                 FilesApi
                   { snapshotOn = \s -> awaitSnapshot . (.slot) <$> lookupSide s sides,
                     readEntry = \snap -> deps.readEntry snap.source,
+                    fileNotes = \snap -> fileNotes snap.source,
                     logger = logger
                   }
               routes = Routes {events = events, files = files, prefs = prefs}

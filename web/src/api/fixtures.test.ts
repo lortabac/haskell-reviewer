@@ -80,6 +80,7 @@ const decoders: Record<string, (value: unknown) => unknown> = {
   "file-too-large": decodeFileView,
   "file-symlink": decodeFileView,
   "file-submodule": decodeFileView,
+  "file-filtered": decodeFileView,
   modules: decodeModuleTree,
   "modules-implicit": decodeModuleTree,
   "module-parsed": decodeModulePage,
@@ -147,11 +148,15 @@ describe("API fixtures", () => {
     }
   });
 
-  it("the file view fixtures cover every kind", () => {
-    const kinds = [...fixtures.keys()]
+  it("the file view fixtures cover every kind, filtered or not", () => {
+    const views = [...fixtures.keys()]
       .filter((n) => n.startsWith("file-"))
-      .map((n) => decodeFileView(fixture(n)).kind);
-    expect(kinds.sort()).toEqual([...fileViewKinds].sort());
+      .map((n) => decodeFileView(fixture(n)));
+    expect(sorted(views.map((v) => v.kind))).toEqual(sorted(fileViewKinds));
+    expect(sorted(views.map((v) => String(v.filtered)))).toEqual([
+      "false",
+      "true",
+    ]);
   });
 
   it("the file list fixture covers every entry kind and a null commit", () => {
@@ -371,6 +376,10 @@ describe("API fixtures", () => {
       "false",
       "true",
     ]);
+    expect(sorted(views.map((v) => String(v.filtered)))).toEqual([
+      "false",
+      "true",
+    ]);
     expect(views.some((v) => v.ref === null)).toBe(true);
     const cover = decodeSourceView(fixture("source-warm-up"));
     if (cover.highlight !== "lexed") throw new Error("not lexed");
@@ -454,7 +463,7 @@ describe("fromCbor", () => {
 });
 
 describe("decoders reject bad shapes", () => {
-  const good = { generation: 1, kind: "text", text: "x" };
+  const good = { generation: 1, filtered: false, kind: "text", text: "x" };
 
   it("module not found", () => {
     const good = { generation: 1, kind: "not-found", what: "module" };
@@ -472,6 +481,8 @@ describe("decoders reject bad shapes", () => {
   });
 
   it("file view", () => {
+    const head = { generation: 1, filtered: false };
+    expect(decodeFileView(good)).toEqual(good);
     for (const bad of [
       null,
       [],
@@ -480,16 +491,18 @@ describe("decoders reject bad shapes", () => {
       { ...good, generation: "1" },
       { ...good, generation: 1.5 },
       { ...good, generation: -1 },
-      { generation: 1, kind: "binary", size: -2 },
-      { generation: 1, kind: "too-large", size: 2, limit: -1 },
+      { ...head, kind: "binary", size: -2 },
+      { ...head, kind: "too-large", size: 2, limit: -1 },
       { ...good, kind: "nope" },
-      { generation: 1, kind: "text" },
-      { generation: 1, kind: "binary", size: "2" },
-      { generation: 1, kind: "too-large", size: 2 },
-      { generation: 1, kind: "symlink", target: "x" },
-      { generation: 1, kind: "symlink", target: 1, resolved: null },
-      { generation: 1, kind: "submodule" },
-      { generation: 1, kind: "submodule", commit: 7 },
+      { ...head, kind: "text" },
+      { ...head, kind: "binary", size: "2" },
+      { ...head, kind: "too-large", size: 2 },
+      { ...head, kind: "symlink", target: "x" },
+      { ...head, kind: "symlink", target: 1, resolved: null },
+      { ...head, kind: "submodule" },
+      { ...head, kind: "submodule", commit: 7 },
+      { ...good, filtered: "no" },
+      { generation: 1, kind: "text", text: "x" },
     ]) {
       expect(() => decodeFileView(bad), JSON.stringify(bad)).toThrow(
         DecodeError,

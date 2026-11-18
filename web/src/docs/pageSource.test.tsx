@@ -34,6 +34,7 @@ const lexed = (over: Record<string, unknown> = {}) => ({
   ref: "Page",
   tier: { kind: "syntactic", reason: "no-hie" },
   partial: false,
+  filtered: false,
   highlight: "lexed",
   // Line 38: "area" (variable, link 1), line 39: "area" (link 2) and
   // "_" is a local (no link).
