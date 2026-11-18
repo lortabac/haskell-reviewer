@@ -22,6 +22,10 @@ module HaskellReviewer.Effects.Source
     readSourceEntry,
     fileNotes,
 
+    -- * Blobs
+    sourceBlob,
+    sharedBlob,
+
     -- * Warm-up
     warmUpListing,
     warmUpObjects,
@@ -384,6 +388,29 @@ fileNotes source p = case source of
   WorkTreeEntries src
     | Just (FromDisk d) <- Map.lookup p src.files -> FileNotes {filtered = d.filtered}
   _ -> unfiltered
+
+-- | The blob of a path, if known: what the side holds there. For the
+-- changed modules (D-317).
+sourceBlob :: EntrySource -> RelPath -> Maybe ObjectId
+sourceBlob source p = case source of
+  CommitEntries c -> (.oid) <$> Map.lookup p c.blobs
+  DiskEntries _ -> Nothing
+  WorkTreeEntries w -> case Map.lookup p w.files of
+    Just (FromIndex o) -> Just o
+    Just (FromDisk d) -> d.blob
+    Nothing -> Nothing
+
+-- | The blob a path is read from, if it is read from one: a commit's
+-- blob, or a clean working-tree file's index blob. Never a disk read:
+-- what a read gives may differ from our hash (D-320). Reads keyed by
+-- it can be shared across sides.
+sharedBlob :: EntrySource -> RelPath -> Maybe ObjectId
+sharedBlob source p = case source of
+  CommitEntries c -> (.oid) <$> Map.lookup p c.blobs
+  DiskEntries _ -> Nothing
+  WorkTreeEntries w -> case Map.lookup p w.files of
+    Just (FromIndex o) -> Just o
+    _ -> Nothing
 
 -- | Read one entry of a commit. See Note [Entry sources].
 readCommitEntry ::

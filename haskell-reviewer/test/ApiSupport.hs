@@ -131,9 +131,9 @@ import HaskellReviewer.Server.CborJson (cborToJson)
 import HaskellReviewer.Server.Events (EventStream (..))
 import HaskellReviewer.Server.Router (Routes (..), application)
 import HaskellReviewer.Session.Clients (newClients)
-import HaskellReviewer.Session.Index (IndexDeps (..), IndexJob (..), newPool, runWorkers)
+import HaskellReviewer.Session.Index (IndexDeps (..), IndexJob (..), runWorkers)
 import HaskellReviewer.Session.Prefs (PrefsStore (..), newPrefsStore)
-import HaskellReviewer.Session.Snapshot (Snapshot (files, index, side))
+import HaskellReviewer.Session.Snapshot (Snapshot (files, index, side), newSessionShare)
 import Network.HTTP.Types (Header, Status (..))
 import Network.Wai
   ( Application,
@@ -488,8 +488,8 @@ indexDeps api snap =
 -- | A snapshot in a pool of its own.
 newSnapshot :: CanonicalRoot -> FileList -> Project -> IO Snapshot
 newSnapshot root fl project = do
-  pool <- newPool
-  Api.newSnapshot TreeSide pool (DiskEntries root) fl project
+  share <- newSessionShare
+  Api.newSnapshot TreeSide share (DiskEntries root) fl project
 
 fixtureSnapshot :: IO Snapshot
 fixtureSnapshot =

@@ -24,16 +24,19 @@ import HaskellReviewer.Core.FileList
     FileList (..),
     ListSource (..),
   )
+import HaskellReviewer.Core.Git (ObjectId (..))
 import HaskellReviewer.Core.RelPath (RelPath, relPathFromBytes, relPathText)
 import HaskellReviewer.Effects.FileSystem (ReadError (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), newLogger)
 import HaskellReviewer.Session.TextStore
-  ( Skipped (..),
+  ( BlobTexts,
+    Skipped (..),
     StoreError (..),
     TextFile (..),
     TextFiles (..),
     awaitTextFiles,
     loadTextFiles,
+    newBlobTexts,
     newTextStore,
     storeBytes,
   )
@@ -62,7 +65,7 @@ tests =
           @?= Skipped {binary = 0, tooLarge = 0, unreadable = 0, overBudget = 6}
         map relPathText asked @?= ["a.txt", "b.txt", "c.txt"],
       testCase "one load for many requests at once" $ do
-        store <- newTextStore
+        store <- newTextStore =<< newBlobTexts
         loads <- newIORef (0 :: Int)
         let load = do
               atomicModifyIORef' loads (\n -> (n + 1, ()))
@@ -76,7 +79,7 @@ tests =
         _ <- awaitTextFiles silent store load
         readIORef loads >>= (@?= 1),
       testCase "a request that goes away doesn't stop the load" $ do
-        store <- newTextStore
+        store <- newTextStore =<< newBlobTexts
         started <- newEmptyMVar
         gate <- newEmptyMVar
         let load = do
@@ -91,7 +94,7 @@ tests =
         r <- within (awaitTextFiles silent store (assertFailure "loaded twice"))
         fmap names r @?= Right ["a.txt", "b.txt", "c.txt"],
       testCase "a crashed load fails every request, logged once, not retried" $ do
-        store <- newTextStore
+        store <- newTextStore =<< newBlobTexts
         logged <- newIORef []
         let keep m = atomicModifyIORef' logged (\ms -> (m : ms, ()))
             logger = newLogger LevelInfo keep
@@ -100,9 +103,37 @@ tests =
         map (either (\(StoreError _) -> "failed") (const "ok")) [r1, r2]
           @?= ["failed", "failed" :: String]
         readIORef logged
-          >>= (@?= ["haskell-reviewer: cannot load the text store: user error (boom)"])
+          >>= (@?= ["haskell-reviewer: cannot load the text store: user error (boom)"]),
+      testCase "sharing: a second load skips kept blobs, same result" $ do
+        table <- newBlobTexts
+        (alone, _) <- loadWith maxBound
+        (first, asked1) <- loadShared maxBound table blobOf
+        (second, asked2) <- loadShared maxBound table blobOf
+        map relPathText asked1 @?= [relPathText p | (p, EntryFile, _) <- entries]
+        -- a.txt and c.txt are kept, with a blob; b.txt has none.
+        map relPathText asked2
+          @?= ["b.txt", "d.bin", "e.csv", "f.txt", "g.txt", "h.txt"]
+        mapM_ (\fs -> summary fs @?= summary alone) [first, second],
+      testCase "sharing: the budget is each store's own" $ do
+        table <- newBlobTexts
+        _ <- loadShared maxBound table blobOf
+        (alone, _) <- loadWith 12
+        (shared, _) <- loadShared 12 table blobOf
+        summary shared @?= summary alone,
+      testCase "sharing: two loads at once both work" $ do
+        table <- newBlobTexts
+        (alone, _) <- loadWith maxBound
+        let load = const (loadShared maxBound table blobOf)
+        rs <- within (mapConcurrently load [1 :: Int, 2])
+        map (summary . fst) rs @?= [summary alone, summary alone]
     ]
   where
+    -- Every file has a blob but b.txt.
+    blobOf p = case relPathText p of
+      "b.txt" -> Nothing
+      t -> Just (ObjectId ("blob-" <> t))
+    summary fs =
+      ([(relPathText f.path, f.bytes) | f <- Vector.toList fs.files], fs.skipped)
     silent = newLogger LevelInfo (\_ -> pure ())
     names fs = [relPathText f.path | f <- Vector.toList fs.files]
     within act = timeout 5_000_000 act >>= maybe (assertFailure "no answer in 5 s") pure
@@ -110,11 +141,17 @@ tests =
 -- | Load the fake list, and say which paths were read.
 loadWith :: Int -> IO (TextFiles, [RelPath])
 loadWith budget = do
+  table <- newBlobTexts
+  loadShared budget table (const Nothing)
+
+-- | The same, sharing bytes through this table, with these blobs.
+loadShared :: Int -> BlobTexts -> (RelPath -> Maybe ObjectId) -> IO (TextFiles, [RelPath])
+loadShared budget table blobOf = do
   asked <- newIORef []
   let readOne p = do
         atomicModifyIORef' asked (\ps -> (p : ps, ()))
         pure (fromMaybe (Left ReadGone) (lookup p [(q, c) | (q, _, Just c) <- entries]))
-  fs <- loadTextFiles budget readOne list
+  fs <- loadTextFiles budget table blobOf readOne list
   (fs,) . reverse <$> readIORef asked
   where
     list =

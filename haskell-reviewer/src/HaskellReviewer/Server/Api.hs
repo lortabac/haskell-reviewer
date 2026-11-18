@@ -68,7 +68,7 @@ import HaskellReviewer.Core.Sides (Side, parseSide, sideName, sideTag)
 import HaskellReviewer.Core.SourceLinks (LinksInput, linksInput, pageLinks, sourceLinks)
 import HaskellReviewer.Effects.FileSystem (ListError, ReadError (..))
 import HaskellReviewer.Effects.Log (Logger, logInfo)
-import HaskellReviewer.Effects.Source (EntrySource)
+import HaskellReviewer.Effects.Source (EntrySource, sharedBlob)
 import HaskellReviewer.Server.Security (methodNotAllowed, notFound)
 import HaskellReviewer.Server.Wire
   ( encodeFileList,
@@ -95,7 +95,6 @@ import HaskellReviewer.Session.Index
   ( IndexFailure (..),
     Indexed (..),
     ParsedSource (..),
-    Pool,
     awaitModule,
     newIndex,
     readProgress,
@@ -107,7 +106,11 @@ import HaskellReviewer.Session.Resolve
     newResolver,
     resolveModuleWith,
   )
-import HaskellReviewer.Session.Snapshot (Snapshot (..), firstGeneration)
+import HaskellReviewer.Session.Snapshot
+  ( SessionShare (..),
+    Snapshot (..),
+    firstGeneration,
+  )
 import HaskellReviewer.Session.TextStore (newTextStore)
 import Network.HTTP.Types
   ( Status,
@@ -184,9 +187,11 @@ What the workers put in the slots is forced before it gets there (Note
 
 -- | The snapshot of one side's file list and its project, with the
 -- JSON bodies, an index in this pool with every module Pending, and its
--- resolver. Fully built before it returns. See Note [Forced snapshot].
-newSnapshot :: Side -> Pool -> EntrySource -> FileList -> Project -> IO Snapshot
-newSnapshot side pool source fl project = do
+-- resolver. Its index and text store share results by blob with the
+-- session's other snapshots (D-320). Fully built before it returns. See
+-- Note [Forced snapshot].
+newSnapshot :: Side -> SessionShare -> EntrySource -> FileList -> Project -> IO Snapshot
+newSnapshot side share source fl project = do
   let modules = buildModuleIndex project fl
       fileListJson = encodeFileList firstGeneration fl
       moduleTreeJson = encodeModuleTree firstGeneration modules
@@ -198,9 +203,14 @@ newSnapshot side pool source fl project = do
     | n <- [unfiltered, FileNotes {filtered = Filtered}],
       c <- cborWarmUp
     ]
-  index <- newIndex pool modules
+  -- Slots read only files of the list (indexAndReport in
+  -- "HaskellReviewer.App.Run"): a symlink's blob is not its text.
+  let blobOf p = case Map.lookup p fl.entries of
+        Just EntryFile -> sharedBlob source p
+        _ -> Nothing
+  index <- newIndex share.pool blobOf modules
   resolver <- newResolver modules index
-  textStore <- newTextStore
+  textStore <- newTextStore share.blobTexts
   pure
     Snapshot
       { generation = firstGeneration,

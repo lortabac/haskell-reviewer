@@ -14,6 +14,7 @@ module HaskellReviewer.Session.Index
     newParsedSource,
     IndexFailure (..),
     Progress (..),
+    ShareCounts (..),
     IndexDeps (..),
     IndexJob (..),
 
@@ -37,6 +38,7 @@ module HaskellReviewer.Session.Index
     readNames,
     readStates,
     slotState,
+    shareCounts,
 
     -- * Internal, for tests
     requestCount,
@@ -50,6 +52,7 @@ import Control.Concurrent.STM
     TVar,
     atomically,
     modifyTVar',
+    newTVar,
     newTVarIO,
     readTVar,
     retry,
@@ -69,17 +72,20 @@ import Control.Exception
     try,
   )
 import Control.Monad (forM, forM_, when)
+import Data.List (find)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Foreign qualified as Text.Foreign
 import Data.Unique (Unique, newUnique)
+import HaskellReviewer.Core.Changed (ModuleKey (..), forceModuleKey, moduleKey)
 import HaskellReviewer.Core.FileContent
   ( FileContent (..),
     FileSize (..),
     TooLargeInfo,
   )
+import HaskellReviewer.Core.Git (ObjectId)
 import HaskellReviewer.Core.IndexQueue (Job (..), Priority (..), Ticket)
 import HaskellReviewer.Core.IndexQueue qualified as Queue
 import HaskellReviewer.Core.ModuleModel
@@ -88,13 +94,12 @@ import HaskellReviewer.Core.ModuleModel
     TextOnlyModule,
   )
 import HaskellReviewer.Core.Modules
-  ( ComponentSettings,
-    HaskellFile (..),
+  ( HaskellFile (..),
     ModuleId,
     ModuleIndex (..),
   )
 import HaskellReviewer.Core.NameTable (NameEntry, forceNames, moduleNames)
-import HaskellReviewer.Core.Parser (ParseSettings, moduleParseSettings)
+import HaskellReviewer.Core.Parser (ParseSettings)
 import HaskellReviewer.Core.Project (GhcVersion)
 import HaskellReviewer.Core.References (OccKeys, occKeys)
 import HaskellReviewer.Core.RelPath (RelPath, relPathText)
@@ -174,6 +179,35 @@ place back. The counts use modifyTVar'. Trade-off (accepted): under
 steady requests with 2 workers, one big file can delay a Requested
 module.
 
+Sharing (D-320): in diff mode most modules are the same on both
+sides. A parse depends only on the text and the 'ParseSettings' (GHC
+sees a fixed file name), so the pool keeps a cache by 'ModuleKey':
+blob id, then settings by equality. A slot whose key has no blob
+('Nothing': browse mode, a file read from disk) never touches it. At
+claim time, for a Pending slot with a blob:
+
+- the key is Shared: claim it as a hit. The worker fills the slot
+  from the cache: no read, no parse, no big-file lock;
+- the key is Owned by another slot (being read now): skip it, as a
+  big module is skipped while the lock is busy. The owner's end
+  writes the cache, which wakes a waiting claim. No worker waits for
+  another's parse; a request waits on its own slot, at most one
+  parse more;
+- else claim it as usual, and mark the key Owned by this claim, in the
+  same transaction.
+
+The owner's end: Ready sets the key Shared (a TooSlow text-only
+result too: there is no retry anyway). Failed, or big and put back,
+drops the key, so a twin reads for itself. The worker's 'finally'
+drops it too if this claim still owns it: a cancel must not leave a
+key Owned for ever (the next 'runWorkers' on the pool would skip it).
+Each claim has its own token (a fresh TVar), not its slot's: a slot
+put back and claimed again is a new owner, which the first claim's
+'finally' must not drop.
+
+The cache lives as long as the pool. A reload must drop the keys of
+indexes no longer in use, else old results stay alive.
+
 Q-RTS-BLACKHOLE: request threads read what workers write, and workers
 share the queue. So nothing shared holds a thunk. The two counts are
 strict Ints, written with modifyTVar'. The parse result is fully
@@ -183,14 +217,16 @@ unboxed vector), all before the transaction that publishes them. The
 queue is a strict map with strict fields, written with '$!'. The rest
 is StrictData values written already evaluated. The slots and the queue
 are built and forced in 'newIndex', before any worker or request sees
-them. 'runWorkers' forces each job's deps before the workers start:
+them, keys too ('forceModuleKey'). The cache holds only forced values;
+each variant list is built in full before it is written, with '$!'.
+'runWorkers' forces each job's deps before the workers start:
 every worker's first claim would force them in STM.
 -}
 
 -- * Types
 
--- | What a session's indexes share: the big-file lock and the request
--- gate. See Note [Indexing].
+-- | What a session's indexes share: the big-file lock, the request
+-- gate and the parse cache. See Note [Indexing].
 data Pool = Pool
   { -- | Tells pools apart.
     identity :: Unique,
@@ -199,8 +235,44 @@ data Pool = Pool
     -- | Requests computing now ('withRequest').
     requests :: TVar Int,
     -- | Workers holding a module now.
-    inFlight :: TVar Int
+    inFlight :: TVar Int,
+    -- | Parse results by blob, then settings. Few settings per blob.
+    cache :: TVar (Map ObjectId [Variant]),
+    -- | Parses and cache hits so far ('shareCounts').
+    counts :: TVar ShareCounts
   }
+
+-- | One blob's result for one set of settings.
+data Variant = Variant
+  { settings :: ParseSettings,
+    entry :: Entry
+  }
+
+-- | A cache entry. See Note [Indexing].
+data Entry
+  = -- | Being read by this claim.
+    Owned Owner
+  | Shared Cached
+
+-- | One claim's token, for the cache. Only compared.
+newtype Owner = Owner (TVar ())
+  deriving (Eq)
+
+-- | A result in the cache.
+data Cached = Cached
+  { result :: Indexed,
+    -- | For a parsed module.
+    names :: Maybe [NameEntry]
+  }
+
+-- | How much work the pool's workers did.
+data ShareCounts = ShareCounts
+  { -- | Runs of 'parse'.
+    parses :: Int,
+    -- | Slots filled from the cache.
+    shares :: Int
+  }
+  deriving (Eq, Show)
 
 -- | The indexing state of one snapshot. See Note [Indexing].
 data Index = Index
@@ -215,7 +287,8 @@ data Index = Index
 -- | One module to index.
 data Slot = Slot
   { file :: HaskellFile,
-    settings :: ComponentSettings,
+    -- | What its parse depends on.
+    key :: ModuleKey,
     state :: TVar SlotState,
     -- | Found over 'bigFileSize' when read.
     big :: TVar Bool,
@@ -307,20 +380,27 @@ newPool = do
   bigBusy <- newTVarIO False
   requests <- newTVarIO 0
   inFlight <- newTVarIO 0
+  cache <- newTVarIO Map.empty
+  counts <- newTVarIO ShareCounts {parses = 0, shares = 0}
   pure
     Pool
       { identity = identity,
         bigBusy = bigBusy,
         requests = requests,
-        inFlight = inFlight
+        inFlight = inFlight,
+        cache = cache,
+        counts = counts
       }
 
 -- | Every module of the index that needs a parse, Pending. Fully built
--- before it returns. See Note [Indexing].
-newIndex :: Pool -> ModuleIndex -> IO Index
-newIndex pool idx = do
+-- before it returns. The function gives each path's blob, or 'Nothing'
+-- when reads of it can't be shared: see Note [Indexing].
+newIndex :: Pool -> (RelPath -> Maybe ObjectId) -> ModuleIndex -> IO Index
+newIndex pool blobOf idx = do
   jobs <- forM (Queue.indexJobs idx) $ \job -> do
     i <- evaluate job.id
+    let key = moduleKey blobOf idx job
+    _ <- evaluate (forceModuleKey key)
     st <- newTVarIO Pending
     big <- newTVarIO False
     requested <- newTVarIO False
@@ -328,7 +408,7 @@ newIndex pool idx = do
       evaluate
         Slot
           { file = job.file,
-            settings = job.settings,
+            key = key,
             state = st,
             big = big,
             requested = requested
@@ -466,6 +546,11 @@ readStates index = traverse (\slot -> readTVar slot.state) index.slots
 slotState :: Index -> ModuleId -> STM (Maybe SlotState)
 slotState index i = traverse (\slot -> readTVar slot.state) (Map.lookup i index.slots)
 
+-- | How much the pool's workers parsed, and how many slots they
+-- filled from the cache.
+shareCounts :: Index -> STM ShareCounts
+shareCounts index = readTVar index.pool.counts
+
 -- * Internal, for tests
 
 -- | Requests in 'withRequest' now, on any index of the pool.
@@ -486,8 +571,21 @@ data Claim = Claim
     id :: ModuleId,
     ticket :: Ticket,
     slot :: Slot,
-    -- | It took the big-file lock with it.
-    holdsBig :: Bool
+    how :: How
+  }
+
+-- | How a claim gets its result.
+data How
+  = -- | A hit. Never holds the big-file lock.
+    FromCache Cached
+  | ReadIt Reading
+
+-- | A claim that reads and parses.
+data Reading = Reading
+  { -- | It took the big-file lock with it.
+    holdsBig :: Bool,
+    -- | Its token, if it owns its key in the cache.
+    owner :: Maybe Owner
   }
 
 -- | Take modules until none is left. The big-file lock and the
@@ -505,7 +603,11 @@ worker n pool work = loop
       when more loop
     release c = atomically $ do
       modifyTVar' pool.inFlight (subtract 1)
-      when c.holdsBig (writeTVar pool.bigBusy False)
+      case c.how of
+        FromCache _ -> pure ()
+        ReadIt r -> do
+          when r.holdsBig (writeTVar pool.bigBusy False)
+          disown c r
 
 -- | How the scan of one index at one priority ended. The claim takes
 -- the first Claimed; it is done when every scan is Empty, else it waits.
@@ -534,7 +636,8 @@ claimNext n pool work = do
   go False [(p, job) | p <- [minBound .. maxBound], job <- work]
 
 -- | Scan one index's queue at one priority. Drops ids that are taken
--- already; skips big modules while the lock is busy.
+-- already; skips big modules while the lock is busy, and modules whose
+-- key another slot is reading.
 scanAt :: Int -> Bool -> Priority -> IndexJob -> STM Scan
 scanAt n busy p job = do
   q0 <- readTVar index.queue
@@ -546,26 +649,33 @@ scanAt n busy p job = do
           Nothing -> go (Queue.remove t q) True blocked rest
           Just slot ->
             readTVar slot.state >>= \case
-              Pending -> do
-                big <- readTVar slot.big
-                if big && busy
-                  then go q dropped True rest
-                  else do
-                    waitIfParked
-                    writeTVar index.queue $! Queue.remove t q
-                    modifyTVar' index.pool.inFlight (+ 1)
-                    writeTVar slot.state Parsing
-                    when big (writeTVar index.pool.bigBusy True)
-                    pure . Claimed $
-                      Claim
-                        { deps = job.deps,
-                          index = index,
-                          id = i,
-                          ticket = t,
-                          slot = slot,
-                          holdsBig = big
-                        }
+              Pending ->
+                lookupShare index.pool slot.key >>= \case
+                  Hit r -> claim q t i slot (FromCache r)
+                  Busy -> go q dropped True rest
+                  Free -> do
+                    big <- readTVar slot.big
+                    if big && busy
+                      then go q dropped True rest
+                      else do
+                        owner <- claimKey index.pool slot.key
+                        when big (writeTVar index.pool.bigBusy True)
+                        claim q t i slot (ReadIt Reading {holdsBig = big, owner = owner})
               _ -> go (Queue.remove t q) True blocked rest
+      claim q t i slot how = do
+        waitIfParked
+        writeTVar index.queue $! Queue.remove t q
+        modifyTVar' index.pool.inFlight (+ 1)
+        writeTVar slot.state Parsing
+        pure . Claimed $
+          Claim
+            { deps = job.deps,
+              index = index,
+              id = i,
+              ticket = t,
+              slot = slot,
+              how = how
+            }
   go q0 False False (Queue.entriesAt p q0)
   where
     index = job.index
@@ -586,22 +696,99 @@ data Outcome
 -- | Index one module, or put it back if it's big. Never throws, except
 -- async exceptions.
 indexClaim :: Claim -> IO ()
-indexClaim c =
-  indexOne c >>= \case
-    FoundBig ->
-      atomically $ do
-        writeTVar c.slot.big True
-        writeTVar c.slot.state Pending
-        modifyTVar' c.index.queue (Queue.putBack c.ticket c.id)
-        -- Asked for while we were reading it.
-        requested <- readTVar c.slot.requested
-        when requested (modifyTVar' c.index.queue (Queue.push Requested c.id))
-    Done r ns -> finish c (Ready r) ns
-    Broke f -> finish c (Failed f) Nothing
+indexClaim c = case c.how of
+  FromCache hit ->
+    finish c (Ready hit.result) hit.names $
+      modifyTVar' c.index.pool.counts (\k -> k {shares = k.shares + 1})
+  ReadIt reading ->
+    indexOne c reading >>= \case
+      FoundBig ->
+        atomically $ do
+          writeTVar c.slot.big True
+          writeTVar c.slot.state Pending
+          modifyTVar' c.index.queue (Queue.putBack c.ticket c.id)
+          -- Asked for while we were reading it.
+          requested <- readTVar c.slot.requested
+          when requested (modifyTVar' c.index.queue (Queue.push Requested c.id))
+          -- Else the slot would skip itself. A twin may read it now.
+          disown c reading
+      Done r ns -> finish c (Ready r) ns (publish c reading r ns)
+      Broke f -> finish c (Failed f) Nothing (disown c reading)
+
+-- * Cache
+
+-- | What the cache has for a key.
+data Share
+  = Hit Cached
+  | -- | Another slot is reading it.
+    Busy
+  | Free
+
+-- | Look a key up. A key with no blob is always Free, without reading
+-- the cache.
+lookupShare :: Pool -> ModuleKey -> STM Share
+lookupShare pool key = case key.blob of
+  Nothing -> pure Free
+  Just b -> do
+    m <- readTVar pool.cache
+    pure $ case find (\v -> v.settings == key.settings) (Map.findWithDefault [] b m) of
+      Just Variant {entry = Shared r} -> Hit r
+      Just Variant {entry = Owned _} -> Busy
+      Nothing -> Free
+
+-- | Mark a Free key Owned by a new token, if it has a blob.
+claimKey :: Pool -> ModuleKey -> STM (Maybe Owner)
+claimKey pool key = case key.blob of
+  Nothing -> pure Nothing
+  Just _ -> do
+    owner <- Owner <$> newTVar ()
+    alterEntry pool key (const (Set (Owned owner)))
+    pure (Just owner)
+
+-- | A read is done: its key is Shared, unless another claim owns it or
+-- it is Shared already.
+publish :: Claim -> Reading -> Indexed -> Maybe [NameEntry] -> STM ()
+publish c reading r ns =
+  alterEntry c.index.pool c.slot.key $ \case
+    Just (Owned o) | Just o /= reading.owner -> Keep
+    Just (Shared _) -> Keep
+    _ -> Set (Shared Cached {result = r, names = ns})
+
+-- | Drop the key if this claim still owns it.
+disown :: Claim -> Reading -> STM ()
+disown c reading =
+  alterEntry c.index.pool c.slot.key $ \case
+    Just (Owned o) | Just o == reading.owner -> Drop
+    _ -> Keep
+
+-- | What to do with one key's entry.
+data Change = Keep | Set Entry | Drop
+
+-- | Change one key's entry. Nothing for a key with no blob. The new
+-- list is built in full before it is written (Q-RTS-BLACKHOLE).
+-- Only a real change writes the cache: each write wakes the waiting
+-- claims.
+alterEntry :: Pool -> ModuleKey -> (Maybe Entry -> Change) -> STM ()
+alterEntry pool key f = case key.blob of
+  Nothing -> pure ()
+  Just b -> do
+    m <- readTVar pool.cache
+    let old = Map.findWithDefault [] b m
+        others = [v | v <- old, v.settings /= key.settings]
+        mine = (.entry) <$> find (\v -> v.settings == key.settings) old
+        write new =
+          writeTVar pool.cache $!
+            if null new then Map.delete b m else forceList new `seq` Map.insert b new m
+    case f mine of
+      Keep -> pure ()
+      Drop -> write others
+      Set e -> write (Variant {settings = key.settings, entry = e} : others)
+  where
+    forceList = foldr seq ()
 
 -- | Read and parse one module.
-indexOne :: Claim -> IO Outcome
-indexOne c =
+indexOne :: Claim -> Reading -> IO Outcome
+indexOne c reading =
   try @SomeException work >>= \case
     Right outcome -> pure outcome
     Left e
@@ -633,11 +820,12 @@ indexOne c =
           pure (Broke (SourceUnreadable why))
         Right (TextContent t)
           | FileSize (Text.Foreign.lengthWord8 t) > bigFileSize,
-            not c.holdsBig ->
+            not reading.holdsBig ->
               pure FoundBig
           | otherwise -> do
-              let settings = moduleParseSettings c.index.ghc c.slot.settings c.slot.file
-              r <- evaluate =<< deps.parse settings t
+              atomically $
+                modifyTVar' c.index.pool.counts (\k -> k {parses = k.parses + 1})
+              r <- evaluate =<< deps.parse c.slot.key.settings t
               -- Built and forced before the transaction: see Note
               -- [Indexing]. Here, so a throw fails only this module.
               case r of
@@ -652,12 +840,13 @@ indexOne c =
         -- A link, a submodule: no longer a file.
         Right _ -> pure (Broke SourceGone)
 
--- | Fill the slot, count it, add its names, all at once. Logs the
--- progress at each tenth.
-finish :: Claim -> SlotState -> Maybe [NameEntry] -> IO ()
-finish c st ns = do
+-- | Fill the slot, count it, add its names, update the cache, all at
+-- once. Logs the progress at each tenth.
+finish :: Claim -> SlotState -> Maybe [NameEntry] -> STM () -> IO ()
+finish c st ns cache = do
   let index = c.index
   (before, after) <- atomically $ do
+    cache
     writeTVar c.slot.state st
     before <- readTVar index.progress
     let after = case st of

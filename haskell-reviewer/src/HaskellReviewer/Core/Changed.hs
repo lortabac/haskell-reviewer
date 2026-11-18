@@ -5,7 +5,9 @@
 module HaskellReviewer.Core.Changed
   ( -- * Keys
     ModuleKey (..),
+    moduleKey,
     moduleKeys,
+    forceModuleKey,
 
     -- * Changed
     changedModules,
@@ -14,10 +16,14 @@ where
 
 import Data.Map.Strict qualified as Map
 import Data.Maybe (isJust)
-import HaskellReviewer.Core.Git (ObjectId)
+import HaskellReviewer.Core.Git (ObjectId (..))
 import HaskellReviewer.Core.IndexQueue (Job (..), indexJobs)
 import HaskellReviewer.Core.Modules (HaskellFile (..), ModuleId, ModuleIndex (..))
-import HaskellReviewer.Core.Parser (ParseSettings, moduleParseSettings)
+import HaskellReviewer.Core.Parser
+  ( ParseSettings,
+    forceParseSettings,
+    moduleParseSettings,
+  )
 import HaskellReviewer.Core.RelPath (RelPath)
 import HaskellReviewer.Core.Sides (Pair (..))
 
@@ -50,15 +56,21 @@ data ModuleKey = ModuleKey
 -- | Every module of the index that needs a parse, with its key, in
 -- background order.
 moduleKeys :: (RelPath -> Maybe ObjectId) -> ModuleIndex -> [(ModuleId, ModuleKey)]
-moduleKeys blobOf idx =
-  [ ( job.id,
-      ModuleKey
-        { blob = blobOf job.file.path,
-          settings = moduleParseSettings idx.ghc job.settings job.file
-        }
-    )
-  | job <- indexJobs idx
-  ]
+moduleKeys blobOf idx = [(job.id, moduleKey blobOf idx job) | job <- indexJobs idx]
+
+-- | One module's key.
+moduleKey :: (RelPath -> Maybe ObjectId) -> ModuleIndex -> Job -> ModuleKey
+moduleKey blobOf idx job =
+  ModuleKey
+    { blob = blobOf job.file.path,
+      settings = moduleParseSettings idx.ghc job.settings job.file
+    }
+
+-- | Force the key fully: parse workers compare keys in STM
+-- (Q-RTS-BLACKHOLE).
+forceModuleKey :: ModuleKey -> ()
+forceModuleKey k =
+  maybe () (\(ObjectId t) -> t `seq` ()) k.blob `seq` forceParseSettings k.settings
 
 -- | The changed modules of each side, in the order given. See Note
 -- [Changed modules].
