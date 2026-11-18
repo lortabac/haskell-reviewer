@@ -37,6 +37,7 @@ library
   exposed-modules:
     -- Core
     HaskellReviewer.Core.Address
+    HaskellReviewer.Core.BlobId
     HaskellReviewer.Core.CabalCompat
     HaskellReviewer.Core.CabalFile
     HaskellReviewer.Core.Changed
@@ -53,6 +54,7 @@ library
     HaskellReviewer.Core.Decls
     HaskellReviewer.Core.DocLinks
     HaskellReviewer.Core.Entities
+    HaskellReviewer.Core.Eol
     HaskellReviewer.Core.Exported
     HaskellReviewer.Core.Exports
     HaskellReviewer.Core.FileContent
@@ -96,6 +98,7 @@ library
     HaskellReviewer.Core.Span
     HaskellReviewer.Core.TextSearch
     HaskellReviewer.Core.Tokens
+    HaskellReviewer.Core.WorkTree
     HaskellReviewer.Core.Xdg
 
     -- Effects
@@ -115,6 +118,7 @@ library
     HaskellReviewer.Effects.Source
     HaskellReviewer.Effects.Spawn
     HaskellReviewer.Effects.Trace
+    HaskellReviewer.Effects.WorkTree
 
     -- Session
     HaskellReviewer.Session.Clients
@@ -238,6 +242,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.App.CliTest
     HaskellReviewer.App.RunTest
     HaskellReviewer.Core.AddressTest
+    HaskellReviewer.Core.BlobIdTest
     HaskellReviewer.Core.CabalFileTest
     HaskellReviewer.Core.ChangedTest
     HaskellReviewer.Core.CodeTest
@@ -249,6 +254,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.DeclsGoldenTest
     HaskellReviewer.Core.DeclsTest
     HaskellReviewer.Core.DocLinksTest
+    HaskellReviewer.Core.EolTest
     HaskellReviewer.Core.FileListTest
     HaskellReviewer.Core.GitTest
     HaskellReviewer.Core.HaddockTest
@@ -282,6 +288,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.SourceTextTest
     HaskellReviewer.Core.TextSearchTest
     HaskellReviewer.Core.TokensTest
+    HaskellReviewer.Core.WorkTreeTest
     HaskellReviewer.Core.XdgTest
     HaskellReviewer.Effects.AtomicFileTest
     HaskellReviewer.Effects.ConfigTest
@@ -295,6 +302,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Effects.SourceTest
     HaskellReviewer.Effects.SpawnTest
     HaskellReviewer.Effects.TraceTest
+    HaskellReviewer.Effects.WorkTreeTest
     HaskellReviewer.Server.ApiGoldenTest
     HaskellReviewer.Server.ApiTest
     HaskellReviewer.Server.AssetsTest

@@ -98,6 +98,7 @@ import HaskellReviewer.Core.Sides
     sideTag,
     withSide,
   )
+import HaskellReviewer.Core.WorkTree qualified as WorkTree
 import HaskellReviewer.Core.Xdg (XdgProblem, prefsFile, renderXdgProblem)
 import HaskellReviewer.Effects.Browser qualified as Browser
 import HaskellReviewer.Effects.Clock
@@ -135,10 +136,12 @@ import HaskellReviewer.Effects.Source
     Lister (..),
     Probe (..),
     ProbeError,
+    WorkTreeSource (..),
     readSourceEntry,
     renderProbeError,
     warmUpListing,
     warmUpObjects,
+    warmUpWorkTree,
   )
 import HaskellReviewer.Effects.Source qualified as Source
 import HaskellReviewer.Effects.Spawn
@@ -279,9 +282,9 @@ to fd 2, past the logger.
 Before the URL line we only do quick things (SPEC §10.1): check ROOT,
 open the trace file, read config.toml (one small file), check git,
 listen, warm up the gzip, prefs and search code, the side names
-(warmUpSideNames in "HaskellReviewer.Server.Api"), commit listing and
-commit reads (warmUpListing, warmUpObjects in
-"HaskellReviewer.Effects.Source"). In diff mode, the revisions are
+(warmUpSideNames in "HaskellReviewer.Server.Api"), commit listing,
+commit reads and the working-tree rules (warmUpListing, warmUpObjects,
+warmUpWorkTree in "HaskellReviewer.Effects.Source"). In diff mode, the revisions are
 resolved too (D-316): a bad one is exit 2. ui.json is not read: the
 first GET api/prefs does that. The rest comes after: Note [Listing
 after the URL].
@@ -560,6 +563,7 @@ serveSides deps logger opts root defaults listers tracer shutdown t0 w0 = do
           warmUpSideNames
           warmUpListing
           warmUpObjects
+          warmUpWorkTree
           -- On this thread, before warp: see Note [Forced snapshot] in
           -- "HaskellReviewer.Server.Api".
           let sideWork s l = SideWork s l <$> newSnapshotSlot
@@ -841,6 +845,10 @@ changedFirst logger done = case (lookup HeadSide built, lookup BaseSide built) o
     blobOf src p = case src of
       CommitEntries c -> (.oid) <$> Map.lookup p c.blobs
       DiskEntries _ -> Nothing
+      WorkTreeEntries w -> case Map.lookup p w.files of
+        Just (WorkTree.FromIndex o) -> Just o
+        Just (WorkTree.FromDisk d) -> d.blob
+        Nothing -> Nothing
 
 -- | List one side. A crash fails this side only; a cancel goes through.
 listSide :: Deps -> SideWork -> IO Listing

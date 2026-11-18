@@ -19,6 +19,14 @@ module HaskellReviewer.Effects.FileSystem
 
     -- * Reading
     readEntry,
+    readDiskEntry,
+
+    -- * For the working-tree side
+    dirFlags,
+    fileFlags,
+    gone,
+    reasonOf,
+    logSome,
 
     -- * Internal (for tests)
     listCommitPlain,
@@ -279,14 +287,6 @@ commitFiles logger info out = case parseTreeEntries out of
   where
     decode = Text.Encoding.decodeUtf8Lenient
 
--- | Log the first 10 lines, then a count of the rest.
-logSome :: (Text -> IO ()) -> Text -> Text -> [Text] -> IO ()
-logSome emit prefix what items = do
-  mapM_ (emit . (prefix <>)) (take 10 items)
-  let more = length items - 10
-  unless (more <= 0) $
-    emit (prefix <> "and " <> Text.pack (show more) <> " more " <> what)
-
 -- | Check git's entries on disk. Drops the ones that are gone, or under
 -- a parent dir that is a symlink. The kind comes from disk, except for
 -- submodules and nested repos (a dir on disk). See Note [File list] in
@@ -411,7 +411,19 @@ data ReadError
 -- A symlink's 'resolved' is set when the target is lexically under
 -- ROOT; the caller checks it's in the snapshot.
 readEntry :: CanonicalRoot -> RelPath -> EntryKind -> IO (Either ReadError FileContent)
-readEntry canon p = \case
+readEntry canon = readDiskEntry canon id
+
+-- | Like 'readEntry', with a change to a file's bytes before they are
+-- classified: the working-tree side's line-end clean step. It is only
+-- applied when we read the whole file (at most the text limit): a cut
+-- file stays as it is, so it is still too large.
+readDiskEntry ::
+  CanonicalRoot ->
+  (ByteString -> ByteString) ->
+  RelPath ->
+  EntryKind ->
+  IO (Either ReadError FileContent)
+readDiskEntry canon clean p = \case
   EntrySubmodule commit -> pure (Right (Submodule commit))
   EntryNestedRepo -> pure (Right NestedRepo)
   _ -> do
@@ -451,9 +463,48 @@ readEntry canon p = \case
           let FileSize maxText = textLimit
               size = FileSize (fromIntegral (PosixFiles.fileSize st))
           bytes <- BS.hGet h (maxText + 1)
-          pure (Right (contentFromBytes size bytes))
-    fileFlags =
-      defaultFileFlags {nofollow = True, nonBlock = True, noctty = True, cloexec = True}
+          let cleaned
+                | BS.length bytes <= maxText = clean bytes
+                | otherwise = bytes
+          pure (Right (contentFromBytes size cleaned))
+
+-- * Shared with the working-tree side
+
+-- | Log the first 10 lines, then a count of the rest.
+logSome :: (Text -> IO ()) -> Text -> Text -> [Text] -> IO ()
+logSome emit prefix what items = do
+  mapM_ (emit . (prefix <>)) (take 10 items)
+  let more = length items - 10
+  unless (more <= 0) $
+    emit (prefix <> "and " <> Text.pack (show more) <> " more " <> what)
+
+-- | A file to read, never through a symlink. O_NONBLOCK: a FIFO
+-- doesn't block the open.
+fileFlags :: OpenFileFlags
+fileFlags =
+  defaultFileFlags {nofollow = True, nonBlock = True, noctty = True, cloexec = True}
+
+-- | A dir, never through a symlink.
+dirFlags :: OpenFileFlags
+dirFlags =
+  defaultFileFlags {nofollow = True, directory = True, noctty = True, cloexec = True}
+
+-- | Missing, a symlink where a dir should be (ELOOP), or a file where a
+-- dir should be (ENOTDIR).
+gone :: IOException -> Bool
+gone e =
+  isDoesNotExistError e
+    || e.ioe_errno == Just eloop
+    || e.ioe_errno == Just enotdir
+  where
+    Errno eloop = eLOOP
+    Errno enotdir = eNOTDIR
+
+-- | The OS's reason, for a message.
+reasonOf :: IOException -> Text
+reasonOf e
+  | null e.ioe_description = Text.pack (ioeGetErrorString e)
+  | otherwise = Text.pack e.ioe_description
 
 -- * Internal
 
@@ -471,22 +522,6 @@ openParents canon p = do
           openFdAt (Just fd) (Text.Encoding.encodeUtf8 seg) ReadOnly dirFlags
       closeFd fd
       either ioError pure next
-
--- | A dir, never through a symlink.
-dirFlags :: OpenFileFlags
-dirFlags =
-  defaultFileFlags {nofollow = True, directory = True, noctty = True, cloexec = True}
-
--- | Missing, a symlink where a dir should be (ELOOP), or a file where a
--- dir should be (ENOTDIR).
-gone :: IOException -> Bool
-gone e =
-  isDoesNotExistError e
-    || e.ioe_errno == Just eloop
-    || e.ioe_errno == Just enotdir
-  where
-    Errno eloop = eLOOP
-    Errno enotdir = eNOTDIR
 
 -- | 'Nothing' if it can't be read (gone, no permission, ...).
 lstat :: ByteString -> IO (Maybe PosixFiles.FileStatus)
@@ -509,8 +544,3 @@ allM _ [] = pure True
 allM f (x : xs) = do
   ok <- f x
   if ok then allM f xs else pure False
-
-reasonOf :: IOException -> Text
-reasonOf e
-  | null e.ioe_description = Text.pack (ioeGetErrorString e)
-  | otherwise = Text.pack e.ioe_description

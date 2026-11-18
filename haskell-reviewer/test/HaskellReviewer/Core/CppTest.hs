@@ -35,7 +35,14 @@ import HaskellReviewer.Core.Project (GhcVersion (..), PackageName (..), Platform
 import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
 import HaskellReviewer.Effects.Parser (cppLimitsWarmUp, cppWarmUp)
 import System.Timeout (timeout)
-import Test.Tasty (TestTree, localOption, mkTimeout, testGroup)
+import Test.Tasty
+  ( DependencyType (..),
+    TestTree,
+    after,
+    localOption,
+    mkTimeout,
+    testGroup,
+  )
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 tests :: TestTree
@@ -659,9 +666,13 @@ positions =
     ]
 
 -- | Hostile input: each case must end quickly with a bounded output.
+-- The cases have wall-clock limits, so they wait for the groups that
+-- spawn git most: next to those they took up to 10 s, alone well under
+-- one. A narrow pattern: tasty rescans every waiter's dependencies on
+-- each status change, so a broad one costs minutes of CPU.
 limits :: TestTree
 limits =
-  localOption (mkTimeout 20_000_000) $
+  after AllFinish "/WorkTree/ || /Git planted/" . localOption (mkTimeout 20_000_000) $
     testGroup
       "limits"
       [ testCase "macros that double 50 times" $ do

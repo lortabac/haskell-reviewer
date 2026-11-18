@@ -4,6 +4,8 @@ module HaskellReviewer.Effects.Source
   ( -- * Types
     EntrySource (..),
     CommitSource (..),
+    WorkTreeSource (..),
+    FileNotes (..),
     Lister (..),
     Listed (..),
     Probe (..),
@@ -15,22 +17,27 @@ module HaskellReviewer.Effects.Source
     probeFilesWith,
     diskLister,
     commitLister,
+    workTreeLister,
 
     -- * Reading
     readSourceEntry,
+    fileNotes,
 
     -- * Warm-up
     warmUpListing,
     warmUpObjects,
+    warmUpWorkTree,
   )
 where
 
 import Control.Exception (evaluate)
+import Control.Monad (forM_)
 import Data.ByteString qualified as BS
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as Text
+import HaskellReviewer.Core.BlobId (blobId, emptyBlobId)
 import HaskellReviewer.Core.CommitFiles
   ( BlobRef (..),
     BlobSize (..),
@@ -39,6 +46,30 @@ import HaskellReviewer.Core.CommitFiles
     linkTargetCap,
     mkCommitFiles,
   )
+import HaskellReviewer.Core.Eol
+  ( AttrState (..),
+    Attrs (..),
+    AutoCrlf (..),
+    CleanEol (..),
+    EolRule (..),
+    ExecBit (..),
+    Filtering (..),
+    Symlinks (..),
+    applyEol,
+    cleanForms,
+    convertIsBinary,
+    defaultCoreConfig,
+    dropCrBeforeLf,
+    eolRule,
+    eolSure,
+    filtering,
+    gitBool,
+    hasCrlfInIndex,
+    parseCheckAttr,
+    parseCoreConfig,
+    textStats,
+    unspecifiedAttrs,
+  )
 import HaskellReviewer.Core.FileContent
   ( FileContent (..),
     FileSize (..),
@@ -46,17 +77,35 @@ import HaskellReviewer.Core.FileContent
     textLimit,
   )
 import HaskellReviewer.Core.FileList (EntryKind (..), FileList)
-import HaskellReviewer.Core.Git (ObjectId (..), RepoInfo, parseTreeEntries)
+import HaskellReviewer.Core.Git
+  ( ObjectFormat (..),
+    ObjectId (..),
+    RepoInfo,
+    parseTreeEntries,
+  )
 import HaskellReviewer.Core.RelPath (RelPath, parseRelPath)
 import HaskellReviewer.Core.Revspec (DiffInfo (..), Revspec (..), printable)
-import HaskellReviewer.Core.Root (CanonicalRoot, Root (..))
+import HaskellReviewer.Core.Root (CanonicalRoot (..), Root (..))
 import HaskellReviewer.Core.Sides (Pair (..))
+import HaskellReviewer.Core.WorkTree
+  ( CheckSettings (..),
+    DiskFile (..),
+    FullStat (..),
+    IndexTime (..),
+    Look (..),
+    Seconds (..),
+    StatTime (..),
+    WorkFile (..),
+    checkEntry,
+    parseDebugEntries,
+  )
 import HaskellReviewer.Effects.FileSystem
   ( ListError,
     ReadError (..),
     canonicalRoot,
     listCommit,
     listFiles,
+    readDiskEntry,
     readEntry,
   )
 import HaskellReviewer.Effects.Git
@@ -81,15 +130,22 @@ import HaskellReviewer.Effects.GitObjects
   )
 import HaskellReviewer.Effects.Log (Logger)
 import HaskellReviewer.Effects.Revisions (DiffError, renderDiffError, resolveDiff)
+import HaskellReviewer.Effects.WorkTree (WorkTreeFiles (..), listWorkTree)
 
 {- Note [Entry sources]
 
 Each side's snapshot reads its files from one 'EntrySource':
 
 - 'DiskEntries': ROOT on disk, as it is now (browse mode). See Note
-  [File containment] in "HaskellReviewer.Core.RelPath".
+  [File containment] in "HaskellReviewer.Core.RelPath". The bytes are
+  shown as they are: no line-end rule, no index (D-318).
 - 'CommitEntries': the blobs of one commit, through the object reader
   (Note [Object reader] in "HaskellReviewer.Effects.GitObjects").
+- 'WorkTreeEntries': the working tree as git sees it (@--diff REV@'s
+  head). A clean file is read from its index blob, like a commit
+  read; a dirty or untracked one from disk, as in browse mode, then
+  with git's line-end clean step. See Note [Working-tree listing] in
+  "HaskellReviewer.Effects.WorkTree".
 
 A sum type, not a read function, so code can tell what a side reads:
 a reload only matters when a side reads the disk (G18).
@@ -108,6 +164,26 @@ Commit reads, by the kind in the list:
 data EntrySource
   = DiskEntries CanonicalRoot
   | CommitEntries CommitSource
+  | WorkTreeEntries WorkTreeSource
+
+-- | The working tree, as git sees it.
+data WorkTreeSource = WorkTreeSource
+  { root :: CanonicalRoot,
+    -- | For the clean files.
+    reader :: ObjectReader,
+    -- | How to read each file and symlink of the side's list: one
+    -- entry each, none for submodules and nested repos.
+    files :: Map RelPath WorkFile
+  }
+
+-- | What a side says about one file, besides its content.
+data FileNotes = FileNotes
+  { -- | Read from disk, and git would run more than the line-end rule
+    -- on it (a filter, ident, working-tree-encoding): what git stores
+    -- may differ.
+    filtered :: Filtering
+  }
+  deriving (Eq, Show)
 
 -- | The files of one commit.
 data CommitSource = CommitSource
@@ -244,6 +320,25 @@ commitLister logger git info reader commit =
         BlobMissing -> pure ()
         BlobSizeUnknown -> pure ()
 
+-- | List the working tree, read through this reader. See Note
+-- [Working-tree listing] in
+-- "HaskellReviewer.Effects.WorkTree".
+workTreeLister ::
+  Logger -> Git -> RepoInfo -> ObjectReader -> CanonicalRoot -> Lister
+workTreeLister logger git info reader canon =
+  Lister
+    { list =
+        fmap listed <$> listWorkTree logger git info reader canon
+    }
+  where
+    listed wt =
+      Listed
+        { files = wt.files,
+          source =
+            WorkTreeEntries
+              WorkTreeSource {root = canon, reader = reader, files = wt.work}
+        }
+
 -- | Read one entry of the list from its source. See Note [Entry
 -- sources].
 readSourceEntry ::
@@ -251,23 +346,51 @@ readSourceEntry ::
 readSourceEntry = \case
   DiskEntries canon -> readEntry canon
   CommitEntries src -> readCommitEntry src
+  WorkTreeEntries src -> readWorkTreeEntry src
+
+-- | The notes for one file. Only a working-tree file read from disk
+-- can be filtered.
+fileNotes :: EntrySource -> RelPath -> FileNotes
+fileNotes source p = case source of
+  WorkTreeEntries src
+    | Just (FromDisk d) <- Map.lookup p src.files -> FileNotes {filtered = d.filtered}
+  _ -> FileNotes {filtered = Unfiltered}
 
 -- | Read one entry of a commit. See Note [Entry sources].
 readCommitEntry ::
   CommitSource -> RelPath -> EntryKind -> IO (Either ReadError FileContent)
-readCommitEntry src p = \case
+readCommitEntry src p kind = case kind of
   EntrySubmodule c -> pure (Right (Submodule c))
   EntryNestedRepo -> pure (Right NestedRepo)
-  EntryFile -> blob (maxText + 1) (\b -> contentFromBytes b.size b.bytes)
+  _ -> case Map.lookup p src.blobs of
+    Nothing -> pure (Left ReadGone)
+    Just ref -> readBlobEntry src.reader p kind ref.oid
+
+-- | Read one entry of the working tree. See Note [Entry sources].
+readWorkTreeEntry ::
+  WorkTreeSource -> RelPath -> EntryKind -> IO (Either ReadError FileContent)
+readWorkTreeEntry src p kind = case kind of
+  EntrySubmodule c -> pure (Right (Submodule c))
+  EntryNestedRepo -> pure (Right NestedRepo)
+  _ -> case Map.lookup p src.files of
+    Nothing -> pure (Left ReadGone)
+    Just (FromIndex oid) -> readBlobEntry src.reader p kind oid
+    Just (FromDisk d) -> readDiskEntry src.root (applyEol d.eol) p kind
+
+-- | Read a file or symlink from its blob: a file up to the text limit
+-- + 1, then classified as on disk; a symlink up to 'linkTargetCap'
+-- ('commitLink'). Any object error is 'ReadFailed'.
+readBlobEntry ::
+  ObjectReader -> RelPath -> EntryKind -> ObjectId -> IO (Either ReadError FileContent)
+readBlobEntry reader p kind oid = case kind of
   EntrySymlink -> blob linkTargetCap (\b -> Link (commitLink p b.size b.bytes))
+  _ -> blob (maxText + 1) (\b -> contentFromBytes b.size b.bytes)
   where
     FileSize maxText = textLimit
-    blob cap k = case Map.lookup p src.blobs of
-      Nothing -> pure (Left ReadGone)
-      Just ref ->
-        readBlob src.reader cap ref.oid >>= \case
-          Left e -> pure (Left (ReadFailed (renderObjectError e)))
-          Right b -> pure (Right (k b))
+    blob cap k =
+      readBlob reader cap oid >>= \case
+        Left e -> pure (Left (ReadFailed (renderObjectError e)))
+        Right b -> pure (Right (k b))
 
 -- | Build the shared values of commit reads before workers and
 -- request threads read at once (Q-RTS-BLACKHOLE): the reader's
@@ -319,4 +442,156 @@ warmUpListing =
       [ row "100644" "blob" sha1 Nothing "p/a.hs",
         row "120000" "blob" sha1 Nothing "p/link",
         row "160000" "commit" sha1 Nothing "p/sub"
+      ]
+
+-- | Build the shared values of the working-tree side before the
+-- listing thread, workers and request threads use them at once
+-- (Q-RTS-BLACKHOLE): the @--debug@, check-attr and config parsers,
+-- 'gitBool', every line-end rule, the binary test, the clean step on
+-- read with 'contentFromBytes', the stat check, blob ids in both
+-- formats, and 'fileNotes'. Run before warp. Throws if a fixed sample
+-- doesn't parse (a bug).
+warmUpWorkTree :: IO ()
+warmUpWorkTree = do
+  entries <- case parseDebugEntries debugSample of
+    Right es -> es <$ evaluate (length (show es))
+    Left e -> ioError (userError ("warmUpWorkTree: " <> show e))
+  force (parseDebugEntries "100644 junk 0\tx\0  ctime: 1\n")
+  force (parseCheckAttr attrSample)
+  force (parseCoreConfig configSample)
+  force (map gitBool bools)
+  force
+    [ (eolRule ac (attrsOf t c e), eolSure ac (attrsOf t c e) "a\r\n")
+    | ac <- autocrlfs,
+      t <- states,
+      c <- states,
+      e <- states
+    ]
+  forM_ byteSamples $ \b -> do
+    let s = textStats b
+    force (s, convertIsBinary s, hasCrlfInIndex b, dropCrBeforeLf b)
+    force [cleanForms r b | r <- [EolKeep, EolText, EolAuto]]
+    force
+      [ contentFromBytes (FileSize (BS.length b)) (applyEol c b)
+      | c <- [KeepRaw, DropCrBeforeLf, AutoOnRead]
+      ]
+    force [blobId f b | f <- [Sha1, Sha256]]
+  force [emptyBlobId f | f <- [Sha1, Sha256]]
+  let settings t =
+        CheckSettings
+          { indexMtime = t,
+            execBit = TrustExecBit,
+            symlinks = SymlinksOff,
+            emptyBlob = emptyBlobId Sha1
+          }
+      looks =
+        LookGone
+          : LookFailed "x"
+          : [ LookFound
+                FullStat
+                  { mode = m,
+                    size = 3,
+                    mtime = StatTime 1 2,
+                    ctime = StatTime 1 2,
+                    ino = 4,
+                    dev = 5,
+                    uid = 6,
+                    gid = 7
+                  }
+            | m <- [0o100644, 0o100755, 0o120777, 0o040755, 0o010644]
+            ]
+  force
+    [ checkEntry (settings t) e l
+    | t <- [IndexTime (Seconds 1_800_000_000), IndexTimeUnknown],
+      e <- entries,
+      l <- looks
+    ]
+  case parseRelPath "a.hs" of
+    Right p -> force (fileNotes (DiskEntries (CanonicalRoot "/x" "/x")) p)
+    Left e -> ioError (userError ("warmUpWorkTree: " <> show e))
+  let lfs = unspecifiedAttrs {filter = AttrValue "lfs"}
+  force [filtering defaultCoreConfig a | a <- [unspecifiedAttrs, lfs]]
+  where
+    force :: (Show a) => a -> IO ()
+    force x = () <$ evaluate (length (show x))
+    oid = BS.replicate 40 0x61
+    block mode stage path flags =
+      mode
+        <> " "
+        <> oid
+        <> " "
+        <> stage
+        <> "\t"
+        <> path
+        <> "\0  ctime: 1700000000:1\n  mtime: 1700000000:2\n  dev: 1\tino: 2\n\
+           \  uid: 3\tgid: 4\n  size: 5\tflags: "
+        <> flags
+        <> "\n"
+    debugSample =
+      BS.concat
+        [ block "100644" "0" "a.hs" "0",
+          block "100755" "0" "run.sh" "8000",
+          block "120000" "0" "link" "40000000",
+          block "160000" "0" "sub" "0",
+          block "100644" "1" "c.txt" "1000",
+          block "100644" "2" "c.txt" "2000",
+          block "100644" "0" "new.hs" "20000000",
+          block "040000" "0" "odd" "0"
+        ]
+    attrSample =
+      BS.intercalate
+        "\0"
+        [ "a.hs",
+          "text",
+          "set",
+          "a.hs",
+          "eol",
+          "crlf",
+          "a.hs",
+          "crlf",
+          "unset",
+          "a.hs",
+          "filter",
+          "lfs",
+          "a.hs",
+          "ident",
+          "unspecified",
+          "a.hs",
+          "working-tree-encoding",
+          "UTF-16",
+          ""
+        ]
+    configSample =
+      "core.autocrlf\ninput\0core.filemode\0core.symlinks\nfalse\0\
+      \core.checkstat\nminimal\0"
+    bools =
+      Nothing
+        : map
+          Just
+          [ "",
+            "true",
+            "Yes",
+            "ON",
+            "off",
+            "1",
+            "0",
+            "0x10",
+            "010",
+            "-2k",
+            "1m",
+            "bad",
+            " 5"
+          ]
+    autocrlfs = [AutoCrlfFalse, AutoCrlfTrue, AutoCrlfInput]
+    states =
+      [AttrSet, AttrUnset, AttrUnspecified]
+        <> map AttrValue ["input", "auto", "lf", "crlf", "x"]
+    attrsOf t c e = unspecifiedAttrs {text = t, crlf = c, eol = e}
+    byteSamples =
+      [ "module A where\r\n",
+        "a\0b\r\n",
+        "a\rb",
+        BS.replicate 300 1 <> "\r\n",
+        "a\r\nb\26",
+        ""
       ]

@@ -16,6 +16,13 @@
 #   pc/        a partial clone of pcsrc/ (blob:none) with the traps and an
 #              ext:: remote that marks on a fetch. The blob of f.txt in
 #              HEAD~1 is missing; its id is in missing-blob.
+#   r1/ .. r4/ the same files in index states that make git look at
+#              content (D-311): r1 zero stat (read-tree), r2 racy (mtime
+#              in the future, then add), r3 one file touched, r4 r2 with
+#              a split index, index v4 and the untracked cache. Each has
+#              b.txt edited, an untracked file and a submodule sub/ (from
+#              subsrc/) with racy entries and traps of its own.
+#   fsd/       like r2, with core.fsmonitor=true (the built-in daemon)
 . "$(dirname "$0")/lib.sh"
 T=$1
 realgit=$(command -v git)
@@ -113,10 +120,76 @@ if env GIT_NO_LAZY_FETCH=1 git $gflags -C "$T/pc" cat-file -e "$(cat "$T/missing
   exit 2
 fi
 
+# Repos in index states that make git look at content (from the T01
+# spike). subsrc/ is the source of their submodule.
+ss=$T/subsrc
+repo_init "$ss"
+printf '*.x filter=x\n' > "$ss/.gitattributes"
+echo subx > "$ss/a.x"
+echo subplain > "$ss/p.txt"
+g -C "$ss" add -A
+commit_at "$ss" 0 -m s0
+
+future() { touch -d 2100-01-01T00:00:00 "$@"; }
+
+# mkrepo DIR STATE: the same files and history; the index state differs.
+mkrepo() {
+  d=$1
+  state=$2
+  repo_init "$d"
+  printf '*.x filter=x\n*.cl filter=cl\n*.bin filter=lfs diff=lfs merge=lfs -text\n*.txt diff=x\n' \
+    > "$d/.gitattributes"
+  echo xdata > "$d/a.x"
+  echo cldata > "$d/a.cl"
+  echo infodata > "$d/a.info"
+  echo cadata > "$d/a.ca"
+  cp "$r/a.bin" "$d/a.bin"
+  echo t1 > "$d/a.txt"
+  echo b1 > "$d/b.txt"
+  echo 'main = pure ()' > "$d/plain.hs"
+  mkdir "$d/lib"
+  echo 'module L where' > "$d/lib/L.hs"
+  g -C "$d" add -A
+  commit_at "$d" 0 -m c0
+  echo t2 > "$d/a.txt"
+  g -C "$d" add -A
+  commit_at "$d" 1 -m c1
+  g -C "$d" submodule add -q "$ss" sub > /dev/null 2>&1
+  commit_at "$d" 2 -m sub
+  # Racy entries inside the submodule.
+  future "$d/sub/a.x" "$d/sub/p.txt"
+  g -C "$d/sub" add -A
+  all="$d/a.x $d/a.cl $d/a.info $d/a.ca $d/a.bin $d/a.txt $d/plain.hs $d/lib/L.hs"
+  case $state in
+    r1) g -C "$d" read-tree HEAD ;;
+    r2)
+      # shellcheck disable=SC2086
+      future $all
+      g -C "$d" add -A
+      ;;
+    r3) touch -d 2025-06-01T00:00:00 "$d/plain.hs" ;;
+    r4)
+      g -C "$d" config core.untrackedCache true
+      g -C "$d" config core.splitIndex true
+      g -C "$d" config index.version 4
+      # shellcheck disable=SC2086
+      future $all
+      g -C "$d" update-index --index-version 4 --split-index --untracked-cache \
+        > /dev/null 2>&1
+      g -C "$d" add -A
+      g -c core.untrackedCache=true -C "$d" status -s > /dev/null
+      ;;
+  esac
+  echo b2 > "$d/b.txt"
+  echo 'module U where' > "$d/untracked.hs"
+}
+for st in r1 r2 r3 r4; do mkrepo "$T/$st" "$st"; done
+mkrepo "$T/fsd" r2
+
 # Traps go in last, after every add and commit.
 traps() {
   d=$1
-  gd=$d/.git
+  gd=$(g -C "$d" rev-parse --absolute-git-dir)
   c() { g -C "$d" config "$@"; }
   c filter.x.clean "$T/bin/mark x-clean; cat"
   c filter.x.smudge "$T/bin/mark x-smudge; cat"
@@ -137,7 +210,16 @@ traps() {
   c core.hooksPath "$T/hooks"
   mkdir -p "$gd/hooks"
   for h in $hooks; do cp "$T/hooks/$h" "$gd/hooks/$h"; done
+  if [ -d "$d/sub" ]; then
+    s() { g -C "$d/sub" config "$@"; }
+    s filter.x.clean "$T/bin/mark sub-x-clean; cat"
+    s filter.x.process "$T/bin/mark sub-x-process; exit 1"
+    s filter.x.required true
+    s core.fsmonitor "$T/bin/fsmon"
+  fi
 }
 traps "$r"
 traps "$T/pc"
+for d in r1 r2 r3 r4 fsd; do traps "$T/$d"; done
+g -C "$T/fsd" config core.fsmonitor true
 rm -f "$M"/* "$T/trace.json"

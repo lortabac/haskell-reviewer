@@ -1,17 +1,21 @@
--- | The planted repo (D-311): the commit-side calls and the object
--- reader run none of its traps, start no child and leave .git as it
--- was. Positive controls, with plain git, show the traps work.
+-- | The planted repo (D-311): the commit-side calls, the object
+-- reader and the working-tree lister run none of its traps, start no
+-- child and leave .git as it was (but for the mtime of a split index's
+-- shared file). Positive controls, with plain git, show the traps work.
 module HaskellReviewer.Effects.GitPlantedTest (tests) where
 
-import Control.Monad (forM, forM_, unless)
+import Control.Monad (forM, forM_, unless, when)
 import Data.List (isInfixOf, isPrefixOf)
 import Data.Map.Strict qualified as Map
 import Data.Text qualified as Text
 import HaskellReviewer.Core.CommitFiles (BlobRef (..), BlobSize (..), CommitFiles (..))
+import HaskellReviewer.Core.Eol (Filtering (..))
+import HaskellReviewer.Core.FileList (FileList (..))
 import HaskellReviewer.Core.Git (ObjectId (..))
-import HaskellReviewer.Core.RelPath (parseRelPath)
+import HaskellReviewer.Core.RelPath (parseRelPath, relPathText)
 import HaskellReviewer.Core.Root (Root (..))
-import HaskellReviewer.Effects.FileSystem (listCommit, listCommitPlain)
+import HaskellReviewer.Core.WorkTree (DiskFile (..), WorkFile (..))
+import HaskellReviewer.Effects.FileSystem (canonicalRoot, listCommit, listCommitPlain)
 import HaskellReviewer.Effects.Git
   ( Git (..),
     GitSetup (..),
@@ -33,13 +37,19 @@ import HaskellReviewer.Effects.GitObjects
     withObjectReader,
   )
 import HaskellReviewer.Effects.Log (LogLevel (..), Logger, newLogger)
+import HaskellReviewer.Effects.Source
+  ( EntrySource (..),
+    WorkTreeSource (..),
+    readSourceEntry,
+  )
+import HaskellReviewer.Effects.WorkTree (WorkTreeFiles (..), listWorkTree)
 import System.Directory qualified as Dir
-import System.FilePath ((</>))
+import System.FilePath (takeFileName, (</>))
 import System.IO.Temp (createTempDirectory, getCanonicalTemporaryDirectory)
 import System.Process (CreateProcess (..), proc, readCreateProcessWithExitCode)
 import Test.Tasty (TestTree, testGroup, withResource)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
-import TestSupport (fixtureRepo, gitOut, snapshotDir)
+import TestSupport (FileState (..), fixtureRepo, gitOut, snapshotDir)
 
 tests :: TestTree
 tests =
@@ -143,9 +153,75 @@ safeCalls t = do
   afterPc <- snapshotDir (pc </> ".git")
   afterRepo @?= beforeRepo
   afterPc @?= beforePc
+  workTreeCalls t
   where
     ok :: (Show e) => Either e a -> IO a
     ok = either (assertFailure . show) pure
+
+-- | The working-tree lister, and a read of every file it lists, in
+-- each racy state, a submodule, the fsmonitor-daemon repo and the
+-- partial clone.
+workTreeCalls :: FilePath -> Assertion
+workTreeCalls t = do
+  let roots = ["r1", "r2", "r3", "r4", "r2/sub", "fsd", "pc"]
+      gitDirOf r = t </> takeWhile (/= '/') r </> ".git"
+  clearMarkers t
+  writeFile (t </> "trace.json") ""
+  dirsBefore <- mapM (snapshotDir . gitDirOf) roots
+  -- One probe: every spawn forks the test process, and that slows the
+  -- time-limited tests that run next to this one.
+  g0 <- plantedGit t (t </> "r1")
+  forM_ roots $ \r -> do
+    let g = atRoot g0 (t </> r)
+    info <- ok =<< repoInfo g
+    canon <- canonicalRoot (Root (t </> r))
+    withObjectReader quiet defaultReaderSettings g $ \reader -> do
+      wt <- ok =<< listWorkTree quiet g info reader canon
+      assertBool (r <> ": files") (Map.size wt.files.entries >= 1)
+      let source =
+            WorkTreeEntries
+              WorkTreeSource {root = canon, reader = reader, files = wt.work}
+      -- Reads through the index blobs (cat-file) and from disk.
+      when (r `elem` ["r2", "r4", "r2/sub"]) $
+        forM_ (Map.toList wt.files.entries) $ \(p, k) -> do
+          _ <- readSourceEntry source p k
+          pure ()
+      -- The racy and touched files are clean, unless filtered: we
+      -- can't run the filter, so those are read from disk. b.txt is
+      -- dirty.
+      unless (r `elem` ["r2/sub", "pc"]) $ do
+        let clean = [relPathText p | (p, FromIndex _) <- Map.toList wt.work]
+            filtered =
+              [ relPathText p
+              | (p, FromDisk d) <- Map.toList wt.work,
+                d.filtered == Filtered
+              ]
+        forM_ ["a.txt", "plain.hs"] $ \f ->
+          assertBool (r <> ": " <> Text.unpack f <> " clean") (f `elem` clean)
+        -- In r3 they may be clean by stat (only plain.hs was touched).
+        unless (r == "r3") $
+          forM_ ["a.x", "a.cl", "a.info", "a.ca", "a.bin"] $ \f ->
+            assertBool (r <> ": " <> Text.unpack f <> " filtered") (f `elem` filtered)
+        assertBool (r <> ": b.txt dirty") ("b.txt" `notElem` clean)
+  markers <- Dir.listDirectory (t </> "markers")
+  markers @?= []
+  trace <- readFile (t </> "trace.json")
+  assertBool "git ran: no trace2 events" (not (null trace))
+  assertBool "a child was started" (not ("\"child_start\"" `isInfixOf` trace))
+  dirsAfter <- mapM (snapshotDir . gitDirOf) roots
+  forM_ (zip3 roots dirsBefore dirsAfter) $ \(r, b, a) ->
+    (r, map sharedMtime a) @?= (r, map sharedMtime b)
+  -- The daemon was never asked for.
+  ipc <- Dir.doesPathExist (t </> "fsd" </> ".git" </> "fsmonitor--daemon.ipc")
+  assertBool "fsmonitor daemon socket" (not ipc)
+  where
+    ok :: (Show e) => Either e a -> IO a
+    ok = either (assertFailure . show) pure
+    -- Reading a split index bumps the mtime of its shared file (git
+    -- does it on every read, D-311).
+    sharedMtime f
+      | "sharedindex." `isPrefixOf` takeFileName f.path = f {mtime = ""}
+      | otherwise = f
 
 -- | Each trap fires with plain git and the same HOME and PATH.
 controls :: FilePath -> Assertion
@@ -161,23 +237,47 @@ controls t = do
   -- The trace check works: status started the hook as a child.
   trace <- readFile (t </> "trace.json")
   assertBool "no child_start seen" ("\"child_start\"" `isInfixOf` trace)
+  -- The racy states make git run clean filters. Filters that fail
+  -- (process, required) are off, so git gets to the clean commands.
+  -- (r1's zero stat entries are listed dirty with no content check.)
+  let noReq =
+        concat
+          [ ["-c", k]
+          | k <-
+              [ "filter.x.process=",
+                "filter.x.required=false",
+                "filter.lfs.process=",
+                "filter.lfs.required=false"
+              ]
+          ]
+  forM_ ["r2", "r4", "fsd"] $ \r ->
+    firesAny
+      (t </> r)
+      (noReq <> ["diff-files", "--name-only"])
+      ["x-clean", "cl-clean", "lfs-clean"]
+  fires (t </> "r2") ["status", "--porcelain"] "fsmonitor-hook"
+  -- The fsmonitor daemon: plain git status starts it. Not in every
+  -- build (2.44.x has none).
+  (_, opts, _) <-
+    readCreateProcessWithExitCode (plainGit t t ["version", "--build-options"]) ""
+  when ("fsmonitor--daemon" `isInfixOf` opts) $ do
+    let fsd = t </> "fsd"
+        ipc = fsd </> ".git" </> "fsmonitor--daemon.ipc"
+    _ <-
+      readCreateProcessWithExitCode
+        (plainGit t fsd (noReq <> ["status", "--porcelain"]))
+        ""
+    started <- Dir.doesPathExist ipc
+    _ <- readCreateProcessWithExitCode (plainGit t fsd ["fsmonitor--daemon", "stop"]) ""
+    assertBool "control: git status started no fsmonitor daemon" started
   where
-    fires dir args prefix = do
+    fires dir args prefix = firesAny dir args [prefix]
+    firesAny dir args prefixes = do
       clearMarkers t
-      let cp =
-            (proc (t </> "bin" </> "git") args)
-              { cwd = Just dir,
-                env =
-                  Just
-                    [ ("HOME", t </> "home"),
-                      ("PATH", t </> "bin" <> ":/usr/bin:/bin"),
-                      ("LC_ALL", "C")
-                    ],
-                close_fds = True
-              }
+      let cp = plainGit t dir args
       (code, _, _) <- readCreateProcessWithExitCode cp ""
       markers <- Dir.listDirectory (t </> "markers")
-      unless (any (prefix `isPrefixOf`) markers) $
+      unless (or [p `isPrefixOf` m | p <- prefixes, m <- markers]) $
         assertFailure
           ( "control "
               <> unwords args
@@ -185,9 +285,34 @@ controls t = do
               <> show code
               <> ") fired "
               <> show markers
-              <> ", expected "
-              <> prefix
+              <> ", expected one of "
+              <> show prefixes
           )
+
+-- | The same git, run in another ROOT.
+atRoot :: Git -> FilePath -> Git
+atRoot g root =
+  Git
+    { exe = g.exe,
+      cwd = root,
+      env = g.env,
+      probeTimeLimit = g.probeTimeLimit,
+      listTimeLimit = g.listTimeLimit
+    }
+
+-- | git with bin/ on PATH (the trace2 wrapper) and home/ as HOME.
+plainGit :: FilePath -> FilePath -> [String] -> CreateProcess
+plainGit t dir args =
+  (proc (t </> "bin" </> "git") args)
+    { cwd = Just dir,
+      env =
+        Just
+          [ ("HOME", t </> "home"),
+            ("PATH", t </> "bin" <> ":/usr/bin:/bin"),
+            ("LC_ALL", "C")
+          ],
+      close_fds = True
+    }
 
 clearMarkers :: FilePath -> IO ()
 clearMarkers t = do

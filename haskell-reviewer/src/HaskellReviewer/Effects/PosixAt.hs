@@ -6,6 +6,7 @@ module HaskellReviewer.Effects.PosixAt
 
     -- * Calls
     statAt,
+    lstatAt,
     readLinkAt,
     listDirFd,
   )
@@ -25,8 +26,10 @@ import Foreign.C.Error
 import Foreign.C.String (CString)
 import Foreign.C.Types (CChar, CInt (..), CLLong (..), CLong (..), CSize (..))
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
+import Foreign.Marshal.Array (allocaArray, peekArray)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peek)
+import HaskellReviewer.Core.WorkTree (FullStat (..), StatTime (..))
 import System.Posix.IO (closeFd)
 import System.Posix.Types (Fd (..))
 
@@ -77,6 +80,33 @@ statAt (Fd dir) name =
             size = fromIntegral n
           }
 
+-- | fstatat with AT_SYMLINK_NOFOLLOW, with everything the stat check
+-- compares. See Note [Stat check] in "HaskellReviewer.Core.WorkTree".
+lstatAt :: Fd -> ByteString -> IO FullStat
+lstatAt (Fd dir) name =
+  BS.useAsCString name $ \cname ->
+    allocaArray 10 $ \out -> do
+      throwErrnoPathIfMinus1_ "lstatAt" (show name) $ c_lstat_full dir cname out
+      -- The order is set by hr_lstat_full in cbits/posix_at.c.
+      vals <- map (\(CLLong n) -> n) <$> peekArray 10 out
+      case vals of
+        [m, size, ms, mns, cs, cns, ino, dev, uid, gid] ->
+          pure
+            FullStat
+              { mode = fromIntegral m,
+                size = size,
+                mtime = time ms mns,
+                ctime = time cs cns,
+                ino = fromIntegral ino,
+                dev = fromIntegral dev,
+                uid = fromIntegral uid,
+                gid = fromIntegral gid
+              }
+        _ -> ioError (userError "lstatAt: short result")
+  where
+    -- Cut to 32 bits, as git keeps them in the index.
+    time s ns = StatTime {sec = fromIntegral s, nsec = fromIntegral ns}
+
 -- | readlinkat: the target of the symlink, as bytes.
 readLinkAt :: Fd -> ByteString -> IO ByteString
 readLinkAt (Fd dir) name =
@@ -115,6 +145,9 @@ listDirFd (Fd fd) = bracket open c_closedir (go [])
 
 foreign import ccall safe "hr_stat_at"
   c_stat_at :: CInt -> CString -> Ptr CInt -> Ptr CLLong -> IO CInt
+
+foreign import ccall safe "hr_lstat_full"
+  c_lstat_full :: CInt -> CString -> Ptr CLLong -> IO CInt
 
 foreign import ccall safe "hr_readlink_at"
   c_readlink_at :: CInt -> CString -> Ptr CChar -> CSize -> IO CLong
