@@ -20,6 +20,10 @@ module HaskellReviewer.Effects.Git
     probeGitWith,
     systemGitSetup,
     lsFiles,
+    lsFilesDebug,
+    gitIndexPath,
+    checkAttr,
+    coreConfig,
     repoInfo,
     resolveCommit,
     mergeBase,
@@ -103,15 +107,19 @@ index come from someone else. Git must only read. Every call:
   - -c core.hooksPath=/dev/null: no hooks, ever;
   - -c safe.bareRepository=explicit: a bare repo planted in the tree
     is not picked up.
-- has stdin on /dev/null and no inherited fds (close_fds; see
-  Note [No inherited fds] in "HaskellReviewer.Effects.Spawn" for why
-  that stays cheap).
-- has a time limit: 30 s for --version, rev-parse and merge-base
-  ('gitProbeTimeLimit'), 120 s for ls-files and ls-tree
-  ('gitListTimeLimit'), 30 s per object read (Note [Object reader] in
-  "HaskellReviewer.Effects.GitObjects"). A FIFO in the tree (named
+- has stdin on /dev/null, except check-attr, which reads paths from a
+  pipe that a thread of its own writes (so a full pipe each way can't
+  block git and us), and no inherited fds (close_fds; see Note [No
+  inherited fds] in "HaskellReviewer.Effects.Spawn" for why that stays
+  cheap).
+- has a time limit: 30 s for --version, rev-parse, merge-base and
+  config ('gitProbeTimeLimit'), 120 s for ls-files, ls-tree and
+  check-attr ('gitListTimeLimit'), 30 s per object read (Note [Object
+  reader] in "HaskellReviewer.Effects.GitObjects"). A FIFO in the tree (named
   .gitignore, say, or set as core.excludesFile) makes git block in
-  open() for ever. Past the limit we kill git (SIGKILL) and wait for it.
+  open() for ever (so does a FIFO .gitattributes for check-attr and
+  ls-files --others). Past the limit we kill git (SIGKILL) and wait
+  for it.
   We do the same when the call is cancelled (shutdown), so no git is
   left behind.
 - has its output capped: 256 MiB of stdout, 4 KiB of stderr kept.
@@ -125,9 +133,11 @@ On macOS, /usr/bin/git without the Command Line Tools is a shim that
 fails --version: also exit 2.
 
 We only run --version, rev-parse (--is-inside-work-tree; --show-prefix
---show-object-format --is-shallow-repository; --verify), merge-base,
-ls-files, ls-tree and cat-file --batch-command (SPEC §11.4.1). None of
-them writes.
+--show-object-format --is-shallow-repository; --verify; --git-path
+index), merge-base, ls-files (--stage, --stage --debug, --others
+--exclude-standard), ls-tree, check-attr -z --stdin, config -z
+--get-regexp for a few core keys, and cat-file --batch-command (SPEC
+§11.4.1). None of them writes, and none runs a filter (D-311).
 -}
 
 -- | How to run git.
@@ -340,6 +350,62 @@ lsFiles git = do
   where
     runOk = runOkWithin git.listTimeLimit
 
+-- | Like 'lsFiles', with the stat data of each index entry
+-- (@ls-files -z --stage --debug@): the working-tree side's stat check.
+-- Parse it with 'HaskellReviewer.Core.WorkTree.parseDebugEntries'.
+lsFilesDebug :: Git -> IO (Either GitError LsFilesOutput)
+lsFilesDebug git = do
+  (staged, others) <-
+    concurrently
+      (runOk git ["ls-files", "-z", "--stage", "--debug"])
+      (runOk git ["ls-files", "-z", "--others", "--exclude-standard"])
+  pure (LsFilesOutput <$> staged <*> others)
+  where
+    runOk = runOkWithin git.listTimeLimit
+
+-- | Where the index file is: @rev-parse --git-path index@. Raw bytes,
+-- absolute or relative to ROOT. git prints no @-z@ form: one trailing
+-- LF is dropped.
+gitIndexPath :: Git -> IO (Either GitError ByteString)
+gitIndexPath git =
+  fmap dropLf <$> runOkWithin git.probeTimeLimit git ["rev-parse", "--git-path", "index"]
+  where
+    dropLf b = fromMaybe b (BS.stripSuffix "\n" b)
+
+-- | The attributes of these paths (relative to ROOT), raw: the ones
+-- in 'HaskellReviewer.Core.Eol.attrNames'. Parse with
+-- 'HaskellReviewer.Core.Eol.parseCheckAttr'.
+checkAttr :: Git -> [String] -> [ByteString] -> IO (Either GitError ByteString)
+checkAttr git names paths = do
+  let args = ["check-attr", "-z", "--stdin"] <> names
+  result <- runGitInput git.listTimeLimit git (BS.concat [p <> "\0" | p <- paths]) args
+  pure $ case result of
+    Left e -> Left e
+    Right r -> case r.exitCode of
+      ExitSuccess -> Right r.out
+      ExitFailure c -> Left (GitFailed (failure git args c r))
+
+-- | The core keys the working-tree side reads, and any filter driver
+-- named @unset@ or @unspecified@, raw
+-- (@config -z --get-regexp@). Exit 1 is no key set: empty. Parse with
+-- 'HaskellReviewer.Core.Eol.parseCoreConfig'.
+coreConfig :: Git -> IO (Either GitError ByteString)
+coreConfig git = do
+  let args =
+        [ "config",
+          "-z",
+          "--get-regexp",
+          "^(core\\.(autocrlf|filemode|symlinks|ignorecase|trustctime|checkstat)\
+          \|filter\\.(unset|unspecified)\\..*)$"
+        ]
+  result <- runGit git.probeTimeLimit git args
+  pure $ case result of
+    Left e -> Left e
+    Right r -> case r.exitCode of
+      ExitSuccess -> Right r.out
+      ExitFailure 1 -> Right ""
+      ExitFailure c -> Left (GitFailed (failure git args c r))
+
 -- | ROOT's prefix, the object format and whether the clone is shallow.
 repoInfo :: Git -> IO (Either GitError RepoInfo)
 repoInfo git = do
@@ -505,46 +571,90 @@ maxStdout = 256 * 1024 * 1024
 maxStderr :: Int
 maxStderr = 4096
 
--- | Run git with the hardened flags and env. stdout and stderr are
--- read at the same time, so a full pipe can't block git. On time out,
--- too much output, an exception or cancel, git is killed and waited
--- for. See Note [Git hardening].
+-- | Run git with the hardened flags and env, stdin on /dev/null.
+-- stdout and stderr are read at the same time, so a full pipe can't
+-- block git. On time out, too much output, an exception or cancel, git
+-- is killed and waited for. See Note [Git hardening].
 runGit :: Microseconds -> Git -> [String] -> IO (Either GitError GitResult)
-runGit (Microseconds limit) git args = do
-  result <- try @IOException $
-    withBinaryFile "/dev/null" ReadMode $ \devNull -> do
-      let cp =
-            (gitProcess git args)
-              { std_in = UseHandle devNull,
-                std_out = CreatePipe,
-                std_err = CreatePipe
-              }
-      bracket (createProcess cp) cleanUp $ \case
-        (_, Just hOut, Just hErr, ph) -> do
-          -- The wait is in the limit too: git can close its pipes and
-          -- go on running.
-          outcome <-
-            timeout limit $
-              withAsync (readOutput DropRest maxStderr hErr) $ \errReader -> do
-                out <- readOutput FailOnMore maxStdout hOut
-                case out of
-                  -- Stop here: cleanUp kills git.
-                  Nothing -> pure Nothing
-                  Just o -> do
-                    err <- fromMaybe "" <$> wait errReader
-                    code <- waitForProcess ph
-                    pure (Just GitResult {exitCode = code, out = o, err = err})
-          pure $ case outcome of
-            Nothing -> Left (GitTimedOut call)
-            Just Nothing -> Left (GitOutputTooLarge call)
-            Just (Just r) -> Right r
-        _ -> ioError (userError "no pipes")
-  pure $ case result of
-    Left e -> Left (GitCannotRun CannotRun {exe = git.exe, reason = reasonOf e})
-    Right r -> r
+runGit limit git args = do
+  result <- try @IOException (runGitWith limit git args NoInput)
+  pure (either (cannotRun git) id result)
+
+-- | Like 'runGit', with these bytes on stdin. A thread of its own
+-- writes them while we read stdout and stderr: git prints before it
+-- has read everything, so one pipe each way could fill up and block
+-- both. git going away early (EPIPE) is not an error here: its exit
+-- code tells.
+runGitInput ::
+  Microseconds -> Git -> ByteString -> [String] -> IO (Either GitError GitResult)
+runGitInput limit git input args = do
+  result <- try @IOException (runGitWith limit git args (Input input))
+  pure (either (cannotRun git) id result)
+
+-- | What git gets on stdin.
+data Stdin
+  = -- | /dev/null.
+    NoInput
+  | -- | These bytes, through a pipe.
+    Input ByteString
+
+-- | The shared part of 'runGit' and 'runGitInput'.
+runGitWith ::
+  Microseconds -> Git -> [String] -> Stdin -> IO (Either GitError GitResult)
+runGitWith limit git args = \case
+  NoInput ->
+    withBinaryFile "/dev/null" ReadMode $ \devNull ->
+      runWith (UseHandle devNull) (\_ -> pure ())
+  Input bytes -> runWith CreatePipe (mapM_ (feed bytes))
+  where
+    feed bytes h = void (try @IOException (BS.hPut h bytes >> hClose h))
+    runWith stdin feeder = runGitProcess limit git args stdin feeder
+
+-- | Start git, feed its stdin (if a pipe), read its output. On time
+-- out, too much output, an exception or cancel, git is killed and
+-- waited for.
+runGitProcess ::
+  Microseconds ->
+  Git ->
+  [String] ->
+  StdStream ->
+  (Maybe Handle -> IO ()) ->
+  IO (Either GitError GitResult)
+runGitProcess (Microseconds limit) git args stdin feeder = do
+  let cp =
+        (gitProcess git args)
+          { std_in = stdin,
+            std_out = CreatePipe,
+            std_err = CreatePipe
+          }
+  bracket (createProcess cp) cleanUp $ \case
+    (hIn, Just hOut, Just hErr, ph) -> do
+      -- The wait is in the limit too: git can close its pipes and go
+      -- on running.
+      outcome <-
+        timeout limit $
+          withAsync (feeder hIn) $ \_ ->
+            withAsync (readOutput DropRest maxStderr hErr) $ \errReader -> do
+              out <- readOutput FailOnMore maxStdout hOut
+              case out of
+                -- Stop here: cleanUp kills git.
+                Nothing -> pure Nothing
+                Just o -> do
+                  err <- fromMaybe "" <$> wait errReader
+                  code <- waitForProcess ph
+                  pure (Just GitResult {exitCode = code, out = o, err = err})
+      pure $ case outcome of
+        Nothing -> Left (GitTimedOut call)
+        Just Nothing -> Left (GitOutputTooLarge call)
+        Just (Just r) -> Right r
+    _ -> ioError (userError "no pipes")
   where
     call = Call {exe = git.exe, args = args}
-    reasonOf e
+
+cannotRun :: Git -> IOException -> Either GitError a
+cannotRun git e = Left (GitCannotRun CannotRun {exe = git.exe, reason = reasonOf})
+  where
+    reasonOf
       | null e.ioe_description = Text.pack (displayException e)
       | otherwise = Text.pack e.ioe_description
 
@@ -561,10 +671,11 @@ gitProcess git args =
     }
 
 -- | Kill git if still there, close the pipes, reap it.
-cleanUp :: (a, Maybe Handle, Maybe Handle, ProcessHandle) -> IO ()
-cleanUp (_, hOut, hErr, ph) = do
+cleanUp :: (Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle) -> IO ()
+cleanUp (hIn, hOut, hErr, ph) = do
   pid <- getPid ph
   mapM_ (\p -> void (try @IOException (signalProcess sigKILL p))) pid
+  mapM_ (void . try @IOException . hClose) hIn
   mapM_ hClose hOut
   mapM_ hClose hErr
   void (try @IOException (waitForProcess ph))

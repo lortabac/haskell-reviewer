@@ -19,6 +19,7 @@ import GHC.IO.Encoding (setLocaleEncoding, utf8)
 import HaskellReviewer.App.CliTest qualified
 import HaskellReviewer.App.RunTest qualified
 import HaskellReviewer.Core.AddressTest qualified
+import HaskellReviewer.Core.BlobIdTest qualified
 import HaskellReviewer.Core.CabalFileTest qualified
 import HaskellReviewer.Core.ChangedTest qualified
 import HaskellReviewer.Core.CodeTest qualified
@@ -29,6 +30,7 @@ import HaskellReviewer.Core.CppTest qualified
 import HaskellReviewer.Core.DeclsGoldenTest qualified
 import HaskellReviewer.Core.DeclsTest qualified
 import HaskellReviewer.Core.DocLinksTest qualified
+import HaskellReviewer.Core.EolTest qualified
 import HaskellReviewer.Core.FileListTest qualified
 import HaskellReviewer.Core.GitTest qualified
 import HaskellReviewer.Core.HaddockTest qualified
@@ -62,6 +64,7 @@ import HaskellReviewer.Core.SourceLinksTest qualified
 import HaskellReviewer.Core.SourceTextTest qualified
 import HaskellReviewer.Core.TextSearchTest qualified
 import HaskellReviewer.Core.TokensTest qualified
+import HaskellReviewer.Core.WorkTreeTest qualified
 import HaskellReviewer.Core.XdgTest qualified
 import HaskellReviewer.Effects.AtomicFileTest qualified
 import HaskellReviewer.Effects.Config (warmUpConfig)
@@ -74,11 +77,12 @@ import HaskellReviewer.Effects.HelperTest qualified
 import HaskellReviewer.Effects.LogTest qualified
 import HaskellReviewer.Effects.Parser (warmUpParser)
 import HaskellReviewer.Effects.RevisionsTest qualified
-import HaskellReviewer.Effects.Source (warmUpListing, warmUpObjects)
+import HaskellReviewer.Effects.Source (warmUpListing, warmUpObjects, warmUpWorkTree)
 import HaskellReviewer.Effects.SourceTest qualified
 import HaskellReviewer.Effects.Spawn (prepareSpawning)
 import HaskellReviewer.Effects.SpawnTest qualified
 import HaskellReviewer.Effects.TraceTest qualified
+import HaskellReviewer.Effects.WorkTreeTest qualified
 import HaskellReviewer.Server.Api (warmUpSideNames)
 import HaskellReviewer.Server.ApiGoldenTest qualified
 import HaskellReviewer.Server.ApiTest qualified
@@ -132,6 +136,7 @@ main = do
   warmUpSideNames
   warmUpListing
   warmUpObjects
+  warmUpWorkTree
   -- The same for the refs route. It parses and resolves the warm-up
   -- project too, here on one thread.
   warmUpRefs
@@ -162,6 +167,9 @@ main = do
         withResource (warmUpGzip >> warmUpPrefs) (const (pure ())) $ \_ ->
           HaskellReviewer.App.RunTest.tests,
         HaskellReviewer.Core.AddressTest.tests,
+        HaskellReviewer.Core.BlobIdTest.tests,
+        HaskellReviewer.Core.EolTest.tests,
+        HaskellReviewer.Core.WorkTreeTest.tests,
         HaskellReviewer.Core.CabalFileTest.tests,
         HaskellReviewer.Core.ChangedTest.tests,
         -- toml-parser's and aeson's shared values, built before the
@@ -197,6 +205,7 @@ main = do
         HaskellReviewer.Effects.GitObjectsTest.tests,
         HaskellReviewer.Effects.GitPlantedTest.tests,
         HaskellReviewer.Effects.GitTest.tests,
+        HaskellReviewer.Effects.WorkTreeTest.tests,
         HaskellReviewer.Effects.HelperTest.tests,
         HaskellReviewer.Effects.LogTest.tests,
         HaskellReviewer.Effects.RevisionsTest.tests,

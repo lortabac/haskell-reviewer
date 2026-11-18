@@ -9,6 +9,8 @@ module TestSupport
     -- * git
     git,
     gitOut,
+    gitBytes,
+    GitRun (..),
     gitSetup,
     realGitAt,
     fixtureRepo,
@@ -30,6 +32,7 @@ module TestSupport
   )
 where
 
+import Control.Concurrent.Async (wait, withAsync)
 import Control.Concurrent.MVar (MVar, newMVar, withMVar)
 import Control.Exception (IOException, bracket, try)
 import Control.Monad (unless, void, when)
@@ -53,7 +56,7 @@ import System.Directory qualified as Dir
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..))
 import System.FilePath (splitSearchPath, (</>))
-import System.IO (IOMode (ReadMode), hGetContents', readFile', withBinaryFile)
+import System.IO (IOMode (ReadMode), hClose, hGetContents', readFile', withBinaryFile)
 import System.IO.Temp (withSystemTempDirectory)
 import System.IO.Unsafe (unsafePerformIO)
 import System.Posix.IO
@@ -129,6 +132,50 @@ gitOut dir args = do
   case code of
     ExitSuccess -> pure out
     ExitFailure _ -> assertFailure ("git " <> unwords args <> " failed: " <> err)
+
+-- | What 'gitBytes' gives.
+data GitRun = GitRun
+  { code :: ExitCode,
+    out :: ByteString,
+    err :: ByteString
+  }
+
+-- | Like 'gitOut', with raw bytes on stdin and out, and no failure on
+-- a non-zero exit. stdin is written from its own thread, so big inputs
+-- and outputs can't block.
+gitBytes :: FilePath -> [String] -> ByteString -> IO GitRun
+gitBytes dir args input = do
+  path <- fromMaybe "/usr/bin:/bin" <$> lookupEnv "PATH"
+  let cp =
+        (proc "git" args)
+          { cwd = Just dir,
+            close_fds = True,
+            std_in = CreatePipe,
+            std_out = CreatePipe,
+            std_err = CreatePipe,
+            env =
+              Just
+                [ ("PATH", path),
+                  ("HOME", dir),
+                  ("GIT_CONFIG_NOSYSTEM", "1"),
+                  ("GIT_CONFIG_GLOBAL", "/dev/null")
+                ]
+          }
+  bracket (createProcess cp) cleanup $ \case
+    (Just hIn, Just hOut, Just hErr, ph) ->
+      withAsync (BS.hPut hIn input >> hClose hIn) $ \_ ->
+        withAsync (BS.hGetContents hErr) $ \errA -> do
+          out <- BS.hGetContents hOut
+          err <- wait errA
+          code <- waitForProcess ph
+          pure GitRun {code = code, out = out, err = err}
+    _ -> assertFailure "gitBytes: no pipes"
+  where
+    cleanup (i, o, e, ph) = do
+      mapM_ (void . try @IOException . hClose) i
+      mapM_ hClose o
+      mapM_ hClose e
+      void (try @IOException (waitForProcess ph))
 
 -- | How the program would find git, but with HOME and XDG_CONFIG_HOME
 -- in the given (empty) dir: the developer's own git config can't change

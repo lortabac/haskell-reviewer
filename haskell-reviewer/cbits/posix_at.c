@@ -30,6 +30,34 @@ int hr_stat_at(int dirfd, const char *name, int *kind, long long *size)
     return 0;
 }
 
+/* Full lstat of name in dirfd, for the stat check. out gets 10 values:
+   st_mode, size, mtime s and ns, ctime s and ns, ino, dev, uid, gid.
+   -1 and errno on error. */
+int hr_lstat_full(int dirfd, const char *name, long long *out)
+{
+    struct stat st;
+    if (fstatat(dirfd, name, &st, AT_SYMLINK_NOFOLLOW) != 0)
+        return -1;
+    out[0] = (long long)st.st_mode;
+    out[1] = (long long)st.st_size;
+#ifdef __APPLE__
+    out[2] = (long long)st.st_mtimespec.tv_sec;
+    out[3] = (long long)st.st_mtimespec.tv_nsec;
+    out[4] = (long long)st.st_ctimespec.tv_sec;
+    out[5] = (long long)st.st_ctimespec.tv_nsec;
+#else
+    out[2] = (long long)st.st_mtim.tv_sec;
+    out[3] = (long long)st.st_mtim.tv_nsec;
+    out[4] = (long long)st.st_ctim.tv_sec;
+    out[5] = (long long)st.st_ctim.tv_nsec;
+#endif
+    out[6] = (long long)st.st_ino;
+    out[7] = (long long)st.st_dev;
+    out[8] = (long long)st.st_uid;
+    out[9] = (long long)st.st_gid;
+    return 0;
+}
+
 /* readlinkat. The result is not NUL-terminated. */
 long hr_readlink_at(int dirfd, const char *name, char *buf, size_t len)
 {

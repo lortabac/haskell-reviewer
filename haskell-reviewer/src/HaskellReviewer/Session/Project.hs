@@ -36,15 +36,18 @@ readProject source fl platform cliGhc = do
 -- "HaskellReviewer.Core.RelPath"). The disk tells what a path is; a
 -- commit only knows its list, so we take the kind from there. A
 -- submodule or nested repo is a directory on disk, so 'Gone' there:
--- the same for a commit.
+-- the same for a commit. The working-tree side takes it from its list
+-- too: a dirty file's kind there came from lstat.
 readProjectFile :: EntrySource -> FileList -> RelPath -> IO (Either FileProblem Text)
 readProjectFile source fl p = case source of
   DiskEntries _ -> classify <$> readSourceEntry source p EntryFile
-  CommitEntries _ -> case Map.findWithDefault EntryFile p fl.entries of
-    EntrySubmodule _ -> pure (Left Gone)
-    EntryNestedRepo -> pure (Left Gone)
-    kind -> classify <$> readSourceEntry source p kind
+  CommitEntries _ -> fromList
+  WorkTreeEntries _ -> fromList
   where
+    fromList = case Map.findWithDefault EntryFile p fl.entries of
+      EntrySubmodule _ -> pure (Left Gone)
+      EntryNestedRepo -> pure (Left Gone)
+      kind -> classify <$> readSourceEntry source p kind
     classify = \case
       Right (TextContent t) -> Right t
       Right (Binary _) -> Left NotText

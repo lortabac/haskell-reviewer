@@ -1341,12 +1341,16 @@ calls, all with the hardening below:
   session. Only `contents <id>` and `info <id>` (hex ids), default
   format. Never `flush`, `remote-object-info` (it goes to the remote),
   `--filters` or `--textconv`.
-- Working-tree side and browse mode: `ls-files -z --stage [--debug]`,
-  `ls-files -z --others --exclude-standard`, `rev-parse --git-path
-  index`.
+- Browse mode: `ls-files -z --stage` and `ls-files -z --others
+  --exclude-standard`; files are read from disk as they are (no index,
+  no EOL rules; D-318).
+- Working-tree side (`--diff REV`): `rev-parse --git-path index`,
+  `ls-files -z --stage --debug`, `ls-files -z --others
+  --exclude-standard`.
 - EOL rules: `check-attr -z --stdin text eol crlf filter ident
   working-tree-encoding`, `config -z --get-regexp
-  '^core\.(autocrlf|filemode|symlinks|ignorecase|trustctime|checkstat)$'`.
+  '^(core\.(autocrlf|filemode|symlinks|ignorecase|trustctime|checkstat)|filter\.(unset|unspecified)\..*)$'`
+  (D-318: a driver named `unset` or `unspecified`).
 - There is no `git diff`, `diff-files`, `status` or `hash-object`: they
   compare file content and can run clean filters (§9.1). Nothing writes
   to `.git`: no index refresh, no temporary index, no new objects.
@@ -1384,36 +1388,44 @@ calls, all with the hardening below:
 - **Helper lookup**: `git`, `claude` and the companions are looked up only
   in absolute `PATH` entries, and a binary inside ROOT is never run. A
   change under review can't add a binary that we then start (§9.1).
-- **Working-tree side** (D-75, D-311):
+- **Working-tree side** (D-75, D-311, D-318), listed after the URL:
   - A file on disk can differ from its blob and still be unchanged (CRLF,
     `ident`, encodings, LFS).
-  - The index file is statted first, then read with `ls-files --debug`.
+  - The index file is statted first (and its `sharedindex.*` files: the
+    oldest counts), then read with `ls-files --debug`.
   - A path with a symlink (or a file) in a leading directory is deleted,
-    as in git. We never read through a symlinked directory: T04 walks
-    the path with `openat` per component (`O_NOFOLLOW|O_DIRECTORY`), since
-    an lstat of the leading directories then an open is a race. A file
-    gone after the check counts as changed.
+    as in git. We never read through a symlinked directory: we walk the
+    path with `openat` per component (`O_NOFOLLOW|O_DIRECTORY`), one fd
+    per directory level, since an lstat of the leading directories then
+    an open is a race. A file gone after the check counts as changed.
   - We compare each index entry's stat data with `lstat`: file type and
-    exec bit (a change there is dirty), size, mtime, ctime, inode and
-    owner.
+    exec bit (a change there is dirty), size (a change is dirty, as in
+    git; with a recorded size of 0 it makes a candidate), mtime, ctime,
+    inode and owner.
   - An entry that differs, has a recorded size of 0 (not the empty blob),
     or whose mtime seconds are not older than the index file's (racy) is
     a candidate. We hash candidates in process, after the EOL rules of
     `.gitattributes` and `core.autocrlf`; "binary" as git's
-    `convert_is_binary`. Config booleans are read as git reads them.
+    `convert_is_binary`. Config booleans are read as git reads them; a
+    bad one is a listing error, as git dies on it too.
   - Files are opened with `O_NOFOLLOW` and `O_NONBLOCK`, then checked
-    with `fstat`: only a regular file is read (a FIFO or symlink swapped
-    in after the `lstat` counts as changed).
+    with `fstat`: only a regular file with the same inode is read (a
+    FIFO or symlink swapped in after the `lstat` counts as changed).
+    Files over 64 MiB are not hashed: dirty.
   - A tracked file whose stat or hash matches is read from its index
-    blob. Dirty and untracked files are read from disk.
-  - A dirty file under any other filter (e.g. LFS) is shown as its
-    on-disk text, with a "filtered file" note. A touched file under such
-    a filter (or `ident`, `working-tree-encoding`) can't be checked
-    without running the filter, so it shows as dirty and filtered where
-    git would say clean (unless its raw bytes equal the blob). These are
-    extra dirty files, not missed changes.
+    blob. Dirty and untracked files are read from disk, with the EOL
+    rules applied (the text git would store).
+  - A file under any other filter (e.g. LFS), `ident` or
+    `working-tree-encoding` can't be checked without running the
+    filter, which we never do: unless clean by stat, it is dirty,
+    shown as its on-disk text with a "filtered file" note. So is a file
+    whose `text` or `crlf` attribute is set or unset, when reading it as
+    the value (`text=set`, which `check-attr` prints the same way and git
+    reads as no action) would clean its bytes differently. These are extra
+    dirty files, not missed changes (apart from gitlinks, below).
   - skip-worktree entries use the index blob; intent-to-add entries count
-    as untracked; unmerged entries are dirty.
+    as untracked; unmerged entries are dirty. Any doubt (an lstat error,
+    a file changed while we read it) is dirty.
 - Submodules are not entered. A submodule shows as one entry with its
   commit id (on the working-tree side, the index's id: the submodule's
   HEAD is not compared, so a moved HEAD shows as clean). A gitlink that

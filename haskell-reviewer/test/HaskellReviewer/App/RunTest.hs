@@ -971,6 +971,7 @@ runCabalChange = withCanonicalTemp $ \tmp -> do
               side = if o == headId then "head" else "base"
            in atomicModifyIORef' claimed (\rs -> (rs <> [(side, relPathText p)], ()))
         DiskEntries _ -> pure ()
+        WorkTreeEntries _ -> pure ()
       change _ d =
         d
           { checkRoot = \p -> pure (Right (Root p)),
