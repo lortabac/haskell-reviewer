@@ -64,8 +64,8 @@ haskell-reviewer [ROOT] [--diff REVSPEC] [options]
   - `BASE..HEAD`: compare two commits (any git rev syntax).
   - `BASE...HEAD`: compare `merge-base(BASE, HEAD)` with `HEAD` (PR semantics).
   - `REV`: compare `REV` with the **working tree** (including uncommitted and
-    untracked-but-not-ignored files). Not supported yet: exit 2 until T04
-    (D-316).
+    untracked-but-not-ignored files). Base is `REV`'s commit; head is the
+    working tree, as git sees it (§11.4.1, D-319).
 
   How it is read (D-316): split at the first `...`, else at the first `..`;
   no dots at all is `REV`. An empty end is `HEAD` (`main..` is
@@ -106,7 +106,8 @@ protect against other local users and DNS-rebinding attacks.
 - `--diff` is checked and its revisions resolved **before the URL line**
   (D-316). Each of these is exit 2: no git on PATH, ROOT not in a git work
   tree, an end that names no commit (unknown, or a blob or tree), no merge
-  base for `...`, and `REV` alone (not supported yet). Each prints one line
+  base for `...`. For `REV`, only `REV` is resolved here: the working tree
+  is listed after the URL (D-319). Each prints one line
   on stderr; a name in it has its control characters escaped. In a shallow
   clone, "names no commit" and "no merge base" say so. Bad syntax is a
   usage error: exit 2 with the usage text.
@@ -1089,7 +1090,7 @@ Therefore:
 | `--diff` with an unknown revision, or one that is not a commit (a blob, a tree) | Error, exit code 2, naming the revision. In a shallow clone the message says its history may be cut (D-316). |
 | `--diff BASE...HEAD` with no merge base | Error, exit code 2. In a shallow clone the message says to fetch more history (D-316). |
 | `--diff BASE...HEAD` with several merge bases | The first one git prints is the base; the count is kept for the header (D-316). |
-| `--diff` in a treeless partial clone (`--filter=tree:0`), a tree missing locally | Only found when the side is listed, after the URL: that side answers 500 "cannot list files", with a log line. Coordinator default, to be confirmed by the human (D-316). |
+| `--diff` in a treeless partial clone (`--filter=tree:0`), a tree missing locally | Only found when the side is listed, after the URL: that side answers 500 "cannot list files", with a log line (D-316). |
 | `--diff` and ROOT is not in one of the commits | That side has no files (an implicit project, empty). |
 | A module fails to parse | Text-only fallback (§3.1). |
 | HIE files missing or stale | Syntactic tier, shown in the header. |
@@ -1418,7 +1419,8 @@ calls, all with the hardening below:
   - A file under any other filter (e.g. LFS), `ident` or
     `working-tree-encoding` can't be checked without running the
     filter, which we never do: unless clean by stat, it is dirty,
-    shown as its on-disk text with a "filtered file" note. So is a file
+    shown as its on-disk text with a "filtered file" note (`filtered:
+    true` on `api/file` and `api/source`, D-319). So is a file
     whose `text` or `crlf` attribute is set or unset, when reading it as
     the value (`text=set`, which `check-attr` prints the same way and git
     reads as no action) would clean its bytes differently. These are extra
@@ -1668,7 +1670,9 @@ a framework would cost more than it saves.
   an outline (each entry with a label from the server: the name, or the
   instance head, `instance C Maybe (Maybe a)`, D-287); the file's text
   comes from `api/file`. While the answer is partial, the view refetches
-  on `indexing` events, at most once a second (D-286). A module page
+  on `indexing` events, at most once a second (D-286). `api/file` and
+  `api/source` also carry `filtered`: true for a working-tree file read
+  from disk that git would filter (D-319). A module page
   has the same `partial` flag and a targets table of the same shape for
   its links out of the module (D-289); the docs page refetches it the
   same way and only its links change (D-293). Search is

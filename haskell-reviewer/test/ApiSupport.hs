@@ -69,10 +69,12 @@ import HaskellReviewer.Core.Address (Port (..), Token, tokenFromBytes, tokenText
 import HaskellReviewer.Core.Config (builtinDefaults)
 import HaskellReviewer.Core.FileContent
   ( FileContent (..),
+    FileNotes (..),
     FileSize (..),
     LinkInfo (..),
     TooLargeInfo (..),
     textLimit,
+    unfiltered,
   )
 import HaskellReviewer.Core.FileList
   ( CommitId (..),
@@ -154,6 +156,8 @@ data TestApi = TestApi
     -- 'diffApi' made it.
     sides :: Sides (IO (Either ListError Snapshot)),
     readEntry :: Snapshot -> RelPath -> EntryKind -> IO (Either ReadError FileContent),
+    -- | Unfiltered by default.
+    fileNotes :: Snapshot -> RelPath -> FileNotes,
     parse :: ParseSettings -> Text -> IO ModuleParse,
     -- | For read errors.
     logger :: Logger,
@@ -449,6 +453,7 @@ apiFor snap =
     { sides = BrowseSides (Right <$> snap),
       readEntry = \_ p _ ->
         pure (maybe (Left ReadGone) Right (lookup (relPathText p) contents)),
+      fileNotes = \_ _ -> unfiltered,
       parse = parseGuarded,
       logger = newLogger LevelInfo (\_ -> pure ()),
       workers = 1,
@@ -1170,6 +1175,7 @@ sendApiQuery method headers reqBody query api path = do
         FilesApi
           { snapshotOn = \side -> pure <$> lookupSide side listed,
             readEntry = api.readEntry,
+            fileNotes = api.fileNotes,
             logger = api.logger
           }
       routes = Routes {events = events, files = files, prefs = prefsStore}

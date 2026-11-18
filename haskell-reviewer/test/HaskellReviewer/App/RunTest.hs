@@ -53,6 +53,7 @@ import HaskellReviewer.Core.Project (GhcVersion (..))
 import HaskellReviewer.Core.RelPath (relPathFromBytes, relPathText)
 import HaskellReviewer.Core.Revspec
   ( BaseFrom (..),
+    CommitsInfo (..),
     DiffInfo (..),
     Range (..),
     RangeForm (..),
@@ -98,6 +99,7 @@ import HaskellReviewer.Effects.Source
   )
 import HaskellReviewer.Effects.Spawn (SoftLimit (..), SpawnSetup (..))
 import HaskellReviewer.Effects.Trace (Span (..), TraceFileError (..), Tracer (..))
+import HaskellReviewer.Server.CborJson (cborToJson)
 import HaskellReviewer.Server.Listen (ListenError (..), Listener (..))
 import HaskellReviewer.Session.Project qualified as Session.Project
 import Network.Wai (Application, Request (..), defaultRequest, responseToStream)
@@ -726,6 +728,54 @@ diffTests =
               out <- readIORef fake.console
               filter isDone out
                 @?= [allDone],
+      testCase "--diff HEAD: head the working tree, through the real probe" $
+        withCanonicalTemp $ \tmp -> do
+          let repo = tmp </> "repo"
+          fixtureRepo "edits" [repo]
+          Dir.createDirectory (tmp </> "home")
+          setup <- gitSetup (tmp </> "home") gitProbeTimeLimit
+          let change _ d =
+                d
+                  { checkRoot = \p -> pure (Right (Root p)),
+                    probeFiles = probeFilesWith setup,
+                    readEntry = readSourceEntry
+                  }
+              args = [repo, "--idle-exit", "0", "--verbose", "--diff", "HEAD"]
+          headId <- gitOut repo ["rev-parse", "HEAD"]
+          let short = Text.take 7 (Text.strip (Text.pack headId))
+          withRunningProbe args change $ \fake app -> do
+            ok <- waitFor 10 (any isDone <$> readIORef fake.console)
+            assertBool "not indexed" ok
+            let view route side p = do
+                  r <- getSidePath app ([route, side] <> p)
+                  (route, side, p, r.status) @?= (route, side, p, 200)
+                  either (assertFailure . show) (pure . LBS.toStrict) (cborToJson r.body)
+                has needle body = assertBool (show body) (needle `BS.isInfixOf` body)
+            -- Edited, staged only, untracked; LFS: filtered on head only.
+            view "file" "head" ["src", "A.hs"] >>= has "a = 2\\n"
+            view "file" "base" ["src", "A.hs"] >>= has "a = 1\\n"
+            view "file" "head" ["src", "S.hs"] >>= has "s = 2\\n"
+            view "file" "base" ["src", "S.hs"] >>= has "s = 1\\n"
+            view "file" "head" ["src", "New.hs"] >>= has "module New"
+            view "file" "head" ["data.bin"] >>= has "big data\\n\",\"filtered\":true"
+            view "source" "head" ["data.bin"] >>= has "\"filtered\":true"
+            view "file" "base" ["data.bin"] >>= has "\"filtered\":false"
+            view "source" "base" ["data.bin"] >>= has "\"filtered\":false"
+            view "file" "head" ["src", "B.hs"] >>= has "\"filtered\":false"
+            newOnBase <- getSidePath app ["file", "base", "src", "New.hs"]
+            newOnBase.status @?= 404
+            t <- getSide app "files" "tree"
+            t.status @?= 404
+            out <- readIORef fake.console
+            forM_
+              [ "diff: HEAD (against the working tree)",
+                "head: working tree",
+                "base: HEAD = " <> short,
+                "changed: 3 on head, 2 on base, indexed first"
+              ]
+              $ \l -> assertBool (show out) (l `elem` out)
+            filter isDone out
+              @?= ["indexing: done, 7 modules (7 ready, 0 failed, 7 text only) in 0 ms"],
       testCase "stop during indexing: exit 0, both sides failed" $ do
         fake <- newFake
         stop <- newEmptyMVar
@@ -1190,11 +1240,12 @@ fakeProbe = \case
   where
     oid c = ObjectId (Text.replicate 40 c)
     info =
-      DiffInfo
-        { range = Range TwoDot "HEAD~1" "HEAD",
-          sides = Pair {head = oid "1", base = oid "2"},
-          baseFrom = BaseTyped
-        }
+      CommitsDiff
+        CommitsInfo
+          { range = Range TwoDot "HEAD~1" "HEAD",
+            sides = Pair {head = oid "1", base = oid "2"},
+            baseFrom = BaseTyped
+          }
 
 -- | A listing that never ends.
 neverDone :: IO (Either ListError FileList)

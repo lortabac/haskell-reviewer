@@ -221,7 +221,8 @@ diffOption =
     ( Opt.long "diff"
         <> Opt.metavar "REVSPEC"
         <> Opt.help
-          "Compare two commits: BASE..HEAD, or BASE...HEAD from their merge base"
+          "Compare two commits, or a commit and the working tree: BASE..HEAD, \
+          \BASE...HEAD (from the merge base), or REV"
     )
 
 readRevspec :: String -> Either String Revspec

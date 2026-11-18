@@ -99,7 +99,7 @@ describe("FileView", () => {
     const main = await open(
       "empty.txt",
       200,
-      cbor({ generation: 1, kind: "text", text: "" }),
+      cbor({ generation: 1, filtered: false, kind: "text", text: "" }),
     );
     expect(main.textContent).toContain("This file is empty.");
     expect(main.querySelector('[role="grid"]')).toBeNull();
@@ -142,6 +142,7 @@ describe("FileView", () => {
       200,
       cbor({
         generation: 1,
+        filtered: false,
         kind: "symlink",
         target: "/etc/passwd",
         resolved: null,
@@ -162,7 +163,7 @@ describe("FileView", () => {
     const main = await open(
       "vendor/nested",
       200,
-      cbor({ generation: 1, kind: "submodule", commit: null }),
+      cbor({ generation: 1, filtered: false, kind: "submodule", commit: null }),
     );
     expect(main.textContent).toContain(
       "Nested git repository. Its files aren't shown.",
@@ -316,7 +317,14 @@ describe("FileView navigation", () => {
           return new Promise((resolve) => (late = resolve));
         }
         return Promise.resolve(
-          ok(cbor({ generation: 1, kind: "text", text: "new file\n" })),
+          ok(
+            cbor({
+              generation: 1,
+              filtered: false,
+              kind: "text",
+              text: "new file\n",
+            }),
+          ),
         );
       }),
     );
@@ -382,7 +390,7 @@ describe("FileView #L<n>", () => {
         200,
         text === undefined
           ? cborFixture("file-text")
-          : cbor({ generation: 1, kind: "text", text }),
+          : cbor({ generation: 1, filtered: false, kind: "text", text }),
       ],
     });
     const main = mountAppAt(`/tok/src/tree/app/Main.hs${hash}`).querySelector(
@@ -513,6 +521,7 @@ describe("FileView highlighting", () => {
     ref: "Main",
     tier: { kind: "syntactic", reason: "no-hie" },
     partial: false,
+    filtered: false,
     highlight: "lexed",
     // module (keyword), Main (typeCon), line 3 excluded (a region run),
     // the string on line 5 (literal; non-ASCII inside).
@@ -654,6 +663,7 @@ describe("FileView highlighting", () => {
         ref: "Main",
         tier: { kind: "syntactic", reason: "no-hie" },
         partial: false,
+        filtered: false,
         highlight: "plain",
       },
     ],
@@ -710,6 +720,7 @@ describe("FileView links and refetch", () => {
     ref: "Main",
     tier: { kind: "syntactic", reason: "no-hie" },
     partial: false,
+    filtered: false,
     highlight: "lexed",
     runs,
     regions: [],
@@ -1061,7 +1072,7 @@ describe("FileView landing mark, more", () => {
       "/tok/api/files/tree": [200, fixture("files")],
       "/tok/api/file/tree/app/Main.hs": [
         200,
-        cbor({ generation: 1, kind: "text", text }),
+        cbor({ generation: 1, filtered: false, kind: "text", text }),
       ],
     });
     const main = mountAppAt(

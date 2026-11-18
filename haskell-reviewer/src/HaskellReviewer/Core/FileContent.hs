@@ -6,6 +6,10 @@ module HaskellReviewer.Core.FileContent
     TooLargeInfo (..),
     LinkInfo (..),
 
+    -- * Notes
+    FileNotes (..),
+    unfiltered,
+
     -- * Classifying
     contentFromBytes,
     textLimit,
@@ -17,6 +21,7 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.Text (Text)
 import Data.Text.Encoding qualified as Text.Encoding
+import HaskellReviewer.Core.Eol (Filtering (..))
 import HaskellReviewer.Core.FileList (CommitId)
 import HaskellReviewer.Core.RelPath (RelPath)
 
@@ -51,6 +56,20 @@ data LinkInfo = LinkInfo
     resolved :: Maybe RelPath
   }
   deriving (Eq, Show)
+
+-- | What a side says about one file, besides its content. Sent with
+-- the file view and the source view.
+data FileNotes = FileNotes
+  { -- | Read from disk, and git would run more than the line-end rule
+    -- on it (a filter, ident, working-tree-encoding): what git stores
+    -- may differ.
+    filtered :: Filtering
+  }
+  deriving (Eq, Show)
+
+-- | No notes: every file of a commit, and of browse mode.
+unfiltered :: FileNotes
+unfiltered = FileNotes {filtered = Unfiltered}
 
 -- | Text files bigger than this are not shown: 1 MiB.
 textLimit :: FileSize

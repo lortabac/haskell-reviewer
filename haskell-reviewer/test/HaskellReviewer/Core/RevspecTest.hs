@@ -47,20 +47,26 @@ tests =
       testCase "the log lines" $ do
         let oid c = ObjectId (Text.replicate 40 c)
             info =
-              DiffInfo
+              CommitsInfo
                 { range = Range ThreeDot "main" "feature",
                   sides = Pair {head = oid "1", base = oid "2"},
                   baseFrom = MergeBase 2
                 }
-        diffInfoLines info
+        diffInfoLines (CommitsDiff info)
           @?= [ "diff: main...feature",
                 "head: feature = 1111111",
                 "base: merge base of main and feature = 2222222 (1 of 2)"
               ]
-        diffInfoLines info {range = Range TwoDot "main" "feature", baseFrom = BaseTyped}
+        diffInfoLines
+          (CommitsDiff info {range = Range TwoDot "main" "feature", baseFrom = BaseTyped})
           @?= [ "diff: main..feature",
                 "head: feature = 1111111",
                 "base: main = 2222222"
+              ]
+        diffInfoLines (WorkTreeDiff WorkTreeInfo {rev = "v1\n", base = oid "3"})
+          @?= [ "diff: v1\\n (against the working tree)",
+                "head: working tree",
+                "base: v1\\n = 3333333"
               ],
       testCase "printable: control characters escaped" $ do
         printable "a\nb\ESC[31mc\td" @?= "a\\nb\\ESC[31mc\\td"

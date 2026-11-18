@@ -5,7 +5,6 @@ module HaskellReviewer.Effects.Source
     EntrySource (..),
     CommitSource (..),
     WorkTreeSource (..),
-    FileNotes (..),
     Lister (..),
     Listed (..),
     Probe (..),
@@ -53,7 +52,6 @@ import HaskellReviewer.Core.Eol
     CleanEol (..),
     EolRule (..),
     ExecBit (..),
-    Filtering (..),
     Symlinks (..),
     applyEol,
     cleanForms,
@@ -72,9 +70,11 @@ import HaskellReviewer.Core.Eol
   )
 import HaskellReviewer.Core.FileContent
   ( FileContent (..),
+    FileNotes (..),
     FileSize (..),
     contentFromBytes,
     textLimit,
+    unfiltered,
   )
 import HaskellReviewer.Core.FileList (EntryKind (..), FileList)
 import HaskellReviewer.Core.Git
@@ -84,7 +84,13 @@ import HaskellReviewer.Core.Git
     parseTreeEntries,
   )
 import HaskellReviewer.Core.RelPath (RelPath, parseRelPath)
-import HaskellReviewer.Core.Revspec (DiffInfo (..), Revspec (..), printable)
+import HaskellReviewer.Core.Revspec
+  ( CommitsInfo (..),
+    DiffInfo (..),
+    Revspec (..),
+    WorkTreeInfo (..),
+    printable,
+  )
 import HaskellReviewer.Core.Root (CanonicalRoot (..), Root (..))
 import HaskellReviewer.Core.Sides (Pair (..))
 import HaskellReviewer.Core.WorkTree
@@ -129,7 +135,12 @@ import HaskellReviewer.Effects.GitObjects
     withObjectReader,
   )
 import HaskellReviewer.Effects.Log (Logger)
-import HaskellReviewer.Effects.Revisions (DiffError, renderDiffError, resolveDiff)
+import HaskellReviewer.Effects.Revisions
+  ( DiffError,
+    renderDiffError,
+    resolveAgainstWorkTree,
+    resolveDiff,
+  )
 import HaskellReviewer.Effects.WorkTree (WorkTreeFiles (..), listWorkTree)
 
 {- Note [Entry sources]
@@ -176,15 +187,6 @@ data WorkTreeSource = WorkTreeSource
     files :: Map RelPath WorkFile
   }
 
--- | What a side says about one file, besides its content.
-data FileNotes = FileNotes
-  { -- | Read from disk, and git would run more than the line-end rule
-    -- on it (a filter, ident, working-tree-encoding): what git stores
-    -- may differ.
-    filtered :: Filtering
-  }
-  deriving (Eq, Show)
-
 -- | The files of one commit.
 data CommitSource = CommitSource
   { -- | The commit listed.
@@ -223,9 +225,7 @@ data ProbeError
     ProbeNoGit
   | -- | @--diff@ and ROOT is not in a git work tree. The ROOT.
     ProbeNotWorkTree FilePath
-  | -- | @--diff REV@: not supported yet.
-    ProbeWorkTreeNotYet
-  | -- | The revisions of the range don't give two commits.
+  | -- | The revisions of @--diff@ don't give the commits.
     ProbeDiff DiffError
   deriving (Eq, Show)
 
@@ -236,14 +236,12 @@ renderProbeError = \case
   ProbeNoGit -> "--diff needs git, and there is none on PATH"
   ProbeNotWorkTree root ->
     "--diff needs ROOT in a git work tree: " <> printable (Text.pack root)
-  ProbeWorkTreeNotYet ->
-    "--diff REV (against the working tree) is not supported yet; \
-    \use BASE..HEAD or BASE...HEAD"
   ProbeDiff e -> renderDiffError e
 
 -- | Check git (see Note [Git hardening] in "HaskellReviewer.Effects.Git")
--- and get ready to list each side: ROOT on disk in browse mode, two
--- commits with @--diff@ (D-316). Before the URL line.
+-- and get ready to list each side: ROOT on disk in browse mode; with
+-- @--diff@, two commits, or a commit and the working tree (D-316). Only
+-- the revisions are resolved here, before the URL line.
 probeFiles :: Logger -> Root -> Maybe Revspec -> IO (Either ProbeError Probe)
 probeFiles logger root spec = do
   setup <- systemGitSetup
@@ -258,30 +256,61 @@ probeFilesWith setup logger root = \case
     probeGitWith setup logger root >>= \case
       Left e -> pure (Left (ProbeGit e))
       Right listing -> pure (Right (BrowseProbe (diskLister logger canon listing)))
-  Just (AgainstWorkTree _) -> pure (Left ProbeWorkTreeNotYet)
   Just (RangeSpec range) ->
-    probeGitWith setup logger root >>= \case
-      Left e -> pure (Left (ProbeGit e))
-      Right (ListFromDisk NoGitFound) -> pure (Left ProbeNoGit)
-      Right (ListFromDisk _) -> pure (Left (ProbeNotWorkTree root.path))
-      Right (ListFromGit git) ->
-        repoInfo git >>= \case
-          Left e -> pure (Left (ProbeGit e))
-          Right info ->
-            resolveDiff git info range >>= \case
-              Left e -> pure (Left (ProbeGit e))
-              Right (Left e) -> pure (Left (ProbeDiff e))
-              Right (Right di) -> pure (Right (diffProbe logger git info di))
+    inRepo $ \git info ->
+      orProbeError (resolveDiff git info range) $ \ci ->
+        pure (commitsProbe logger git info ci)
+  Just (AgainstWorkTree rev) ->
+    inRepo $ \git info ->
+      orProbeError (resolveAgainstWorkTree git info rev) $ \wi -> do
+        canon <- canonicalRoot root
+        pure (workTreeProbe logger git info canon wi)
+  where
+    -- ROOT in a git work tree, and the repo's info.
+    inRepo :: (Git -> RepoInfo -> IO (Either ProbeError a)) -> IO (Either ProbeError a)
+    inRepo k =
+      probeGitWith setup logger root >>= \case
+        Left e -> pure (Left (ProbeGit e))
+        Right (ListFromDisk NoGitFound) -> pure (Left ProbeNoGit)
+        Right (ListFromDisk _) -> pure (Left (ProbeNotWorkTree root.path))
+        Right (ListFromGit git) ->
+          repoInfo git >>= \case
+            Left e -> pure (Left (ProbeGit e))
+            Right info -> k git info
+    -- The revisions resolved, or why not.
+    orProbeError ::
+      IO (Either GitError (Either DiffError x)) ->
+      (x -> IO Probe) ->
+      IO (Either ProbeError Probe)
+    orProbeError resolve k =
+      resolve >>= \case
+        Left e -> pure (Left (ProbeGit e))
+        Right (Left e) -> pure (Left (ProbeDiff e))
+        Right (Right x) -> Right <$> k x
 
 -- | Two commit sides, read through one object reader. It starts no
 -- process before the first read.
-diffProbe :: Logger -> Git -> RepoInfo -> DiffInfo -> Probe
-diffProbe logger git info di =
-  DiffProbe di $ \k ->
+commitsProbe :: Logger -> Git -> RepoInfo -> CommitsInfo -> Probe
+commitsProbe logger git info ci =
+  DiffProbe (CommitsDiff ci) $ \k ->
     withObjectReader logger defaultReaderSettings git $ \r ->
-      k Pair {head = lister r di.sides.head, base = lister r di.sides.base}
+      k Pair {head = lister r ci.sides.head, base = lister r ci.sides.base}
   where
     lister = commitLister logger git info
+
+-- | Base a commit, head the working tree, read through one object
+-- reader (head reads its clean files from the index). Head is listed
+-- after the URL, like base.
+workTreeProbe ::
+  Logger -> Git -> RepoInfo -> CanonicalRoot -> WorkTreeInfo -> Probe
+workTreeProbe logger git info canon wi =
+  DiffProbe (WorkTreeDiff wi) $ \k ->
+    withObjectReader logger defaultReaderSettings git $ \r ->
+      k
+        Pair
+          { head = workTreeLister logger git info r canon,
+            base = commitLister logger git info r wi.base
+          }
 
 -- | List ROOT as it is on disk, with git or without.
 diskLister :: Logger -> CanonicalRoot -> Listing -> Lister
@@ -354,7 +383,7 @@ fileNotes :: EntrySource -> RelPath -> FileNotes
 fileNotes source p = case source of
   WorkTreeEntries src
     | Just (FromDisk d) <- Map.lookup p src.files -> FileNotes {filtered = d.filtered}
-  _ -> FileNotes {filtered = Unfiltered}
+  _ -> unfiltered
 
 -- | Read one entry of a commit. See Note [Entry sources].
 readCommitEntry ::

@@ -33,18 +33,22 @@ export interface FileList {
   truncated: boolean;
 }
 
-export type FileView =
-  | { generation: number; kind: "text"; text: string }
-  | { generation: number; kind: "binary"; size: number }
-  | { generation: number; kind: "too-large"; size: number; limit: number }
-  // resolved: the listed file the link points to, if any.
-  | {
-      generation: number;
-      kind: "symlink";
-      target: string;
-      resolved: string | null;
-    }
-  | { generation: number; kind: "submodule"; commit: string | null };
+// filtered: read from disk, and git would filter it (LFS, say): what
+// git stores may differ.
+interface FileViewHead {
+  generation: number;
+  filtered: boolean;
+}
+
+export type FileView = FileViewHead &
+  (
+    | { kind: "text"; text: string }
+    | { kind: "binary"; size: number }
+    | { kind: "too-large"; size: number; limit: number }
+    // resolved: the listed file the link points to, if any.
+    | { kind: "symlink"; target: string; resolved: string | null }
+    | { kind: "submodule"; commit: string | null }
+  );
 
 export const fileViewKinds = [
   "text",
@@ -83,15 +87,17 @@ export function decodeFileView(value: unknown): FileView {
   const path = "$";
   const o = object(value, path);
   const generation = field(o, "generation", path, nat);
+  const filtered = field(o, "filtered", path, bool);
   const kind = field(o, "kind", path, oneOf(fileViewKinds));
   switch (kind) {
     case "text":
-      return { generation, kind, text: field(o, "text", path, str) };
+      return { generation, filtered, kind, text: field(o, "text", path, str) };
     case "binary":
-      return { generation, kind, size: field(o, "size", path, nat) };
+      return { generation, filtered, kind, size: field(o, "size", path, nat) };
     case "too-large":
       return {
         generation,
+        filtered,
         kind,
         size: field(o, "size", path, nat),
         limit: field(o, "limit", path, nat),
@@ -99,6 +105,7 @@ export function decodeFileView(value: unknown): FileView {
     case "symlink":
       return {
         generation,
+        filtered,
         kind,
         target: field(o, "target", path, str),
         resolved: field(o, "resolved", path, nullable(str)),
@@ -106,6 +113,7 @@ export function decodeFileView(value: unknown): FileView {
     case "submodule":
       return {
         generation,
+        filtered,
         kind,
         commit: field(o, "commit", path, nullable(str)),
       };

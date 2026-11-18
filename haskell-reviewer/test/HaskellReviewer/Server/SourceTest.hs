@@ -34,7 +34,8 @@ import Data.Maybe (fromMaybe)
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
-import HaskellReviewer.Core.FileContent (FileContent (..), LinkInfo (..))
+import HaskellReviewer.Core.Eol (Filtering (..))
+import HaskellReviewer.Core.FileContent (FileContent (..), FileNotes (..), LinkInfo (..))
 import HaskellReviewer.Core.Highlight (DisplayClass, linkedRunWidth)
 import HaskellReviewer.Core.ModuleModel
   ( ParseError (..),
@@ -199,13 +200,21 @@ routeTests =
       v <- okSource sourceApi "s/src/B.hs"
       -- Not s:test:t:B.
       str (field "ref" v) @?= "s:lib:B",
+    testCase "filtered: from the snapshot's file notes, on plain and lexed" $ do
+      let filteredApi = sourceApi {fileNotes = \_ _ -> FileNotes {filtered = Filtered}}
+      plain <- okSource filteredApi {workers = 0} "s/notes.txt"
+      field "filtered" plain @?= Aeson.Bool True
+      lexed <- okSource (indexed filteredApi) "s/src/B.hs"
+      str (field "highlight" lexed) @?= "lexed"
+      field "filtered" lexed @?= Aeson.Bool True,
     testCase "plain: not a module, boot, symlink, submodule, generated, ..." $
       mapM_
         ( \(p, ref) -> do
             v <- okSource sourceApi p
             (p, str (field "highlight" v)) @?= (p, "plain")
             (p, maybeStr (field "ref" v)) @?= (p, ref)
-            (p, fieldCount v) @?= (p, 6)
+            (p, fieldCount v) @?= (p, 7)
+            (p, field "filtered" v) @?= (p, Aeson.Bool False)
         )
         [ ("s/notes.txt", Nothing),
           ("s/src/A.hs-boot", Nothing),

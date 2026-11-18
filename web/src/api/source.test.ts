@@ -14,6 +14,7 @@ const head = {
   ref: "A",
   tier: { kind: "syntactic", reason: "no-hie" },
   partial: false,
+  filtered: false,
 };
 
 const lexed = {
@@ -56,6 +57,8 @@ describe("source view", () => {
       { ...lexed, ref: undefined },
       { ...lexed, tier: { kind: "precise", reason: "no-hie" } },
       { ...lexed, partial: "no" },
+      { ...lexed, filtered: "no" },
+      { ...lexed, filtered: undefined },
       { ...lexed, highlight: "fancy" },
       { ...lexed, runs: undefined },
       // Not 6 a run.

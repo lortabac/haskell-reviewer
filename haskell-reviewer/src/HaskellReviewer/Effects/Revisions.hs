@@ -1,4 +1,4 @@
--- | Resolving @--diff@ to two commits, before the URL line (SPEC §2,
+-- | Resolving @--diff@ to its commits, before the URL line (SPEC §2,
 -- D-316).
 module HaskellReviewer.Effects.Revisions
   ( -- * Types
@@ -6,6 +6,7 @@ module HaskellReviewer.Effects.Revisions
 
     -- * Resolving
     resolveDiff,
+    resolveAgainstWorkTree,
     renderDiffError,
   )
 where
@@ -15,19 +16,20 @@ import Data.Text qualified as Text
 import HaskellReviewer.Core.Git (History (..), ObjectId, RepoInfo (..))
 import HaskellReviewer.Core.Revspec
   ( BaseFrom (..),
-    DiffInfo (..),
+    CommitsInfo (..),
     Range (..),
     RangeForm (..),
+    WorkTreeInfo (..),
     printable,
     renderRange,
   )
 import HaskellReviewer.Core.Sides (Pair (..))
 import HaskellReviewer.Effects.Git (Git, GitError, mergeBase, resolveCommit)
 
--- | Why the revisions of a range don't give two commits. Exit 2.
+-- | Why the revisions of @--diff@ don't give the commits. Exit 2.
 data DiffError
-  = -- | An end that names no commit: unknown, or a blob or tree. The
-    -- end as typed.
+  = -- | An end (or @REV@) that names no commit: unknown, or a blob or
+    -- tree. As typed.
     DiffUnknownRev Text History
   | -- | @BASE...HEAD@ with no merge base.
     DiffNoMergeBase Range History
@@ -55,7 +57,7 @@ renderDiffError = \case
 -- a bad base is reported first. One call at a time: two at once risks
 -- Q-RTS-BLACKHOLE and saves only a few ms.
 resolveDiff ::
-  Git -> RepoInfo -> Range -> IO (Either GitError (Either DiffError DiffInfo))
+  Git -> RepoInfo -> Range -> IO (Either GitError (Either DiffError CommitsInfo))
 resolveDiff git info range =
   commit range.base >>= \case
     Left e -> pure (Left e)
@@ -77,4 +79,14 @@ resolveDiff git info range =
     unknown rev = pure (Right (Left (DiffUnknownRev rev info.history)))
     found b h from =
       pure . Right . Right $
-        DiffInfo {range = range, sides = Pair {head = h, base = b}, baseFrom = from}
+        CommitsInfo {range = range, sides = Pair {head = h, base = b}, baseFrom = from}
+
+-- | Resolve @REV@ for @--diff REV@: base's commit. Head is the working
+-- tree, listed after the URL. Errors as for 'resolveDiff'.
+resolveAgainstWorkTree ::
+  Git -> RepoInfo -> Text -> IO (Either GitError (Either DiffError WorkTreeInfo))
+resolveAgainstWorkTree git info rev =
+  resolveCommit git (Text.unpack rev) >>= \case
+    Left e -> pure (Left e)
+    Right Nothing -> pure (Right (Left (DiffUnknownRev rev info.history)))
+    Right (Just b) -> pure (Right (Right WorkTreeInfo {rev = rev, base = b}))

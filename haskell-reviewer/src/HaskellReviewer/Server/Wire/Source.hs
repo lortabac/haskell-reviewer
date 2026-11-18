@@ -29,6 +29,8 @@ import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Word (Word32)
+import HaskellReviewer.Core.Eol (Filtering (..))
+import HaskellReviewer.Core.FileContent (FileNotes (..), unfiltered)
 import HaskellReviewer.Core.Highlight
   ( LinkedRuns,
     Run (..),
@@ -84,7 +86,11 @@ import HaskellReviewer.Core.Tokens (tokenCount)
 import HaskellReviewer.Effects.Parser (declsWarmUp, highlightWarmUp)
 import HaskellReviewer.Server.Cbor (Encoding)
 import HaskellReviewer.Server.Cbor qualified as Cbor
-import HaskellReviewer.Server.Wire (encodeFileNotFound, encodeModuleNotFound)
+import HaskellReviewer.Server.Wire
+  ( encodeFileNotFound,
+    encodeModuleNotFound,
+    filteredValue,
+  )
 import HaskellReviewer.Server.Wire.Page (syntacticTier)
 import HaskellReviewer.Server.Wire.Targets (encodeTarget)
 import HaskellReviewer.Session.Snapshot (Generation (..))
@@ -95,13 +101,15 @@ GET api/source/<side>/<path> is CBOR, built per request (no cache). The
 file's text is not in it: the client gets it from api/file. In JSON
 terms:
 
-  {generation, path, ref, tier, partial, highlight}
+  {generation, path, ref, tier, partial, filtered, highlight}
 
 ref is the module's ref (null if the file is no module), tier as on
 the module page, partial true when resolution read a module not ready
-yet (the client asks again later). highlight is "plain" (nothing more:
-not a module, generated, preprocessed, not text, too large, or text
-only with nothing to show) or "lexed", which adds:
+yet (the client asks again later), filtered as on api/file (a file
+read from disk that git would filter; 'FileNotes'). highlight is
+"plain" (nothing more: not a module, generated, preprocessed, not
+text, too large, or text only with nothing to show) or "lexed", which
+adds:
 
 - runs: a flat int array, 6 per run: start line minus the previous
   run's start line (for the first run, minus 0: its start line), start
@@ -150,6 +158,8 @@ data SourceView = SourceView
     -- | 'Nothing' if the file is no module.
     moduleId :: Maybe ModuleId,
     partial :: Bool,
+    -- | Sent as @filtered@.
+    notes :: FileNotes,
     body :: SourceBody
   }
 
@@ -207,7 +217,8 @@ encodeSource (Generation g) idx v =
       ("path", Cbor.text (relPathText v.path)),
       ("ref", Cbor.nullable (Cbor.text . moduleRef idx) v.moduleId),
       ("tier", syntacticTier),
-      ("partial", Cbor.bool v.partial)
+      ("partial", Cbor.bool v.partial),
+      ("filtered", filteredValue v.notes)
     ]
       <> case v.body of
         PlainBody -> [("highlight", Cbor.text "plain")]
@@ -303,6 +314,7 @@ sourceWarmUp =
             { path = file,
               moduleId = moduleAtPath idx file,
               partial = maybe False isPartial res,
+              notes = unfiltered,
               body = LexedBody (parsedSource p.parsed links)
             }
       _ -> Nothing
@@ -317,6 +329,7 @@ sourceWarmUp =
                     { path = file,
                       moduleId = Just i,
                       partial = False,
+                      notes = unfiltered,
                       body = LexedBody (parsedSource m links)
                     }
             TextOnly o ->
@@ -324,9 +337,17 @@ sourceWarmUp =
                 { path = file,
                   moduleId = Nothing,
                   partial = False,
+                  notes = unfiltered,
                   body = textOnlySource o
                 }
-    view p i b = SourceView {path = warmUpPath p, moduleId = i, partial = False, body = b}
+    view p i b =
+      SourceView
+        { path = warmUpPath p,
+          moduleId = i,
+          partial = False,
+          notes = unfiltered,
+          body = b
+        }
     -- A field of two types: a guess of the occurrence table.
     fieldsModule =
       "{-# LANGUAGE DuplicateRecordFields #-}\nmodule M where\n\
@@ -337,14 +358,15 @@ sourceWarmUp =
 
 -- | Every lexed warm-up view stacked into one, as if the files were one
 -- after the other: lines shifted, links and targets renumbered. Not a
--- real file: it covers every value at once, for the coverage test and
--- the source-warm-up fixture. See Note [Source view].
+-- real file: it covers every value at once (filtered too), for the
+-- coverage test and the source-warm-up fixture. See Note [Source view].
 coveringView :: SourceView
 coveringView =
   SourceView
     { path = warmUpPath "Covering.hs",
       moduleId = Nothing,
       partial = any (.partial) sourceWarmUp,
+      notes = FileNotes {filtered = Filtered},
       body = LexedBody (stack [s | SourceView {body = LexedBody s} <- sourceWarmUp])
     }
 

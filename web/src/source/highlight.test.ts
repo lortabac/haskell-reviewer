@@ -95,6 +95,7 @@ describe("outline", () => {
       ref: "A",
       tier: { kind: "syntactic", reason: "no-hie" },
       partial: false,
+      filtered: false,
       highlight: "lexed",
       runs: [],
       regions: [],
@@ -116,6 +117,7 @@ describe("outline", () => {
       ref: "A",
       tier: { kind: "syntactic", reason: "no-hie" },
       partial: false,
+      filtered: false,
       highlight: "lexed",
       runs: packRuns([
         run(1, 1, 1, 2, 2, 2),
