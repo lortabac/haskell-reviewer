@@ -19,6 +19,9 @@ module HaskellReviewer.Effects.GitObjects
     readBlob,
     objectInfo,
     renderObjectError,
+
+    -- * Warm-up
+    warmUpReader,
   )
 where
 
@@ -29,6 +32,7 @@ import Control.Exception
   ( IOException,
     SomeException,
     bracket,
+    evaluate,
     finally,
     mask,
     mask_,
@@ -252,6 +256,48 @@ readBlob r cap oid = ask r oid (\c -> talkContents c oid cap)
 objectInfo :: ObjectReader -> ObjectId -> IO (Either ObjectError ObjectInfo)
 objectInfo r oid = ask r oid (\c -> talkInfo c oid)
 
+-- | Build the shared values of a read before workers and request
+-- threads read at once (Q-RTS-BLACKHOLE): the header parser on every
+-- arm, the id check, the death check and every message. Run before
+-- warp. Throws if a sample doesn't parse as it should (a bug).
+--
+-- Not warmed: the talk path (the verb literals, talkContents,
+-- talkInfo). It needs a live process, so a read before the URL. A
+-- process start is serialised under the registry lock anyway.
+warmUpReader :: IO ()
+warmUpReader = do
+  forM_ headers $ \(line, ok) ->
+    case parseCatFileHeader line of
+      Right h | ok -> () <$ evaluate (length (show h))
+      Left e | not ok -> () <$ evaluate (Text.length e)
+      other -> ioError (userError ("warmUpReader: " <> show other))
+  forM_ [sha1, sha256] $ \o -> () <$ evaluate (length (show (parseObjectId o)))
+  _ <- evaluate (promisorDeath oid "fatal: could not fetch x from promisor remote")
+  forM_ errors $ \e -> evaluate (Text.length (renderObjectError e))
+  where
+    sha1 = BS.replicate 40 0x61
+    sha256 = BS.replicate 64 0x62
+    oid = ObjectId (Text.Encoding.decodeUtf8Lenient sha1)
+    headers =
+      [ (sha1 <> " blob 12", True),
+        (sha1 <> " tree 30", True),
+        (sha1 <> " commit 200", True),
+        (sha1 <> " tag 140", True),
+        (sha256 <> " blob 0", True),
+        (sha1 <> " missing", True),
+        (sha1 <> " ambiguous", False),
+        ("junk", False)
+      ]
+    cannot = CannotRun {exe = "/usr/bin/git", reason = "no such file"}
+    errors =
+      [ObjectMissing oid, ObjectBadId "x", ObjectReaderClosed]
+        <> [ ObjectNotABlob NotABlob {oid = oid, kind = k}
+           | k <- [TypeBlob, TypeTree, TypeCommit, TypeTag]
+           ]
+        <> [ failed oid p
+           | p <- [CannotStart cannot, Died "", Died "fatal: x", TimedOut, BadAnswer "x"]
+           ]
+
 -- * Internal
 
 -- | One place in the pool.
@@ -373,18 +419,20 @@ ask r oid@(ObjectId t) talk
             _ -> do
               err <- dropSlot r slot
               closedOr $
-                if promisorDeath err
+                if promisorDeath oid err
                   then ObjectMissing oid
                   else failed oid (Died err)
-    -- git 2.44.1 on a blob missing from a partial clone.
-    promisorDeath err =
-      ("could not fetch " <> t <> " from promisor remote") `Text.isInfixOf` err
     -- A read cut short by stop is not a read error.
     closedOr e = do
       reg <- readMVar r.registry
       pure . Left $ case reg.state of
         Closed -> ObjectReaderClosed
         Open -> e
+
+-- | git 2.44.1 died on this blob, missing from a partial clone.
+promisorDeath :: ObjectId -> Text -> Bool
+promisorDeath (ObjectId t) err =
+  ("could not fetch " <> t <> " from promisor remote") `Text.isInfixOf` err
 
 failed :: ObjectId -> ReadProblem -> ObjectError
 failed oid p = ObjectReadFailed ReadFailure {oid = oid, problem = p}

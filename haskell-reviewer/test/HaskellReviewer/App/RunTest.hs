@@ -43,14 +43,21 @@ import HaskellReviewer.Core.FileList
     ListSource (..),
     mkFileList,
   )
-import HaskellReviewer.Core.Git (GitVersion (..))
+import HaskellReviewer.Core.Git (GitVersion (..), History (..), ObjectId (..))
 import HaskellReviewer.Core.ModuleModel
   ( ModuleParse (..),
     TextOnlyReason (..),
     textOnlyModule,
   )
 import HaskellReviewer.Core.Project (GhcVersion (..))
-import HaskellReviewer.Core.RelPath (relPathFromBytes)
+import HaskellReviewer.Core.RelPath (relPathFromBytes, relPathText)
+import HaskellReviewer.Core.Revspec
+  ( BaseFrom (..),
+    DiffInfo (..),
+    Range (..),
+    RangeForm (..),
+    Revspec (..),
+  )
 import HaskellReviewer.Core.Root (CanonicalRoot (..), Root (..))
 import HaskellReviewer.Core.Sides (Pair (..), Sides (..))
 import HaskellReviewer.Core.Xdg (XdgProblem (..))
@@ -65,21 +72,28 @@ import HaskellReviewer.Effects.FileSystem
     RootError (..),
   )
 import HaskellReviewer.Effects.Git
-  ( GitError (..),
+  ( DiskReason (..),
+    GitError (..),
     Listing (..),
     TooOld (..),
+    gitProbeTimeLimit,
     repoInfo,
     resolveCommit,
   )
 import HaskellReviewer.Effects.GitObjects (defaultReaderSettings, withObjectReader)
 import HaskellReviewer.Effects.Log (LogLevel (..), Logger, logInfo, newLogger)
+import HaskellReviewer.Effects.Revisions (DiffError (..))
 import HaskellReviewer.Effects.Shutdown (Shutdown (..))
 import HaskellReviewer.Effects.Source
-  ( EntrySource (..),
+  ( CommitSource (..),
+    EntrySource (..),
     Listed (..),
     Lister (..),
+    Probe (..),
+    ProbeError (..),
     commitLister,
     diskLister,
+    probeFilesWith,
     readSourceEntry,
   )
 import HaskellReviewer.Effects.Spawn (SoftLimit (..), SpawnSetup (..))
@@ -93,9 +107,10 @@ import System.Exit (ExitCode (..))
 import System.FilePath ((</>))
 import System.Posix.Resource (ResourceLimit (..))
 import System.Timeout (timeout)
-import Test.Tasty (TestTree, testGroup)
+import Test.Tasty (TestTree, testGroup, withResource)
+import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
-import TestSupport (fixtureRepo, realGitAt, withCanonicalTemp)
+import TestSupport (fixtureRepo, gitOut, gitSetup, realGitAt, withCanonicalTemp)
 
 tests :: TestTree
 tests =
@@ -159,8 +174,8 @@ tests =
         fake <- newFake
         let deps =
               (fake.deps)
-                { probeFiles = \_ _ ->
-                    pure . Left . GitTooOld $
+                { probeFiles = \_ _ _ ->
+                    pure . Left . ProbeGit . GitTooOld $
                       TooOld {exe = "/usr/bin/git", version = GitVersion 2 43 0},
                   listen = \_ _ -> assertFailure "listen called"
                 }
@@ -171,6 +186,23 @@ tests =
           @?= [ "haskell-reviewer: git at /usr/bin/git is version 2.43.0; \
                 \need 2.44.1 or newer"
               ]
+        readIORef fake.closed >>= (@?= True),
+      testCase "bad --diff: exit 2, no listen, tracer closed" $ do
+        fake <- newFake
+        specs <- newIORef []
+        let deps =
+              (fake.deps)
+                { probeFiles = \_ _ spec -> do
+                    modifyIORef' specs (<> [spec])
+                    pure (Left (ProbeDiff (DiffUnknownRev "nope" FullHistory))),
+                  listen = \_ _ -> assertFailure "listen called"
+                }
+        code <- run deps ["--diff", "nope..HEAD", "--trace-file", "t.jsonl"]
+        code @?= ExitFailure 2
+        readIORef fake.console
+          >>= (@?= ["haskell-reviewer: --diff: unknown revision or not a commit: nope"])
+        readIORef specs
+          >>= (@?= [Just (RangeSpec Range {form = TwoDot, base = "nope", head = "HEAD"})])
         readIORef fake.closed >>= (@?= True),
       testCase "config warnings: on the console before the URL, exit 0" $ do
         fake <- newFake
@@ -195,13 +227,14 @@ tests =
               (fake.deps)
                 { checkRoot = \p -> step "root" >> fake.deps.checkRoot p,
                   loadConfig = \l -> step "config" >> fake.deps.loadConfig l,
-                  probeFiles = \l r -> step "git" >> fake.deps.probeFiles l r
+                  probeFiles = \l r m -> step "git" >> fake.deps.probeFiles l r m
                 }
         _ <- run deps []
         readIORef steps >>= (@?= ["root", "config", "git"]),
       listingTests,
       indexingTests,
       diffTests,
+      cabalChangeTests,
       testCase "--port is passed to listen" $ do
         fake <- newFake
         ports <- newIORef []
@@ -395,7 +428,7 @@ listingTests =
             empty = fakeLister (pure (Right (mkFileList FromDisk 0 [])))
             deps =
               (idleDeps fake stop serve)
-                { probeFiles = \_ _ -> pure (Right (BrowseSides empty)),
+                { probeFiles = \_ _ _ -> pure (Right (fakeProbe (BrowseSides empty))),
                   warmUp = [putMVar warming () >> busy]
                 }
         withAsync (run deps ["--idle-exit", "0"]) $ \running -> do
@@ -516,7 +549,7 @@ indexingTests =
             busy = mapM_ (\n -> evaluate (length (show (n * n :: Integer)))) [1 ..]
             deps =
               (idleDeps fake stop serve)
-                { probeFiles = \_ _ -> pure (Right (BrowseSides oneLister)),
+                { probeFiles = \_ _ _ -> pure (Right (fakeProbe (BrowseSides oneLister))),
                   parse = \_ _ -> putMVar parsing () >> busy >> pure textOnly
                 }
         withAsync (run deps ["--idle-exit", "0"]) $ \running -> do
@@ -606,16 +639,20 @@ withRunningSides ::
   (Fake -> Sides Lister) ->
   (Fake -> Application -> IO a) ->
   IO a
-withRunningSides args change mkListers action = do
+withRunningSides args change mkListers =
+  withRunningProbe args $ \fake d ->
+    change d {probeFiles = \_ _ _ -> pure (Right (fakeProbe (mkListers fake)))}
+
+-- | Run until the test is done, with deps made from the fake's (the
+-- probe is the test's).
+withRunningProbe ::
+  [String] -> (Fake -> Deps -> Deps) -> (Fake -> Application -> IO a) -> IO a
+withRunningProbe args change action = do
   fake <- newFake
   stop <- newEmptyMVar
   appVar <- newEmptyMVar
   let serve ready app = ready >> putMVar appVar app >> blockForever
-      deps =
-        change
-          (idleDeps fake stop serve)
-            { probeFiles = \_ _ -> pure (Right (mkListers fake))
-            }
+      deps = change fake (idleDeps fake stop serve)
   withAsync (run deps args) $ \running -> do
     app <- timeout 5_000_000 (takeMVar appVar)
     result <- maybe (assertFailure "not ready") (action fake) app
@@ -699,8 +736,8 @@ diffTests =
             one = fakeLister (pure (Right oneModule))
             deps =
               (idleDeps fake stop serve)
-                { probeFiles = \_ _ ->
-                    pure (Right (DiffSides Pair {head = one, base = one})),
+                { probeFiles = \_ _ _ ->
+                    pure (Right (fakeProbe (DiffSides Pair {head = one, base = one}))),
                   parse = \_ _ -> void (tryPutMVar parsing ()) >> busy >> pure textOnly
                 }
         withAsync (run deps ["--idle-exit", "0"]) $ \running -> do
@@ -779,8 +816,8 @@ diffTests =
             one = fakeLister (pure (Right oneModule))
             deps =
               (idleDeps fake stop serve)
-                { probeFiles = \_ _ ->
-                    pure (Right (DiffSides Pair {head = one, base = one}))
+                { probeFiles = \_ _ _ ->
+                    pure (Right (fakeProbe (DiffSides Pair {head = one, base = one})))
                 }
         withAsync (run deps ["--idle-exit", "0"]) $ \running -> do
           ready <- timeout 5_000_000 (takeMVar appVar)
@@ -801,8 +838,8 @@ diffTests =
             quick = fakeLister (putMVar listed () >> pure (Right oneModule))
             deps =
               (idleDeps fake stop serve)
-                { probeFiles = \_ _ ->
-                    pure (Right (DiffSides Pair {head = slow, base = quick}))
+                { probeFiles = \_ _ _ ->
+                    pure (Right (fakeProbe (DiffSides Pair {head = slow, base = quick})))
                 }
         withAsync (run deps ["--idle-exit", "0"]) $ \running -> do
           ready <- timeout 5_000_000 (takeMVar appVar)
@@ -865,7 +902,100 @@ diffTests =
     isDone = ("indexing: done" `Text.isPrefixOf`)
     allDone = "indexing: done, 4 modules (4 ready, 0 failed, 4 text only) in 0 ms"
     diskAt dir =
-      diskLister quiet (CanonicalRoot dir (Char8.pack dir)) ListFromDisk
+      diskLister quiet (CanonicalRoot dir (Char8.pack dir)) (ListFromDisk NotInRepo)
+
+-- | A real diff session on @cabal-change.sh@, through the real probe,
+-- one worker (D-317). Built once for the group.
+--
+-- Not tested: a crash while finding the changed modules only logs a
+-- line. Making it crash would need a new hook in 'Deps'.
+cabalChangeTests :: TestTree
+cabalChangeTests =
+  withResource runCabalChange (\_ -> pure ()) $ \get ->
+    testGroup
+      "cabal-change"
+      [ goldenVsString "head module tree" (golden "head") ((.headTree) <$> get),
+        goldenVsString "base module tree" (golden "base") ((.baseTree) <$> get),
+        testCase "changed first, head then base, then the rest" $ do
+          r <- get
+          r.claims
+            @?= [ ("head", "added/src/C.hs"),
+                  ("head", "ext/src/X.hs"),
+                  ("head", "ext/src/Y.hs"),
+                  ("base", "ext/src/X.hs"),
+                  ("base", "ext/src/Y.hs"),
+                  ("base", "added/src/C.hs"),
+                  ("head", "added/src/A.hs"),
+                  ("head", "added/src/B.hs"),
+                  ("head", "moved/lib/M.hs"),
+                  ("head", "moved/lib/N.hs"),
+                  ("base", "added/src/A.hs"),
+                  ("base", "added/src/B.hs"),
+                  ("base", "moved/src/M.hs"),
+                  ("base", "moved/src/N.hs")
+                ],
+        testCase "log lines, tree 404" $ do
+          r <- get
+          let has l = assertBool (show r.console) (l `elem` r.console)
+          has "changed: 3 on head, 3 on base, indexed first"
+          has "diff: HEAD~1..HEAD"
+          let baseLine = ("base: HEAD~1 = " `Text.isPrefixOf`)
+          assertBool (show r.console) (any baseLine r.console)
+          length (filter ("indexing: done" `Text.isPrefixOf`) r.console) @?= 1
+          r.treeStatus @?= 404
+      ]
+  where
+    golden side = "../fixtures/repos/cabal-change." <> side <> ".json"
+
+-- | What 'runCabalChange' saw.
+data CabalChange = CabalChange
+  { headTree :: LBS.ByteString,
+    baseTree :: LBS.ByteString,
+    treeStatus :: Int,
+    -- | Module reads by the workers, in order: side and path.
+    claims :: [(Text, Text)],
+    console :: [Text]
+  }
+
+runCabalChange :: IO CabalChange
+runCabalChange = withCanonicalTemp $ \tmp -> do
+  let repo = tmp </> "repo"
+  fixtureRepo "cabal-change" [repo]
+  Dir.createDirectory (tmp </> "home")
+  setup <- gitSetup (tmp </> "home") gitProbeTimeLimit
+  headId <- Text.strip . Text.pack <$> gitOut repo ["rev-parse", "HEAD"]
+  claimed <- newIORef []
+  let record src p = case src of
+        CommitEntries c ->
+          let ObjectId o = c.commit
+              side = if o == headId then "head" else "base"
+           in atomicModifyIORef' claimed (\rs -> (rs <> [(side, relPathText p)], ()))
+        DiskEntries _ -> pure ()
+      change _ d =
+        d
+          { checkRoot = \p -> pure (Right (Root p)),
+            probeFiles = probeFilesWith setup,
+            readEntry = \src p k -> record src p >> readSourceEntry src p k,
+            indexWorkers = pure 1
+          }
+      args = [repo, "--idle-exit", "0", "--verbose", "--diff", "HEAD~1..HEAD"]
+  withRunningProbe args change $ \fake app -> do
+    ok <- waitFor 10 (any ("indexing: done" `Text.isPrefixOf`) <$> readIORef fake.console)
+    assertBool "not indexed" ok
+    rs <- readIORef claimed
+    h <- getSide app "modules" "head"
+    b <- getSide app "modules" "base"
+    t <- getSide app "modules" "tree"
+    (h.status, b.status) @?= (200, 200)
+    out <- readIORef fake.console
+    pure
+      CabalChange
+        { headTree = h.body,
+          baseTree = b.body,
+          treeStatus = t.status,
+          claims = rs,
+          console = out
+        }
 
 -- | Head has the first module, base the second; both have A.
 checkSides :: Application -> Text -> Text -> Assertion
@@ -1050,6 +1180,21 @@ openStream app opened = do
     pure ResponseReceived
   pure ()
 
+-- | A probe with these listers, in browse mode or diff mode. In diff
+-- mode, @HEAD~1..HEAD@ at made-up commits.
+fakeProbe :: Sides Lister -> Probe
+fakeProbe = \case
+  BrowseSides l -> BrowseProbe l
+  DiffSides p -> DiffProbe info (\k -> k p)
+  where
+    oid c = ObjectId (Text.replicate 40 c)
+    info =
+      DiffInfo
+        { range = Range TwoDot "HEAD~1" "HEAD",
+          sides = Pair {head = oid "1", base = oid "2"},
+          baseFrom = BaseTyped
+        }
+
 -- | A listing that never ends.
 neverDone :: IO (Either ListError FileList)
 neverDone = Left (ListCrashed "") <$ blockForever
@@ -1141,7 +1286,8 @@ newFake = do
             -- In memory: never the real ui.json.
             prefsPath = pure (Left HomeUnset),
             -- Never done: no line or span from the listing.
-            probeFiles = \_ _ -> pure (Right (BrowseSides (fakeLister neverDone))),
+            probeFiles = \_ _ _ ->
+              pure (Right (fakeProbe (BrowseSides (fakeLister neverDone)))),
             readProject = Session.Project.readProject,
             -- No real parse here: see Note [Shared values in tests] in
             -- HaskellReviewer.Core.PackageGlobTest.

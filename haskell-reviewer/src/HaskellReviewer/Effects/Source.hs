@@ -6,9 +6,13 @@ module HaskellReviewer.Effects.Source
     CommitSource (..),
     Lister (..),
     Listed (..),
+    Probe (..),
+    ProbeError (..),
 
     -- * Listing
     probeFiles,
+    renderProbeError,
+    probeFilesWith,
     diskLister,
     commitLister,
 
@@ -17,6 +21,7 @@ module HaskellReviewer.Effects.Source
 
     -- * Warm-up
     warmUpListing,
+    warmUpObjects,
   )
 where
 
@@ -24,6 +29,8 @@ import Control.Exception (evaluate)
 import Data.ByteString qualified as BS
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.Text (Text)
+import Data.Text qualified as Text
 import HaskellReviewer.Core.CommitFiles
   ( BlobRef (..),
     BlobSize (..),
@@ -40,8 +47,10 @@ import HaskellReviewer.Core.FileContent
   )
 import HaskellReviewer.Core.FileList (EntryKind (..), FileList)
 import HaskellReviewer.Core.Git (ObjectId (..), RepoInfo, parseTreeEntries)
-import HaskellReviewer.Core.RelPath (RelPath)
-import HaskellReviewer.Core.Root (CanonicalRoot, Root)
+import HaskellReviewer.Core.RelPath (RelPath, parseRelPath)
+import HaskellReviewer.Core.Revspec (DiffInfo (..), Revspec (..), printable)
+import HaskellReviewer.Core.Root (CanonicalRoot, Root (..))
+import HaskellReviewer.Core.Sides (Pair (..))
 import HaskellReviewer.Effects.FileSystem
   ( ListError,
     ReadError (..),
@@ -50,14 +59,28 @@ import HaskellReviewer.Effects.FileSystem
     listFiles,
     readEntry,
   )
-import HaskellReviewer.Effects.Git (Git, GitError, Listing, probeGit)
+import HaskellReviewer.Effects.Git
+  ( DiskReason (..),
+    Git,
+    GitError,
+    GitSetup,
+    Listing (..),
+    probeGitWith,
+    renderGitError,
+    repoInfo,
+    systemGitSetup,
+  )
 import HaskellReviewer.Effects.GitObjects
   ( BlobBytes (..),
     ObjectReader,
+    defaultReaderSettings,
     readBlob,
     renderObjectError,
+    warmUpReader,
+    withObjectReader,
   )
 import HaskellReviewer.Effects.Log (Logger)
+import HaskellReviewer.Effects.Revisions (DiffError, renderDiffError, resolveDiff)
 
 {- Note [Entry sources]
 
@@ -88,7 +111,7 @@ data EntrySource
 
 -- | The files of one commit.
 data CommitSource = CommitSource
-  { -- | Not read yet: the header's revision will show it (T03b, T10).
+  { -- | The commit listed.
     commit :: ObjectId,
     -- | The blob of every file and symlink of the list.
     blobs :: Map RelPath BlobRef,
@@ -107,12 +130,82 @@ data Listed = Listed
     source :: EntrySource
   }
 
+-- | What the probe found: how to list each side.
+data Probe
+  = -- | Browse mode: ROOT on disk.
+    BrowseProbe Lister
+  | -- | Diff mode: what @--diff@ resolved to, and a way to run with a
+    -- lister per side. The object reader lives as long as the action,
+    -- so it must wrap the whole server.
+    DiffProbe DiffInfo (forall a. (Pair Lister -> IO a) -> IO a)
+
+-- | Why the probe failed. All are exit 2.
+data ProbeError
+  = -- | git can't be used (both modes).
+    ProbeGit GitError
+  | -- | @--diff@ and no git on PATH.
+    ProbeNoGit
+  | -- | @--diff@ and ROOT is not in a git work tree. The ROOT.
+    ProbeNotWorkTree FilePath
+  | -- | @--diff REV@: not supported yet.
+    ProbeWorkTreeNotYet
+  | -- | The revisions of the range don't give two commits.
+    ProbeDiff DiffError
+  deriving (Eq, Show)
+
+-- | Message for the user, without the program name. One line.
+renderProbeError :: ProbeError -> Text
+renderProbeError = \case
+  ProbeGit e -> renderGitError e
+  ProbeNoGit -> "--diff needs git, and there is none on PATH"
+  ProbeNotWorkTree root ->
+    "--diff needs ROOT in a git work tree: " <> printable (Text.pack root)
+  ProbeWorkTreeNotYet ->
+    "--diff REV (against the working tree) is not supported yet; \
+    \use BASE..HEAD or BASE...HEAD"
+  ProbeDiff e -> renderDiffError e
+
 -- | Check git (see Note [Git hardening] in "HaskellReviewer.Effects.Git")
--- and get ready to list ROOT on disk. A 'GitError' is exit 2.
-probeFiles :: Logger -> Root -> IO (Either GitError Lister)
-probeFiles logger root = do
-  canon <- canonicalRoot root
-  fmap (diskLister logger canon) <$> probeGit logger root
+-- and get ready to list each side: ROOT on disk in browse mode, two
+-- commits with @--diff@ (D-316). Before the URL line.
+probeFiles :: Logger -> Root -> Maybe Revspec -> IO (Either ProbeError Probe)
+probeFiles logger root spec = do
+  setup <- systemGitSetup
+  probeFilesWith setup logger root spec
+
+-- | Like 'probeFiles', with PATH, environment and time limits given.
+probeFilesWith ::
+  GitSetup -> Logger -> Root -> Maybe Revspec -> IO (Either ProbeError Probe)
+probeFilesWith setup logger root = \case
+  Nothing -> do
+    canon <- canonicalRoot root
+    probeGitWith setup logger root >>= \case
+      Left e -> pure (Left (ProbeGit e))
+      Right listing -> pure (Right (BrowseProbe (diskLister logger canon listing)))
+  Just (AgainstWorkTree _) -> pure (Left ProbeWorkTreeNotYet)
+  Just (RangeSpec range) ->
+    probeGitWith setup logger root >>= \case
+      Left e -> pure (Left (ProbeGit e))
+      Right (ListFromDisk NoGitFound) -> pure (Left ProbeNoGit)
+      Right (ListFromDisk _) -> pure (Left (ProbeNotWorkTree root.path))
+      Right (ListFromGit git) ->
+        repoInfo git >>= \case
+          Left e -> pure (Left (ProbeGit e))
+          Right info ->
+            resolveDiff git info range >>= \case
+              Left e -> pure (Left (ProbeGit e))
+              Right (Left e) -> pure (Left (ProbeDiff e))
+              Right (Right di) -> pure (Right (diffProbe logger git info di))
+
+-- | Two commit sides, read through one object reader. It starts no
+-- process before the first read.
+diffProbe :: Logger -> Git -> RepoInfo -> DiffInfo -> Probe
+diffProbe logger git info di =
+  DiffProbe di $ \k ->
+    withObjectReader logger defaultReaderSettings git $ \r ->
+      k Pair {head = lister r di.sides.head, base = lister r di.sides.base}
+  where
+    lister = commitLister logger git info
 
 -- | List ROOT as it is on disk, with git or without.
 diskLister :: Logger -> CanonicalRoot -> Listing -> Lister
@@ -175,6 +268,21 @@ readCommitEntry src p = \case
         readBlob src.reader cap ref.oid >>= \case
           Left e -> pure (Left (ReadFailed (renderObjectError e)))
           Right b -> pure (Right (k b))
+
+-- | Build the shared values of commit reads before workers and
+-- request threads read at once (Q-RTS-BLACKHOLE): the reader's
+-- ('warmUpReader'), and classifying a text blob, a binary one, a
+-- non-UTF-8 one and a link. Run before warp.
+warmUpObjects :: IO ()
+warmUpObjects = do
+  warmUpReader
+  mapM_
+    (\b -> evaluate (length (show (contentFromBytes (FileSize (BS.length b)) b))))
+    ["module A where\n", "a\0b", "\xff\xfe"]
+  case parseRelPath "p/link" of
+    Right p -> () <$ evaluate (length (show (commitLink p (FileSize 4) "a.hs")))
+    Left e -> ioError (userError ("warmUpObjects: " <> show e))
+  () <$ evaluate (length (show (ReadFailed "x")))
 
 -- | Build the shared values of commit listing (the ls-tree parser's
 -- literals, the path checks, the list builder) before two sides list at

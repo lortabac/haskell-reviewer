@@ -75,6 +75,20 @@ tests =
                 ("GIT_NO_REPLACE_OBJECTS", "1"),
                 ("GIT_TERMINAL_PROMPT", "0")
               ],
+      testCase "renderGitError: no stderr, the call; args printable" $ do
+        let failed err =
+              GitFailed
+                Failure
+                  { exe = "/usr/bin/git",
+                    args = ["rev-parse", "HEAD@{5}"],
+                    code = 128,
+                    stderr = err
+                  }
+        renderGitError (failed " \n")
+          @?= "git failed in ROOT: git rev-parse HEAD@{5} exited with 128"
+        renderGitError (failed "fatal: x") @?= "git failed in ROOT: fatal: x"
+        renderGitError (GitTimedOut Call {exe = "/usr/bin/git", args = ["a\nb"]})
+          @?= "git took too long in ROOT: git a\\nb",
       testCase "hardenedEnv: no HOME, no XDG_CONFIG_HOME" $
         map fst (hardenedEnv [] [])
           @?= [ "PATH",
@@ -275,7 +289,7 @@ tests =
     ]
   where
     assertDisk = \case
-      Right ListFromDisk -> pure ()
+      Right (ListFromDisk _) -> pure ()
       Right (ListFromGit _) -> assertFailure "expected from disk, got git"
       Left e -> assertFailure ("expected from disk, got " <> show e)
     errorIs r e = leftOf r @?= Just e

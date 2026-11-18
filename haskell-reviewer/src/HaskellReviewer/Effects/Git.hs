@@ -4,6 +4,7 @@ module HaskellReviewer.Effects.Git
     Git (..),
     GitSetup (..),
     Listing (..),
+    DiskReason (..),
     GitError (..),
     TooOld (..),
     Unreadable (..),
@@ -17,6 +18,7 @@ module HaskellReviewer.Effects.Git
     -- * Operations
     probeGit,
     probeGitWith,
+    systemGitSetup,
     lsFiles,
     repoInfo,
     resolveCommit,
@@ -56,6 +58,7 @@ import HaskellReviewer.Core.Git
     parseRepoInfo,
     renderGitVersion,
   )
+import HaskellReviewer.Core.Revspec (printable)
 import HaskellReviewer.Core.Root (Root (..))
 import HaskellReviewer.Effects.Clock (Microseconds (..))
 import HaskellReviewer.Effects.Helper (findHelperIn, safePathDirs)
@@ -158,7 +161,17 @@ data Listing
   = -- | ROOT is in a git work tree.
     ListFromGit Git
   | -- | No git, or ROOT is not in a work tree.
-    ListFromDisk
+    ListFromDisk DiskReason
+
+-- | Why we list from disk. Diff mode needs git, and says which.
+data DiskReason
+  = -- | No git on PATH.
+    NoGitFound
+  | -- | No repo at all, from ROOT up.
+    NotInRepo
+  | -- | In a repo, but not in its work tree (in .git, say).
+    NotInWorkTree
+  deriving (Eq, Show)
 
 -- | git can't be used. At start-up, these are exit 2.
 data GitError
@@ -251,13 +264,20 @@ renderGitError = \case
     "cannot read the version of git at " <> Text.pack e.exe <> ": " <> e.firstLine
   GitCannotRun e ->
     "cannot run git at " <> Text.pack e.exe <> ": " <> e.reason
-  GitFailed f -> "git failed in ROOT: " <> f.stderr
+  GitFailed f
+    | Text.null (Text.strip f.stderr) ->
+        "git failed in ROOT: "
+          <> callText Call {exe = f.exe, args = f.args}
+          <> " exited with "
+          <> Text.pack (show f.code)
+    | otherwise -> "git failed in ROOT: " <> f.stderr
   GitTimedOut c -> "git took too long in ROOT: " <> callText c
   GitOutputTooLarge c -> "git printed too much in ROOT: " <> callText c
   GitBadOutput b -> "cannot read the output of " <> callText b.call <> ": " <> b.problem
   where
     needed = renderGitVersion minimumGitVersion
-    callText c = Text.pack (unwords ("git" : c.args))
+    -- The args may hold the user's revisions.
+    callText c = printable (Text.pack (unwords ("git" : c.args)))
 
 -- | Find git, check its version, and see if ROOT is in a work tree.
 -- See Note [Git hardening].
@@ -267,16 +287,21 @@ renderGitError = \case
 -- don't silently show something else.
 probeGit :: Logger -> Root -> IO (Either GitError Listing)
 probeGit logger root = do
+  setup <- systemGitSetup
+  probeGitWith setup logger root
+
+-- | Our PATH and environment, and the usual time limits.
+systemGitSetup :: IO GitSetup
+systemGitSetup = do
   env <- getEnvironment
   let path = fromMaybe "" (lookup "PATH" env)
-  let setup =
-        GitSetup
-          { searchPath = splitSearchPath path,
-            inherited = env,
-            probeTimeLimit = gitProbeTimeLimit,
-            listTimeLimit = gitListTimeLimit
-          }
-  probeGitWith setup logger root
+  pure
+    GitSetup
+      { searchPath = splitSearchPath path,
+        inherited = env,
+        probeTimeLimit = gitProbeTimeLimit,
+        listTimeLimit = gitListTimeLimit
+      }
 
 -- | Like 'probeGit', with PATH, environment and time limit given.
 probeGitWith :: GitSetup -> Logger -> Root -> IO (Either GitError Listing)
@@ -284,8 +309,8 @@ probeGitWith setup logger root = do
   found <- findHelperIn setup.searchPath root "git"
   case found of
     Nothing -> do
-      logVerbose logger "git: not found on PATH, listing files from disk"
-      pure (Right ListFromDisk)
+      logVerbose logger "git: not found on PATH"
+      pure (Right (ListFromDisk NoGitFound))
     Just exe -> do
       dirs <- safePathDirs root setup.searchPath
       let git =
@@ -323,8 +348,9 @@ repoInfo git = do
   out <- runOkWithin git.probeTimeLimit git args
   pure (out >>= badOutput git args . parseRepoInfo)
 
--- | The commit a revision names, or 'Nothing' if none (unknown, not a
--- commit, or a range: only the exit code counts, D-311).
+-- | The commit a revision names, or 'Nothing' if none: unknown, not a
+-- commit, or a range. Exit 1 is none, and so is exit 0 with anything
+-- but one commit id (@^main@ prints @^\<id>@). D-311, D-316.
 resolveCommit :: Git -> String -> IO (Either GitError (Maybe ObjectId))
 resolveCommit git rev = do
   let args = ["rev-parse", "--verify", "--quiet", "--end-of-options", rev <> "^{commit}"]
@@ -334,12 +360,9 @@ resolveCommit git rev = do
     Right r -> case r.exitCode of
       ExitSuccess -> case parseCommitIds r.out of
         Right [oid] -> Right (Just oid)
-        Right _ -> bad args "expected one commit id"
-        Left e -> bad args e
+        _ -> Right Nothing
       ExitFailure 1 -> Right Nothing
       ExitFailure c -> Left (GitFailed (failure git args c r))
-  where
-    bad args = badOutput git args . Left
 
 -- | Every merge base of two commits. None (no common history, or a
 -- shallow clone) is an empty list.
@@ -429,14 +452,14 @@ inWorkTree logger git = do
     Right r -> case r.exitCode of
       ExitSuccess
         | Text.strip (decode r.out) == "true" -> pure (Right (ListFromGit git))
-        | otherwise -> disk "ROOT is not in a work tree"
+        | otherwise -> disk NotInWorkTree "ROOT is not in a work tree"
       ExitFailure _
-        | notARepo r.err -> disk "ROOT is not in a git repository"
+        | notARepo r.err -> disk NotInRepo "ROOT is not in a git repository"
       ExitFailure c -> pure (Left (GitFailed (failure git args c r)))
   where
-    disk why = do
-      logVerbose logger ("git: " <> why <> ", listing files from disk")
-      pure (Right ListFromDisk)
+    disk reason why = do
+      logVerbose logger ("git: " <> why)
+      pure (Right (ListFromDisk reason))
 
 -- | git found no repo at all, from ROOT up. Not "fatal: not a git
 -- repository: <path>" (or, since git 2.56, "fatal: gitfile does not

@@ -26,6 +26,7 @@ import HaskellReviewer.Core.Project
     parserGhcVersion,
     renderGhcVersion,
   )
+import HaskellReviewer.Core.Revspec (Revspec, parseRevspec, renderRevspecError)
 import HaskellReviewer.Effects.Log (LogLevel (..))
 import Options.Applicative qualified as Opt
 import System.Exit (ExitCode (..))
@@ -52,7 +53,9 @@ data Options = Options
     traceFile :: Maybe FilePath,
     -- | GHC version the project targets. 'Nothing': with-compiler, else
     -- the parser's own version (§7.1).
-    ghc :: Maybe GhcVersion
+    ghc :: Maybe GhcVersion,
+    -- | @--diff@: 'Nothing' is browse mode. Not resolved yet.
+    diff :: Maybe Revspec
   }
   deriving (Eq, Show)
 
@@ -135,6 +138,7 @@ optionsParser =
     <*> logLevelFlags
     <*> Opt.optional traceFileOption
     <*> Opt.optional ghcOption
+    <*> Opt.optional diffOption
 
 rootArg :: Opt.Parser FilePath
 rootArg =
@@ -207,6 +211,23 @@ ghcOption =
               <> ")"
           )
     )
+
+-- | Bad syntax is a usage error here; the rest (unknown revision, ...)
+-- is checked at start-up, before the URL.
+diffOption :: Opt.Parser Revspec
+diffOption =
+  Opt.option
+    (Opt.eitherReader readRevspec)
+    ( Opt.long "diff"
+        <> Opt.metavar "REVSPEC"
+        <> Opt.help
+          "Compare two commits: BASE..HEAD, or BASE...HEAD from their merge base"
+    )
+
+readRevspec :: String -> Either String Revspec
+readRevspec s = case parseRevspec (Text.pack s) of
+  Right r -> Right r
+  Left e -> Left (Text.unpack (renderRevspecError e))
 
 readPort :: String -> Either String Port
 readPort s = case readNatural s of
