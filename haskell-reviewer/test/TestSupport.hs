@@ -10,6 +10,7 @@ module TestSupport
     git,
     gitOut,
     gitSetup,
+    realGitAt,
     fixtureRepo,
 
     -- * Checks
@@ -38,8 +39,16 @@ import Data.List (isPrefixOf, sort)
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
+import HaskellReviewer.Core.Root (Root (..))
 import HaskellReviewer.Effects.Clock (Microseconds)
-import HaskellReviewer.Effects.Git (GitSetup (..))
+import HaskellReviewer.Effects.Git
+  ( Git,
+    GitSetup (..),
+    Listing (..),
+    gitProbeTimeLimit,
+    probeGitWith,
+  )
+import HaskellReviewer.Effects.Log (LogLevel (..), newLogger)
 import System.Directory qualified as Dir
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..))
@@ -138,6 +147,17 @@ gitSetup home limit = do
         probeTimeLimit = limit,
         listTimeLimit = limit
       }
+
+-- | The real git, found as the program finds it, with ROOT at the
+-- second dir and HOME in the first (an empty dir). Fails the test if
+-- git doesn't list ROOT.
+realGitAt :: FilePath -> FilePath -> IO Git
+realGitAt home root = do
+  setup <- gitSetup home gitProbeTimeLimit
+  probeGitWith setup (newLogger LevelInfo (\_ -> pure ())) (Root root) >>= \case
+    Right (ListFromGit g) -> pure g
+    Right ListFromDisk -> assertFailure "git not used"
+    Left e -> assertFailure ("git error (git 2.44.1 or newer needed): " <> show e)
 
 -- | Build a fixture repo: run @fixtures/repos/<name>.sh@ with the
 -- given args (the first is the dir to make), with only PATH from our

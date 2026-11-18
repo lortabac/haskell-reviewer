@@ -12,6 +12,7 @@ import HaskellReviewer.Core.Modules (buildModuleIndex)
 import HaskellReviewer.Core.Project (Platform (..))
 import HaskellReviewer.Core.Root (Root (..))
 import HaskellReviewer.Effects.FileSystem (WalkResult (..), canonicalRoot, walkFiles)
+import HaskellReviewer.Effects.Source (EntrySource (..))
 import HaskellReviewer.Session.Project (readProject)
 import ModulesDump (dumpModules)
 import System.Directory qualified as Dir
@@ -47,7 +48,7 @@ dump dir = do
   canon <- canonicalRoot (Root (fixtureDir <> dir))
   w <- walkFiles canon (fileListCap + 1)
   let fl = mkFileList FromDisk w.skippedNames w.entries
-  project <- readProject canon fl platform Nothing
+  project <- readProject (DiskEntries canon) fl platform Nothing
   let text = dumpModules (buildModuleIndex project fl)
   pure (LBS.fromStrict (Text.Encoding.encodeUtf8 text))
   where

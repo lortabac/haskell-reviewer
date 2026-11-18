@@ -41,6 +41,7 @@ import HaskellReviewer.Core.SourceText
     unlitMarkdown,
   )
 import HaskellReviewer.Effects.FileSystem (WalkResult (..), canonicalRoot, walkFiles)
+import HaskellReviewer.Effects.Source (EntrySource (..))
 import HaskellReviewer.Session.Project (readProject)
 import LibUnlit
   ( Block (..),
@@ -115,7 +116,7 @@ litFiles dir = do
   canon <- canonicalRoot (Root dir)
   w <- walkFiles canon fileListCap
   let fl = mkFileList FromDisk w.skippedNames w.entries
-  proj <- readProject canon fl hostPlatform Nothing
+  proj <- readProject (DiskEntries canon) fl hostPlatform Nothing
   let idx = buildModuleIndex proj fl
   pure (dedupe (fromIndex dir idx))
   where

@@ -18,6 +18,7 @@ import ApiSupport
     sourceApi,
     sourceTexts,
     str,
+    treeSnapshot,
   )
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (poll, wait, withAsync)
@@ -42,6 +43,7 @@ import HaskellReviewer.Core.ModuleModel
   )
 import HaskellReviewer.Core.Modules (moduleAtPath)
 import HaskellReviewer.Core.ResolveWarmUp (resolveWarmUpIndex)
+import HaskellReviewer.Core.Sides (Sides (..))
 import HaskellReviewer.Core.SourceLinks (GuessHow, LinkReason, OutlineKind)
 import HaskellReviewer.Effects.FileSystem (ListError (..), ReadError (..))
 import HaskellReviewer.Server.Api (computed)
@@ -259,7 +261,7 @@ routeTests =
             (m, r.status, lookup "Allow" r.headers) @?= (m, 405, Just "GET")
         )
         ["HEAD", "POST"]
-      let unlisted = sourceApi {snapshot = pure (Left (ListCrashed "x"))}
+      let unlisted = sourceApi {sides = BrowseSides (pure (Left (ListCrashed "x")))}
       r2 <- getApi unlisted ["api", "source", "tree", "s/x"]
       (r2.status, r2.body) @?= (500, "cannot list files"),
     testCase "waits for its own slot" $ do
@@ -304,7 +306,7 @@ routeTests =
       sort (nubOrd decls) @?= ["type:Shape", "val:area"],
     testCase "gate on: answered while indexing, from Pending" gateCase,
     testCase "the body is built inside the gate" $ do
-      snap <- sourceApi.snapshot >>= either (assertFailure . show) pure
+      snap <- treeSnapshot sourceApi >>= either (assertFailure . show) pure
       entered <- newEmptyMVar
       go <- newEmptyMVar
       let mk = putMVar entered () >> takeMVar go >> pure "body"
@@ -322,14 +324,14 @@ routeTests =
 -- Cpp, this hangs.
 gateCase :: Assertion
 gateCase = do
-  snap <- sourceApi.snapshot >>= either (assertFailure . show) pure
+  snap <- treeSnapshot sourceApi >>= either (assertFailure . show) pure
   holdA <- newEmptyMVar
   holdB <- newEmptyMVar
   let held p gate t = when (Just t == lookup p sourceTexts) (readMVar gate)
       -- Our own workers: the request must come once they are busy.
       api =
         sourceApi
-          { snapshot = pure (Right snap),
+          { sides = BrowseSides (pure (Right snap)),
             parse = \settings t -> do
               held "s/src/A.hs" holdA t
               held "s/src/B.hs" holdB t

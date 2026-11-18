@@ -851,8 +851,9 @@ describe("FileView links and refetch", () => {
       now = 1000;
       vi.spyOn(Date, "now").mockImplementation(() => now);
     });
-    const at = (generation: number, ready: number) => ({
+    const at = (generation: number, ready: number): Indexing => ({
       generation,
+      side: "tree",
       total: 2,
       ready,
       failed: 0,

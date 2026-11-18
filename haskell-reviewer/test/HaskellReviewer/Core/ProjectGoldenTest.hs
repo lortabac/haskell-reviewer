@@ -13,6 +13,7 @@ import HaskellReviewer.Core.FileList (ListSource (..), fileListCap, mkFileList)
 import HaskellReviewer.Core.Project (GhcVersion (..), Platform (..))
 import HaskellReviewer.Core.Root (Root (..))
 import HaskellReviewer.Effects.FileSystem (WalkResult (..), canonicalRoot, walkFiles)
+import HaskellReviewer.Effects.Source (EntrySource (..))
 import HaskellReviewer.Session.Project (readProject)
 import ProjectDump (dumpProject)
 import System.Directory qualified as Dir
@@ -73,7 +74,11 @@ dump dir platform cliGhc = do
   canon <- canonicalRoot (Root (fixtureDir <> dir))
   w <- walkFiles canon (fileListCap + 1)
   project <-
-    readProject canon (mkFileList FromDisk w.skippedNames w.entries) platform cliGhc
+    readProject
+      (DiskEntries canon)
+      (mkFileList FromDisk w.skippedNames w.entries)
+      platform
+      cliGhc
   pure (LBS.fromStrict (Text.Encoding.encodeUtf8 (dumpProject project)))
 
 -- | Fail if a fixture or golden file has no test. Cases can share a

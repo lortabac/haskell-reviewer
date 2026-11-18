@@ -9,6 +9,10 @@ module HaskellReviewer.Core.CommitFiles
 
     -- * Building
     mkCommitFiles,
+
+    -- * Reading
+    linkTargetCap,
+    commitLink,
   )
 where
 
@@ -16,7 +20,8 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import HaskellReviewer.Core.FileContent (FileSize)
+import Data.Text.Encoding qualified as Text.Encoding
+import HaskellReviewer.Core.FileContent (FileSize (..), LinkInfo (..))
 import HaskellReviewer.Core.FileList
   ( CommitId (..),
     EntryKind (..),
@@ -32,7 +37,12 @@ import HaskellReviewer.Core.Git
     TreeItem (..),
     TreeSize (..),
   )
-import HaskellReviewer.Core.RelPath (BadPath (..), RelPath, parseRelPath)
+import HaskellReviewer.Core.RelPath
+  ( BadPath (..),
+    RelPath,
+    parseRelPath,
+    resolveLinkTarget,
+  )
 
 {- Note [Commit files]
 
@@ -147,6 +157,26 @@ mkCommitFiles prefix entries =
       SizeKnown s -> BlobSize s
       SizeMissing -> BlobMissing
       SizeNotListed -> BlobSizeUnknown
+
+-- * Reading
+
+-- | We read at most this many bytes of a symlink's target: 4 KiB, as
+-- Linux's PATH_MAX.
+linkTargetCap :: Int
+linkTargetCap = 4096
+
+-- | A symlink of a commit, from its blob: the link's path, the blob's
+-- full size, and its bytes, at most 'linkTargetCap'. A target that was
+-- cut is shown cut, and points nowhere.
+commitLink :: RelPath -> FileSize -> ByteString -> LinkInfo
+commitLink p (FileSize size) bytes =
+  LinkInfo
+    { target = Text.Encoding.decodeUtf8Lenient bytes,
+      resolved =
+        if size > BS.length bytes
+          then Nothing
+          else resolveLinkTarget p bytes
+    }
 
 -- * Internal
 

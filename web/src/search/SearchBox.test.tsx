@@ -352,23 +352,47 @@ describe("SearchBox", () => {
     // though this is the very first indexing-triggered attempt (the
     // throttle used to start counting from 0, so this one always
     // fired at once).
-    setIndexing({ generation: 1, total: 10, ready: 5, failed: 0 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 5,
+      failed: 0,
+    });
     await vi.advanceTimersByTimeAsync(10);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     // Once the throttle window has passed: refetches.
     await vi.advanceTimersByTimeAsync(1000);
-    setIndexing({ generation: 1, total: 10, ready: 6, failed: 0 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 6,
+      failed: 0,
+    });
     await vi.advanceTimersByTimeAsync(10);
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     // Right after that one: throttled again.
-    setIndexing({ generation: 1, total: 10, ready: 7, failed: 0 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 7,
+      failed: 0,
+    });
     await vi.advanceTimersByTimeAsync(10);
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     // Done: always refetches, throttle or not.
-    setIndexing({ generation: 1, total: 10, ready: 10, failed: 0 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 10,
+      failed: 0,
+    });
     await vi.advanceTimersByTimeAsync(10);
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(root.querySelector(".search-partial")).toBeNull();
@@ -403,7 +427,7 @@ describe("SearchBox", () => {
     type(root, "map");
     await vi.advanceTimersByTimeAsync(120);
     expect(status(root)).toBe("1 result. Partial: still indexing.");
-    setIndexing({ generation: 1, total: 1, ready: 1, failed: 0 });
+    setIndexing({ generation: 1, side: "tree", total: 1, ready: 1, failed: 0 });
     await vi.advanceTimersByTimeAsync(10);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(status(root)).toBe("2 results.");
@@ -441,7 +465,7 @@ describe("SearchBox", () => {
     expect(options(root)[1]?.textContent).toContain("Data.Map");
     expect(i.getAttribute("aria-activedescendant")).toBe(options(root)[1]?.id);
 
-    setIndexing({ generation: 1, total: 2, ready: 2, failed: 0 });
+    setIndexing({ generation: 1, side: "tree", total: 2, ready: 2, failed: 0 });
     await vi.advanceTimersByTimeAsync(10);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(options(root)[0]?.textContent).toContain("Data.Map");
@@ -761,13 +785,25 @@ describe("SearchBox — review round 1 fixes", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     // Older than the answer's own snapshot: stale, ignored.
-    setIndexing({ generation: 1, total: 10, ready: 10, failed: 0 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 10,
+      failed: 0,
+    });
     await vi.advanceTimersByTimeAsync(10);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     // Newer (a Reload happened): our answer is for a gone snapshot,
     // so it refetches at once, throttle or not.
-    setIndexing({ generation: 3, total: 10, ready: 1, failed: 0 });
+    setIndexing({
+      generation: 3,
+      side: "tree",
+      total: 10,
+      ready: 1,
+      failed: 0,
+    });
     await vi.advanceTimersByTimeAsync(10);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -785,7 +821,13 @@ describe("SearchBox — review round 1 fixes", () => {
     const { root, setIndexing } = mount({ placement: "page" });
     type(root, "map");
     await vi.advanceTimersByTimeAsync(120);
-    setIndexing({ generation: 1, total: 10, ready: 10, failed: 0 }); // done
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 10,
+      failed: 0,
+    }); // done
     // Before the search's own refetch for "done" lands, the footer
     // (still showing, partial() hasn't flipped yet) must not claim
     // "(10 of 10)" next to "still indexing".
@@ -963,7 +1005,13 @@ describe("SearchBox — review round 2 fixes", () => {
     i.dispatchEvent(key("Escape")); // closes the popup, keeps the text
     expect(i.getAttribute("aria-expanded")).toBe("false");
     // "Done" normally bypasses the throttle, but nothing is shown.
-    setIndexing({ generation: 1, total: 10, ready: 10, failed: 0 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 10,
+      failed: 0,
+    });
     await vi.advanceTimersByTimeAsync(10);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

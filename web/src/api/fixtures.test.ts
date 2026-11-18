@@ -678,10 +678,13 @@ describe("decoders reject bad shapes", () => {
   });
 
   it("indexing", () => {
-    const good = { generation: 1, total: 3, ready: 2, failed: 1 };
+    const good = { generation: 1, side: "tree", total: 3, ready: 2, failed: 1 };
     expect(decodeIndexing(good)).toEqual(good);
+    expect(decodeIndexing({ ...good, side: "base" }).side).toBe("base");
     for (const bad of [
       null,
+      { ...good, side: undefined },
+      { ...good, side: "work" },
       { ...good, total: undefined },
       { ...good, ready: -1 },
       { ...good, failed: "1" },

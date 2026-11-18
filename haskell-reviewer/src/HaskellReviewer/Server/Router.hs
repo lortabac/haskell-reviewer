@@ -91,9 +91,10 @@ Paths below are what the router sees, after the token.
   body. api/source/<side>/<path...>: one file as the source view, as
   CBOR (Note [Source view] in "HaskellReviewer.Server.Wire.Source"); a
   path not in the list, or a file gone, is a 404 with a JSON body.
-  api/indexing/<side>: how far indexing is, as JSON. The only
-  side is tree; another one is a plain 404. GET only (405 otherwise,
-  HEAD too).
+  api/indexing/<side>: how far indexing is, as JSON. The sides are
+  the session's: tree in browse mode, base and head in diff mode
+  (Note [Sides] in "HaskellReviewer.Core.Sides"); another one is a
+  plain 404. GET only (405 otherwise, HEAD too).
 - api/search/<side>?q=<text>: modules and names that match, as JSON
   (Note [Search route] in "HaskellReviewer.Server.Search"). Same sides
   and methods as above; a bad q is a plain 400.

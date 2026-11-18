@@ -71,9 +71,12 @@ import HaskellReviewer.Effects.GitTest qualified
 import HaskellReviewer.Effects.HelperTest qualified
 import HaskellReviewer.Effects.LogTest qualified
 import HaskellReviewer.Effects.Parser (warmUpParser)
+import HaskellReviewer.Effects.Source (warmUpListing)
+import HaskellReviewer.Effects.SourceTest qualified
 import HaskellReviewer.Effects.Spawn (prepareSpawning)
 import HaskellReviewer.Effects.SpawnTest qualified
 import HaskellReviewer.Effects.TraceTest qualified
+import HaskellReviewer.Server.Api (warmUpSideNames)
 import HaskellReviewer.Server.ApiGoldenTest qualified
 import HaskellReviewer.Server.ApiTest qualified
 import HaskellReviewer.Server.AssetsTest qualified
@@ -88,6 +91,7 @@ import HaskellReviewer.Server.RefsTest qualified
 import HaskellReviewer.Server.Router (warmUpGzip)
 import HaskellReviewer.Server.RouterTest qualified
 import HaskellReviewer.Server.Search (warmUpSearch)
+import HaskellReviewer.Server.SidesTest qualified
 import HaskellReviewer.Server.SourceTest qualified
 import HaskellReviewer.Server.TextSearch (warmUpTextSearch)
 import HaskellReviewer.Server.TextSearchTest qualified
@@ -121,6 +125,9 @@ main = do
   -- each serve warms it up again. Once here, before any test runs
   -- (Q-RTS-BLACKHOLE).
   warmUpSearch
+  -- The side names and commit listing, as the server does.
+  warmUpSideNames
+  warmUpListing
   -- The same for the refs route. It parses and resolves the warm-up
   -- project too, here on one thread.
   warmUpRefs
@@ -186,6 +193,7 @@ main = do
         HaskellReviewer.Effects.GitTest.tests,
         HaskellReviewer.Effects.HelperTest.tests,
         HaskellReviewer.Effects.LogTest.tests,
+        HaskellReviewer.Effects.SourceTest.tests,
         HaskellReviewer.Effects.SpawnTest.tests,
         HaskellReviewer.Effects.TraceTest.tests,
         -- Build the parser's and CPP's shared values before the tests
@@ -244,8 +252,10 @@ main = do
                     [ HaskellReviewer.Server.ApiGoldenTest.tests,
                       HaskellReviewer.Server.ApiTest.tests,
                       HaskellReviewer.Server.RefsTest.tests,
+                      HaskellReviewer.Server.SidesTest.tests,
                       HaskellReviewer.Server.SourceTest.tests,
-                      HaskellReviewer.Server.TextSearchTest.tests
+                      HaskellReviewer.Server.TextSearchTest.tests,
+                      HaskellReviewer.Effects.SourceTest.parsingTests
                     ],
                 HaskellReviewer.Server.PageLinksTest.tests,
                 HaskellReviewer.Server.PageLinksTest.linearTests,

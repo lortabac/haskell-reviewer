@@ -15,6 +15,7 @@ import ApiSupport
     requestApi,
     str,
     textSearchApi,
+    treeSnapshot,
   )
 import Control.Concurrent.Async (mapConcurrently)
 import Control.Exception (throwIO)
@@ -28,6 +29,7 @@ import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Text (Text)
 import Data.Vector qualified as Vector
 import HaskellReviewer.Core.RelPath (relPathFromBytes)
+import HaskellReviewer.Core.Sides (Sides (..))
 import HaskellReviewer.Core.TextSearch (TextAnswer (..), needle)
 import HaskellReviewer.Effects.Clock (MonotonicTime (..), Nanoseconds (..))
 import HaskellReviewer.Effects.FileSystem (ListError (..))
@@ -122,7 +124,7 @@ tests =
       testCase "a failed listing is a 500" $ do
         r <-
           getApiQuery
-            textSearchApi {snapshot = pure (Left (ListCrashed "boom"))}
+            textSearchApi {sides = BrowseSides (pure (Left (ListCrashed "boom")))}
             textPath
             "?q=main"
         (r.status, r.body) @?= (500, "cannot list files"),
@@ -134,11 +136,11 @@ tests =
             "?q=main"
         (r.status, r.body) @?= (500, "cannot read files"),
       testCase "one load per snapshot, for requests at once and later" $ do
-        snap <- either (assertFailure . show) pure =<< textSearchApi.snapshot
+        snap <- either (assertFailure . show) pure =<< treeSnapshot textSearchApi
         readCount <- newIORef (0 :: Int)
         let api =
               textSearchApi
-                { snapshot = pure (Right snap),
+                { sides = BrowseSides (pure (Right snap)),
                   readEntry = \s p k -> do
                     atomicModifyIORef' readCount (\n -> (n + 1, ()))
                     textSearchApi.readEntry s p k,

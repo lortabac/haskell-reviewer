@@ -580,10 +580,17 @@ filesTests =
           withServer id ["--verbose", dir] $ \server -> do
             let doneLine = "indexing: done, 2 modules (2 ready, 0 failed, 0 text only)"
             waitForLine server (doneLine `isPrefixOf`)
-            let done = "{\"generation\":1,\"total\":2,\"ready\":2,\"failed\":0}"
+            let done =
+                  "{\"generation\":1,\"side\":\"tree\",\
+                  \\"total\":2,\"ready\":2,\"failed\":0}"
             r <- getPath server "api/indexing/tree"
             r.status @?= 200
             r.body @?= done
+            -- Browse mode has no base or head side.
+            noBase <- getPath server "api/files/base"
+            noBase.status @?= 404
+            noHead <- getPath server "api/indexing/head"
+            noHead.status @?= 404
             let req =
                   "GET "
                     <> Char8.pack (tokenPath server)

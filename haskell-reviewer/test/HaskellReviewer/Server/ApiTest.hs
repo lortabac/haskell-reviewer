@@ -18,6 +18,7 @@ import ApiSupport
     requestApi,
     searchApi,
     sendApi,
+    treeSnapshot,
   )
 import Codec.Compression.GZip qualified as GZip
 import Control.Concurrent.Async (mapConcurrently, wait, withAsync)
@@ -43,6 +44,7 @@ import HaskellReviewer.Core.Modules (Literate (..))
 import HaskellReviewer.Core.Parser (FileKind (..), ParseSettings (..))
 import HaskellReviewer.Core.Project (Extension (..), Language (..))
 import HaskellReviewer.Core.RelPath (relPathFromBytes)
+import HaskellReviewer.Core.Sides (Sides (..))
 import HaskellReviewer.Core.Xdg (XdgProblem (..))
 import HaskellReviewer.Effects.FileSystem (ListError (..), ReadError (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), newLogger)
@@ -165,7 +167,7 @@ tests =
           @?= Just (Char8.pack (show (LBS.length r.body)))
         assertNoStore r,
       testCase "listing failed: 500 on every route" $ do
-        let api = fixtureApi {snapshot = pure (Left (ListCrashed "boom"))}
+        let api = fixtureApi {sides = BrowseSides (pure (Left (ListCrashed "boom")))}
         mapM_
           ( \path -> do
               r <- getApi api path
@@ -188,7 +190,9 @@ tests =
           @?= Just (Char8.pack (show (LBS.length r.body)))
         assertNoStore r
         -- pkg/src/Lexer.hs is a loose module readEntry doesn't have.
-        r.body @?= "{\"generation\":1,\"total\":9,\"ready\":8,\"failed\":1}"
+        r.body
+          @?= "{\"generation\":1,\"side\":\"tree\",\
+              \\"total\":9,\"ready\":8,\"failed\":1}"
     ]
       <> moduleTests
       <> [searchTests, gzipTests, warmUpTest, prefsTests]
@@ -238,7 +242,7 @@ moduleTests =
                   atomicModifyIORef' seen (\xs -> ((t, settings) : xs, ()))
                   projectApi.parse settings t
               }
-      snap <- either (const (assertFailure "not listed")) pure =<< api.snapshot
+      snap <- either (const (assertFailure "not listed")) pure =<< treeSnapshot api
       got <-
         forM
           [ ("Foo", "pkg/src/Foo.hs"),
@@ -380,8 +384,8 @@ searchTests =
         forM_ decls $ \(ref, a) ->
           assertBool (show (ref, a)) (a `elem` concat (lookup ref ids)),
       testCase "searches while workers run" $ do
-        snap <- either (assertFailure . show) pure =<< searchApi.snapshot
-        let api = searchApi {snapshot = pure (Right snap), workers = 0}
+        snap <- either (assertFailure . show) pure =<< treeSnapshot searchApi
+        let api = searchApi {sides = BrowseSides (pure (Right snap)), workers = 0}
             queries =
               concat . replicate 10 $
                 ["?q=map", "?q=a", "?q=Data.Map.insert", "?q=%3C%2B%3E"]

@@ -2,6 +2,7 @@
 module HaskellReviewer.Core.CommitFilesTest (tests) where
 
 import Data.ByteString (ByteString)
+import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as Char8
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
@@ -12,9 +13,11 @@ import HaskellReviewer.Core.CommitFiles
     CommitFiles (..),
     Dropped (..),
     DroppedRow (..),
+    commitLink,
+    linkTargetCap,
     mkCommitFiles,
   )
-import HaskellReviewer.Core.FileContent (FileSize (..))
+import HaskellReviewer.Core.FileContent (FileSize (..), LinkInfo (..))
 import HaskellReviewer.Core.FileList
   ( CommitId (..),
     EntryKind (..),
@@ -111,7 +114,22 @@ tests =
         cf.files.truncated @?= True
         Map.keys cf.blobs @?= Map.keys cf.files.entries
         Map.size cf.outside @?= fileListCap
-        cf.outsideTruncated @?= True
+        cf.outsideTruncated @?= True,
+      testCase "commitLink: resolved, cut at the cap, not UTF-8" $ do
+        let link = rel "docs/link"
+            long = BS.replicate linkTargetCap 97
+        commitLink link (FileSize 7) "../a.hs"
+          @?= LinkInfo {target = "../a.hs", resolved = Just (rel "a.hs")}
+        -- Cut: shown cut, points nowhere, even if the cut text is a path.
+        commitLink link (FileSize (linkTargetCap + 1)) long
+          @?= LinkInfo {target = Text.replicate linkTargetCap "a", resolved = Nothing}
+        commitLink link (FileSize linkTargetCap) long
+          @?= LinkInfo
+            { target = Text.replicate linkTargetCap "a",
+              resolved = Just (rel ("docs/" <> long))
+            }
+        commitLink link (FileSize 2) "\xff\xfe"
+          @?= LinkInfo {target = "\xfffd\xfffd", resolved = Nothing}
     ]
 
 known :: Int -> TreeSize

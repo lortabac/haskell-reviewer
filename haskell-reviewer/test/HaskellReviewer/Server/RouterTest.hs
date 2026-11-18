@@ -1,7 +1,7 @@
 -- | The app, called in process (no socket).
 module HaskellReviewer.Server.RouterTest (tests) where
 
-import ApiSupport (fixedPrefs)
+import ApiSupport (browseOnly, fixedPrefs)
 import Codec.Compression.GZip qualified as GZip
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
@@ -283,7 +283,7 @@ call req = do
         EventStream
           { clients = clients,
             keepAlive = Microseconds 1000000,
-            indexing = pure Nothing,
+            indexing = pure [],
             minGap = Microseconds 0,
             logger = newLogger LevelInfo (\_ -> pure ())
           }
@@ -301,7 +301,7 @@ call req = do
 noFiles :: FilesApi
 noFiles =
   FilesApi
-    { snapshot = pure (Left (ListCrashed "no files here")),
+    { snapshotOn = browseOnly (pure (Left (ListCrashed "no files here"))),
       readEntry = \_ _ _ -> pure (Left ReadGone),
       logger = newLogger LevelInfo (\_ -> pure ())
     }

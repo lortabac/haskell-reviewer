@@ -736,7 +736,8 @@ newFake held = do
               pure (Right (TextContent (Text.dropEnd 3 (relPathText p)))),
             parse = parse,
             logger =
-              newLogger LevelVerbose (\l -> atomically (modifyTVar' logged (<> [l])))
+              newLogger LevelVerbose (\l -> atomically (modifyTVar' logged (<> [l]))),
+            label = ""
           }
   pure
     Fake

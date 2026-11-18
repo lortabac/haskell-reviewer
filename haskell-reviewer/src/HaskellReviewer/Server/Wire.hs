@@ -89,6 +89,7 @@ import HaskellReviewer.Core.Search
     ModuleCandidate (..),
     SearchResult (..),
   )
+import HaskellReviewer.Core.Sides (Side, sideName)
 import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
 import HaskellReviewer.Core.TextSearch
   ( LineHit (..),
@@ -283,14 +284,15 @@ helloPayload = LBS.toStrict (Encoding.encodingToLazyByteString (Aeson.pairs memp
 
 -- | GET api\/indexing\/\<side>, and the data of the @indexing@ event:
 --
--- > {"generation":1,"total":358,"ready":120,"failed":2}
+-- > {"generation":1,"side":"head","total":358,"ready":120,"failed":2}
 --
 -- Done when @ready + failed == total@. See Note [Indexing] in
 -- "HaskellReviewer.Session.Index".
-encodeIndexing :: Generation -> Progress -> ByteString
-encodeIndexing (Generation g) p =
+encodeIndexing :: Generation -> Side -> Progress -> ByteString
+encodeIndexing (Generation g) side p =
   LBS.toStrict . Encoding.encodingToLazyByteString . Aeson.pairs $
     ("generation" .= g)
+      <> ("side" .= sideName side)
       <> ("total" .= p.total)
       <> ("ready" .= p.ready)
       <> ("failed" .= p.failed)

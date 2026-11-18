@@ -88,6 +88,7 @@ library
     HaskellReviewer.Core.RichText
     HaskellReviewer.Core.Root
     HaskellReviewer.Core.Search
+    HaskellReviewer.Core.Sides
     HaskellReviewer.Core.SourceLinks
     HaskellReviewer.Core.SourceText
     HaskellReviewer.Core.Span
@@ -108,6 +109,7 @@ library
     HaskellReviewer.Effects.Parser
     HaskellReviewer.Effects.PosixAt
     HaskellReviewer.Effects.Shutdown
+    HaskellReviewer.Effects.Source
     HaskellReviewer.Effects.Spawn
     HaskellReviewer.Effects.Trace
 
@@ -284,6 +286,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Effects.GitTest
     HaskellReviewer.Effects.HelperTest
     HaskellReviewer.Effects.LogTest
+    HaskellReviewer.Effects.SourceTest
     HaskellReviewer.Effects.SpawnTest
     HaskellReviewer.Effects.TraceTest
     HaskellReviewer.Server.ApiGoldenTest
@@ -296,6 +299,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Server.EventsTest
     HaskellReviewer.Server.ListenTest
     HaskellReviewer.Server.RouterTest
+    HaskellReviewer.Server.SidesTest
     HaskellReviewer.Server.SourceTest
     HaskellReviewer.Server.TextSearchTest
     HaskellReviewer.Session.ClientsTest

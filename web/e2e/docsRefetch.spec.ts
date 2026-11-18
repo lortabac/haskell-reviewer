@@ -53,6 +53,7 @@ const done = (page: Page, generation: number) =>
     (g) =>
       window.__hrEmit?.("indexing", {
         generation: g,
+        side: "tree",
         total: 2,
         ready: 2,
         failed: 0,

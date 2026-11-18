@@ -157,6 +157,7 @@ test("a late highlight keeps focus on the line; a redraw on a link", async ({
   const old = await go.elementHandle();
   await emit(page, "indexing", {
     generation: src.generation(),
+    side: "tree",
     total: 2,
     ready: 2,
     failed: 0,
@@ -395,6 +396,7 @@ test("partial: refetch on indexing done, once; another snapshot: none", async ({
   await emit(page, "hello", {});
   const done = (generation: number) => ({
     generation,
+    side: "tree",
     total: 2,
     ready: 2,
     failed: 0,

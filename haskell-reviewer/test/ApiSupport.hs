@@ -3,6 +3,10 @@
 module ApiSupport
   ( -- * The fixture projects
     TestApi (..),
+    treeSnapshot,
+    withSnapshot,
+    diffApi,
+    browseOnly,
     fixtureApi,
     projectApi,
     implicitApi,
@@ -43,7 +47,7 @@ module ApiSupport
   )
 where
 
-import Control.Concurrent.Async (withAsync)
+import Control.Concurrent.Async (mapConcurrently_, withAsync)
 import Control.Concurrent.MVar (MVar, readMVar)
 import Control.Exception (evaluate)
 import Control.Monad (forM_, void, when)
@@ -112,11 +116,13 @@ import HaskellReviewer.Core.RelPath
     resolveLinkTarget,
   )
 import HaskellReviewer.Core.Root (CanonicalRoot (..))
+import HaskellReviewer.Core.Sides (Pair (..), Side (..), Sides (..), lookupSide)
 import HaskellReviewer.Core.Xdg (XdgProblem (..))
 import HaskellReviewer.Effects.Clock (Microseconds (..))
 import HaskellReviewer.Effects.FileSystem (ListError, ReadError (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), Logger, newLogger)
 import HaskellReviewer.Effects.Parser (parseGuarded)
+import HaskellReviewer.Effects.Source (EntrySource (..))
 import HaskellReviewer.Server.Api (FilesApi (..))
 import HaskellReviewer.Server.Api qualified as Api (newSnapshot)
 import HaskellReviewer.Server.CborJson (cborToJson)
@@ -125,7 +131,7 @@ import HaskellReviewer.Server.Router (Routes (..), application)
 import HaskellReviewer.Session.Clients (newClients)
 import HaskellReviewer.Session.Index (IndexDeps (..), IndexJob (..), newPool, runWorkers)
 import HaskellReviewer.Session.Prefs (PrefsStore (..), newPrefsStore)
-import HaskellReviewer.Session.Snapshot (Snapshot (files, index))
+import HaskellReviewer.Session.Snapshot (Snapshot (files, index, side))
 import Network.HTTP.Types (Header, Status (..))
 import Network.Wai
   ( Application,
@@ -144,7 +150,9 @@ import Test.Tasty.HUnit (assertFailure)
 -- | The snapshot routes and the parse workers, with fakes. Each request
 -- gets a fresh snapshot, so a fresh index: tests share no slot.
 data TestApi = TestApi
-  { snapshot :: IO (Either ListError Snapshot),
+  { -- | Each side's snapshot. Browse mode (tree only) unless
+    -- 'diffApi' made it.
+    sides :: Sides (IO (Either ListError Snapshot)),
     readEntry :: Snapshot -> RelPath -> EntryKind -> IO (Either ReadError FileContent),
     parse :: ParseSettings -> Text -> IO ModuleParse,
     -- | For read errors.
@@ -157,6 +165,37 @@ data TestApi = TestApi
     -- memory, with the built-in defaults.
     prefs :: IO PrefsStore
   }
+
+-- | The tree snapshot of a browse-mode api.
+treeSnapshot :: TestApi -> IO (Either ListError Snapshot)
+treeSnapshot api = case api.sides of
+  BrowseSides s -> s
+  DiffSides _ -> assertFailure "treeSnapshot: a diff api"
+
+-- | Browse mode, with this snapshot.
+withSnapshot :: IO (Either ListError Snapshot) -> TestApi -> TestApi
+withSnapshot s api = api {sides = BrowseSides s}
+
+-- | Diff mode: head is the first api's tree snapshot, base the
+-- second's, each with its side set. The rest comes from the first.
+-- Each snapshot keeps its own pool: the workers run per side.
+diffApi :: TestApi -> TestApi -> TestApi
+diffApi headApi baseApi =
+  headApi
+    { sides =
+        DiffSides
+          Pair
+            { head = onSide HeadSide (treeSnapshot headApi),
+              base = onSide BaseSide (treeSnapshot baseApi)
+            }
+    }
+  where
+    onSide s get = fmap (\snap -> snap {side = s}) <$> get
+
+-- | The file routes' lookup for a browse session with this snapshot.
+browseOnly ::
+  IO (Either ListError Snapshot) -> Side -> Maybe (IO (Either ListError Snapshot))
+browseOnly s side = lookupSide side (BrowseSides s)
 
 -- | A fixed snapshot and file contents. The file API fixtures come
 -- from it.
@@ -389,14 +428,16 @@ forceFixtures = do
 indexed :: TestApi -> TestApi
 indexed api =
   api
-    { snapshot =
-        api.snapshot >>= \case
-          Right snap -> do
-            indexAll api snap
-            pure (Right snap)
-          listed -> pure listed,
+    { sides = indexSide <$> api.sides,
       workers = 0
     }
+  where
+    indexSide get =
+      get >>= \case
+        Right snap -> do
+          indexAll api snap
+          pure (Right snap)
+        listed -> pure listed
 
 -- | Index every module of the snapshot, with one worker.
 indexAll :: TestApi -> Snapshot -> IO ()
@@ -405,7 +446,7 @@ indexAll api snap = runWorkers 1 [IndexJob (indexDeps api snap) snap.index]
 apiFor :: IO Snapshot -> TestApi
 apiFor snap =
   TestApi
-    { snapshot = Right <$> snap,
+    { sides = BrowseSides (Right <$> snap),
       readEntry = \_ p _ ->
         pure (maybe (Left ReadGone) Right (lookup (relPathText p) contents)),
       parse = parseGuarded,
@@ -435,14 +476,15 @@ indexDeps api snap =
         Just EntryFile -> api.readEntry snap p EntryFile
         _ -> pure (Left ReadGone),
       parse = api.parse,
-      logger = api.logger
+      logger = api.logger,
+      label = ""
     }
 
 -- | A snapshot in a pool of its own.
 newSnapshot :: CanonicalRoot -> FileList -> Project -> IO Snapshot
 newSnapshot root fl project = do
   pool <- newPool
-  Api.newSnapshot pool root fl project
+  Api.newSnapshot TreeSide pool (DiskEntries root) fl project
 
 fixtureSnapshot :: IO Snapshot
 fixtureSnapshot =
@@ -1113,20 +1155,20 @@ sendApi method headers reqBody = sendApiQuery method headers reqBody ""
 sendApiQuery ::
   ByteString -> [Header] -> RequestBody -> ByteString -> TestApi -> [Text] -> IO ApiResult
 sendApiQuery method headers reqBody query api path = do
-  listed <- api.snapshot
+  listed <- sequence api.sides
   prefsStore <- api.prefs
   clients <- newClients
   let events =
         EventStream
           { clients = clients,
             keepAlive = Microseconds 1_000_000,
-            indexing = pure Nothing,
+            indexing = pure [],
             minGap = Microseconds 0,
             logger = newLogger LevelInfo (\_ -> pure ())
           }
       files =
         FilesApi
-          { snapshot = pure listed,
+          { snapshotOn = \side -> pure <$> lookupSide side listed,
             readEntry = api.readEntry,
             logger = api.logger
           }
@@ -1138,13 +1180,12 @@ sendApiQuery method headers reqBody query api path = do
             callAppBody app method headers reqBody query host (tokenText apiToken : path)
         maybe (assertFailure ("no answer within 10 s: " <> show path)) pure r
       host = "127.0.0.1:8080"
-  case listed of
-    Right snap
-      | api.workers > 0 ->
-          withAsync
-            (runWorkers api.workers [IndexJob (indexDeps api snap) snap.index])
-            (const call)
-    _ -> call
+  -- One runWorkers per side: each snapshot has a pool of its own.
+  let snaps = [snap | Right snap <- toList listed]
+      work snap = runWorkers api.workers [IndexJob (indexDeps api snap) snap.index]
+  if api.workers > 0 && not (null snaps)
+    then withAsync (mapConcurrently_ work snaps) (const call)
+    else call
 
 -- | Call an app with a request that ends. The path has the token.
 callApp :: Application -> ByteString -> ByteString -> [Text] -> IO ApiResult

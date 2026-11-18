@@ -472,7 +472,8 @@ newWorld held mods = do
               -- Not the 2 s limit: on a loaded machine a module could be
               -- text only (too slow), and the results would change.
               parseWithin 60_000_000 s t,
-            logger = newLogger LevelInfo (\_ -> pure ())
+            logger = newLogger LevelInfo (\_ -> pure ()),
+            label = ""
           }
   pool <- newPool
   index <- newIndex pool idx

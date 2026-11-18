@@ -106,7 +106,9 @@ straight from git objects (for the working tree: clean tracked files from
 their index blobs, the rest from disk, §11.4.1), so no checkout takes place
 and the user's working tree is never touched.
 
-In browse mode there is exactly one side.
+In browse mode there is exactly one side, *tree* (the working tree).
+URLs and API routes name the side (`tree`, `base`, `head`); a side the
+session doesn't have is a plain 404 (D-313).
 
 ### 2.3 Project model
 
@@ -1570,7 +1572,11 @@ the search box's 8 results, on a large project once the store is loaded
   indexes, with one big-file lock and one request gate (D-314). Within
   a priority, head goes before base, whatever came first: a request on
   any side first, then changed modules, then head's other modules, then
-  base's.
+  base's. The sides are listed at the same time, then built one after the
+  other, head first (Q-RTS-BLACKHOLE); the workers start once every
+  side is built (D-313, D-315).
+- **Sources.** Each side's snapshot reads its files from one source:
+  the disk (ROOT as it is now) or a commit's blobs (D-313).
 - **Reload** (§5.2) builds a new generation and swaps it in atomically.
   Unchanged blobs hit the shared parse results (§11.4.4), so a reload
   re-parses only what changed.
@@ -1649,11 +1655,12 @@ a framework would cost more than it saves.
     plain HTTP gives no HTTP/2. One stream per tab would hang the UI after
     a few tabs.
   - URL: `GET /<token>/api/events`. On open the server sends a `hello`
-    event, then an `indexing` event with the current progress (once
-    the files are listed; never if the listing failed).
+    event, then an `indexing` event per side with its current progress
+    (once that side is listed; never for a side whose listing failed).
   - Events: indexing progress (`indexing`, the same JSON as
-    `GET api/indexing/<side>`, at most one per 100 ms, always the latest
-    state), generation changes, LLM stream updates, notices.
+    `GET api/indexing/<side>`, with a `side` field; at most one per side
+    per 100 ms, always the latest state, D-315), generation changes, LLM
+    stream updates, notices.
   - Fallback: without SharedWorker, each tab opens its own stream, and a
     notice warns about the limit.
 - **Liveness**: a browser is connected while its SSE stream is open. The

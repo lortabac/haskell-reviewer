@@ -12,9 +12,11 @@ import Control.Concurrent.MVar
     takeMVar,
     tryPutMVar,
   )
-import Control.Exception (AsyncException (..), evaluate, throwIO, try)
-import Control.Monad (forever, void, when)
+import Control.Exception (AsyncException (..), Exception, evaluate, throwIO, try)
+import Control.Monad (forM_, forever, void, when)
 import Data.ByteString qualified as BS
+import Data.ByteString.Builder qualified as Builder
+import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Lazy qualified as LBS
 import Data.IORef
   ( IORef,
@@ -28,6 +30,7 @@ import Data.List (elemIndex)
 import Data.Maybe (isNothing)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Text.Encoding qualified as Text.Encoding
 import Data.Time.Calendar (fromGregorian)
 import Data.Time.Clock (UTCTime (..))
 import HaskellReviewer.App.Run (Deps (..), run)
@@ -49,6 +52,7 @@ import HaskellReviewer.Core.ModuleModel
 import HaskellReviewer.Core.Project (GhcVersion (..))
 import HaskellReviewer.Core.RelPath (relPathFromBytes)
 import HaskellReviewer.Core.Root (CanonicalRoot (..), Root (..))
+import HaskellReviewer.Core.Sides (Pair (..), Sides (..))
 import HaskellReviewer.Core.Xdg (XdgProblem (..))
 import HaskellReviewer.Effects.Clock
   ( Clock (..),
@@ -58,23 +62,40 @@ import HaskellReviewer.Effects.Clock
   )
 import HaskellReviewer.Effects.FileSystem
   ( ListError (..),
-    Lister (..),
     RootError (..),
   )
-import HaskellReviewer.Effects.Git (GitError (..), TooOld (..))
-import HaskellReviewer.Effects.Log (logInfo)
+import HaskellReviewer.Effects.Git
+  ( GitError (..),
+    Listing (..),
+    TooOld (..),
+    repoInfo,
+    resolveCommit,
+  )
+import HaskellReviewer.Effects.GitObjects (defaultReaderSettings, withObjectReader)
+import HaskellReviewer.Effects.Log (LogLevel (..), Logger, logInfo, newLogger)
 import HaskellReviewer.Effects.Shutdown (Shutdown (..))
+import HaskellReviewer.Effects.Source
+  ( EntrySource (..),
+    Listed (..),
+    Lister (..),
+    commitLister,
+    diskLister,
+    readSourceEntry,
+  )
 import HaskellReviewer.Effects.Spawn (SoftLimit (..), SpawnSetup (..))
 import HaskellReviewer.Effects.Trace (Span (..), TraceFileError (..), Tracer (..))
 import HaskellReviewer.Server.Listen (ListenError (..), Listener (..))
 import HaskellReviewer.Session.Project qualified as Session.Project
 import Network.Wai (Application, Request (..), defaultRequest, responseToStream)
 import Network.Wai.Internal (ResponseReceived (..))
+import System.Directory qualified as Dir
 import System.Exit (ExitCode (..))
+import System.FilePath ((</>))
 import System.Posix.Resource (ResourceLimit (..))
 import System.Timeout (timeout)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
+import TestSupport (fixtureRepo, realGitAt, withCanonicalTemp)
 
 tests :: TestTree
 tests =
@@ -180,6 +201,7 @@ tests =
         readIORef steps >>= (@?= ["root", "config", "git"]),
       listingTests,
       indexingTests,
+      diffTests,
       testCase "--port is passed to listen" $ do
         fake <- newFake
         ports <- newIORef []
@@ -373,7 +395,7 @@ listingTests =
             empty = fakeLister (pure (Right (mkFileList FromDisk 0 [])))
             deps =
               (idleDeps fake stop serve)
-                { probeFiles = \_ _ -> pure (Right empty),
+                { probeFiles = \_ _ -> pure (Right (BrowseSides empty)),
                   warmUp = [putMVar warming () >> busy]
                 }
         withAsync (run deps ["--idle-exit", "0"]) $ \running -> do
@@ -436,9 +458,9 @@ listingTests =
           drop 1 out @?= ["haskell-reviewer: cannot read the project: user error (boom)"],
       testCase "--ghc reaches readProject" $ do
         captured <- newIORef Nothing
-        let capture root fl platform cliGhc = do
+        let capture source fl platform cliGhc = do
               writeIORef captured (Just cliGhc)
-              Session.Project.readProject root fl platform cliGhc
+              Session.Project.readProject source fl platform cliGhc
             change d = d {readProject = capture}
             empty _ = fakeLister (pure (Right (mkFileList FromDisk 0 [])))
         withRunningArgs ["--idle-exit", "0", "--ghc", "9.10"] change empty $ \_ app -> do
@@ -494,7 +516,7 @@ indexingTests =
             busy = mapM_ (\n -> evaluate (length (show (n * n :: Integer)))) [1 ..]
             deps =
               (idleDeps fake stop serve)
-                { probeFiles = \_ _ -> pure (Right (fakeLister (pure (Right oneModule)))),
+                { probeFiles = \_ _ -> pure (Right (BrowseSides oneLister)),
                   parse = \_ _ -> putMVar parsing () >> busy >> pure textOnly
                 }
         withAsync (run deps ["--idle-exit", "0"]) $ \running -> do
@@ -544,6 +566,10 @@ indexingTests =
         readIORef asked >>= (@?= False)
     ]
 
+-- | A lister of 'oneModule'.
+oneLister :: Lister
+oneLister = fakeLister (pure (Right oneModule))
+
 -- | A list with one module, A.hs.
 oneModule :: FileList
 oneModule =
@@ -570,7 +596,17 @@ withRunningArgs ::
   (Fake -> Lister) ->
   (Fake -> Application -> IO a) ->
   IO a
-withRunningArgs args change mkLister action = do
+withRunningArgs args change mkLister =
+  withRunningSides args change (BrowseSides . mkLister)
+
+-- | Like 'withRunningArgs', with a lister per side.
+withRunningSides ::
+  [String] ->
+  (Deps -> Deps) ->
+  (Fake -> Sides Lister) ->
+  (Fake -> Application -> IO a) ->
+  IO a
+withRunningSides args change mkListers action = do
   fake <- newFake
   stop <- newEmptyMVar
   appVar <- newEmptyMVar
@@ -578,7 +614,7 @@ withRunningArgs args change mkLister action = do
       deps =
         change
           (idleDeps fake stop serve)
-            { probeFiles = \_ _ -> pure (Right (mkLister fake))
+            { probeFiles = \_ _ -> pure (Right (mkListers fake))
             }
   withAsync (run deps args) $ \running -> do
     app <- timeout 5_000_000 (takeMVar appVar)
@@ -587,6 +623,327 @@ withRunningArgs args change mkLister action = do
     code <- timeout 5_000_000 (wait running)
     code @?= Just ExitSuccess
     pure result
+
+-- * Diff mode
+
+-- | A diff session through 'run', with a fake probe: each side answers
+-- from its own snapshot (D-313).
+diffTests :: TestTree
+diffTests =
+  testGroup
+    "diff session"
+    [ testCase "two disk dirs: each side from its own snapshot, one done line" $
+        withCanonicalTemp $ \tmp -> do
+          headDir <- makeProject (tmp </> "head") ["A", "C"]
+          baseDir <- makeProject (tmp </> "base") ["A", "B"]
+          let listers _ =
+                DiffSides Pair {head = diskAt headDir, base = diskAt baseDir}
+              real d = d {readEntry = readSourceEntry}
+              args = ["--idle-exit", "0", "--verbose", "--trace-file", "t.jsonl"]
+          withRunningSides args real listers $ \fake app -> do
+            ok <- waitFor 5 (any isDone <$> readIORef fake.console)
+            assertBool "not indexed" ok
+            checkSides app "C" "B"
+            out <- readIORef fake.console
+            filter isDone out
+              @?= [allDone]
+            assertBool (show out) (any ("head: files: " `Text.isPrefixOf`) out)
+            assertBool (show out) (any ("base: project: " `Text.isPrefixOf`) out)
+            names <- map (.name) <$> readIORef fake.spans
+            forM_ ["files:head", "files:base", "project:head", "project:base"] $ \n ->
+              assertBool (show names) (n `elem` names)
+            assertBool (show names) ("parser-warm-up" `elem` names)
+            length (filter (== "indexing") names) @?= 1
+            stream <- streamUntil app ["\"side\":\"head\"", "\"side\":\"base\""]
+            assertBool (show stream) ("event: indexing" `BS.isInfixOf` stream),
+      testCase "commit sides: HEAD and HEAD~1 of the sides repo" $
+        withCanonicalTemp $ \tmp -> do
+          let repo = tmp </> "repo"
+          fixtureRepo "sides" [repo]
+          Dir.createDirectory (tmp </> "home")
+          g <- realGitAt (tmp </> "home") repo
+          info <- repoInfo g >>= either (assertFailure . show) pure
+          let commit rev =
+                resolveCommit g rev >>= \case
+                  Right (Just c) -> pure c
+                  other -> assertFailure (show other)
+          headCommit <- commit "HEAD"
+          baseCommit <- commit "HEAD~1"
+          withObjectReader quiet defaultReaderSettings g $ \reader -> do
+            let listers _ =
+                  DiffSides
+                    Pair
+                      { head = commitLister quiet g info reader headCommit,
+                        base = commitLister quiet g info reader baseCommit
+                      }
+                real d = d {readEntry = readSourceEntry}
+                args = ["--idle-exit", "0", "--verbose"]
+            withRunningSides args real listers $ \fake app -> do
+              ok <- waitFor 5 (any isDone <$> readIORef fake.console)
+              assertBool "not indexed" ok
+              checkSides app "C" "B"
+              headFiles <- getSide app "files" "head"
+              assertBool (show headFiles.body) ("readme-link" `inBody` headFiles)
+              baseFiles <- getSide app "files" "base"
+              assertBool (show baseFiles.body) (not ("readme-link" `inBody` baseFiles))
+              out <- readIORef fake.console
+              filter isDone out
+                @?= [allDone],
+      testCase "stop during indexing: exit 0, both sides failed" $ do
+        fake <- newFake
+        stop <- newEmptyMVar
+        appVar <- newEmptyMVar
+        parsing <- newEmptyMVar
+        let serve ready app = ready >> putMVar appVar app >> blockForever
+            busy = mapM_ (\n -> evaluate (length (show (n * n :: Integer)))) [1 ..]
+            one = fakeLister (pure (Right oneModule))
+            deps =
+              (idleDeps fake stop serve)
+                { probeFiles = \_ _ ->
+                    pure (Right (DiffSides Pair {head = one, base = one})),
+                  parse = \_ _ -> void (tryPutMVar parsing ()) >> busy >> pure textOnly
+                }
+        withAsync (run deps ["--idle-exit", "0"]) $ \running -> do
+          ready <- timeout 5_000_000 (takeMVar appVar)
+          app <- maybe (assertFailure "not ready") pure ready
+          started <- timeout 5_000_000 (takeMVar parsing)
+          started @?= Just ()
+          putMVar stop ()
+          code <- timeout 5_000_000 (wait running)
+          code @?= Just ExitSuccess
+          forM_ ["head", "base"] $ \side -> do
+            r <- timeout 5_000_000 (getSidePath app ["module", side, "A"])
+            fmap (\x -> (x.status, x.body)) r @?= Just (500, "cannot index module"),
+      testCase "head's listing crashes: 500 there, base works" $ do
+        let listers _ =
+              DiffSides
+                Pair
+                  { head = fakeLister (ioError (userError "boom")),
+                    base = fakeLister (pure (Right oneModule))
+                  }
+        withRunningSides ["--idle-exit", "0"] id listers $ \fake app -> do
+          h <- timeout 5_000_000 (getSide app "files" "head")
+          fmap (\x -> (x.status, x.body)) h @?= Just (500, "cannot list files")
+          b <- getSide app "files" "base"
+          b.status @?= 200
+          m <- timeout 5_000_000 (getSidePath app ["module", "base", "A"])
+          fmap (.status) m @?= Just 200
+          t <- getSide app "files" "tree"
+          t.status @?= 404
+          let line = "haskell-reviewer: head: cannot list files: user error (boom)"
+          ok <- waitFor 5 (elem line <$> readIORef fake.console)
+          out <- readIORef fake.console
+          assertBool (show out) ok,
+      testCase "base's listing fails: 500 there, head is indexed" $ do
+        let listers _ =
+              DiffSides
+                Pair
+                  { head = fakeLister (pure (Right oneModule)),
+                    base = fakeLister (pure (Left (ListCrashed "boom")))
+                  }
+        withRunningSides ["--idle-exit", "0", "--verbose"] id listers $ \fake app -> do
+          b <- getSide app "files" "base"
+          (b.status, b.body) @?= (500, "cannot list files")
+          ok <- waitFor 5 (any isDone <$> readIORef fake.console)
+          out <- readIORef fake.console
+          assertBool (show out) ok
+          filter isDone out
+            @?= ["indexing: done, 1 modules (1 ready, 0 failed, 1 text only) in 0 ms"]
+          assertBool
+            (show out)
+            ("haskell-reviewer: base: cannot list files: boom" `elem` out),
+      testCase "warm-ups run once, before any slot is filled" $ do
+        count <- newIORef (0 :: Int)
+        release <- newEmptyMVar
+        let warming d =
+              d {warmUp = [modifyIORef' count (+ 1) >> readMVar release]}
+            one = fakeLister (pure (Right oneModule))
+            listers _ = DiffSides Pair {head = one, base = one}
+        withRunningSides ["--idle-exit", "0"] warming listers $ \_ app ->
+          withAsync (getSide app "files" "head") $ \h ->
+            withAsync (getSide app "files" "base") $ \b -> do
+              threadDelay 200_000
+              early <- (,) <$> poll h <*> poll b
+              assertBool "answered before the warm-up" (bothNothing early)
+              putMVar release ()
+              rh <- timeout 5_000_000 (wait h)
+              rb <- timeout 5_000_000 (wait b)
+              (fmap (.status) rh, fmap (.status) rb) @?= (Just 200, Just 200)
+        readIORef count >>= (@?= 1),
+      testCase "stop before the listing starts: both sides 500, exit 0" $ do
+        fake <- newFake
+        stop <- newEmptyMVar
+        appVar <- newEmptyMVar
+        -- Never ready: the listing never starts.
+        let serve _ app = putMVar appVar app >> blockForever
+            one = fakeLister (pure (Right oneModule))
+            deps =
+              (idleDeps fake stop serve)
+                { probeFiles = \_ _ ->
+                    pure (Right (DiffSides Pair {head = one, base = one}))
+                }
+        withAsync (run deps ["--idle-exit", "0"]) $ \running -> do
+          ready <- timeout 5_000_000 (takeMVar appVar)
+          app <- maybe (assertFailure "not served") pure ready
+          putMVar stop ()
+          code <- timeout 5_000_000 (wait running)
+          code @?= Just ExitSuccess
+          forM_ ["head", "base"] $ \side -> do
+            r <- timeout 5_000_000 (getSide app "files" side)
+            fmap (\x -> (x.status, x.body)) r @?= Just (500, "cannot list files"),
+      testCase "stop during listing: both sides 500, exit 0" $ do
+        fake <- newFake
+        stop <- newEmptyMVar
+        appVar <- newEmptyMVar
+        listed <- newEmptyMVar
+        let serve ready app = ready >> putMVar appVar app >> blockForever
+            slow = fakeLister neverDone
+            quick = fakeLister (putMVar listed () >> pure (Right oneModule))
+            deps =
+              (idleDeps fake stop serve)
+                { probeFiles = \_ _ ->
+                    pure (Right (DiffSides Pair {head = slow, base = quick}))
+                }
+        withAsync (run deps ["--idle-exit", "0"]) $ \running -> do
+          ready <- timeout 5_000_000 (takeMVar appVar)
+          app <- maybe (assertFailure "not ready") pure ready
+          started <- timeout 5_000_000 (takeMVar listed)
+          started @?= Just ()
+          putMVar stop ()
+          code <- timeout 5_000_000 (wait running)
+          code @?= Just ExitSuccess
+          forM_ ["head", "base"] $ \side -> do
+            r <- timeout 5_000_000 (getSide app "files" side)
+            fmap (\x -> (x.status, x.body)) r @?= Just (500, "cannot list files"),
+      testCase "both sides fail to list: no warm-up, no workers, both 500" $ do
+        count <- newIORef (0 :: Int)
+        asked <- newIORef False
+        let counting d =
+              d
+                { warmUp = [modifyIORef' count (+ 1)],
+                  indexWorkers = writeIORef asked True >> pure 1
+                }
+            failing = fakeLister (pure (Left (ListCrashed "boom")))
+            listers _ = DiffSides Pair {head = failing, base = failing}
+        withRunningSides ["--idle-exit", "0", "--verbose"] counting listers $
+          \fake app -> do
+            forM_ ["head", "base"] $ \side -> do
+              r <- getSide app "files" side
+              (side, r.status) @?= (side, 500)
+            let lines' = filter ("cannot list files" `Text.isInfixOf`)
+            ok <- waitFor 5 ((== 2) . length . lines' <$> readIORef fake.console)
+            out <- readIORef fake.console
+            assertBool (show out) ok
+            filter ("indexing:" `Text.isPrefixOf`) out @?= []
+        readIORef count >>= (@?= 0)
+        readIORef asked >>= (@?= False),
+      testCase "a crash after the fill: both sides still indexed" $ do
+        let failing d =
+              d
+                { openTracer = \_ _ ->
+                    pure . Right $
+                      Tracer
+                        { record = \sp ->
+                            when (sp.name == "files:head") (ioError (userError "boom")),
+                          close = pure ()
+                        }
+                }
+            one = fakeLister (pure (Right oneModule))
+            listers _ = DiffSides Pair {head = one, base = one}
+            args = ["--idle-exit", "0", "--verbose", "--trace-file", "t.jsonl"]
+        withRunningSides args failing listers $ \fake _ -> do
+          ok <- waitFor 5 (any isDone <$> readIORef fake.console)
+          out <- readIORef fake.console
+          assertBool (show out) ok
+          filter isDone out
+            @?= ["indexing: done, 2 modules (2 ready, 0 failed, 2 text only) in 0 ms"]
+    ]
+  where
+    bothNothing = \case
+      (Nothing, Nothing) -> True
+      _ -> False
+    isDone = ("indexing: done" `Text.isPrefixOf`)
+    allDone = "indexing: done, 4 modules (4 ready, 0 failed, 4 text only) in 0 ms"
+    diskAt dir =
+      diskLister quiet (CanonicalRoot dir (Char8.pack dir)) ListFromDisk
+
+-- | Head has the first module, base the second; both have A.
+checkSides :: Application -> Text -> Text -> Assertion
+checkSides app headOnly baseOnly = do
+  h <- getSide app "files" "head"
+  b <- getSide app "files" "base"
+  (h.status, b.status) @?= (200, 200)
+  assertBool "same lists" (h.body /= b.body)
+  t <- getSide app "files" "tree"
+  t.status @?= 404
+  let status path = (.status) <$> getSidePath app path
+  status ["module", "head", headOnly] >>= (@?= 200)
+  status ["module", "base", baseOnly] >>= (@?= 200)
+  status ["module", "head", baseOnly] >>= (@?= 404)
+  status ["module", "base", headOnly] >>= (@?= 404)
+  status ["module", "tree", "A"] >>= (@?= 404)
+  forM_ ["head", "base"] $ \side -> do
+    r <- getSide app "indexing" side
+    let tag = "\"side\":\"" <> Text.Encoding.encodeUtf8 side <> "\""
+    assertBool (show r.body) (tag `inBody` r)
+
+-- | A project dir with one library of these modules.
+makeProject :: FilePath -> [Text] -> IO FilePath
+makeProject dir names = do
+  Dir.createDirectoryIfMissing True (dir </> "src")
+  writeFile (dir </> "p.cabal") $
+    "cabal-version: 3.0\nname: p\nversion: 0.1\n\nlibrary\n  exposed-modules: "
+      <> unwords (map Text.unpack names)
+      <> "\n  hs-source-dirs: src\n"
+  forM_ names $ \n -> do
+    let name = Text.unpack n
+    writeFile (dir </> "src" </> name <> ".hs") ("module " <> name <> " where\n")
+  Dir.canonicalizePath dir
+
+-- | GET api/<what>/<side>.
+getSide :: Application -> Text -> Text -> IO ApiResult
+getSide app what side = getSidePath app [what, side]
+
+-- | GET api/<path...>.
+getSidePath :: Application -> [Text] -> IO ApiResult
+getSidePath app path =
+  callApp app "GET" "127.0.0.1:4321" (tokenText fakeToken : "api" : path)
+
+inBody :: BS.ByteString -> ApiResult -> Bool
+inBody needle r = needle `BS.isInfixOf` LBS.toStrict r.body
+
+-- | Read the event stream until it holds every text (5 s at most).
+streamUntil :: Application -> [BS.ByteString] -> IO BS.ByteString
+streamUntil app needles = do
+  seen <- newIORef BS.empty
+  let req =
+        defaultRequest
+          { requestMethod = "GET",
+            requestHeaderHost = Just "127.0.0.1:4321",
+            pathInfo = [tokenText fakeToken, "api", "events"]
+          }
+      write b = do
+        modifyIORef' seen (<> LBS.toStrict (Builder.toLazyByteString b))
+        bytes <- readIORef seen
+        when (all (`BS.isInfixOf` bytes) needles) (throwIO StreamSeen)
+      go = app req $ \resp -> do
+        let (_, _, withBody) = responseToStream resp
+        withBody (\body -> body write (pure ()))
+        pure ResponseReceived
+  r <- timeout 5_000_000 (try @StreamSeen go)
+  bytes <- readIORef seen
+  case r of
+    Just (Left StreamSeen) -> pure bytes
+    _ -> assertFailure ("not seen in the stream: " <> show bytes)
+
+-- | Thrown to end the stream once the texts are there.
+data StreamSeen = StreamSeen
+  deriving (Show)
+
+instance Exception StreamSeen
+
+quiet :: Logger
+quiet = newLogger LevelInfo (\_ -> pure ())
 
 -- | GET api/files/tree on the app.
 getFiles :: Application -> IO ApiResult
@@ -700,7 +1057,9 @@ neverDone = Left (ListCrashed "") <$ blockForever
 -- | A lister for a fake ROOT.
 fakeLister :: IO (Either ListError FileList) -> Lister
 fakeLister action =
-  Lister {root = CanonicalRoot "/abs/x" "/abs/x", list = action}
+  Lister {list = fmap (\fl -> Listed {files = fl, source = fakeRoot}) <$> action}
+  where
+    fakeRoot = DiskEntries (CanonicalRoot "/abs/x" "/abs/x")
 
 -- | Poll every 20 ms, up to the given seconds.
 waitFor :: Double -> IO Bool -> IO Bool
@@ -782,7 +1141,7 @@ newFake = do
             -- In memory: never the real ui.json.
             prefsPath = pure (Left HomeUnset),
             -- Never done: no line or span from the listing.
-            probeFiles = \_ _ -> pure (Right (fakeLister neverDone)),
+            probeFiles = \_ _ -> pure (Right (BrowseSides (fakeLister neverDone))),
             readProject = Session.Project.readProject,
             -- No real parse here: see Note [Shared values in tests] in
             -- HaskellReviewer.Core.PackageGlobTest.

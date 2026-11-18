@@ -228,6 +228,7 @@ test("a refetch while indexing keeps focus on the inline source link", async ({
     (g) =>
       window.__hrEmit?.("indexing", {
         generation: g,
+        side: "tree",
         total: 2,
         ready: 2,
         failed: 0,

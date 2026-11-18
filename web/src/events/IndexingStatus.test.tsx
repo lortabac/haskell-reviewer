@@ -60,38 +60,68 @@ describe("IndexingStatus", () => {
 
   it("not done, under 1 s: nothing", async () => {
     const { root, setIndexing } = mount();
-    setIndexing({ generation: 1, total: 10, ready: 3, failed: 0 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 3,
+      failed: 0,
+    });
     await vi.advanceTimersByTimeAsync(900);
     expect(visible(root)).toBe("");
   });
 
   it("not done, 1 s or more: the count", async () => {
     const { root, setIndexing } = mount();
-    setIndexing({ generation: 1, total: 10, ready: 3, failed: 0 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 3,
+      failed: 0,
+    });
     await vi.advanceTimersByTimeAsync(1000);
     expect(visible(root)).toBe("Indexing 3 of 10 modules");
   });
 
   it("the failed suffix", async () => {
     const { root, setIndexing } = mount();
-    setIndexing({ generation: 1, total: 10, ready: 3, failed: 1 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 3,
+      failed: 1,
+    });
     await vi.advanceTimersByTimeAsync(1000);
     expect(visible(root)).toBe("Indexing 4 of 10 modules (1 failed)");
   });
 
   it("singular: 1 module total", async () => {
     const { root, setIndexing } = mount();
-    setIndexing({ generation: 1, total: 1, ready: 0, failed: 0 });
+    setIndexing({ generation: 1, side: "tree", total: 1, ready: 0, failed: 0 });
     await vi.advanceTimersByTimeAsync(1000);
     expect(visible(root)).toBe("Indexing 0 of 1 module");
   });
 
   it("done, no failures, was shown: hides, announces once", async () => {
     const { root, setIndexing } = mount();
-    setIndexing({ generation: 1, total: 10, ready: 3, failed: 0 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 3,
+      failed: 0,
+    });
     await vi.advanceTimersByTimeAsync(1000);
     expect(visible(root)).toBe("Indexing 3 of 10 modules");
-    setIndexing({ generation: 1, total: 10, ready: 10, failed: 0 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 10,
+      failed: 0,
+    });
     await vi.advanceTimersByTimeAsync(0);
     expect(visible(root)).toBe("");
     expect(live(root).textContent).toBe("Indexing done.");
@@ -99,16 +129,34 @@ describe("IndexingStatus", () => {
 
   it("done with failures, was shown: persistent line, one announcement", async () => {
     const { root, setIndexing } = mount();
-    setIndexing({ generation: 1, total: 10, ready: 3, failed: 1 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 3,
+      failed: 1,
+    });
     await vi.advanceTimersByTimeAsync(1000);
-    setIndexing({ generation: 1, total: 10, ready: 9, failed: 1 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 9,
+      failed: 1,
+    });
     await vi.advanceTimersByTimeAsync(0);
     expect(visible(root)).toBe("1 module couldn't be indexed");
     expect(live(root).textContent).toBe(
       "Indexing done; 1 module couldn't be indexed.",
     );
     // Settling again (e.g. a late replay) says nothing new.
-    setIndexing({ generation: 1, total: 10, ready: 9, failed: 1 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 9,
+      failed: 1,
+    });
     await vi.advanceTimersByTimeAsync(0);
     expect(live(root).textContent).toBe(
       "Indexing done; 1 module couldn't be indexed.",
@@ -117,9 +165,21 @@ describe("IndexingStatus", () => {
 
   it("done with failures, never shown (a fast run): the failure line still shows, no announcement (C2)", async () => {
     const { root, setIndexing } = mount();
-    setIndexing({ generation: 1, total: 10, ready: 5, failed: 2 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 5,
+      failed: 2,
+    });
     await vi.advanceTimersByTimeAsync(200); // under the 1 s delay
-    setIndexing({ generation: 1, total: 10, ready: 8, failed: 2 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 8,
+      failed: 2,
+    });
     await vi.advanceTimersByTimeAsync(0);
     expect(visible(root)).toBe("2 modules couldn't be indexed");
     expect(live(root).textContent).toBe("");
@@ -127,9 +187,21 @@ describe("IndexingStatus", () => {
 
   it("done with no failures, never shown (a fast run): nothing", async () => {
     const { root, setIndexing } = mount();
-    setIndexing({ generation: 1, total: 10, ready: 5, failed: 0 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 5,
+      failed: 0,
+    });
     await vi.advanceTimersByTimeAsync(200); // under the 1 s delay
-    setIndexing({ generation: 1, total: 10, ready: 10, failed: 0 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 10,
+      failed: 0,
+    });
     await vi.advanceTimersByTimeAsync(0);
     expect(visible(root)).toBe("");
     expect(live(root).textContent).toBe("");
@@ -137,33 +209,69 @@ describe("IndexingStatus", () => {
 
   it("no per-tick announcement while still partial", async () => {
     const { root, setIndexing } = mount();
-    setIndexing({ generation: 1, total: 10, ready: 1, failed: 0 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 1,
+      failed: 0,
+    });
     await vi.advanceTimersByTimeAsync(1000);
-    setIndexing({ generation: 1, total: 10, ready: 2, failed: 0 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 2,
+      failed: 0,
+    });
     await vi.advanceTimersByTimeAsync(10);
-    setIndexing({ generation: 1, total: 10, ready: 3, failed: 0 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 3,
+      failed: 0,
+    });
     await vi.advanceTimersByTimeAsync(10);
     expect(live(root).textContent).toBe("");
   });
 
   it("a newer generation starts over: shown again, announced again", async () => {
     const { root, setIndexing } = mount();
-    setIndexing({ generation: 1, total: 10, ready: 10, failed: 0 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 10,
+      failed: 0,
+    });
     await vi.advanceTimersByTimeAsync(1000);
     expect(visible(root)).toBe(""); // already done when first seen
-    setIndexing({ generation: 2, total: 5, ready: 0, failed: 0 });
+    setIndexing({ generation: 2, side: "tree", total: 5, ready: 0, failed: 0 });
     await vi.advanceTimersByTimeAsync(1000);
     expect(visible(root)).toBe("Indexing 0 of 5 modules");
-    setIndexing({ generation: 2, total: 5, ready: 5, failed: 0 });
+    setIndexing({ generation: 2, side: "tree", total: 5, ready: 5, failed: 0 });
     await vi.advanceTimersByTimeAsync(0);
     expect(live(root).textContent).toBe("Indexing done.");
   });
 
   it("two shown runs that end the same way are both announced (C1: a Reload)", async () => {
     const { root, setIndexing } = mount();
-    setIndexing({ generation: 1, total: 10, ready: 3, failed: 0 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 3,
+      failed: 0,
+    });
     await vi.advanceTimersByTimeAsync(1000);
-    setIndexing({ generation: 1, total: 10, ready: 10, failed: 0 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 10,
+      failed: 0,
+    });
     await vi.advanceTimersByTimeAsync(0);
     expect(live(root).textContent).toBe("Indexing done.");
 
@@ -171,20 +279,32 @@ describe("IndexingStatus", () => {
     // the identical string again would be no DOM mutation at all, so
     // it has to be cleared first (loading() turning true) for a
     // screen reader to notice the second "Indexing done."
-    setIndexing({ generation: 2, total: 4, ready: 0, failed: 0 });
+    setIndexing({ generation: 2, side: "tree", total: 4, ready: 0, failed: 0 });
     expect(live(root).textContent).toBe(""); // cleared as the run starts
     await vi.advanceTimersByTimeAsync(1000);
     expect(visible(root)).toBe("Indexing 0 of 4 modules");
-    setIndexing({ generation: 2, total: 4, ready: 4, failed: 0 });
+    setIndexing({ generation: 2, side: "tree", total: 4, ready: 4, failed: 0 });
     await vi.advanceTimersByTimeAsync(0);
     expect(live(root).textContent).toBe("Indexing done.");
   });
 
   it("connection ended: nothing, even with failures shown", async () => {
     const { root, setIndexing, setStatus } = mount();
-    setIndexing({ generation: 1, total: 10, ready: 3, failed: 1 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 3,
+      failed: 1,
+    });
     await vi.advanceTimersByTimeAsync(1000);
-    setIndexing({ generation: 1, total: 10, ready: 9, failed: 1 });
+    setIndexing({
+      generation: 1,
+      side: "tree",
+      total: 10,
+      ready: 9,
+      failed: 1,
+    });
     await vi.advanceTimersByTimeAsync(0);
     expect(visible(root)).toBe("1 module couldn't be indexed");
     setStatus("ended");

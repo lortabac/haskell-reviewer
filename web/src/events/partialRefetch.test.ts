@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
+import type { Indexing } from "../api/events";
 import { refetchStep, refetchThrottleMs } from "./partialRefetch";
 
-const at = (generation: number, ready: number) => ({
+const at = (generation: number, ready: number): Indexing => ({
   generation,
+  side: "tree",
   total: 10,
   ready,
   failed: 0,

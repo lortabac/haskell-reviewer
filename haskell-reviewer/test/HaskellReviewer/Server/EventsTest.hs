@@ -1,7 +1,7 @@
 -- | The event stream: in process, then with a real warp on a socket.
 module HaskellReviewer.Server.EventsTest (tests) where
 
-import ApiSupport (fixedPrefs)
+import ApiSupport (browseOnly, fixedPrefs)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Async (withAsync)
 import Control.Concurrent.STM
@@ -10,7 +10,6 @@ import Control.Concurrent.STM
     atomically,
     newTVarIO,
     readTVar,
-    retry,
     writeTVar,
   )
 import Control.Exception (Exception, bracket, throwIO, try)
@@ -27,6 +26,7 @@ import Data.Text qualified as Text
 import Data.Word (Word64)
 import GHC.Clock (getMonotonicTime)
 import HaskellReviewer.Core.Address (Port (..), Token, tokenFromBytes, tokenText)
+import HaskellReviewer.Core.Sides (Side (..))
 import HaskellReviewer.Effects.Clock (Microseconds (..))
 import HaskellReviewer.Effects.FileSystem (ListError (..), ReadError (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), newLogger)
@@ -118,12 +118,12 @@ inProcessTests =
         r <- collect =<< call events (request "GET" (Just "evil.com:8080") streamPath)
         r.status @?= 403,
       testCase "indexing: the state right after hello" $ do
-        state <- newTVarIO (Just (at 0))
+        state <- newTVarIO [at 0]
         events <- newEventsWith (Microseconds 10_000_000) (readTVar state)
         body <- streamBody events 2 (\_ -> pure ())
         body @?= hello <> indexingEvent 2 0,
       testCase "indexing: a change sends the last state" $ do
-        state <- newTVarIO (Just (at 0))
+        state <- newTVarIO [at 0]
         events <- newEventsWith (Microseconds 10_000_000) (readTVar state)
         -- Two changes before the next read: only the last one goes out.
         body <- streamBody events 3 $ \case
@@ -131,23 +131,59 @@ inProcessTests =
           _ -> pure ()
         body @?= hello <> indexingEvent 2 0 <> indexingEvent 3 2,
       testCase "indexing: no change, only keep-alives" $ do
-        state <- newTVarIO (Just (at 0))
+        state <- newTVarIO [at 0]
         events <- newEventsWith (Microseconds 10_000) (readTVar state)
         body <- streamBody events 4 $ \case
           -- The same state again is no change.
           3 -> setAt state 0
           _ -> pure ()
         body @?= hello <> indexingEvent 2 0 <> keepAlives 2,
-      testCase "indexing: not listed yet, then listing failed: no event" $ do
-        listed <- newTVarIO False
-        let source = readTVar listed >>= \l -> if l then pure Nothing else retry
-        events <- newEventsWith (Microseconds 10_000) source
-        body <- streamBody events 3 $ \case
-          2 -> atomically (writeTVar listed True)
-          _ -> pure ()
+      testCase "indexing: no side listed: no event" $ do
+        events <- newEventsWith (Microseconds 10_000) (pure [])
+        body <- streamBody events 3 (\_ -> pure ())
         body @?= hello <> keepAlives 2,
+      testCase "indexing: browse events have side tree" $ do
+        state <- newTVarIO [at 0]
+        events <- newEventsWith (Microseconds 10_000_000) (readTVar state)
+        body <- streamBody events 2 (\_ -> pure ())
+        assertBool (show body) ("\"side\":\"tree\"" `BS.isInfixOf` LBS.toStrict body),
+      testCase "indexing: two sides, an event each, head first" $ do
+        state <- newTVarIO [on HeadSide 0, on BaseSide 0]
+        events <- newEventsWith (Microseconds 10_000_000) (readTVar state)
+        body <- streamBody events 2 (\_ -> pure ())
+        body @?= hello <> sideEvent 2 HeadSide 0 <> sideEvent 3 BaseSide 0,
+      testCase "indexing: a change on one side sends only that side" $ do
+        state <- newTVarIO [on HeadSide 0, on BaseSide 0]
+        events <- newEventsWith (Microseconds 10_000_000) (readTVar state)
+        body <- streamBody events 3 $ \case
+          2 -> atomically (writeTVar state [on HeadSide 0, on BaseSide 5])
+          _ -> pure ()
+        body
+          @?= hello
+            <> sideEvent 2 HeadSide 0
+            <> sideEvent 3 BaseSide 0
+            <> sideEvent 4 BaseSide 5,
+      testCase "indexing: both sides change in one gap: both are sent" $ do
+        state <- newTVarIO [on HeadSide 0, on BaseSide 0]
+        events <- newEventsWith (Microseconds 10_000_000) (readTVar state)
+        body <- streamBody events 3 $ \case
+          2 -> atomically (writeTVar state [on HeadSide 1, on BaseSide 2])
+          _ -> pure ()
+        body
+          @?= hello
+            <> sideEvent 2 HeadSide 0
+            <> sideEvent 3 BaseSide 0
+            <> sideEvent 4 HeadSide 1
+            <> sideEvent 5 BaseSide 2,
+      testCase "indexing: base not listed: only head events" $ do
+        state <- newTVarIO [on HeadSide 0]
+        events <- newEventsWith (Microseconds 10_000_000) (readTVar state)
+        body <- streamBody events 3 $ \case
+          2 -> atomically (writeTVar state [on HeadSide 3])
+          _ -> pure ()
+        body @?= hello <> sideEvent 2 HeadSide 0 <> sideEvent 3 HeadSide 3,
       testCase "indexing: at most one event per gap, the last state gets there" $ do
-        state <- newTVarIO (Just (at 0))
+        state <- newTVarIO [at 0]
         let gap = Microseconds 200_000
         events <- newEventsGap (Microseconds 10_000_000) gap (readTVar state)
         -- 50 changes, 1 ms apart, once the first event is out. With no
@@ -178,19 +214,31 @@ keepAlives n = mconcat (replicate n ": keep-alive\n\n")
 
 -- | An indexing event with this id, for 'at' this many.
 indexingEvent :: Word64 -> Int -> LBS.ByteString
-indexingEvent i n =
-  render $
-    renderEvent (EventId i) "indexing" (encodeIndexing (Generation 1) (progressAt n))
+indexingEvent i = sideEvent i TreeSide
 
--- | Generation 1, 100 modules, this many ready.
+-- | An indexing event with this id, for 'on' this side, this many.
+sideEvent :: Word64 -> Side -> Int -> LBS.ByteString
+sideEvent i side n =
+  render $
+    renderEvent
+      (EventId i)
+      "indexing"
+      (encodeIndexing (Generation 1) side (progressAt n))
+
+-- | Tree, generation 1, 100 modules, this many ready.
 at :: Int -> IndexingState
-at n = IndexingState {generation = Generation 1, progress = progressAt n}
+at = on TreeSide
+
+-- | Generation 1, 100 modules, this many ready, on this side.
+on :: Side -> Int -> IndexingState
+on side n =
+  IndexingState {generation = Generation 1, side = side, progress = progressAt n}
 
 progressAt :: Int -> Progress
 progressAt n = Progress {total = 100, ready = n, failed = 0}
 
-setAt :: TVar (Maybe IndexingState) -> Int -> IO ()
-setAt v n = atomically (writeTVar v (Just (at n)))
+setAt :: TVar [IndexingState] -> Int -> IO ()
+setAt v n = atomically (writeTVar v [at n])
 
 -- | Run the stream body until the bytes hold the text (5 s at most).
 -- The hook runs at each flush, with its number.
@@ -412,7 +460,7 @@ routesFor events =
     { events = events,
       files =
         FilesApi
-          { snapshot = pure (Left (ListCrashed "no files here")),
+          { snapshotOn = browseOnly (pure (Left (ListCrashed "no files here"))),
             readEntry = \_ _ _ -> pure (Left ReadGone),
             logger = newLogger LevelInfo (\_ -> pure ())
           },
@@ -421,15 +469,15 @@ routesFor events =
 
 -- | No indexing event ever.
 newEvents :: Microseconds -> IO EventStream
-newEvents keepAlive = newEventsWith keepAlive (pure Nothing)
+newEvents keepAlive = newEventsWith keepAlive (pure [])
 
 -- | With this indexing state, and no gap between events.
-newEventsWith :: Microseconds -> STM (Maybe IndexingState) -> IO EventStream
+newEventsWith :: Microseconds -> STM [IndexingState] -> IO EventStream
 newEventsWith keepAlive = newEventsGap keepAlive (Microseconds 0)
 
 -- | With this indexing state and gap between events.
 newEventsGap ::
-  Microseconds -> Microseconds -> STM (Maybe IndexingState) -> IO EventStream
+  Microseconds -> Microseconds -> STM [IndexingState] -> IO EventStream
 newEventsGap keepAlive gap indexing = do
   clients <- newClients
   pure
