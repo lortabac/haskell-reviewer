@@ -34,7 +34,8 @@ import HaskellReviewer.Effects.FileSystem
     walkFiles,
   )
 import HaskellReviewer.Effects.Git
-  ( GitError (..),
+  ( DiskReason (..),
+    GitError (..),
     GitSetup (..),
     Listing (..),
     gitProbeTimeLimit,
@@ -142,7 +143,8 @@ gitTests =
         withCanonicalTemp $ \dir -> do
           r <- probe gitProbeTimeLimit [] (Root dir)
           case r of
-            Right ListFromDisk -> pure ()
+            Right (ListFromDisk NotInRepo) -> pure ()
+            Right (ListFromDisk why) -> assertFailure ("not a repo: " <> show why)
             Right (ListFromGit _) -> assertFailure "expected from disk"
             Left e -> assertFailure ("git error: " <> show e),
       testCase "ROOT given as a symlink" $
@@ -371,7 +373,7 @@ listWithGit dir = do
   r <- probe gitProbeTimeLimit [] (Root dir)
   case r of
     Left e -> assertFailure ("git error (git 2.44.1 or newer needed): " <> show e)
-    Right ListFromDisk -> assertFailure "git not used"
+    Right (ListFromDisk _) -> assertFailure "git not used"
     Right listing -> do
       canon <- canonicalRoot (Root dir)
       listFiles quiet canon listing >>= \case

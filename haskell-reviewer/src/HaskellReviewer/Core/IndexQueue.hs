@@ -80,7 +80,7 @@ indexJobs idx = owned <> loose
 data Priority
   = -- | A request waits for it.
     Requested
-  | -- | Changed in diff mode (not used yet).
+  | -- | Changed in diff mode (D-317).
     Changed
   | Background
   deriving (Eq, Ord, Show, Enum, Bounded)

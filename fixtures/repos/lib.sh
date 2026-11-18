@@ -52,3 +52,13 @@ commit_at() {
 repo_init() {
   g init -q --object-format="${2:-sha1}" "$1"
 }
+
+# git_at N ARGS...: git with author and committer dates at 2026-01-01
+# plus N minutes. For merges and annotated tags (the tagger date is the
+# committer date).
+git_at() {
+  date="$((1767225600 + $1 * 60)) +0000"
+  shift
+  # shellcheck disable=SC2086
+  env GIT_AUTHOR_DATE="$date" GIT_COMMITTER_DATE="$date" git $gflags "$@"
+}

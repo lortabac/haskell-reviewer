@@ -57,6 +57,8 @@ import HaskellReviewer.Core.Address
     tokenByteCount,
     tokenFromBytes,
   )
+import HaskellReviewer.Core.Changed (changedModules, moduleKeys)
+import HaskellReviewer.Core.CommitFiles (BlobRef (..))
 import HaskellReviewer.Core.Config (UiDefaults)
 import HaskellReviewer.Core.FileContent (FileContent)
 import HaskellReviewer.Core.FileList
@@ -85,6 +87,7 @@ import HaskellReviewer.Core.Project
     renderGhcVersion,
   )
 import HaskellReviewer.Core.RelPath (RelPath)
+import HaskellReviewer.Core.Revspec (Revspec, diffInfoLines)
 import HaskellReviewer.Core.Root (Root (..))
 import HaskellReviewer.Core.Sides
   ( Pair (..),
@@ -114,7 +117,6 @@ import HaskellReviewer.Effects.FileSystem
     renderRootError,
   )
 import HaskellReviewer.Effects.FileSystem qualified as FileSystem
-import HaskellReviewer.Effects.Git (GitError, renderGitError)
 import HaskellReviewer.Effects.Log
   ( LogLevel,
     Logger,
@@ -127,11 +129,16 @@ import HaskellReviewer.Effects.Log
 import HaskellReviewer.Effects.Parser qualified as Parser
 import HaskellReviewer.Effects.Shutdown (Shutdown (..), installShutdownHandlers)
 import HaskellReviewer.Effects.Source
-  ( EntrySource,
+  ( CommitSource (..),
+    EntrySource (..),
     Listed (..),
     Lister (..),
+    Probe (..),
+    ProbeError,
     readSourceEntry,
+    renderProbeError,
     warmUpListing,
+    warmUpObjects,
   )
 import HaskellReviewer.Effects.Source qualified as Source
 import HaskellReviewer.Effects.Spawn
@@ -177,6 +184,7 @@ import HaskellReviewer.Session.Index
     SlotState (..),
     failUnfinished,
     newPool,
+    prioritise,
     readProgress,
     readStates,
     runWorkers,
@@ -271,10 +279,12 @@ to fd 2, past the logger.
 Before the URL line we only do quick things (SPEC §10.1): check ROOT,
 open the trace file, read config.toml (one small file), check git,
 listen, warm up the gzip, prefs and search code, the side names
-(warmUpSideNames in "HaskellReviewer.Server.Api") and commit listing
-(warmUpListing in "HaskellReviewer.Effects.Source"). ui.json is not
-read: the first GET api/prefs does that. The rest comes after: Note [Listing after the
-URL].
+(warmUpSideNames in "HaskellReviewer.Server.Api"), commit listing and
+commit reads (warmUpListing, warmUpObjects in
+"HaskellReviewer.Effects.Source"). In diff mode, the revisions are
+resolved too (D-316): a bad one is exit 2. ui.json is not read: the
+first GET api/prefs does that. The rest comes after: Note [Listing
+after the URL].
 
 The warm-ups and the config run on the main thread, before warp
 accepts: request threads then find their shared values built
@@ -293,7 +303,10 @@ its own thread, then built one after the other, head first: building
 reads the project and forces shared values, which threads must not do
 at once (Q-RTS-BLACKHOLE). The listing step's shared values are built
 before warp (warmUpListing in "HaskellReviewer.Effects.Source"). A
-crash fails that side only. The snapshot routes wait for their side
+crash fails that side only. In diff mode, once both sides are built,
+their changed modules go to the front of the queues (D-317), before
+any fill. The object reader of diff mode wraps the whole server, so it
+stops after the listing thread. The snapshot routes wait for their side
 (Session.Snapshot), so an early request is just slower. Each snapshot
 is fully built before the routes see it (Note [Forced snapshot] in
 "HaskellReviewer.Server.Api"), and the warm-ups run once, before any
@@ -335,10 +348,10 @@ data Deps = Deps
     -- | Where ui.json is. See Note [Saving preferences] in
     -- "HaskellReviewer.Session.Prefs".
     prefsPath :: IO (Either XdgProblem FilePath),
-    -- | Check git and get ready to list the files of ROOT: one lister
-    -- per side of the session (Note [Sides] in
+    -- | Check git, resolve @--diff@ if given, and get ready to list the
+    -- files of ROOT: one lister per side of the session (Note [Sides] in
     -- "HaskellReviewer.Core.Sides"). See Note [Listing after the URL].
-    probeFiles :: Logger -> Root -> IO (Either GitError (Sides Lister)),
+    probeFiles :: Logger -> Root -> Maybe Revspec -> IO (Either ProbeError Probe),
     -- | Read the project of a snapshot. See Note [Listing after the URL].
     readProject ::
       EntrySource ->
@@ -387,7 +400,7 @@ newRealDeps spawnSetup = do
           env <- getEnvironment
           Config.loadConfig logger (`lookup` env),
         prefsPath = (\env -> prefsFile (`lookup` env)) <$> getEnvironment,
-        probeFiles = \logger root -> fmap BrowseSides <$> Source.probeFiles logger root,
+        probeFiles = Source.probeFiles,
         readProject = Session.Project.readProject,
         warmUp =
           [Parser.warmUpParser, warmUpResolve, warmUpPages, warmUpSource, warmUpRefs],
@@ -405,7 +418,8 @@ data StartupError
   = BadRoot RootError
   | BadTraceFile TraceFileError
   | BadListen ListenError
-  | BadGit GitError
+  | -- | git, or @--diff@.
+    BadProbe ProbeError
   deriving (Eq, Show)
 
 -- | Message for the user, with the program name in front.
@@ -415,7 +429,7 @@ renderStartupError err =
     BadRoot e -> renderRootError e
     BadTraceFile e -> renderTraceFileError e
     BadListen e -> renderListenError e
-    BadGit e -> renderGitError e
+    BadProbe e -> renderProbeError e
 
 -- | The real program.
 main :: IO ()
@@ -474,15 +488,41 @@ startUp deps args = do
               -- On this thread, before warp: see Note [Startup work]. A
               -- bad config is never an exit.
               defaults <- evaluate =<< deps.loadConfig logger
-              probed <- deps.probeFiles logger root
+              probed <- deps.probeFiles logger root opts.diff
               case probed of
-                Left e -> startupFailed deps (BadGit e) `finally` tracer.close
-                Right listers ->
-                  serve deps logger opts root defaults listers tracer shutdown t0 w0
+                Left e -> startupFailed deps (BadProbe e) `finally` tracer.close
+                Right probe ->
+                  serve deps logger opts root defaults probe tracer shutdown t0 w0
                     `finally` tracer.close
 
--- | Listen, print the URL, serve until a signal. See Note [Shutdown].
+-- | Listen, print the URL, serve until a signal. In diff mode the
+-- object reader wraps it all, so it stops after the listing thread.
+-- See Note [Shutdown].
 serve ::
+  Deps ->
+  Logger ->
+  Options ->
+  Root ->
+  UiDefaults ->
+  Probe ->
+  Tracer ->
+  Shutdown ->
+  MonotonicTime ->
+  UTCTime ->
+  IO ExitCode
+serve deps logger opts root defaults probe tracer shutdown t0 w0 = case probe of
+  BrowseProbe l -> go (BrowseSides l)
+  DiffProbe info with -> do
+    -- Built here, on this thread, before warp (Q-RTS-BLACKHOLE).
+    let ls = diffInfoLines info
+    _ <- evaluate (sum (map Text.length ls))
+    mapM_ (logVerbose logger) ls
+    with (go . DiffSides)
+  where
+    go listers = serveSides deps logger opts root defaults listers tracer shutdown t0 w0
+
+-- | 'serve', with the listers.
+serveSides ::
   Deps ->
   Logger ->
   Options ->
@@ -494,7 +534,7 @@ serve ::
   MonotonicTime ->
   UTCTime ->
   IO ExitCode
-serve deps logger opts root defaults listers tracer shutdown t0 w0 = do
+serveSides deps logger opts root defaults listers tracer shutdown t0 w0 = do
   stoppedEarly <- shutdown.stopped
   if stoppedEarly
     then pure ExitSuccess
@@ -519,6 +559,7 @@ serve deps logger opts root defaults listers tracer shutdown t0 w0 = do
           warmUpTextSearch
           warmUpSideNames
           warmUpListing
+          warmUpObjects
           -- On this thread, before warp: see Note [Forced snapshot] in
           -- "HaskellReviewer.Server.Api".
           let sideWork s l = SideWork s l <$> newSnapshotSlot
@@ -671,6 +712,8 @@ runListing deps logger tracer pool work cliGhc = do
     -- the project and forces shared values (Q-RTS-BLACKHOLE).
     listings <- forConcurrently work (listSide deps)
     done <- mapM (uncurry (buildSide deps logger pool cliGhc)) (zip work listings)
+    -- Before the warm-ups and the fill: no worker or request runs yet.
+    changedFirst logger done
     t2 <- deps.clock.monotonic
     w2 <- deps.clock.now
     let built = [b.snapshot | SideDone {result = SideBuilt b} <- done]
@@ -763,6 +806,41 @@ runListing deps logger tracer pool work cliGhc = do
           <> " ms"
     reportWarmUp (Nanoseconds ns) =
       logVerbose logger ("parser warm-up: " <> showText (ns `div` 1_000) <> " us")
+
+-- | In diff mode, push each side's changed modules to the front of its
+-- queue (D-317). Only when both sides are built. A crash only logs a
+-- line: indexing works without it.
+changedFirst :: Logger -> [SideDone] -> IO ()
+changedFirst logger done = case (lookup HeadSide built, lookup BaseSide built) of
+  (Just h, Just b) ->
+    try @SomeException (go h b) >>= \case
+      Right () -> pure ()
+      Left e
+        | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
+        | otherwise ->
+            logInfo logger $
+              "haskell-reviewer: cannot find the changed modules: "
+                <> exceptionMessage e
+  _ -> pure ()
+  where
+    built = [(w.side, b.snapshot) | SideDone {work = w, result = SideBuilt b} <- done]
+    go h b = do
+      let keys snap = moduleKeys (blobOf snap.source) snap.modules
+          changed = changedModules Pair {head = keys h, base = keys b}
+      nh <- evaluate (length changed.head)
+      nb <- evaluate (length changed.base)
+      atomically $ do
+        prioritise h.index changed.head
+        prioritise b.index changed.base
+      logVerbose logger $
+        "changed: "
+          <> showText nh
+          <> " on head, "
+          <> showText nb
+          <> " on base, indexed first"
+    blobOf src p = case src of
+      CommitEntries c -> (.oid) <$> Map.lookup p c.blobs
+      DiskEntries _ -> Nothing
 
 -- | List one side. A crash fails this side only; a cancel goes through.
 listSide :: Deps -> SideWork -> IO Listing

@@ -282,7 +282,7 @@ realGitIn home root = do
   setup <- gitSetup home gitProbeTimeLimit
   probeGitWith setup quiet (Root root) >>= \case
     Right (ListFromGit g) -> pure g
-    Right ListFromDisk -> assertFailure "git not used"
+    Right (ListFromDisk _) -> assertFailure "git not used"
     Left e -> assertFailure ("git error (git 2.44.1 or newer needed): " <> show e)
 
 -- | Run the git on PATH in a dir; its stdout as bytes.
@@ -571,14 +571,13 @@ fakeTests =
           other -> assertFailure (show (() <$ other))
         calls <- lines <$> readFile (dir </> "calls")
         length calls @?= 1,
-    testCase "rev-parse junk: GitBadOutput" $
+    testCase "rev-parse junk: GitBadOutput; --verify junk: no commit" $
       withScript (const ["echo junk", "echo more"]) $ \_ g -> do
         repoInfo g >>= \case
           Left (GitBadOutput _) -> pure ()
           other -> assertFailure (show other)
-        resolveCommit g "HEAD" >>= \case
-          Left (GitBadOutput _) -> pure ()
-          other -> assertFailure (show other)
+        -- Exit 0 with anything but one id: no commit (D-316).
+        resolveCommit g "HEAD" >>= (@?= Right Nothing)
         mergeBase g (oid 'a') (oid 'b') >>= \case
           Left (GitBadOutput _) -> pure ()
           other -> assertFailure (show other),

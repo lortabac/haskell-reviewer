@@ -24,6 +24,7 @@ module HaskellReviewer.Session.Index
     -- * Requests
     awaitModule,
     requestModule,
+    prioritise,
 
     -- * Workers
     runWorkers,
@@ -136,6 +137,8 @@ can, all in one transaction ('claimNext'). So a request on any index
 goes before background work, and head's background work goes before
 base's if head comes first. Within a priority the order is by index,
 not by arrival: a head request goes before an older base request.
+In diff mode the changed modules are pushed at Changed ('prioritise')
+before the workers start (D-317).
 
 Workers ('runWorkers', one per capability in the server) take the next
 Pending module, set it Parsing in the same transaction, read and parse
@@ -373,6 +376,19 @@ requestModule index i = case Map.lookup i index.slots of
     readTVar slot.state >>= \case
       Pending -> modifyTVar' index.queue (Queue.push Requested i)
       _ -> pure ()
+
+-- | Push these modules at 'Changed', in this order: diff mode's changed
+-- modules (D-317). Only Pending ones; ids with no slot are skipped. The
+-- queue gets the index's own ids, not the caller's.
+prioritise :: Index -> [ModuleId] -> STM ()
+prioritise index ids =
+  forM_ ids $ \i -> case Map.lookupIndex i index.slots of
+    Nothing -> pure ()
+    Just k -> do
+      let (own, slot) = Map.elemAt k index.slots
+      readTVar slot.state >>= \case
+        Pending -> modifyTVar' index.queue (Queue.push Changed own)
+        _ -> pure ()
 
 -- * Workers
 

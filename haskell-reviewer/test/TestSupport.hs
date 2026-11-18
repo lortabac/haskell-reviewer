@@ -156,7 +156,7 @@ realGitAt home root = do
   setup <- gitSetup home gitProbeTimeLimit
   probeGitWith setup (newLogger LevelInfo (\_ -> pure ())) (Root root) >>= \case
     Right (ListFromGit g) -> pure g
-    Right ListFromDisk -> assertFailure "git not used"
+    Right (ListFromDisk _) -> assertFailure "git not used"
     Left e -> assertFailure ("git error (git 2.44.1 or newer needed): " <> show e)
 
 -- | Build a fixture repo: run @fixtures/repos/<name>.sh@ with the

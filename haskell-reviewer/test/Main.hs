@@ -20,6 +20,7 @@ import HaskellReviewer.App.CliTest qualified
 import HaskellReviewer.App.RunTest qualified
 import HaskellReviewer.Core.AddressTest qualified
 import HaskellReviewer.Core.CabalFileTest qualified
+import HaskellReviewer.Core.ChangedTest qualified
 import HaskellReviewer.Core.CodeTest qualified
 import HaskellReviewer.Core.CommitFilesTest qualified
 import HaskellReviewer.Core.ConfigGoldenTest qualified
@@ -53,6 +54,7 @@ import HaskellReviewer.Core.ReferencesTest qualified
 import HaskellReviewer.Core.RelPathTest qualified
 import HaskellReviewer.Core.ResolveGoldenTest qualified
 import HaskellReviewer.Core.ResolveTest qualified
+import HaskellReviewer.Core.RevspecTest qualified
 import HaskellReviewer.Core.RichTextGoldenTest qualified
 import HaskellReviewer.Core.RootTest qualified
 import HaskellReviewer.Core.SearchTest qualified
@@ -71,7 +73,8 @@ import HaskellReviewer.Effects.GitTest qualified
 import HaskellReviewer.Effects.HelperTest qualified
 import HaskellReviewer.Effects.LogTest qualified
 import HaskellReviewer.Effects.Parser (warmUpParser)
-import HaskellReviewer.Effects.Source (warmUpListing)
+import HaskellReviewer.Effects.RevisionsTest qualified
+import HaskellReviewer.Effects.Source (warmUpListing, warmUpObjects)
 import HaskellReviewer.Effects.SourceTest qualified
 import HaskellReviewer.Effects.Spawn (prepareSpawning)
 import HaskellReviewer.Effects.SpawnTest qualified
@@ -125,9 +128,10 @@ main = do
   -- each serve warms it up again. Once here, before any test runs
   -- (Q-RTS-BLACKHOLE).
   warmUpSearch
-  -- The side names and commit listing, as the server does.
+  -- The side names, commit listing and commit reads, as the server does.
   warmUpSideNames
   warmUpListing
+  warmUpObjects
   -- The same for the refs route. It parses and resolves the warm-up
   -- project too, here on one thread.
   warmUpRefs
@@ -159,6 +163,7 @@ main = do
           HaskellReviewer.App.RunTest.tests,
         HaskellReviewer.Core.AddressTest.tests,
         HaskellReviewer.Core.CabalFileTest.tests,
+        HaskellReviewer.Core.ChangedTest.tests,
         -- toml-parser's and aeson's shared values, built before the
         -- tests use them in parallel (Q-RTS-BLACKHOLE).
         withResource (warmUpConfig >> warmUpPrefs) (const (pure ())) $ \_ ->
@@ -181,6 +186,7 @@ main = do
         HaskellReviewer.Core.ProjectLoadTest.tests,
         HaskellReviewer.Core.ProjectTest.tests,
         HaskellReviewer.Core.RelPathTest.tests,
+        HaskellReviewer.Core.RevspecTest.tests,
         HaskellReviewer.Core.RootTest.tests,
         HaskellReviewer.Core.SearchTest.tests,
         HaskellReviewer.Core.TextSearchTest.tests,
@@ -193,6 +199,7 @@ main = do
         HaskellReviewer.Effects.GitTest.tests,
         HaskellReviewer.Effects.HelperTest.tests,
         HaskellReviewer.Effects.LogTest.tests,
+        HaskellReviewer.Effects.RevisionsTest.tests,
         HaskellReviewer.Effects.SourceTest.tests,
         HaskellReviewer.Effects.SpawnTest.tests,
         HaskellReviewer.Effects.TraceTest.tests,

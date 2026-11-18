@@ -64,7 +64,16 @@ haskell-reviewer [ROOT] [--diff REVSPEC] [options]
   - `BASE..HEAD`: compare two commits (any git rev syntax).
   - `BASE...HEAD`: compare `merge-base(BASE, HEAD)` with `HEAD` (PR semantics).
   - `REV`: compare `REV` with the **working tree** (including uncommitted and
-    untracked-but-not-ignored files).
+    untracked-but-not-ignored files). Not supported yet: exit 2 until T04
+    (D-316).
+
+  How it is read (D-316): split at the first `...`, else at the first `..`;
+  no dots at all is `REV`. An empty end is `HEAD` (`main..` is
+  `main..HEAD`); both empty is an error. An end that still has `..`, a base
+  that ends with `.` or a head that starts with `.` is an error, so
+  `a....b` and `a..b..c` are rejected (git would take `.b` as a name). A
+  merge commit or a criss-cross merge can give several merge bases for
+  `...`: the first one git prints is used.
 - Without `--diff` the tool is in **browse mode** and shows the working tree.
 - **ROOT bounds everything** (D-43). When ROOT is a subdirectory of the git
   work tree (a monorepo), the views, the diff and the LLM's visible set
@@ -94,6 +103,13 @@ protect against other local users and DNS-rebinding attacks.
 - **Exit codes**: `0` normal exit (including idle exit), `1` internal error,
   `2` bad usage or invalid input (unknown revision, not a git repo when
   `--diff` is given, unreadable ROOT).
+- `--diff` is checked and its revisions resolved **before the URL line**
+  (D-316). Each of these is exit 2: no git on PATH, ROOT not in a git work
+  tree, an end that names no commit (unknown, or a blob or tree), no merge
+  base for `...`, and `REV` alone (not supported yet). Each prints one line
+  on stderr; a name in it has its control characters escaped. In a shallow
+  clone, "names no commit" and "no merge base" say so. Bad syntax is a
+  usage error: exit 2 with the usage text.
 - `--help` lists every flag with a one-line description. `--version` prints
   the tool version, the bundled parser's GHC version, and the HIE
   companions found.
@@ -1068,7 +1084,13 @@ Therefore:
 | HIE companion crashes, times out or returns bad output | Syntactic tier for the affected modules; the reason is in the header hint. |
 | Package has `package.yaml` but no `.cabal` (Hpack) | Not supported (D-41): that package is treated as plain directories with a banner explaining how to generate the `.cabal` file. |
 | Generated module source (`.hsc`, `.x`, `.y`, `.chs`) | Plain text, "generated: not indexed" (§2.3). |
-| `--diff` but not a git repo | Error, exit code 2. |
+| `--diff` but no git on PATH, or ROOT not in a git work tree (no repo, inside `.git`) | Error, exit code 2 (D-316). A bare repo is refused by git: exit 2 with git's message. |
+| `--diff` with bad syntax (`a....b`, `..`, empty) | Usage error, exit code 2 (D-316). |
+| `--diff` with an unknown revision, or one that is not a commit (a blob, a tree) | Error, exit code 2, naming the revision. In a shallow clone the message says its history may be cut (D-316). |
+| `--diff BASE...HEAD` with no merge base | Error, exit code 2. In a shallow clone the message says to fetch more history (D-316). |
+| `--diff BASE...HEAD` with several merge bases | The first one git prints is the base; the count is kept for the header (D-316). |
+| `--diff` in a treeless partial clone (`--filter=tree:0`), a tree missing locally | Only found when the side is listed, after the URL: that side answers 500 "cannot list files", with a log line. Coordinator default, to be confirmed by the human (D-316). |
+| `--diff` and ROOT is not in one of the commits | That side has no files (an implicit project, empty). |
 | A module fails to parse | Text-only fallback (§3.1). |
 | HIE files missing or stale | Syntactic tier, shown in the header. |
 | LLM not configured | LLM entry points are hidden; a single hint explains how to enable them. |
@@ -1155,7 +1177,10 @@ appears at once and fills in progressively.
   the LLM `find_references` tool. They mark their results *partial*, and do
   not block.
 - In diff mode the changed modules on both sides are indexed first, so that
-  the expanded diff is ready as early as possible.
+  the expanded diff is ready as early as possible. Modules are paired by
+  id. A module is changed if it is on one side only, or its blob or its
+  parse settings (extensions, CPP flags, ...) differ. A module moved by
+  `hs-source-dirs` with the same blob and settings is not changed (D-317).
 - The memory budget is to be set from the first benchmarks. As a
   provisional target, it should stay under 2 GiB for the large reference
   project in diff mode, with both sides indexed. The budget is for the
@@ -1297,7 +1322,8 @@ calls, all with the hardening below:
   also `rev-parse --show-prefix --show-object-format
   --is-shallow-repository`.
 - Revisions: `rev-parse --verify --quiet --end-of-options <rev>^{commit}`
-  per end (only the exit code counts: `a..b` prints ids and fails).
+  per end. Exit 1, or exit 0 with anything but one commit id, means no
+  commit (`a..b` prints ids and fails; `^main` prints `^<id>`; D-316).
   `merge-base --all <base> <head>` for `...`, on the resolved ids: the
   first base is used. No base in a shallow clone: the message says so.
 - Commit sides: `ls-tree -r -z --long --full-tree <commit>` per side.

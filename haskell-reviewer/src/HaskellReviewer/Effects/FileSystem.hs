@@ -190,7 +190,7 @@ renderListError = \case
 -- "HaskellReviewer.Core.FileList". Warnings go to the logger.
 listFiles :: Logger -> CanonicalRoot -> Listing -> IO (Either ListError FileList)
 listFiles logger canon = \case
-  ListFromDisk -> do
+  ListFromDisk _ -> do
     w <- walkFiles canon (fileListCap + 1)
     logSome (logInfo logger) warning "unreadable directories" w.warnings
     Right <$> built (mkFileList FromDisk w.skippedNames w.entries)

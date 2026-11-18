@@ -75,7 +75,7 @@ plantedGit t root = do
           }
   probeGitWith setup quiet (Root root) >>= \case
     Right (ListFromGit g) -> pure g
-    Right ListFromDisk -> assertFailure "git not used"
+    Right (ListFromDisk _) -> assertFailure "git not used"
     Left e -> assertFailure ("git error: " <> show e)
 
 safeCalls :: FilePath -> Assertion

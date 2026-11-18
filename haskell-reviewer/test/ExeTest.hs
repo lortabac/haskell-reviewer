@@ -40,7 +40,11 @@ import System.Environment (getEnvironment, lookupEnv)
 import System.Exit (ExitCode (..))
 import System.FilePath (takeDirectory, (</>))
 import System.IO (Handle, hGetContents', hGetLine, hIsEOF, hReady, readFile')
-import System.IO.Temp (withSystemTempDirectory)
+import System.IO.Temp
+  ( createTempDirectory,
+    getCanonicalTemporaryDirectory,
+    withSystemTempDirectory,
+  )
 import System.Info qualified
 import System.Posix.Process (getProcessID)
 import System.Posix.Resource
@@ -65,7 +69,7 @@ import System.Process
     waitForProcess,
   )
 import System.Timeout (timeout)
-import Test.Tasty (TestTree, testGroup)
+import Test.Tasty (TestTree, testGroup, withResource)
 import Test.Tasty.ExpectedFailure (ignoreTestBecause)
 import Test.Tasty.HUnit
   ( Assertion,
@@ -79,7 +83,9 @@ import TestSupport
   ( assertFds,
     assertNoMarker,
     baselineFds,
+    fixtureRepo,
     git,
+    gitOut,
     listFdsTo,
     snapshotDir,
     withCanonicalTemp,
@@ -94,6 +100,7 @@ tests =
       serverTests,
       filesTests,
       gitTests,
+      diffTests,
       signalTests,
       openerTests,
       prefsTests
@@ -234,7 +241,8 @@ quickExitTests =
     [ testCase "--help: exit 0, flags on stderr" $ do
         (code, err) <- runExe ["--help"]
         code @?= ExitSuccess
-        assertContains "--port" err,
+        assertContains "--port" err
+        assertContains "--diff REVSPEC" err,
       testCase "--version: exit 0, same version as the library" $ do
         (code, err) <- runExe ["--version"]
         code @?= ExitSuccess
@@ -845,6 +853,141 @@ gitTests =
           lock <- Dir.doesPathExist (root </> ".git" </> "index.lock")
           assertBool "index.lock left" (not lock)
     ]
+
+-- * Diff mode
+
+-- | @--diff@ end to end (D-316). The fixtures are built once for the
+-- group: Note [Shared values in tests] in
+-- "HaskellReviewer.Core.PackageGlobTest".
+diffTests :: TestTree
+diffTests =
+  withResource makeDiffRepos Dir.removeDirectoryRecursive $ \get ->
+    testGroup
+      "diff (exe)"
+      [ testCase "no git on PATH: exit 2" $ do
+          t <- get
+          env <- envWith [("PATH", t </> "empty")] []
+          exit2With (withEnv env) [t </> "repo", "--diff", "a..b"] $
+            "haskell-reviewer: --diff needs git, and there is none on PATH",
+        testCase "ROOT not in a repo, or in .git: exit 2" $ do
+          t <- get
+          forM_ [t </> "plain", t </> "repo" </> ".git"] $ \root ->
+            exit2With id [root, "--diff", "a..b"] $
+              "haskell-reviewer: --diff needs ROOT in a git work tree: " <> root,
+        testCase "ROOT a bare repo: exit 2" $ do
+          t <- get
+          (code, err) <- runExe ["--no-open", t </> "bare.git", "--diff", "a..b"]
+          code @?= ExitFailure 2
+          assertContains "cannot use bare repository" err,
+        testCase "bad syntax: usage error, exit 2" $ do
+          t <- get
+          forM_ ["a....b", "", ".."] $ \d -> do
+            (code, err) <- runExe ["--no-open", t </> "repo", "--diff", d]
+            code @?= ExitFailure 2
+            assertContains "option --diff: " err
+            assertContains "Usage:" err,
+        testCase "unknown revision, not a commit: exit 2" $ do
+          t <- get
+          forM_ ["nope", "blobtag", "--output=x", "^main"] $ \rev -> do
+            exit2With id [t </> "repo", "--diff=" <> rev <> "..HEAD"] $
+              "haskell-reviewer: --diff: unknown revision or not a commit: " <> rev
+          -- A control character is escaped: still one line.
+          exit2With id [t </> "repo", "--diff", "a\nb\ESC..HEAD"] $
+            "haskell-reviewer: --diff: unknown revision or not a commit: a\\nb\\ESC"
+          -- Never read as an option of git.
+          here <- Dir.doesPathExist "x"
+          inRepo <- Dir.doesPathExist (t </> "repo" </> "x")
+          (here, inRepo) @?= (False, False),
+        testCase "git fails with no stderr: the call and the code, exit 2" $ do
+          t <- get
+          exit2With id [t </> "repo", "--diff", "HEAD@{500}..HEAD"] $
+            "haskell-reviewer: git failed in ROOT: git rev-parse --verify --quiet \
+            \--end-of-options HEAD@{500}^{commit} exited with 128",
+        testCase "no merge base: exit 2" $ do
+          t <- get
+          exit2With id [t </> "repo", "--diff", "main...lonely"] $
+            "haskell-reviewer: --diff: no merge base for main...lonely",
+        testCase "shallow clone: exit 2 with the hint" $ do
+          t <- get
+          exit2With id [t </> "shallow", "--diff", "HEAD~1..HEAD"] $
+            "haskell-reviewer: --diff: unknown revision or not a commit: HEAD~1; \
+            \this is a shallow clone, its history may be cut"
+          exit2With id [t </> "shallow", "--diff", "main...origin/feature"] $
+            "haskell-reviewer: --diff: no merge base for main...origin/feature; \
+            \this is a shallow clone: fetch more history",
+        testCase "--diff REV: not supported yet, exit 2" $ do
+          t <- get
+          exit2With id [t </> "repo", "--diff", "HEAD"] $
+            "haskell-reviewer: --diff REV (against the working tree) is not supported \
+            \yet; use BASE..HEAD or BASE...HEAD",
+        testCase "BASE..HEAD: both sides served, tree 404, one done line" $ do
+          t <- get
+          let root = t </> "repo" </> "pkg"
+          withServer id ["--verbose", root, "--diff", "light..feature"] $ \server -> do
+            waitForLine server ("indexing: done, " `isPrefixOf`)
+            forM_ ["head", "base"] $ \side -> do
+              r <- getPath server ("api/modules/" <> side)
+              (side, r.status) @?= (side, 200)
+            noTree <- getPath server "api/modules/tree"
+            noTree.status @?= 404
+            files <- getPath server "api/files/head"
+            let body = Char8.unpack files.body
+            assertContains "\"path\":\"src/H.hs\"" body
+            assertBool body (not ("README" `isInfixOf` body))
+            base <- getPath server "api/files/base"
+            let baseBody = Char8.unpack base.body
+            assertBool baseBody (not ("src/F.hs" `isInfixOf` baseBody))
+            (_, err) <- stopServer server sigTERM
+            assertContains "diff: light..feature\n" err
+            length (filter ("indexing: done" `isPrefixOf`) (lines err)) @?= 1,
+        testCase "BASE...HEAD: base is the merge base" $ do
+          t <- get
+          let root = t </> "repo" </> "pkg"
+          f2 <- take 7 <$> gitOut (t </> "repo") ["rev-parse", "feature~1"]
+          withServer id ["--verbose", root, "--diff", "main...feature"] $ \server -> do
+            base <- getPath server "api/files/base"
+            let body = Char8.unpack base.body
+            assertContains "\"path\":\"src/G.hs\"" body
+            assertBool body (not (any (`isInfixOf` body) ["src/C.hs", "src/H.hs"]))
+            (_, err) <- stopServer server sigTERM
+            assertContains ("base: merge base of main and feature = " <> f2 <> "\n") err,
+        testCase "planted repo: commit reads run nothing" $ do
+          t <- get
+          let p = t </> "planted"
+          env <-
+            envWith [("PATH", p </> "bin" <> ":/usr/bin:/bin"), ("HOME", p </> "home")] []
+          withServer (withEnv env) [p </> "repo", "--verbose", "--diff", "HEAD~1..HEAD"] $
+            \server -> do
+              waitForLine server ("indexing: done, " `isPrefixOf`)
+              forM_ ["head", "base"] $ \side ->
+                forM_ ["a.x", "a.bin", "a.txt", "a.cl"] $ \f -> do
+                  r <- getPath server ("api/file/" <> side <> "/" <> f)
+                  (side, f, r.status) @?= (side, f, 200)
+              (code, _) <- stopServer server sigTERM
+              code @?= ExitSuccess
+          markers <- Dir.listDirectory (p </> "markers")
+          markers @?= []
+      ]
+
+-- | The revspecs repo, a shallow clone of it with every branch tip, a
+-- bare clone, a plain dir, an empty dir, and the planted repos.
+makeDiffRepos :: IO FilePath
+makeDiffRepos = do
+  tmp <- getCanonicalTemporaryDirectory
+  t <- createTempDirectory tmp "exe-diff" >>= Dir.canonicalizePath
+  fixtureRepo "revspecs" [t </> "repo"]
+  mapM_ (Dir.createDirectory . (t </>)) ["plain", "empty", "planted"]
+  let url = "file://" <> t </> "repo"
+  git t ["clone", "-q", "--depth", "1", "--no-single-branch", url, "shallow"]
+  git t ["clone", "-q", "--bare", url, "bare.git"]
+  fixtureRepo "planted" [t </> "planted"]
+  pure t
+
+-- | Exit 2, and stderr is this one line.
+exit2With :: (CreateProcess -> CreateProcess) -> [String] -> String -> Assertion
+exit2With tweak args msg = do
+  (code, err) <- runExeWith tweak ("--no-open" : args)
+  (code, err) @?= (ExitFailure 2, msg <> "\n")
 
 -- | Check one call of the fake git in "git inherits no fds and a capped
 -- limit": soft fd limit at most 4096, and the fds of a clean child.

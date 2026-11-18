@@ -78,6 +78,7 @@ import HaskellReviewer.Session.Index
     bigFileSize,
     newIndex,
     newPool,
+    prioritise,
     readNames,
     readProgress,
     readStates,
@@ -437,6 +438,28 @@ poolTests =
         (h, b) <- twoIndexes ["A", "B"] ["C", "D"]
         within (runWorkers 1 (headBase fake.deps h b))
         readTVarIO fake.parsed >>= (@?= ["A", "B", "C", "D"]),
+      testCase "changed first: head's, base's, then background" $ do
+        fake <- newFake []
+        (h, b) <- twoIndexes ["A", "B", "C"] ["D", "E", "F"]
+        atomically $ do
+          prioritise h [m "C", m "nope"]
+          prioritise b [m "F", m "E"]
+        within (runWorkers 1 (headBase fake.deps h b))
+        readTVarIO fake.parsed >>= (@?= ["C", "F", "E", "A", "B", "D"]),
+      testCase "a request beats changed; a module taken already is not pushed" $ do
+        fake <- newFake ["C"]
+        (h, b) <- twoIndexes ["A", "B", "C"] ["D", "E"]
+        atomically (prioritise h [m "C"])
+        withAsync (runWorkers 1 (headBase fake.deps h b)) $ \_ -> do
+          waitState h (m "C") isParsing
+          atomically $ do
+            prioritise b [m "D"]
+            requestModule b (m "E")
+            prioritise h [m "C"]
+          release fake "C"
+          waitDone h
+          waitDone b
+        readTVarIO fake.parsed >>= (@?= ["C", "E", "D", "A", "B"]),
       testCase "a request on base beats head's background" $ do
         fake <- newFake ["A"]
         (h, b) <- twoIndexes ["A", "B", "C"] ["D", "E"]

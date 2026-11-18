@@ -4,6 +4,7 @@ import Data.Text qualified as Text
 import HaskellReviewer.App.Cli
 import HaskellReviewer.Core.Address (Port (..))
 import HaskellReviewer.Core.Project (GhcVersion (..))
+import HaskellReviewer.Core.Revspec (Range (..), RangeForm (..), Revspec (..))
 import HaskellReviewer.Effects.Log (LogLevel (..))
 import System.Exit (ExitCode (..))
 import Test.Tasty (TestTree, testGroup)
@@ -52,6 +53,29 @@ tests =
         mapM_
           (\v -> usageError ["--ghc", v])
           ["9", "9.x", "9.12.", "9.99999999999.1", ""],
+      testCase "--diff" $ do
+        parseOk ["--diff", "main..feature"] $ \o ->
+          o.diff @?= Just (RangeSpec (Range TwoDot "main" "feature"))
+        parseOk ["--diff=main...feature"] $ \o ->
+          o.diff @?= Just (RangeSpec (Range ThreeDot "main" "feature"))
+        parseOk ["--diff", "HEAD"] (\o -> o.diff @?= Just (AgainstWorkTree "HEAD"))
+        parseOk ["dir", "--diff", "a.."] $ \o -> do
+          o.root @?= "dir"
+          o.diff @?= Just (RangeSpec (Range TwoDot "a" "HEAD")),
+      testCase "--diff: a value that starts with a dash is a revision" $ do
+        parseOk ["--diff=-x..HEAD"] $ \o ->
+          o.diff @?= Just (RangeSpec (Range TwoDot "-x" "HEAD"))
+        parseOk ["--diff", "-x..HEAD"] $ \o ->
+          o.diff @?= Just (RangeSpec (Range TwoDot "-x" "HEAD"))
+        parseOk ["--diff", "--port..x"] $ \o -> do
+          o.diff @?= Just (RangeSpec (Range TwoDot "--port" "x"))
+          o.port @?= Nothing,
+      testCase "bad --diff: usage error with the reason" $ do
+        mapM_ (\d -> usageError ["--diff", d]) ["", "..", "...", "a....b", "a..b..c"]
+        case parseArgs ["--diff", "a....b"] of
+          CliExit _ txt ->
+            assertBool (show txt) ("option --diff: too many dots" `Text.isInfixOf` txt)
+          other -> assertFailure (show other),
       testCase "--version" $
         parseArgs ["--version"] @?= CliCommand ShowVersion,
       testCase "--help lists every flag" $
@@ -68,7 +92,8 @@ tests =
                 "--verbose",
                 "--debug",
                 "--trace-file",
-                "--ghc"
+                "--ghc",
+                "--diff"
               ]
           other -> assertFailure ("expected help, got " <> show other),
       testCase "unknown flag" $ usageError ["--bogus"],
@@ -84,7 +109,8 @@ defaults =
       idleExit = IdleExitAfter (Minutes 5),
       logLevel = LevelInfo,
       traceFile = Nothing,
-      ghc = Nothing
+      ghc = Nothing,
+      diff = Nothing
     }
 
 maxMinutes :: Int
