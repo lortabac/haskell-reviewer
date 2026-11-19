@@ -5,8 +5,10 @@ module HaskellReviewer.Session.Snapshot
     Snapshot (..),
     SnapshotSlot,
     IndexingState (..),
+    SessionShare (..),
 
     -- * Operations
+    newSessionShare,
     firstGeneration,
     newSnapshotSlot,
     fillSnapshot,
@@ -35,14 +37,28 @@ import HaskellReviewer.Core.Search (ModuleCandidate)
 import HaskellReviewer.Core.Sides (Side, Sides)
 import HaskellReviewer.Effects.FileSystem (ListError)
 import HaskellReviewer.Effects.Source (EntrySource)
-import HaskellReviewer.Session.Index (Index, Progress, readProgress)
+import HaskellReviewer.Session.Index (Index, Pool, Progress, newPool, readProgress)
 import HaskellReviewer.Session.Resolve (Resolver)
-import HaskellReviewer.Session.TextStore (TextStore)
+import HaskellReviewer.Session.TextStore (BlobTexts, TextStore, newBlobTexts)
 
 -- | Which snapshot a response comes from. Goes up on reload (later); the
 -- client caches by it (SPEC §11.6.2).
 newtype Generation = Generation Word64
   deriving (Eq, Show)
+
+-- | What a session's snapshots share: the workers' pool (with its
+-- parse cache) and the text stores' bytes by blob (D-320).
+data SessionShare = SessionShare
+  { pool :: Pool,
+    blobTexts :: BlobTexts
+  }
+
+-- | A new one, for one session.
+newSessionShare :: IO SessionShare
+newSessionShare = do
+  pool <- newPool
+  blobTexts <- newBlobTexts
+  pure SessionShare {pool = pool, blobTexts = blobTexts}
 
 -- | The generation of the first snapshot. The only one for now: there
 -- is no reload yet.

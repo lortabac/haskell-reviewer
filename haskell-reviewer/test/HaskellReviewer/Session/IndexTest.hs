@@ -34,7 +34,7 @@ import Control.Exception
     throwIO,
     try,
   )
-import Control.Monad (void, when)
+import Control.Monad (join, void, when)
 import Data.List (nub, sort)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, isNothing)
@@ -43,6 +43,7 @@ import Data.Text qualified as Text
 import GHC.Conc (BlockReason (..), ThreadStatus (..), threadStatus)
 import HaskellReviewer.Core.FileContent (FileContent (..), FileSize (..))
 import HaskellReviewer.Core.FileList (EntryKind (..), ListSource (..), mkFileList)
+import HaskellReviewer.Core.Git (ObjectId (..))
 import HaskellReviewer.Core.ModuleModel
   ( ModuleParse (..),
     TextOnlyModule,
@@ -73,6 +74,7 @@ import HaskellReviewer.Session.Index
     ParsedSource (..),
     Pool,
     Progress (..),
+    ShareCounts (..),
     SlotState (..),
     awaitModule,
     bigFileSize,
@@ -85,6 +87,7 @@ import HaskellReviewer.Session.Index
     requestCount,
     requestModule,
     runWorkers,
+    shareCounts,
     slotState,
     withRequest,
   )
@@ -102,6 +105,7 @@ tests =
     "Index"
     [ gateTests,
       poolTests,
+      shareTests,
       testCase "a request jumps the queue" $ do
         fake <- newFake ["A"]
         index <- indexOf ["A", "B", "C", "D"]
@@ -621,6 +625,201 @@ poolTests =
   where
     crashed = IndexCrashed "heap overflow"
 
+-- | Two indexes in one pool share parses by key (D-320). Each file's
+-- text is its blob, or its name with no blob, so the fake's parse
+-- list shows what was parsed.
+shareTests :: TestTree
+shareTests =
+  testGroup
+    "sharing"
+    [ testCase "same blob and settings: one parse, both get it" $ do
+        fake <- newFake []
+        pool <- newPool
+        let hf = [("A.hs", Just "x"), ("B.hs", Just "y")]
+            bf = [("Moved.hs", Just "x"), ("C.hs", Just "z")]
+        h <- indexBlobs pool hf
+        b <- indexBlobs pool bf
+        within (runWorkers 1 (headBase (blobReads fake (hf <> bf)) h b))
+        sort <$> readTVarIO fake.parsed >>= (@?= ["x", "y", "z"])
+        atomically (slotState b (m "Moved")) >>= (@?= Just (Ready textOnlyResult))
+        atomically (shareCounts h) >>= (@?= ShareCounts {parses = 3, shares = 1})
+        atomically (readProgress b)
+          >>= (@?= Progress {total = 2, ready = 2, failed = 0}),
+      testCase "same blob, other settings: two parses" $ do
+        fake <- newFake []
+        pool <- newPool
+        let hf = [("A.hs", Just "x")]
+            bf = [("A.lhs", Just "x")]
+        h <- indexBlobs pool hf
+        b <- indexBlobs pool bf
+        within (runWorkers 1 (headBase (blobReads fake (hf <> bf)) h b))
+        readTVarIO fake.parsed >>= (@?= ["x", "x"])
+        atomically (shareCounts h) >>= (@?= ShareCounts {parses = 2, shares = 0}),
+      testCase "no blob: two parses" $ do
+        fake <- newFake []
+        pool <- newPool
+        let hf = [("A.hs", Nothing)]
+            bf = [("A.hs", Nothing)]
+        h <- indexBlobs pool hf
+        b <- indexBlobs pool bf
+        within (runWorkers 2 (headBase (blobReads fake (hf <> bf)) h b))
+        readTVarIO fake.parsed >>= (@?= ["A", "A"])
+        atomically (shareCounts h) >>= (@?= ShareCounts {parses = 2, shares = 0}),
+      testCase "same key twice in one index: one parse" $ do
+        fake <- newFake []
+        pool <- newPool
+        let hf = [("A.hs", Just "x"), ("B.hs", Just "x")]
+        h <- indexBlobs pool hf
+        within (runWorkers 2 [IndexJob (blobReads fake hf) h])
+        readTVarIO fake.parsed >>= (@?= ["x"])
+        Map.elems <$> atomically (readStates h)
+          >>= (@?= [Ready textOnlyResult, Ready textOnlyResult]),
+      testCase "a request for a twin being parsed waits, then gets it" $ do
+        fake <- newFake ["x"]
+        pool <- newPool
+        let hf = [("A.hs", Just "x"), ("B.hs", Just "y")]
+            bf = [("Moved.hs", Just "x")]
+        h <- indexBlobs pool hf
+        b <- indexBlobs pool bf
+        withAsync (runWorkers 2 (headBase (blobReads fake (hf <> bf)) h b)) $ \_ -> do
+          waitState h (m "A") isParsing
+          withAsync (awaitModule b (m "Moved")) $ \request -> do
+            -- The other worker does B, then waits: Moved is A's twin.
+            waitState h (m "B") isReady
+            poll request >>= assertBool "answered before the parse" . isNothing
+            atomically (slotState b (m "Moved")) >>= (@?= Just Pending)
+            release fake "x"
+            r <- within (waitCatch request)
+            either (assertFailure . show) (@?= Just (Right textOnlyResult)) r
+          waitDone h
+          waitDone b
+        sort <$> readTVarIO fake.parsed >>= (@?= ["x", "y"]),
+      testCase "the owner can't read it: the twin reads it" $ do
+        fake <- newFake []
+        gate <- newEmptyMVar
+        let hf = [("A.hs", Just "x")]
+            bf = [("Moved.hs", Just "x")]
+            deps =
+              (blobReads fake (hf <> bf))
+                { readModule = \p -> case relPathText p of
+                    "A.hs" -> do
+                      readMVar gate
+                      pure (Left (ReadFailed "Permission denied"))
+                    _ -> (blobReads fake (hf <> bf)).readModule p
+                }
+        pool <- newPool
+        h <- indexBlobs pool hf
+        b <- indexBlobs pool bf
+        withAsync (runWorkers 2 (headBase deps h b)) $ \_ -> do
+          waitState h (m "A") isParsing
+          -- Moved waits for A's owner.
+          atomically (slotState b (m "Moved")) >>= (@?= Just Pending)
+          putMVar gate ()
+          waitDone h
+          waitDone b
+        atomically (slotState h (m "A"))
+          >>= (@?= Just (Failed (SourceUnreadable "Permission denied")))
+        atomically (slotState b (m "Moved")) >>= (@?= Just (Ready textOnlyResult))
+        readTVarIO fake.parsed >>= (@?= ["x"]),
+      testCase "the owner finds it big while the lock is busy: no hang, one parse" $ do
+        -- B1 holds the lock. A is read only then, so it is found big
+        -- and put back; then its twin Moved too. Both wait for the lock.
+        let FileSize limit = bigFileSize
+            big n = n <> Text.replicate limit "x"
+        fake <- newFake [big "B1"]
+        let deps =
+              fake.deps
+                { readModule = \p -> case relPathText p of
+                    "B1.hs" -> pure (Right (TextContent (big "B1")))
+                    "A.hs" -> do
+                      -- Once B1's parse has started.
+                      atomically (readTVar fake.parsed >>= check . elem (big "B1"))
+                      pure (Right (TextContent (big "X")))
+                    _ -> pure (Right (TextContent (big "X")))
+                }
+        pool <- newPool
+        let hf = [("B1.hs", Just "b1"), ("A.hs", Just "x")]
+            bf = [("Moved.hs", Just "x")]
+        h <- indexBlobs pool hf
+        b <- indexBlobs pool bf
+        withAsync (runWorkers 2 (headBase deps h b)) $ \_ -> do
+          within (atomically (readTVar fake.bigRunning >>= check . (>= 1)))
+          release fake (big "B1")
+          waitDone h
+          waitDone b
+        sort <$> readTVarIO fake.parsed >>= (@?= [big "B1", big "X"])
+        readTVarIO fake.bigMost >>= (@?= 1)
+        atomically (slotState b (m "Moved")) >>= (@?= Just (Ready textOnlyResult)),
+      testCase "a cancel while the owner parses: the next run parses the key" $ do
+        fake <- newFake ["x"]
+        pool <- newPool
+        let hf = [("A.hs", Just "x")]
+            bf = [("Moved.hs", Just "x")]
+        h <- indexBlobs pool hf
+        b <- indexBlobs pool bf
+        let deps = blobReads fake (hf <> bf)
+        withAsync (runWorkers 1 (headBase deps h b)) $ \workers -> do
+          waitState h (m "A") isParsing
+          cancel workers
+          void (within (waitCatch workers))
+        let stopped = Failed (IndexCrashed "indexing was stopped")
+        Map.elems <$> atomically (readStates h) >>= (@?= [stopped])
+        Map.elems <$> atomically (readStates b) >>= (@?= [stopped])
+        -- A later run on the same pool: the key is not left owned.
+        release fake "x"
+        h2 <- indexBlobs pool hf
+        within (runWorkers 1 [IndexJob (blobReads fake hf) h2])
+        Map.elems <$> atomically (readStates h2) >>= (@?= [Ready textOnlyResult])
+        readTVarIO fake.parsed >>= (@?= ["x", "x"]),
+      testProperty "random keys: one parse per key, same results" shareProperty
+    ]
+
+-- | The fake's deps, reading each file's blob as its text, or its
+-- name if it has none. Give every file of 'indexBlobs'.
+blobReads :: Fake -> [(Text, Maybe Text)] -> IndexDeps
+blobReads fake fs =
+  fake.deps
+    { readModule = \p ->
+        let f = relPathText p
+         in pure . Right . TextContent $
+              fromMaybe (Text.dropEnd 3 f) (join (lookup f fs))
+    }
+
+-- | Random blobs on two indexes, random workers and requests.
+shareProperty :: Property
+shareProperty = property $ do
+  let blob = Gen.element [Nothing, Just "x", Just "y", Just "z"]
+  hs <- forAll (Gen.list (Range.linear 0 6) blob)
+  bs <- forAll (Gen.list (Range.linear 0 6) blob)
+  workers <- forAll (Gen.int (Range.linear 1 4))
+  let files tag ks =
+        [(tag <> Text.pack (show i) <> ".hs", k) | (i, k) <- zip [1 :: Int ..] ks]
+      hf = files "h" hs
+      bf = files "b" bs
+      names = map fst (hf <> bf) <> ["none.hs"]
+  asks <- forAll (Gen.list (Range.linear 0 8) (Gen.element names))
+  (parsed, states, counts) <- evalIO $ do
+    fake <- newFake []
+    pool <- newPool
+    h <- indexBlobs pool hf
+    b <- indexBlobs pool bf
+    let deps = blobReads fake (hf <> bf)
+        onIndex f = if "h" `Text.isPrefixOf` f then h else b
+        idOf f = LooseModule (path f)
+    withAsync (runWorkers workers (headBase deps h b)) $ \run -> do
+      mapM_ (\f -> within (awaitModule (onIndex f) (idOf f))) asks
+      within (waitCatch run) >>= either throwIO pure
+    states <- atomically ((<>) <$> readStates h <*> readStates b)
+    parsed <- readTVarIO fake.parsed
+    counts <- atomically (shareCounts h)
+    pure (parsed, states, counts)
+  let keyed = nub [k | Just k <- hs <> bs]
+      unkeyed = [Text.dropEnd 3 f | (f, Nothing) <- hf <> bf]
+  sort parsed === sort (keyed <> unkeyed)
+  Map.elems states === replicate (length hs + length bs) (Ready textOnlyResult)
+  let total = length hs + length bs
+  counts === ShareCounts {parses = length parsed, shares = total - length parsed}
+
 -- | Poll until the value is right. For a thread's status, which has no
 -- STM to wait on.
 waitFor :: (a -> Bool) -> IO a -> IO a
@@ -706,7 +905,27 @@ parsingTests =
           Just (Ready (IndexedParsed p)) -> do
             p.text @?= "module A (a) where\ndata T = K\na = 1\n"
             p.occKeys @?= occKeys p.text p.parsed
-          other -> assertFailure (take 300 (show other))
+          other -> assertFailure (take 300 (show other)),
+      testCase "a shared parse: the twin gets the result and the names" $ do
+        fake <- newFake []
+        let text = "module A (a) where\na = 1\n"
+            deps =
+              fake.deps
+                { readModule = \_ -> pure (Right (TextContent text)),
+                  parse = \st t -> do
+                    _ <- fake.deps.parse st t
+                    parseGuarded st t
+                }
+        pool <- newPool
+        h <- indexBlobs pool [("A.hs", Just "x")]
+        b <- indexBlobs pool [("Moved.hs", Just "x")]
+        within (runWorkers 1 (headBase deps h b))
+        readTVarIO fake.parsed >>= (@?= [text])
+        hs <- atomically (slotState h (m "A"))
+        bs <- atomically (slotState b (m "Moved"))
+        bs @?= hs
+        names <- atomically (readNames b)
+        fmap (map (.name)) names @?= Map.fromList [(m "Moved", ["a"])]
     ]
 
 -- * Fakes
@@ -797,12 +1016,18 @@ indexOf ns = do
 
 -- | An index of loose modules, one per name, in this pool.
 indexIn :: Pool -> [Text] -> IO Index
-indexIn pool ns =
+indexIn pool ns = indexBlobs pool [(n <> ".hs", Nothing) | n <- ns]
+
+-- | An index of loose modules, by file name, with each file's blob, in
+-- this pool.
+indexBlobs :: Pool -> [(Text, Maybe Text)] -> IO Index
+indexBlobs pool fs =
   newIndex
     pool
+    (\p -> ObjectId <$> join (lookup (relPathText p) fs))
     ( buildModuleIndex
         project
-        (mkFileList FromDisk 0 [(path (n <> ".hs"), EntryFile) | n <- ns])
+        (mkFileList FromDisk 0 [(path f, EntryFile) | (f, _) <- fs])
     )
   where
     project =

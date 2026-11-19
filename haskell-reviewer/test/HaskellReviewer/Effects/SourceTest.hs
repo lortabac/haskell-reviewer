@@ -3,11 +3,13 @@
 module HaskellReviewer.Effects.SourceTest (tests, parsingTests) where
 
 import ApiSupport (ApiResult (..), TestApi (..), getApi, indexed, searchApi)
+import Control.Concurrent.STM (atomically)
 import Control.Monad (forM_)
 import Data.ByteString (ByteString)
 import Data.Map.Strict qualified as Map
 import Data.Text qualified as Text
 import HaskellReviewer.Core.CommitFiles (linkTargetCap)
+import HaskellReviewer.Core.Eol (CleanEol (..), Filtering (..))
 import HaskellReviewer.Core.FileContent
   ( FileContent (..),
     FileSize (..),
@@ -16,11 +18,17 @@ import HaskellReviewer.Core.FileContent
     textLimit,
   )
 import HaskellReviewer.Core.FileList (CommitId (..), EntryKind (..), FileList (..))
-import HaskellReviewer.Core.Git (ObjectId)
+import HaskellReviewer.Core.Git (ObjectId (..))
+import HaskellReviewer.Core.ModuleModel
+  ( ModuleParse (..),
+    TextOnlyReason (..),
+    textOnlyModule,
+  )
 import HaskellReviewer.Core.Project (FileProblem (..), hostPlatform)
 import HaskellReviewer.Core.RelPath (RelPath, parseRelPath)
 import HaskellReviewer.Core.Root (Root (..))
 import HaskellReviewer.Core.Sides (Side (..), Sides (..))
+import HaskellReviewer.Core.WorkTree (DiskFile (..), WorkFile (..))
 import HaskellReviewer.Effects.FileSystem (ReadError (..), canonicalRoot)
 import HaskellReviewer.Effects.Git (Git, Listing (..), repoInfo, resolveCommit)
 import HaskellReviewer.Effects.GitObjects
@@ -30,16 +38,29 @@ import HaskellReviewer.Effects.GitObjects
   )
 import HaskellReviewer.Effects.Log (LogLevel (..), Logger, newLogger)
 import HaskellReviewer.Effects.Source
-  ( Listed (..),
+  ( EntrySource (..),
+    Listed (..),
     Lister (..),
+    WorkTreeSource (..),
     commitLister,
     diskLister,
     readSourceEntry,
+    sharedBlob,
+    sourceBlob,
   )
 import HaskellReviewer.Server.Api (newSnapshot)
-import HaskellReviewer.Session.Index (newPool)
+import HaskellReviewer.Session.Index
+  ( IndexDeps (..),
+    IndexJob (..),
+    Indexed (..),
+    ShareCounts (..),
+    SlotState (..),
+    readStates,
+    runWorkers,
+    shareCounts,
+  )
 import HaskellReviewer.Session.Project (readProject, readProjectFile)
-import HaskellReviewer.Session.Snapshot (Snapshot (..))
+import HaskellReviewer.Session.Snapshot (Snapshot (..), newSessionShare)
 import System.Directory qualified as Dir
 import System.FilePath ((</>))
 import System.IO.Temp (createTempDirectory, getCanonicalTemporaryDirectory)
@@ -76,6 +97,84 @@ tests =
           withObjectReader quiet defaultReaderSettings g $ \reader -> do
             l <- headListed g reader
             readProjectFile l.source l.files (rel "sub") >>= (@?= Left Gone),
+        testCase "blobs: shared only when read from a blob (D-320)" $ do
+          r <- get
+          let proj = r.sha1 </> "proj"
+          g <- realGitAt r.home proj
+          canon <- canonicalRoot (Root proj)
+          withObjectReader quiet defaultReaderSettings g $ \reader -> do
+            l <- headListed g reader
+            let both src p = (sourceBlob src (rel p), sharedBlob src (rel p))
+                known = fst (both l.source "a.hs")
+            assertBool "a.hs has a blob" (known /= Nothing)
+            both l.source "a.hs" @?= (known, known)
+            both l.source "nope.hs" @?= (Nothing, Nothing)
+            both (DiskEntries canon) "a.hs" @?= (Nothing, Nothing)
+            let o = ObjectId "0123"
+                disk b =
+                  FromDisk DiskFile {blob = b, eol = KeepRaw, filtered = Unfiltered}
+                wt =
+                  WorkTreeEntries
+                    WorkTreeSource
+                      { root = canon,
+                        reader = reader,
+                        files =
+                          Map.fromList
+                            [ (rel "clean.hs", FromIndex o),
+                              (rel "dirty.hs", disk (Just o)),
+                              (rel "new.hs", disk Nothing)
+                            ]
+                      }
+            both wt "clean.hs" @?= (Just o, Just o)
+            both wt "dirty.hs" @?= (Just o, Nothing)
+            both wt "new.hs" @?= (Nothing, Nothing)
+            both wt "nope.hs" @?= (Nothing, Nothing),
+        testCase "a symlink module with a file's blob gets no shared result" $
+          withCanonicalTemp $ \tmp -> do
+            -- L.hs links to A.hs; B.hs holds the text "A.hs": the same
+            -- blob. L has no slot (we never follow links), so no hit.
+            let repo = tmp </> "r"
+            Dir.createDirectory repo
+            Dir.createDirectory (tmp </> "home")
+            git repo ["init", "-q"]
+            writeFile (repo </> "p.cabal") $
+              unlines
+                [ "cabal-version: 3.0",
+                  "name: p",
+                  "version: 0.1",
+                  "library",
+                  "  exposed-modules: B L",
+                  "  build-depends: base",
+                  "  default-language: Haskell2010"
+                ]
+            writeFile (repo </> "A.hs") "module A where\n"
+            writeFile (repo </> "B.hs") "A.hs"
+            Dir.createFileLink "A.hs" (repo </> "L.hs")
+            git repo ["add", "-A"]
+            git repo ["commit", "-qm", "links"]
+            g <- realGitAt (tmp </> "home") repo
+            withObjectReader quiet defaultReaderSettings g $ \reader -> do
+              l <- headListed g reader
+              sourceBlob l.source (rel "L.hs") @?= sourceBlob l.source (rel "B.hs")
+              project <- readProject l.source l.files hostPlatform Nothing
+              share <- newSessionShare
+              snap <- newSnapshot TreeSide share l.source l.files project
+              let deps =
+                    IndexDeps
+                      { readModule = \p -> readSourceEntry l.source p EntryFile,
+                        parse = \_ _ -> pure (TextOnly (textOnlyModule TooSlow [])),
+                        logger = quiet,
+                        label = ""
+                      }
+              runWorkers 1 [IndexJob deps snap.index]
+              -- Slots: A (a loose module) and B.
+              states <- atomically (readStates snap.index)
+              let ready = Ready (IndexedTextOnly (textOnlyModule TooSlow []))
+              Map.elems states @?= [ready, ready]
+              assertBool (show (Map.keys states)) $
+                not (any (Text.isInfixOf "\"L\"" . Text.pack . show) (Map.keys states))
+              atomically (shareCounts snap.index)
+                >>= (@?= ShareCounts {parses = 2, shares = 0}),
         testCase "commit reads: a symlink target over 4096 bytes is cut" $
           withCanonicalTemp $ \tmp -> do
             let repo = tmp </> "r"
@@ -144,8 +243,8 @@ parsingTests =
         Left e -> assertFailure (show e)
         Right l -> do
           project <- readProject l.source l.files hostPlatform Nothing
-          pool <- newPool
-          newSnapshot TreeSide pool l.source l.files project
+          share <- newSessionShare
+          newSnapshot TreeSide share l.source l.files project
     apiOn snap =
       indexed
         searchApi

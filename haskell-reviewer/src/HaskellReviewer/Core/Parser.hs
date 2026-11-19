@@ -11,6 +11,7 @@ module HaskellReviewer.Core.Parser
     FileKind (..),
     defaultParseSettings,
     moduleParseSettings,
+    forceParseSettings,
 
     -- * Parsing
     parseSource,
@@ -109,7 +110,7 @@ import HaskellReviewer.Core.Cpp
   ( CppEnv (..),
     CppOutput (..),
     FlagSource (..),
-    MacroFlag,
+    MacroFlag (..),
     MacroFlags (..),
     macroFlag,
     macroFlags,
@@ -140,8 +141,10 @@ import HaskellReviewer.Core.Parser.Helpers (SpanMap (..), toSpan)
 import HaskellReviewer.Core.Parser.Lex (Lexed (..), lexTokens)
 import HaskellReviewer.Core.Project
   ( Extension (..),
-    GhcVersion,
+    GhcVersion (..),
     Language,
+    PackageName (..),
+    Platform (..),
     hostPlatform,
     parserGhcVersion,
   )
@@ -289,6 +292,33 @@ moduleParseSettings ghc c file =
   where
     signature = any (`Text.isSuffixOf` relPathName file.path) [".hsig", ".lhsig"]
     cppFlags = macroFlags CppOptions c.cppOptions
+
+-- | Force the settings fully: workers compare them in STM, so a thunk
+-- in there would be forced by many threads at once (Q-RTS-BLACKHOLE).
+forceParseSettings :: ParseSettings -> ()
+forceParseSettings s =
+  language s.language `seq`
+    each (\e -> e.name `seq` e.enabled `seq` ()) s.extensions `seq`
+      each (`seq` ()) s.ghcOptions `seq`
+        each (`seq` ()) s.ignoredCppOptions `seq`
+          s.literate `seq`
+            s.kind `seq`
+              cppEnv s.cpp
+  where
+    language = \case
+      Project.UnknownLanguage t -> t `seq` ()
+      l -> l `seq` ()
+    cppEnv c =
+      let GhcVersion v = c.ghc
+       in each (`seq` ()) v `seq`
+            c.platform.os `seq`
+              c.platform.arch `seq`
+                each flag c.flags `seq`
+                  each (\(PackageName n) -> n `seq` ()) c.buildDepends
+    flag = \case
+      Define n b -> n `seq` b `seq` ()
+      Undefine n -> n `seq` ()
+    each f = foldr (\x r -> f x `seq` r) ()
 
 -- | Without @-I dir@ and @-Idir@: silent until we read includes.
 withoutIncludes :: [Text] -> [Text]

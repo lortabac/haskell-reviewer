@@ -966,8 +966,10 @@ cabalChangeTests =
       "cabal-change"
       [ goldenVsString "head module tree" (golden "head") ((.headTree) <$> get),
         goldenVsString "base module tree" (golden "base") ((.baseTree) <$> get),
-        testCase "changed first, head then base, then the rest" $ do
+        testCase "changed first, head then base, then the rest; twins not read" $ do
           r <- get
+          -- Base's A, B, M and N have head's blob and settings: they
+          -- come from the cache, unread (D-320).
           r.claims
             @?= [ ("head", "added/src/C.hs"),
                   ("head", "ext/src/X.hs"),
@@ -978,16 +980,14 @@ cabalChangeTests =
                   ("head", "added/src/A.hs"),
                   ("head", "added/src/B.hs"),
                   ("head", "moved/lib/M.hs"),
-                  ("head", "moved/lib/N.hs"),
-                  ("base", "added/src/A.hs"),
-                  ("base", "added/src/B.hs"),
-                  ("base", "moved/src/M.hs"),
-                  ("base", "moved/src/N.hs")
+                  ("head", "moved/lib/N.hs")
                 ],
         testCase "log lines, tree 404" $ do
           r <- get
           let has l = assertBool (show r.console) (l `elem` r.console)
           has "changed: 3 on head, 3 on base, indexed first"
+          -- C, X and Y twice (other settings), the others once.
+          has "indexing: 10 parsed, 4 shared"
           has "diff: HEAD~1..HEAD"
           let baseLine = ("base: HEAD~1 = " `Text.isPrefixOf`)
           assertBool (show r.console) (any baseLine r.console)
@@ -1031,7 +1031,9 @@ runCabalChange = withCanonicalTemp $ \tmp -> do
           }
       args = [repo, "--idle-exit", "0", "--verbose", "--diff", "HEAD~1..HEAD"]
   withRunningProbe args change $ \fake app -> do
-    ok <- waitFor 10 (any ("indexing: done" `Text.isPrefixOf`) <$> readIORef fake.console)
+    -- The parsed/shared line comes right after the done line.
+    let shares l = "indexing: " `Text.isPrefixOf` l && " shared" `Text.isSuffixOf` l
+    ok <- waitFor 10 (any shares <$> readIORef fake.console)
     assertBool "not indexed" ok
     rs <- readIORef claimed
     h <- getSide app "modules" "head"

@@ -58,7 +58,6 @@ import HaskellReviewer.Core.Address
     tokenFromBytes,
   )
 import HaskellReviewer.Core.Changed (changedModules, moduleKeys)
-import HaskellReviewer.Core.CommitFiles (BlobRef (..))
 import HaskellReviewer.Core.Config (UiDefaults)
 import HaskellReviewer.Core.FileContent (FileContent)
 import HaskellReviewer.Core.FileList
@@ -98,7 +97,6 @@ import HaskellReviewer.Core.Sides
     sideTag,
     withSide,
   )
-import HaskellReviewer.Core.WorkTree qualified as WorkTree
 import HaskellReviewer.Core.Xdg (XdgProblem, prefsFile, renderXdgProblem)
 import HaskellReviewer.Effects.Browser qualified as Browser
 import HaskellReviewer.Effects.Clock
@@ -130,16 +128,15 @@ import HaskellReviewer.Effects.Log
 import HaskellReviewer.Effects.Parser qualified as Parser
 import HaskellReviewer.Effects.Shutdown (Shutdown (..), installShutdownHandlers)
 import HaskellReviewer.Effects.Source
-  ( CommitSource (..),
-    EntrySource (..),
+  ( EntrySource (..),
     Listed (..),
     Lister (..),
     Probe (..),
     ProbeError,
-    WorkTreeSource (..),
     fileNotes,
     readSourceEntry,
     renderProbeError,
+    sourceBlob,
     warmUpListing,
     warmUpObjects,
     warmUpWorkTree,
@@ -183,25 +180,27 @@ import HaskellReviewer.Session.Index
     IndexFailure (..),
     IndexJob (..),
     Indexed (..),
-    Pool,
     Progress (..),
+    ShareCounts (..),
     SlotState (..),
     failUnfinished,
-    newPool,
     prioritise,
     readProgress,
     readStates,
     runWorkers,
+    shareCounts,
   )
 import HaskellReviewer.Session.Prefs (newPrefsStore)
 import HaskellReviewer.Session.Project qualified as Session.Project
 import HaskellReviewer.Session.Resolve (warmUpResolve)
 import HaskellReviewer.Session.Snapshot
-  ( Snapshot (..),
+  ( SessionShare,
+    Snapshot (..),
     SnapshotSlot,
     awaitSnapshot,
     fillSnapshot,
     indexingStates,
+    newSessionShare,
     newSnapshotSlot,
     snapshotSTM,
   )
@@ -571,7 +570,7 @@ serveSides deps logger opts root defaults listers tracer shutdown t0 w0 = do
           sides <- strictSides =<< sequence (withSide sideWork listers)
           slots <- strictSides ((.slot) <$> sides)
           let work = toList sides
-          pool <- newPool
+          share <- newSessionShare
           -- Filled by ready: the listing starts after the URL line.
           start <- newEmptyMVar
           let url = sessionUrl listener.port token
@@ -622,7 +621,7 @@ serveSides deps logger opts root defaults listers tracer shutdown t0 w0 = do
               -- runs: every slot is filled.
               listing =
                 ( takeMVar start
-                    >> runListing deps logger tracer pool work opts.ghc
+                    >> runListing deps logger tracer share work opts.ghc
                     >>= runIndexing deps logger tracer
                 )
                   `finally` stopIndexing work
@@ -708,16 +707,16 @@ runListing ::
   Deps ->
   Logger ->
   Tracer ->
-  Pool ->
+  SessionShare ->
   [SideWork] ->
   Maybe GhcVersion ->
   IO [Snapshot]
-runListing deps logger tracer pool work cliGhc = do
+runListing deps logger tracer share work cliGhc = do
   result <- try @SomeException $ do
     -- Listed at once, built one at a time, head first: building reads
     -- the project and forces shared values (Q-RTS-BLACKHOLE).
     listings <- forConcurrently work (listSide deps)
-    done <- mapM (uncurry (buildSide deps logger pool cliGhc)) (zip work listings)
+    done <- mapM (uncurry (buildSide deps logger share cliGhc)) (zip work listings)
     -- Before the warm-ups and the fill: no worker or request runs yet.
     changedFirst logger done
     t2 <- deps.clock.monotonic
@@ -831,7 +830,7 @@ changedFirst logger done = case (lookup HeadSide built, lookup BaseSide built) o
   where
     built = [(w.side, b.snapshot) | SideDone {work = w, result = SideBuilt b} <- done]
     go h b = do
-      let keys snap = moduleKeys (blobOf snap.source) snap.modules
+      let keys snap = moduleKeys (sourceBlob snap.source) snap.modules
           changed = changedModules Pair {head = keys h, base = keys b}
       nh <- evaluate (length changed.head)
       nb <- evaluate (length changed.base)
@@ -844,13 +843,6 @@ changedFirst logger done = case (lookup HeadSide built, lookup BaseSide built) o
           <> " on head, "
           <> showText nb
           <> " on base, indexed first"
-    blobOf src p = case src of
-      CommitEntries c -> (.oid) <$> Map.lookup p c.blobs
-      DiskEntries _ -> Nothing
-      WorkTreeEntries w -> case Map.lookup p w.files of
-        Just (WorkTree.FromIndex o) -> Just o
-        Just (WorkTree.FromDisk d) -> d.blob
-        Nothing -> Nothing
 
 -- | List one side. A crash fails this side only; a cancel goes through.
 listSide :: Deps -> SideWork -> IO Listing
@@ -868,15 +860,15 @@ listSide deps w =
 -- | Build one listed side's snapshot. A crash fails this side only; a
 -- cancel goes through.
 buildSide ::
-  Deps -> Logger -> Pool -> Maybe GhcVersion -> SideWork -> Listing -> IO SideDone
-buildSide deps logger pool cliGhc w listing =
+  Deps -> Logger -> SessionShare -> Maybe GhcVersion -> SideWork -> Listing -> IO SideDone
+buildSide deps logger share cliGhc w listing =
   SideDone w <$> case listing of
     ListingFailed e files -> pure (SideNotListed e files)
     ListingThrew msg -> pure (SideCrashed msg)
     ListingOk l files -> catchCrash SideCrashed $ do
       t1 <- deps.clock.monotonic
       w1 <- deps.clock.now
-      snap <- snapshotOf deps logger pool w.side l cliGhc
+      snap <- snapshotOf deps logger share w.side l cliGhc
       t2 <- deps.clock.monotonic
       let project = Timing {start = w1, duration = elapsed t1 t2}
       pure (SideBuilt Built {snapshot = snap, files = files, project = project})
@@ -917,12 +909,12 @@ runWarmUp deps logger =
 snapshotOf ::
   Deps ->
   Logger ->
-  Pool ->
+  SessionShare ->
   Side ->
   Listed ->
   Maybe GhcVersion ->
   IO Snapshot
-snapshotOf deps logger pool side listed cliGhc = do
+snapshotOf deps logger share side listed cliGhc = do
   result <- try @SomeException $ do
     project <- deps.readProject listed.source listed.files hostPlatform cliGhc
     logVerbose logger $
@@ -932,7 +924,7 @@ snapshotOf deps logger pool side listed cliGhc = do
         <> " ("
         <> renderGhcSource project.ghc.source
         <> ")"
-    newSnapshot side pool listed.source listed.files project
+    newSnapshot side share listed.source listed.files project
   case result of
     Right snap -> pure snap
     Left e
@@ -941,7 +933,7 @@ snapshotOf deps logger pool side listed cliGhc = do
           let msg = exceptionMessage e
           logInfo logger $
             "haskell-reviewer: " <> sideTag side <> "cannot read the project: " <> msg
-          newSnapshot side pool listed.source listed.files (crashed msg)
+          newSnapshot side share listed.source listed.files (crashed msg)
   where
     -- Not the implicit source: there may be a project we failed to read.
     -- Never got to with-compiler: --ghc, else the parser's version.
@@ -1021,6 +1013,14 @@ indexAndReport deps logger tracer snaps = do
       <> " text only) in "
       <> showText (ns `div` 1_000_000)
       <> " ms"
+  -- Diff mode: how much the sides shared (D-320). All indexes are in
+  -- one pool, so any of them has the counts.
+  case snaps of
+    snap : _ | any (\s -> s.side /= TreeSide) snaps -> do
+      k <- atomically (shareCounts snap.index)
+      logVerbose logger $
+        "indexing: " <> showText k.parses <> " parsed, " <> showText k.shares <> " shared"
+    _ -> pure ()
   where
     indexDeps snap =
       IndexDeps

@@ -1491,12 +1491,19 @@ one column), and the end is exclusive. The HIE index uses the same rule
 Anything the model lacks is recomputed by parsing again on demand.
 
 **Sharing across sides.** The parse result is keyed by *(blob id,
-effective parse settings)*. The settings are the language, the extensions,
-a hash of the CPP environment, and the hashes of included files. Equal keys
-share one result, so in diff mode an unchanged module is parsed and stored
-once. The source text is also stored once per blob. Resolution depends on
-the imports of each side, so it stays per side, and it is cheap compared
-with parsing.
+effective parse settings)* (D-320). The settings are all the parse depends
+on but the text: language, extensions, ghc-options, the CPP environment,
+literate style and file kind, compared by equality. Included files are not
+read yet, so they are not part of the key. Equal keys share one result, so
+in diff mode an unchanged module is parsed and stored once, with its text.
+Only bytes read from a blob are shared: a commit's, or a clean
+working-tree file's index blob. A file read from disk (browse mode, a
+dirty working-tree file) is never shared. A result shown as text because
+the parse was too slow is shared too; failures (gone, unreadable,
+crashed) are not. The text search store shares its bytes by blob the same
+way; it still holds a second copy of each module's text (D-306).
+Resolution depends on the imports of each side, so it stays per side, and
+it is cheap compared with parsing.
 
 #### 11.4.5 Resolution
 
@@ -1614,12 +1621,16 @@ the search box's 8 results, on a large project once the store is loaded
   any side first, then changed modules, then head's other modules, then
   base's. The sides are listed at the same time, then built one after the
   other, head first (Q-RTS-BLACKHOLE); the workers start once every
-  side is built (D-313, D-315).
+  side is built (D-313, D-315). The pool also holds the shared parse
+  results (§11.4.4): a slot whose twin is being parsed waits for that
+  parse instead of doing its own (D-320).
 - **Sources.** Each side's snapshot reads its files from one source:
   the disk (ROOT as it is now) or a commit's blobs (D-313).
 - **Reload** (§5.2) builds a new generation and swaps it in atomically.
   Unchanged blobs hit the shared parse results (§11.4.4), so a reload
-  re-parses only what changed.
+  re-parses only what changed. A dirty file is read from disk, so it is
+  parsed again. The swap must drop the shared results and texts no
+  generation uses any more (T16).
 - **GC.** Big indexes may cause long GC pauses. Benchmarks pick the fix:
   compact regions or the non-moving GC (Q-GC). M1 and M2 keep the copying
   GC with the D-162 defaults: pauses are well under target (D-219, D-305).

@@ -17,7 +17,7 @@ import HaskellReviewer.Core.Sides (Pair (..), Side (..), Sides (..))
 import HaskellReviewer.Effects.FileSystem (ListError (..))
 import HaskellReviewer.Effects.Source (EntrySource (..))
 import HaskellReviewer.Server.Api (newSnapshot)
-import HaskellReviewer.Session.Index (Progress (..), newPool)
+import HaskellReviewer.Session.Index (Progress (..))
 import HaskellReviewer.Session.Snapshot
   ( Generation (..),
     IndexingState (..),
@@ -25,6 +25,7 @@ import HaskellReviewer.Session.Snapshot
     awaitSnapshot,
     fillSnapshot,
     indexingStates,
+    newSessionShare,
     newSnapshotSlot,
   )
 import System.Timeout (timeout)
@@ -87,10 +88,10 @@ stateOn side =
 -- | A snapshot with no files, on this side.
 emptySnapshot :: Side -> IO Snapshot
 emptySnapshot side = do
-  pool <- newPool
+  share <- newSessionShare
   newSnapshot
     side
-    pool
+    share
     (DiskEntries (CanonicalRoot "/x" "/x"))
     (mkFileList FromDisk 0 [])
     Project

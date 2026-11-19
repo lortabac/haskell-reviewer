@@ -476,7 +476,7 @@ newWorld held mods = do
             label = ""
           }
   pool <- newPool
-  index <- newIndex pool idx
+  index <- newIndex pool (const Nothing) idx
   resolver <- newResolver idx index
   pure
     World

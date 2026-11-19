@@ -54,6 +54,7 @@ import HaskellReviewer.Effects.Clock
   )
 import HaskellReviewer.Effects.FileSystem (ListError (..), ReadError (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), Logger, logVerbose, newLogger)
+import HaskellReviewer.Effects.Source (sharedBlob)
 import HaskellReviewer.Server.Api (FilesApi (..), fromSideSnapshot)
 import HaskellReviewer.Server.Security (methodNotAllowed, notFound)
 import HaskellReviewer.Server.Wire (encodeTextSearch)
@@ -66,7 +67,9 @@ import HaskellReviewer.Session.TextStore
     TextFiles (..),
     awaitTextFiles,
     loadTextFiles,
+    newBlobTexts,
     newTextStore,
+    storeBlobTexts,
     storeBytes,
     textStoreBudget,
   )
@@ -149,11 +152,12 @@ searchFiles now deadline n limit fs = do
 -- race on them (Q-RTS-BLACKHOLE). Call it before serving.
 warmUpTextSearch :: IO ()
 warmUpTextSearch = do
-  fs <- loadTextFiles textStoreBudget fakeRead fakeList
-  _ <- loadTextFiles 10 fakeRead fakeList
-  store <- newTextStore
+  table <- newBlobTexts
+  fs <- loadTextFiles textStoreBudget table (const Nothing) fakeRead fakeList
+  _ <- loadTextFiles 10 table (const Nothing) fakeRead fakeList
+  store <- newTextStore table
   _ <- awaitTextFiles silent store (pure fs)
-  failing <- newTextStore
+  failing <- newTextStore table
   _ <- awaitTextFiles silent failing (ioError (userError "x"))
   let fake = Just (pure (Right (fakeSource (pure (Right fs)))))
   mapM_
@@ -224,7 +228,13 @@ fromSnapshot api snap =
     load = do
       t0 <- systemClock.monotonic
       let readOne p = api.readEntry snap p EntryFile
-      fs <- loadTextFiles textStoreBudget readOne snap.files
+      fs <-
+        loadTextFiles
+          textStoreBudget
+          (storeBlobTexts snap.textStore)
+          (sharedBlob snap.source)
+          readOne
+          snap.files
       t1 <- systemClock.monotonic
       let Nanoseconds ns = elapsed t0 t1
           sk = fs.skipped
