@@ -458,7 +458,7 @@ Available in diff mode only. It shows the textual diff file by file.
   a copied file shows as added (D-74).
 - **Find in file** (`f`, or a toolbar button) searches the whole file on
   both sides, as in §4.4.
-- Option to ignore whitespace-only changes.
+- Option to ignore whitespace-only changes (as git's `-w`).
 
 ### 4.6 Expanded (semantic) diff view
 
@@ -1294,7 +1294,7 @@ The main library splits into layers. Lower layers never import upper ones:
 | markdown-unlit oracle (tests only) | `markdown-unlit ==0.6.0`, with `base-compat ==0.15.0`, test suite only | The port in `Core.SourceText` is checked against it (D-224). Never a runtime dependency, never run (D-223). |
 | Browser tests | Playwright + axe-core | §11.9. |
 | CI | GitHub Actions | §11.9. |
-| License | BSD-3-Clause | D-73. |
+| License | BSD-3-Clause, except the line diff (`Core.LineDiff*`, ported from git's xdiff): LGPL-2.1-or-later, with JGit's EDL notice on the histogram part | D-73, D-321. |
 
 Third-party API packages sit behind our own provider interface (§11.6.3),
 so replacing one touches only its adapter.
@@ -1563,7 +1563,16 @@ path.
 - **Hunks**: histogram diff (as `git diff --histogram`), with a Myers
   fallback for inputs where histogram degrades. Context is unlimited,
   because both full texts are at hand, so "expand context" costs nothing.
-- **Ignore whitespace** re-runs the diff on normalised lines.
+  (D-321)
+- **Lines** are compared as the source view cuts them (D-276). So CRLF and
+  LF lines are equal: exact mode is `git diff --histogram` on both texts
+  with CRLF turned into LF. A final newline added or removed shows as git
+  shows it (the last line removed and added).
+- **Notes**, which change no line: lines whose only change is CRLF vs LF
+  ("line endings changed"), and a BOM added or removed.
+- **Ignore whitespace** re-runs the diff as git's `-w`: lines are compared
+  without git's whitespace (space, tab, CR, LF). This also ignores the
+  final newline.
 
 #### 11.4.8 Semantic diff
 
