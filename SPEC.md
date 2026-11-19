@@ -1294,7 +1294,7 @@ The main library splits into layers. Lower layers never import upper ones:
 | markdown-unlit oracle (tests only) | `markdown-unlit ==0.6.0`, with `base-compat ==0.15.0`, test suite only | The port in `Core.SourceText` is checked against it (D-224). Never a runtime dependency, never run (D-223). |
 | Browser tests | Playwright + axe-core | §11.9. |
 | CI | GitHub Actions | §11.9. |
-| License | BSD-3-Clause, except the line diff (`Core.LineDiff*`, ported from git's xdiff): LGPL-2.1-or-later, with JGit's EDL notice on the histogram part | D-73, D-321. |
+| License | GPL-2.0-only (the rename code is ported from git's diffcore); the line diff (`Core.LineDiff*`, ported from git's xdiff) stays LGPL-2.1-or-later, with JGit's EDL notice on the histogram part | D-73, D-321, D-323. |
 
 Third-party API packages sit behind our own provider interface (§11.6.3),
 so replacing one touches only its adapter.
@@ -1554,12 +1554,18 @@ one may come in M4 for "Affected".
 (D-54) All diffs are computed **in process**, from the two snapshots.
 Commit-to-commit and commit-to-working-tree therefore take the same code
 path.
-- **File pairing**: files with equal paths; then renames, first by exact
-  blob match, then by content similarity ≥ 50 % among the remaining
-  added/removed files, the way git does by default. Copies are not
-  detected (§4.5). Like git's `diff.renameLimit`, the similarity step is
-  capped (1,000 files per side by default); above that, only exact
-  renames are found, and a notice says so.
+- **File pairing** (D-324), as `git diff -M` does: files with equal
+  paths (a type or exec-bit change shows as modified, with a note); then
+  renames among the removed and added files: first by exact blob match
+  (empty files too), then files with the same basename, unique on each
+  side, that are ≥ 75 % similar (even past the limit), then content
+  similarity ≥ 50 % among the rest. Copies are not detected (§4.5). Like
+  git's `diff.renameLimit` (1,000), the last step is skipped when the
+  removed × added files left are more than 1,000², or when it would pass
+  a work budget (bytes read, compare steps). Then only exact and
+  same-basename renames are found, and a notice says so. Files over
+  64 MiB get no similarity score (they can still pair exactly).
+  Untracked files take part (`git diff REV` leaves them out).
 - **Hunks**: histogram diff (as `git diff --histogram`), with a Myers
   fallback for inputs where histogram degrades. Context is unlimited,
   because both full texts are at hand, so "expand context" costs nothing.
