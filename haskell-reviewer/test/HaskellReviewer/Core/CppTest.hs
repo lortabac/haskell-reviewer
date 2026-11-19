@@ -4,7 +4,7 @@
 -- mode] in "HaskellReviewer.Core.Cpp".
 module HaskellReviewer.Core.CppTest (tests) where
 
-import Control.Exception (evaluate)
+import Control.Exception (AllocationLimitExceeded (..), bracket_, evaluate, try)
 import Data.IntMap.Strict qualified as IntMap
 import Data.List (sort)
 import Data.Text (Text)
@@ -34,7 +34,7 @@ import HaskellReviewer.Core.CppPropertyTest qualified as Properties
 import HaskellReviewer.Core.Project (GhcVersion (..), PackageName (..), Platform (..))
 import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
 import HaskellReviewer.Effects.Parser (cppLimitsWarmUp, cppWarmUp)
-import System.Timeout (timeout)
+import System.Mem (disableAllocationLimit, enableAllocationLimit, setAllocationCounter)
 import Test.Tasty
   ( DependencyType (..),
     TestTree,
@@ -43,7 +43,7 @@ import Test.Tasty
     mkTimeout,
     testGroup,
   )
-import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (HUnitFailure, assertBool, assertFailure, testCase, (@?=))
 
 tests :: TestTree
 -- Runs inside warmUpParser, which runs CPP too (see test/Main.hs).
@@ -96,8 +96,8 @@ keeps ls = "yes" `elem` cpp (ls <> ["yes", "#endif"])
 forceOutput :: CppOutput -> Int
 forceOutput o =
   Text.length o.text
-    + length (map renderCppWarning o.warnings)
-    + length o.regions
+    + sum (map (Text.length . renderCppWarning) o.warnings)
+    + sum (map (length . show) o.regions)
     + (case o.positions of PositionMap m -> sum (map IntMap.size (IntMap.elems m)))
 
 spanOf :: Int -> Int -> Int -> Int -> Span
@@ -665,139 +665,147 @@ positions =
         mapSpan sameLines (spanOf 3 4 5 6) @?= spanOf 3 4 5 6
     ]
 
--- | Hostile input: each case must end quickly with a bounded output.
--- The cases have wall-clock limits, so they wait for the groups that
--- spawn git most: next to those they took up to 10 s, alone well under
--- one. A narrow pattern: tasty rescans every waiter's dependencies on
--- each status change, so a broad one costs minutes of CPU.
+-- | Hostile input: each case must end with a bounded output, within
+-- an allocation cap (Note [CPP test limits]). The group waits for the
+-- git groups, so its GC load doesn't disturb their timing (D-318). The
+-- pattern is narrow: tasty rescans every waiter's dependencies on each
+-- status change, so a broad one costs minutes of CPU.
 limits :: TestTree
 limits =
-  after AllFinish "/WorkTree/ || /Git planted/" . localOption (mkTimeout 20_000_000) $
+  after AllFinish "/WorkTree/ || /Git planted/" . localOption (mkTimeout 60_000_000) $
     testGroup
       "limits"
-      [ testCase "macros that double 50 times" $ do
+      [ testCase "the cap fails an allocation over it" $ do
+          let big = evaluate (length (show [1 .. 2_000_000 :: Integer]))
+          r <- try @HUnitFailure (withCap 10 big)
+          assertBool "fails" (either (const True) (const False) r),
+        testCase "the cap lets an allocation under it pass" $
+          withCap 10 (evaluate (Text.length (Text.replicate 1_000_000 "a")))
+            >>= (@?= 1_000_000),
+        testCase "macros that double 50 times" $ do
           let a k = " A" <> n k
               ls =
                 "#define A0 x"
                   : ["#define" <> a k <> a (k - 1) <> a (k - 1) | k <- [1 .. 50]]
                     <> ["A50"]
-          o <- bounded ls
+          o <- bounded 5_000 ls
           assertBool "warns" (hasLimit ExpansionWork o),
         testCase "many recursive macros" $ do
           let m k = "M" <> n (k `mod` 50)
               ls =
                 ["#define " <> m k <> "(x) " <> m (k + 1) <> "(x x)" | k <- [0 .. 49]]
                   <> ["M0(a)"]
-          _ <- bounded ls
+          _ <- bounded 5_000 ls
           pure (),
         testCase "F(F(...)) 40 deep" $ do
           let ls =
                 [ "#define F(x) [x]",
                   Text.replicate 40 "F(" <> "1" <> Text.replicate 40 ")"
                 ]
-          o <- bounded ls
+          o <- bounded 20 ls
           assertBool "warns" (any (\w -> w.problem == RecursiveMacro "F") o.warnings),
         testCase "64 macros in a chain" $ do
           let ls = ["#define M" <> n k <> " M" <> n (k + 1) | k <- [0 .. 99]] <> ["M0"]
-          o <- bounded ls
+          o <- bounded 2 ls
           assertBool "warns" (hasLimit ExpansionDepth o),
         testCase "10,000 nested #if" $ do
           let ls = replicate 10000 "#if 1" <> ["x"] <> replicate 10000 "#endif"
-          o <- bounded ls
+          o <- bounded 200 ls
           assertBool "warns" (hasLimit IfDepth o)
           assertBool "no missing endif" (all ((/= MissingEndif) . (.problem)) o.warnings),
         testCase "100,000 parens" $ do
           let deep = Text.replicate 100000 "(" <> "1" <> Text.replicate 100000 ")"
-          o <- bounded ["#if " <> deep, "#endif"]
+          o <- bounded 1_000 ["#if " <> deep, "#endif"]
           assertBool "warns" (hasLimit ExpressionDepth o),
         testCase "100,000 unary operators" $ do
-          o <- bounded ["#if " <> Text.replicate 100000 "!" <> "1", "#endif"]
+          o <- bounded 500 ["#if " <> Text.replicate 100000 "!" <> "1", "#endif"]
           assertBool "warns" (hasLimit ExpressionDepth o),
         testCase "a long #if chain" $ do
-          o <- bounded ["#if 1" <> Text.replicate 100000 " + 1", "x", "#endif"]
+          o <- bounded 2_000 ["#if 1" <> Text.replicate 100000 " + 1", "x", "#endif"]
           outLines o @?= ["", "x", ""],
         testCase "1 << 99999 and a huge number" $ do
           let huge = "1" <> Text.replicate 1000000 "0"
-          o <- bounded ["#if 1 << 99999", "#endif", "#if " <> huge, "#endif"]
+          o <- bounded 2_000 ["#if 1 << 99999", "#endif", "#if " <> huge, "#endif"]
           (map (.problem) o.warnings)
             @?= [BigShift, BadExpression (cut ("number too large " <> huge))],
         testCase "an unterminated F( over 1 MiB" $ do
-          o <- bounded ["#define F(x) [x]", "F(" <> Text.replicate 1048576 "a "]
+          o <- bounded 50_000 ["#define F(x) [x]", "F(" <> Text.replicate 1048576 "a "]
           (map (.problem) o.warnings) @?= [UnterminatedCall "F"],
         testCase "100,000 unterminated F(" $ do
-          o <- bounded ["#define F(x) [x]", Text.replicate 100000 "F("]
+          o <- bounded 20_000 ["#define F(x) [x]", Text.replicate 100000 "F("]
           assertBool "warns" (hasLimit ExpansionWork o),
         testCase "300 arguments" $ do
           let many = Text.intercalate "," (replicate 300 "a")
-          o <- bounded ["#define F(x) [x]", "F(" <> many <> ")"]
+          o <- bounded 10 ["#define F(x) [x]", "F(" <> many <> ")"]
           assertBool "warns" (hasLimit ArgCount o),
         testCase "10,001 #define" $ do
           let defs = ["#define M" <> n k <> " 1" | k <- [0 .. 10000]]
-          o <- bounded (defs <> ["M9999 M10000"])
+          o <- bounded 200 (defs <> ["M9999 M10000"])
           assertBool "warns" (hasLimit DefineCount o)
           last (outLines o) @?= "1 M10000",
         testCase "a body that uses its parameter 5000 times, with a 1 MB argument" $ do
           let body = Text.unwords (replicate 5000 "x")
           let arg = Text.replicate 1000000 "a"
-          o <- bounded ["#define F(x) " <> body, "F(" <> arg <> ")"]
+          o <- bounded 50 ["#define F(x) " <> body, "F(" <> arg <> ")"]
           assertBool "warns" (hasLimit ExpansionWork o),
         testCase "5000 unterminated F( with long strings" $ do
           let ls = replicate 5000 ("F( \"" <> Text.replicate 1000 "b")
-          o <- bounded ("#define F(x) x" : ls)
+          o <- bounded 1_000 ("#define F(x) x" : ls)
           assertBool "few warnings" (length o.warnings <= 10),
         testCase "a failed call doesn't expand its put-back body again" $ do
           let ls = ["#define P(x) x", "#define Q P(Q", "d = Q"]
-          o <- bounded ls
+          o <- bounded 1 ls
           outLines o @?= ["", "", "d = P(Q"]
           (map (.problem) o.warnings) @?= [UnterminatedCall "P", RecursiveMacro "Q"],
         testCase "two macros that call each other through a failed call" $ do
-          o <- bounded ["#define P(x) x", "#define Q P(R", "#define R P(Q", "d = Q"]
+          o <- bounded 1 ["#define P(x) x", "#define Q P(R", "#define R P(Q", "d = Q"]
           assertBool "small" (Text.length o.text < 100),
         testCase "warnings: at most 1000, then one note" $ do
-          o <- bounded (replicate 3000 "#error x")
+          o <- bounded 50 (replicate 3000 "#error x")
           length o.warnings @?= 1001
           (last o.warnings).problem @?= WarningsDropped,
         testCase "unclosed #if count toward the warning cap" $ do
-          o <- bounded (replicate 5000 "#if 1")
+          o <- bounded 100 (replicate 5000 "#if 1")
           length o.warnings @?= 1001,
         testCase "warning texts are cut to 200 chars" $ do
-          o <- bounded ["#error " <> Text.replicate 1000 "e"]
+          o <- bounded 1 ["#error " <> Text.replicate 1000 "e"]
           (map (.problem) o.warnings)
             @?= [ErrorDirective (cut (Text.replicate 1000 "e"))],
         testCase "3500 nested unterminated F( then 1 MB of comments" $ do
-          o <- quick ("#define F(x) x" : Text.replicate 3500 "F(" : comments)
+          o <- bounded 2_000 ("#define F(x) x" : Text.replicate 3500 "F(" : comments)
           assertBool "warns" (not (null o.warnings)),
         testCase "a chain of 21 macros into 1000 failed F(" $ do
           let chain = ["#define M" <> n k <> " M" <> n (k + 1) | k <- [0 .. 19]]
               body = Text.replicate 1000 "F(" <> "a" <> Text.replicate 1000 ",b)"
           let defs = ["#define F(x) x"] <> chain <> ["#define M20 " <> body]
-          o <- quick (defs <> comments <> ["M0"])
+          o <- bounded 10_000 (defs <> comments <> ["M0"])
           assertBool "warns" (not (null o.warnings)),
         testCase "an unterminated call over 1 MiB, in many lines" $ do
-          o <- quick ("#define P(x) x" : "P(a" : replicate 500000 "a")
+          o <- bounded 10_000 ("#define P(x) x" : "P(a" : replicate 500000 "a")
           (map (.problem) o.warnings) @?= [UnterminatedCall "P"],
         testCase "Q expands to a failed call, 30000 times" $ do
-          _ <- quick (["#define P(x) x", "#define Q P(Q"] <> replicate 30000 "d = Q")
+          let ls = ["#define P(x) x", "#define Q P(Q"] <> replicate 30000 "d = Q"
+          _ <- bounded 20_000 ls
           pure (),
         testCase "9000 macros, each a failed call into the next" $ do
           let defs = ["#define m" <> n k <> " F(m" <> n (k + 1) | k <- [0 .. 8999]]
-          _ <- quick (["#define F(x) x"] <> defs <> ["m0"])
+          _ <- bounded 500 (["#define F(x) x"] <> defs <> ["m0"])
           pure (),
         testCase "a chain of 60 F-then-macro bodies" $ do
           let defs = ["#define M" <> n k <> " F M" <> n (k + 1) | k <- [0 .. 59]]
-          _ <- quick (["#define F(x) x"] <> defs <> replicate 2000 "M0")
+          _ <- bounded 5_000 (["#define F(x) x"] <> defs <> replicate 2000 "M0")
           pure (),
         testCase "F, then a million empty lines" $ do
-          o <- quick ("#define F(x) x" : "F" : replicate 1000000 "")
+          o <- bounded 10_000 ("#define F(x) x" : "F" : replicate 1000000 "")
           (outLines o !! 1) @?= "F",
         testCase "two limits on one line both warn" $ do
           let chain = ["#define M" <> n k <> " M" <> n (k + 1) | k <- [0 .. 99]]
               many = Text.intercalate "," (replicate 300 "a")
-          o <- quick (["#define F(x) x"] <> chain <> ["M0 F(" <> many <> ")"])
+          o <- bounded 10 (["#define F(x) x"] <> chain <> ["M0 F(" <> many <> ")"])
           assertBool "depth" (hasLimit ExpansionDepth o)
           assertBool "args" (hasLimit ArgCount o),
         testCase "a 1 MiB line of names" $ do
-          o <- bounded ["#define FOO 1", Text.replicate 100000 "FOO bar "]
+          o <- bounded 5_000 ["#define FOO 1", Text.replicate 100000 "FOO bar "]
           Text.length o.text @?= 600001
       ]
   where
@@ -807,17 +815,57 @@ limits =
     comments = replicate 12000 ("-- " <> Text.replicate 76 "p")
     hasLimit l o = any (\w -> w.problem == LimitHit l) o.warnings
 
--- | 'bounded', in under 5 s.
-quick :: [Text] -> IO CppOutput
-quick ls = timeout 5_000_000 (bounded ls) >>= maybe (assertFailure "too slow") pure
+{- Note [CPP test limits]
 
--- | Run, and check the output is within the size limit (Note [CPP
--- limits]) and keeps the line count.
-bounded :: [Text] -> IO CppOutput
-bounded ls = do
-  let input = Text.intercalate "\n" ls
-      o = runCpp env [] input
-  _ <- evaluate (forceOutput o)
-  assertBool "output too big" (Text.length o.text <= 4 * Text.length input + 1048576)
-  length (outLines o) @?= length ls
-  pure o
+The cases in 'limits' don't test a time limit: 'runCpp' is pure and
+has none. They check that hostile input can't make it do much more
+work than the budget allows (Note [CPP limits]). A wall-clock guard
+was flaky: these cases spend most of their time in GC, and every GC
+stops all capabilities, so under load (or next to other heavy tests)
+5 s was not enough (D-268).
+
+So each case has an allocation cap, per thread (the RTS allocation
+limit; Note [Linear time tests] in "HaskellReviewer.Core.DeclsTest"
+compares allocation counters instead): a blowup throws
+AllocationLimitExceeded at the cap, and the cap doesn't depend on
+load. The caps are about 4x the largest allocation measured on GHC
+9.10, 9.12 and 9.14 (default -O1), rounded up on a 1-2-5 scale (MB).
+A -O0, coverage or profiling build can allocate more and go over:
+raise the caps or skip the group there. To re-measure, print
+'getAllocationCounter' before and after in 'withCap'.
+
+The input is built and forced before the cap is armed, so shared
+values (like 'comments') are not charged to one case. The limit is
+disabled again right after, or tasty's own code in the thread would
+get the exception.
+
+Work that doesn't allocate (say 'Text.length' on the rest of the
+input at each token) is not seen by the cap. The group's 60 s timeout
+is the backstop for that, but it only catches about 40x or worse on the
+heaviest case (measured with such a change in the reader).
+-}
+
+-- | Run the action with a cap of @mb@ MB of allocation (this thread only);
+-- fail when it goes over.
+withCap :: Int -> IO a -> IO a
+withCap mb act = do
+  setAllocationCounter (fromIntegral mb * 1_000_000)
+  r <- try (bracket_ enableAllocationLimit disableAllocationLimit act)
+  case r of
+    Left AllocationLimitExceeded ->
+      assertFailure ("allocated over " <> show mb <> " MB (Note [CPP test limits])")
+    Right x -> pure x
+
+-- | Run with an allocation cap in MB (Note [CPP test limits]), and
+-- check the output is within the size limit (Note [CPP limits]) and
+-- keeps the line count.
+bounded :: Int -> [Text] -> IO CppOutput
+bounded mb ls = do
+  -- Force the input first: it is not charged to the cap.
+  input <- evaluate (Text.intercalate "\n" ls)
+  withCap mb $ do
+    let o = runCpp env [] input
+    _ <- evaluate (forceOutput o)
+    assertBool "output too big" (Text.length o.text <= 4 * Text.length input + 1048576)
+    length (outLines o) @?= length ls
+    pure o

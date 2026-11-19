@@ -195,8 +195,8 @@ main = do
         HaskellReviewer.Core.IndexQueueTest.tests,
         -- The line diff tests are heavy (big diffs, GBs allocated): run
         -- beside the others, their GC pauses push 5 s guards in the
-        -- parser and CPP tests over (D-321). So they wait for all else
-        -- but the "Linear time" groups (which run after them), through
+        -- parser tests over (D-321). So they wait for all else but the
+        -- "Linear time" groups (which run after them), through
         -- one gate test: a broad pattern on each of them makes tasty
         -- rescan ~1,600 dependencies per waiter (about 470 s of CPU, as
         -- in D-318). Each worker looking for work checks the waiting
