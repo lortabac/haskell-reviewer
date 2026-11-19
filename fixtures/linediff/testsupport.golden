@@ -1,0 +1,195 @@
+@@ -9,7 +9,17 @@
+     -- * git
+     git,
+     gitOut,
++    gitBytes,
++    gitBytesEnv,
++    GitRun (..),
+     gitSetup,
++    realGitAt,
++    fixtureRepo,
++
++    -- * Checks
++    FileState (..),
++    snapshotDir,
++    assertNoMarker,
+ 
+     -- * Scripts
+     writeScript,
+@@ -23,21 +33,31 @@
+   )
+ where
+ 
++import Control.Concurrent.Async (wait, withAsync)
+ import Control.Concurrent.MVar (MVar, newMVar, withMVar)
+ import Control.Exception (IOException, bracket, try)
+-import Control.Monad (unless, void)
++import Control.Monad (unless, void, when)
++import Data.ByteString (ByteString)
+ import Data.ByteString qualified as BS
+ import Data.List (isPrefixOf, sort)
+ import Data.Maybe (fromMaybe)
+ import Data.Text qualified as Text
+ import Data.Text.Encoding qualified as Text.Encoding
++import HaskellReviewer.Core.Root (Root (..))
+ import HaskellReviewer.Effects.Clock (Microseconds)
+-import HaskellReviewer.Effects.Git (GitSetup (..))
++import HaskellReviewer.Effects.Git
++  ( Git,
++    GitSetup (..),
++    Listing (..),
++    gitProbeTimeLimit,
++    probeGitWith,
++  )
++import HaskellReviewer.Effects.Log (LogLevel (..), newLogger)
+ import System.Directory qualified as Dir
+ import System.Environment (lookupEnv)
+ import System.Exit (ExitCode (..))
+ import System.FilePath (splitSearchPath, (</>))
+-import System.IO (IOMode (ReadMode), hGetContents', readFile', withBinaryFile)
++import System.IO (IOMode (ReadMode), hClose, hGetContents', readFile', withBinaryFile)
+ import System.IO.Temp (withSystemTempDirectory)
+ import System.IO.Unsafe (unsafePerformIO)
+ import System.Posix.IO
+@@ -57,7 +77,7 @@
+     readCreateProcessWithExitCode,
+     waitForProcess,
+   )
+-import Test.Tasty.HUnit (assertFailure)
++import Test.Tasty.HUnit (Assertion, assertFailure)
+ 
+ -- * Temp dirs
+ 
+@@ -114,6 +134,55 @@
+     ExitSuccess -> pure out
+     ExitFailure _ -> assertFailure ("git " <> unwords args <> " failed: " <> err)
+ 
++-- | What 'gitBytes' gives.
++data GitRun = GitRun
++  { code :: ExitCode,
++    out :: ByteString,
++    err :: ByteString
++  }
++
++-- | Like 'gitOut', with raw bytes on stdin and out, and no failure on
++-- a non-zero exit. stdin is written from its own thread, so big inputs
++-- and outputs can't block.
++gitBytes :: FilePath -> [String] -> ByteString -> IO GitRun
++gitBytes = gitBytesEnv []
++
++-- | 'gitBytes' with more environment variables.
++gitBytesEnv :: [(String, String)] -> FilePath -> [String] -> ByteString -> IO GitRun
++gitBytesEnv extra dir args input = do
++  path <- fromMaybe "/usr/bin:/bin" <$> lookupEnv "PATH"
++  let cp =
++        (proc "git" args)
++          { cwd = Just dir,
++            close_fds = True,
++            std_in = CreatePipe,
++            std_out = CreatePipe,
++            std_err = CreatePipe,
++            env =
++              Just $
++                [ ("PATH", path),
++                  ("HOME", dir),
++                  ("GIT_CONFIG_NOSYSTEM", "1"),
++                  ("GIT_CONFIG_GLOBAL", "/dev/null")
++                ]
++                  <> extra
++          }
++  bracket (createProcess cp) cleanup $ \case
++    (Just hIn, Just hOut, Just hErr, ph) ->
++      withAsync (BS.hPut hIn input >> hClose hIn) $ \_ ->
++        withAsync (BS.hGetContents hErr) $ \errA -> do
++          out <- BS.hGetContents hOut
++          err <- wait errA
++          code <- waitForProcess ph
++          pure GitRun {code = code, out = out, err = err}
++    _ -> assertFailure "gitBytes: no pipes"
++  where
++    cleanup (i, o, e, ph) = do
++      mapM_ (void . try @IOException . hClose) i
++      mapM_ hClose o
++      mapM_ hClose e
++      void (try @IOException (waitForProcess ph))
++
+ -- | How the program would find git, but with HOME and XDG_CONFIG_HOME
+ -- in the given (empty) dir: the developer's own git config can't change
+ -- the tests.
+@@ -132,6 +201,75 @@
+         listTimeLimit = limit
+       }
+ 
++-- | The real git, found as the program finds it, with ROOT at the
++-- second dir and HOME in the first (an empty dir). Fails the test if
++-- git doesn't list ROOT.
++realGitAt :: FilePath -> FilePath -> IO Git
++realGitAt home root = do
++  setup <- gitSetup home gitProbeTimeLimit
++  probeGitWith setup (newLogger LevelInfo (\_ -> pure ())) (Root root) >>= \case
++    Right (ListFromGit g) -> pure g
++    Right (ListFromDisk _) -> assertFailure "git not used"
++    Left e -> assertFailure ("git error (git 2.44.1 or newer needed): " <> show e)
++
++-- | Build a fixture repo: run @fixtures/repos/<name>.sh@ with the
++-- given args (the first is the dir to make), with only PATH from our
++-- environment. Fails the test if the script fails.
++fixtureRepo :: String -> [String] -> IO ()
++fixtureRepo name args = do
++  path <- fromMaybe "/usr/bin:/bin" <$> lookupEnv "PATH"
++  let cp =
++        (proc "/bin/sh" (("../fixtures/repos" </> name <> ".sh") : args))
++          { close_fds = True,
++            env = Just [("PATH", path)]
++          }
++  (code, _, err) <- readCreateProcessWithExitCode cp ""
++  case code of
++    ExitSuccess -> pure ()
++    ExitFailure _ -> assertFailure (name <> ".sh failed: " <> err)
++
++-- * Checks
++
++-- | One file, as seen by 'snapshotDir'.
++data FileState = FileState
++  { path :: FilePath,
++    size :: Integer,
++    mtime :: String,
++    contents :: ByteString
++  }
++  deriving (Eq, Show)
++
++-- | Every file and dir under a dir. A dir is its path with a trailing
++-- slash and nothing else, so a new empty dir shows too.
++snapshotDir :: FilePath -> IO [FileState]
++snapshotDir dir = do
++  entries <- Dir.listDirectory dir
++  concat
++    <$> mapM
++      ( \name -> do
++          let p = dir </> name
++          isLink <- Dir.pathIsSymbolicLink p
++          isDir <- Dir.doesDirectoryExist p
++          if isDir && not isLink
++            then (dirState p :) <$> snapshotDir p
++            else do
++              size <- Dir.getFileSize p
++              mtime <- show <$> Dir.getModificationTime p
++              bytes <- BS.readFile p
++              pure [FileState {path = p, size = size, mtime = mtime, contents = bytes}]
++      )
++      (sort entries)
++  where
++    dirState p = FileState {path = p <> "/", size = 0, mtime = "", contents = ""}
++
++-- | The marker file must not exist. Shows what it holds if it does.
++assertNoMarker :: FilePath -> Assertion
++assertNoMarker marker = do
++  ran <- Dir.doesPathExist marker
++  when ran $ do
++    what <- readFile marker
++    assertFailure ("something ran: " <> what)
++
+ -- * Scripts
+ 
+ -- | Write an executable shell script. Gives back its path.
+notes: none

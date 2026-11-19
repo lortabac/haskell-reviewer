@@ -1,0 +1,201 @@
+@@ -4,12 +4,10 @@
+ -- is copied out; the AST is dropped after this.
+ module HaskellReviewer.Core.Parser.Convert
+   ( convertModule,
+-    toSpan,
+   )
+ where
+ 
+-import Data.Maybe (fromMaybe, mapMaybe)
+-import Data.Text (Text)
++import Data.Maybe (mapMaybe)
+ import Data.Text qualified as Text
+ import GHC.Data.FastString (unpackFS)
+ import GHC.Hs
+@@ -26,34 +24,19 @@
+     LIE,
+     LIEWrappedName,
+     LImportDecl,
+-    WithHsDocIdentifiers (..),
+     XModulePs (..),
+   )
+ import GHC.Hs qualified as Ghc (ImportDeclQualifiedStyle (..))
+-import GHC.Hs.Doc (HsDocString)
+-import GHC.Hs.DocString (renderHsDocString)
+ import GHC.Parser.Annotation (getLocA)
+-import GHC.Types.Name.Occurrence (occNameString)
+-import GHC.Types.Name.Reader (RdrName, isQual_maybe, rdrNameOcc)
++import GHC.Types.Name.Reader (isQual_maybe)
+ import GHC.Types.PkgQual (RawPkgQual (..))
+ import GHC.Types.SourceText (StringLiteral (..))
+-import GHC.Types.SrcLoc
+-  ( GenLocated (..),
+-    Located,
+-    SrcSpan (..),
+-    srcSpanEndCol,
+-    srcSpanEndLine,
+-    srcSpanStartCol,
+-    srcSpanStartLine,
+-    unLoc,
+-  )
+-import GHC.Unit.Module.Warnings
+-  ( InWarningCategory (..),
+-    WarningCategory (..),
+-    WarningTxt (..),
+-  )
++import GHC.Types.SrcLoc (GenLocated (..), Located, unLoc)
++import HaskellReviewer.Core.Exported (markExported)
++import HaskellReviewer.Core.LineRegions (LineRegions)
+ import HaskellReviewer.Core.ModuleModel
+-  ( Export (..),
++  ( DocComment (..),
++    Export (..),
+     Extensions,
+     Import (..),
+     ImportLevel (..),
+@@ -68,61 +51,71 @@
+     ParseWarning,
+     ParsedModule (..),
+     Qualified (..),
+-    RawDoc (..),
+     Section (..),
+     SubList (..),
+     Subs (..),
+-    WarningKind (..),
+-    WarningText (..),
+   )
+ import HaskellReviewer.Core.ModuleModel qualified as Model (Located (..))
+-import HaskellReviewer.Core.Project (ModuleName (..))
+-import HaskellReviewer.Core.SourceText (ColumnMap, GhcRange (..), ghcToSpan)
+-import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
++import HaskellReviewer.Core.Parser.ConvertDecls (Converted (..), convertDecls)
++import HaskellReviewer.Core.Parser.ConvertOccurrences (convertOccurrences)
++import HaskellReviewer.Core.Parser.Helpers
++  ( SpanMap,
++    docComment,
++    headingComment,
++    moduleName,
++    occText,
++  )
++import HaskellReviewer.Core.Parser.Helpers qualified as Helpers (spanOf, warningText)
++import HaskellReviewer.Core.RichText (Doc)
++import HaskellReviewer.Core.Tokens (Tokens)
+ import Language.Haskell.Syntax.ImpExp.IsBoot (IsBootInterface (..))
+-import Language.Haskell.Syntax.Module.Name qualified as Ghc (ModuleName, moduleNameString)
+ 
+ -- | The model of a parsed module. The extensions and warnings come from
+--- the flags.
++-- the flags, the tokens from the second lex, the regions from CPP and
++-- unlit. The occurrence table is built here, while the AST is alive.
+ convertModule ::
+-  ColumnMap -> Extensions -> [ParseWarning] -> Located (HsModule GhcPs) -> ParsedModule
+-convertModule cols exts warnings (L _ m) =
++  SpanMap ->
++  Extensions ->
++  [ParseWarning] ->
++  Tokens ->
++  LineRegions ->
++  Located (HsModule GhcPs) ->
+   ParsedModule
+-    { header =
+-        ModuleHeader
+-          { name = located moduleName <$> hsmodName m,
+-            haddock = doc <$> hsmodHaddockModHeader ext,
+-            warning = warningText <$> hsmodDeprecMessage ext
+-          },
+-      exports = map export . unLoc <$> hsmodExports m,
++convertModule spans exts warnings tokens regions (L _ m) =
++  ParsedModule
++    { header = header,
++      exports = exports,
+       imports = map importDecl (hsmodImports m),
+       extensions = exts,
+-      warnings = warnings
++      warnings = warnings,
++      declarations = declarations,
++      docItems = converted.docItems,
++      pragmas = converted.pragmas,
++      tokens = tokens,
++      occurrences = convertOccurrences spans exts tokens self declarations m,
++      regions = regions
+     }
+   where
+     ext = hsmodExt m
++    header =
++      ModuleHeader
++        { name = located moduleName <$> hsmodName m,
++          haddock = doc <$> hsmodHaddockModHeader ext,
++          warning = warningText <$> hsmodDeprecMessage ext
++        }
++    exports = map export . unLoc <$> hsmodExports m
++    self = (.value) <$> header.name
++    converted = convertDecls spans self (hsmodDecls m)
++    declarations = markExported self exports converted.decls
+ 
+-    -- The parser gives real spans to everything it parsed.
+-    spanOf l = fromMaybe (Span (Line 0) (Col 0) (Line 0) (Col 0)) (toSpan cols l)
++    spanOf = Helpers.spanOf spans
+ 
+     located f lx@(L _ x) = Model.Located {span = spanOf (getLocA lx), value = f x}
+ 
+-    doc :: LHsDoc GhcPs -> RawDoc
+-    doc d@(L _ w) = RawDoc {span = spanOf (getLocA d), text = docText w.hsDocString}
++    doc :: LHsDoc GhcPs -> DocComment Doc
++    doc = docComment spans
+ 
+-    warningText w =
+-      WarningText
+-        { span = spanOf (getLocA w),
+-          kind = case unLoc w of
+-            WarningTxt category _ _ -> WarningPragma (categoryText <$> category)
+-            DeprecatedTxt _ _ -> DeprecatedPragma,
+-          messages = case unLoc w of
+-            WarningTxt _ _ ms -> map message ms
+-            DeprecatedTxt _ ms -> map message ms
+-        }
+-    categoryText (L _ c) = case unLoc c.iwc_wc of
+-      WarningCategory fs -> Text.pack (unpackFS fs)
+-    message (L _ s) = Text.pack (unpackFS s.hsDocString.sl_fs)
++    warningText w = Helpers.warningText (spanOf (getLocA w)) (unLoc w)
+ 
+     export :: LIE GhcPs -> Export
+     export lie@(L _ ie) = case ie of
+@@ -134,7 +127,7 @@
+         ExportModule
+           ModuleExport {name = located moduleName mn, warning = warningText <$> w}
+       IEGroup _ level heading ->
+-        ExportSection Section {level = level, heading = doc heading}
++        ExportSection Section {level = level, heading = headingComment spans heading}
+       IEDoc _ d -> ExportDoc (doc d)
+       IEDocNamed _ chunk ->
+         ExportDocNamed
+@@ -239,28 +232,3 @@
+     importLevel = \case
+       ImportDeclSplice -> SpliceLevel
+       ImportDeclQuote -> QuoteLevel
+-
+--- | GHC's span in our columns. 'Nothing' for GHC's spans with no place.
+-toSpan :: ColumnMap -> SrcSpan -> Maybe Span
+-toSpan cols = \case
+-  RealSrcSpan r _ ->
+-    Just $
+-      ghcToSpan cols $
+-        GhcRange
+-          { startLine = srcSpanStartLine r,
+-            startCol = srcSpanStartCol r,
+-            endLine = srcSpanEndLine r,
+-            endCol = srcSpanEndCol r
+-          }
+-  UnhelpfulSpan _ -> Nothing
+-
+--- | A Haddock comment's text, without the decorator.
+-docText :: HsDocString -> Text
+-docText = Text.pack . renderHsDocString
+-
+-moduleName :: Ghc.ModuleName -> ModuleName
+-moduleName = ModuleName . Text.pack . Ghc.moduleNameString
+-
+--- | The name without its qualifier or parens.
+-occText :: RdrName -> Text
+-occText = Text.pack . occNameString . rdrNameOcc
+notes: none

@@ -1,0 +1,11 @@
+spec ba68ea7 82c10db SPEC.md (cut: base lines 165-440, head lines 166-459)
+router 63a76ee 5154088 haskell-reviewer/src/HaskellReviewer/Server/Router.hs
+snapshot 3c505c2 a41f0ea haskell-reviewer/src/HaskellReviewer/Session/Snapshot.hs
+convert fb7b87f 0bcfe6f haskell-reviewer/src/HaskellReviewer/Core/Parser/Convert.hs
+modulemodel 0d877b4 0bcfe6f haskell-reviewer/src/HaskellReviewer/Core/ModuleModel.hs
+testsupport 7bdbf5e b94d13b haskell-reviewer/test/TestSupport.hs
+apigolden 63a76ee 9543606 haskell-reviewer/test/HaskellReviewer/Server/ApiGoldenTest.hs (cut: base lines 1-40, head lines 1-90)
+testmain 8626014 b94d13b haskell-reviewer/test/Main.hs
+cabal 8d7f846 925c9c1 haskell-reviewer/haskell-reviewer.cabal
+client 48c59b9 f4ab282 web/src/api/client.ts
+app 468e923 00d94f8 web/src/App.tsx

@@ -273,6 +273,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.HighlightTest
     HaskellReviewer.Core.IndexQueueTest
     HaskellReviewer.Core.InstanceKeyTest
+    HaskellReviewer.Core.LineDiffGoldenTest
     HaskellReviewer.Core.LineDiffOracleTest
     HaskellReviewer.Core.LineDiffTest
     HaskellReviewer.Core.MarkdownUnlitTest
@@ -337,6 +338,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Session.TextStoreTest
     HighlightDump
     IndexSupport
+    LineDiffDump
     LineDiffSupport
     ModulesDump
     OccurrencesDump

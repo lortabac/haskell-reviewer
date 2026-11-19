@@ -12,7 +12,7 @@ BENCH_RTS ?=
 # Any other bench flags, e.g. BENCH_ARGS="--steady-runs 1 --nav-idle 10".
 BENCH_ARGS ?=
 
-.PHONY: build test install freeze web e2e bench bench-smoke cpp-check resolve-check cbor-json
+.PHONY: build test install freeze web e2e bench bench-smoke cpp-check resolve-check linediff-check cbor-json
 
 build:
 	$(CABAL) build all
@@ -71,6 +71,23 @@ resolve-check:
 	$(CABAL) exec -v0 -- runghc --ghc-arg=-XGHC2024 --ghc-arg=-XDuplicateRecordFields \
 	    --ghc-arg=-XNoFieldSelectors --ghc-arg=-XOverloadedRecordDot --ghc-arg=-XOverloadedStrings \
 	    --ghc-arg=-ihaskell-reviewer/test dev/ResolveCheck.hs fixtures/resolve
+
+# Dev only, not in CI: the line diff against git on a repo's history
+# (D-321). Clones LINEDIFF_CHECK_REPO (default: this repo; any local
+# repo, only read) and diffs the files of its last LINEDIFF_CHECK_N
+# first-parent commits (default 200), both modes, with ours and with git.
+# Prints the share that is identical, the mismatches and our timings.
+# Fails if one differs. Same -X flags as resolve-check. The script loads
+# the test helpers (LineDiffSupport), so the test suite's dependencies
+# are built first.
+LINEDIFF_CHECK_REPO ?= .
+LINEDIFF_CHECK_N ?= 200
+linediff-check:
+	$(CABAL) build lib:haskell-reviewer
+	$(CABAL) build --only-dependencies haskell-reviewer:test:haskell-reviewer-test
+	$(CABAL) exec -v0 -- runghc --ghc-arg=-XGHC2024 --ghc-arg=-XDuplicateRecordFields \
+	    --ghc-arg=-XNoFieldSelectors --ghc-arg=-XOverloadedRecordDot --ghc-arg=-XOverloadedStrings \
+	    --ghc-arg=-ihaskell-reviewer/test dev/LineDiffCheck.hs -n $(LINEDIFF_CHECK_N) $(LINEDIFF_CHECK_REPO)
 
 # Dev only: CBOR on stdin, JSON on stdout. For a CBOR answer of the
 # API, e.g. curl -s <url>/api/file/tree/a.hs | make -s cbor-json

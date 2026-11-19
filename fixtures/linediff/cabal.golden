@@ -1,0 +1,138 @@
+@@ -39,7 +39,9 @@
+     HaskellReviewer.Core.Address
+     HaskellReviewer.Core.CabalCompat
+     HaskellReviewer.Core.CabalFile
++    HaskellReviewer.Core.Changed
+     HaskellReviewer.Core.Code
++    HaskellReviewer.Core.CommitFiles
+     HaskellReviewer.Core.Config
+     HaskellReviewer.Core.Cpp
+     HaskellReviewer.Core.Cpp.Expand
+@@ -84,12 +86,15 @@
+     HaskellReviewer.Core.References
+     HaskellReviewer.Core.Resolve
+     HaskellReviewer.Core.ResolveWarmUp
++    HaskellReviewer.Core.Revspec
+     HaskellReviewer.Core.RichText
+     HaskellReviewer.Core.Root
+     HaskellReviewer.Core.Search
++    HaskellReviewer.Core.Sides
+     HaskellReviewer.Core.SourceLinks
+     HaskellReviewer.Core.SourceText
+     HaskellReviewer.Core.Span
++    HaskellReviewer.Core.TextSearch
+     HaskellReviewer.Core.Tokens
+     HaskellReviewer.Core.Xdg
+ 
+@@ -100,11 +105,14 @@
+     HaskellReviewer.Effects.Config
+     HaskellReviewer.Effects.FileSystem
+     HaskellReviewer.Effects.Git
++    HaskellReviewer.Effects.GitObjects
+     HaskellReviewer.Effects.Helper
+     HaskellReviewer.Effects.Log
+     HaskellReviewer.Effects.Parser
++    HaskellReviewer.Effects.Revisions
+     HaskellReviewer.Effects.PosixAt
+     HaskellReviewer.Effects.Shutdown
++    HaskellReviewer.Effects.Source
+     HaskellReviewer.Effects.Spawn
+     HaskellReviewer.Effects.Trace
+ 
+@@ -115,6 +123,7 @@
+     HaskellReviewer.Session.Project
+     HaskellReviewer.Session.Resolve
+     HaskellReviewer.Session.Snapshot
++    HaskellReviewer.Session.TextStore
+ 
+     -- Server
+     HaskellReviewer.Server.Api
+@@ -128,6 +137,7 @@
+     HaskellReviewer.Server.Router
+     HaskellReviewer.Server.Search
+     HaskellReviewer.Server.Security
++    HaskellReviewer.Server.TextSearch
+     HaskellReviewer.Server.Wire
+     HaskellReviewer.Server.Wire.Page
+     HaskellReviewer.Server.Wire.Source
+@@ -211,6 +221,8 @@
+     Bench.ProjectsTest
+     Bench.Queries
+     Bench.QueriesTest
++    Bench.Refs
++    Bench.RefsTest
+     Bench.RtsStats
+     Bench.RtsStatsTest
+     Bench.Shell
+@@ -227,7 +239,9 @@
+     HaskellReviewer.App.RunTest
+     HaskellReviewer.Core.AddressTest
+     HaskellReviewer.Core.CabalFileTest
++    HaskellReviewer.Core.ChangedTest
+     HaskellReviewer.Core.CodeTest
++    HaskellReviewer.Core.CommitFilesTest
+     HaskellReviewer.Core.ConfigGoldenTest
+     HaskellReviewer.Core.CppGoldenTest
+     HaskellReviewer.Core.CppPropertyTest
+@@ -258,6 +272,7 @@
+     HaskellReviewer.Core.ProjectTest
+     HaskellReviewer.Core.ReferencesTest
+     HaskellReviewer.Core.RelPathTest
++    HaskellReviewer.Core.RevspecTest
+     HaskellReviewer.Core.ResolveGoldenTest
+     HaskellReviewer.Core.ResolveTest
+     HaskellReviewer.Core.RichTextGoldenTest
+@@ -265,14 +280,19 @@
+     HaskellReviewer.Core.SearchTest
+     HaskellReviewer.Core.SourceLinksTest
+     HaskellReviewer.Core.SourceTextTest
++    HaskellReviewer.Core.TextSearchTest
+     HaskellReviewer.Core.TokensTest
+     HaskellReviewer.Core.XdgTest
+     HaskellReviewer.Effects.AtomicFileTest
+     HaskellReviewer.Effects.ConfigTest
+     HaskellReviewer.Effects.FileSystemTest
++    HaskellReviewer.Effects.GitObjectsTest
++    HaskellReviewer.Effects.GitPlantedTest
+     HaskellReviewer.Effects.GitTest
+     HaskellReviewer.Effects.HelperTest
+     HaskellReviewer.Effects.LogTest
++    HaskellReviewer.Effects.RevisionsTest
++    HaskellReviewer.Effects.SourceTest
+     HaskellReviewer.Effects.SpawnTest
+     HaskellReviewer.Effects.TraceTest
+     HaskellReviewer.Server.ApiGoldenTest
+@@ -285,12 +305,15 @@
+     HaskellReviewer.Server.EventsTest
+     HaskellReviewer.Server.ListenTest
+     HaskellReviewer.Server.RouterTest
++    HaskellReviewer.Server.SidesTest
+     HaskellReviewer.Server.SourceTest
++    HaskellReviewer.Server.TextSearchTest
+     HaskellReviewer.Session.ClientsTest
+     HaskellReviewer.Session.IndexTest
+     HaskellReviewer.Session.PrefsTest
+     HaskellReviewer.Session.ResolveTest
+     HaskellReviewer.Session.SnapshotTest
++    HaskellReviewer.Session.TextStoreTest
+     HighlightDump
+     IndexSupport
+     ModulesDump
+@@ -334,6 +357,7 @@
+     , text
+     , time
+     , unix
++    , vector
+     , wai
+     , warp
+     , zlib              >=0.7  && <0.8
+@@ -358,6 +382,8 @@
+     Bench.Path
+     Bench.Projects
+     Bench.Queries
++    Bench.Refs
++    Bench.RefsDuring
+     Bench.Report
+     Bench.RtsStats
+     Bench.Run
+notes: none

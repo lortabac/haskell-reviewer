@@ -1,0 +1,15 @@
+@@ -1,7 +1,7 @@
+ f x = do
+-  a
+-  b
+-  if x
+-    then c
+-    else d
+-  e
++    a
++    b
++    if x
++        then c
++        else d
++    e
+notes: none
