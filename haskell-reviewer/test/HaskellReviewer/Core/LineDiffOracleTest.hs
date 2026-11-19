@@ -18,7 +18,7 @@ import Hedgehog
     Property,
     PropertyT,
     annotate,
-    assert,
+    discard,
     evalIO,
     failure,
     forAll,
@@ -29,6 +29,9 @@ import Hedgehog
     (===),
   )
 import Hedgehog.Gen qualified as Gen
+import Hedgehog.Internal.Gen (evalGen)
+import Hedgehog.Internal.Seed qualified as Seed
+import Hedgehog.Internal.Tree (treeValue)
 import Hedgehog.Range qualified as Range
 import LineDiffSupport
   ( chunks,
@@ -41,7 +44,7 @@ import LineDiffSupport
     gitRunsMany,
   )
 import Test.Tasty (TestTree, testGroup, withResource)
-import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 import Test.Tasty.Hedgehog (testProperty)
 
 -- | git 2.54 changed compaction (see 'GitRule'): compare with what the
@@ -52,7 +55,12 @@ tests =
     testGroup
       "LineDiff oracle"
       [ testGroup "exact" (modeTests getRule KeepWhitespace),
-        testGroup "-w" (modeTests getRule IgnoreWhitespace)
+        testGroup "-w" (modeTests getRule IgnoreWhitespace),
+        testCase "batches are not mostly unchanged pairs" $ do
+          -- Fixed seeds, so no flake.
+          let share g = changedShare 2000 (sizedPair g)
+          assertBool "generated pairs" (2 * share genPair >= 2000)
+          assertBool "repetitive pairs" (10 * share genRepetitivePair >= 9 * 2000)
       ]
 
 modeTests :: IO GitRule -> Whitespace -> [TestTree]
@@ -70,24 +78,42 @@ modeTests getRule ws =
     <> chunks 2 "huge pairs" (withTests 1 (withShrinks 0 (hugeOracle getRule ws)))
     <> [testGroup "cases" [testCase name (oracleCase getRule ws p) | (name, p) <- cases]]
 
--- | @k@ pairs per test, all diffed by one git run. Each pair gets its
--- own size, 0 to 99: with few tests, Hedgehog's size (which grows by
--- one per test from 0) would make every pair tiny and unchanged. At
--- least a quarter of a batch's pairs must have different lines (61% of
--- generated pairs do, 99% of repetitive ones), so the batch tests
--- something.
+-- | A pair with its own size, 0 to 99: with few tests, Hedgehog's size
+-- (which grows by one per test from 0) would make every pair tiny and
+-- unchanged.
+sizedPair :: Gen (Pair Text) -> Gen (Pair Text)
+sizedPair gen = Gen.integral (Range.constant 0 99) >>= \size -> Gen.resize size gen
+
+differ :: Pair Text -> Bool
+differ p = diffLines p.base /= diffLines p.head
+
+-- | How many of @n@ pairs, made with fixed seeds, have different lines.
+changedShare :: Int -> Gen (Pair Text) -> Int
+changedShare n gen =
+  length
+    [ ()
+    | i <- [0 .. n - 1],
+      Just t <- [evalGen 50 (Seed.from (fromIntegral i)) gen],
+      differ (treeValue t)
+    ]
+
+-- | @k@ pairs per test, all diffed by one git run. A batch with fewer
+-- than a quarter of its pairs different is discarded: it would test
+-- little (61% of generated pairs differ, 99% of repetitive ones; the
+-- unit test above checks that with fixed seeds).
 oracleMany :: IO GitRule -> Whitespace -> Int -> Gen (Pair Text) -> Property
 oracleMany getRule ws k gen = property $ do
-  let sized = Gen.integral (Range.constant 0 99) >>= \size -> Gen.resize size gen
-  ps <- forAll (Gen.list (Range.singleton k) sized)
+  ps <- forAll (Gen.list (Range.singleton k) (sizedPair gen))
   rule <- evalIO getRule
-  evalIO (gitRunsMany ws ps) >>= \case
-    Left err -> annotate err >> failure
-    Right gits -> do
-      [(lineDiffStatsAs rule ws p).diff.runs | p <- ps] === gits
-      let changed = length [() | p <- ps, diffLines p.base /= diffLines p.head]
-      annotate (show changed <> " of " <> show k <> " pairs have different lines")
-      assert (4 * changed >= k)
+  let changed = length (filter differ ps)
+  if 4 * changed < k
+    then discard
+    else
+      evalIO (gitRunsMany ws ps) >>= \case
+        Left err -> annotate err >> failure
+        Right gits -> do
+          [(lineDiffStatsAs rule ws p).diff.runs | p <- ps] === gits
+          annotate (show changed <> " of " <> show k <> " pairs have different lines")
 
 -- | Big fallback regions, where Myers' cost limit fires (LineDiffTest's
 -- cutoff coverage checks that; a cover over 5 tests here could flake).
