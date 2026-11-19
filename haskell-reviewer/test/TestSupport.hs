@@ -10,6 +10,7 @@ module TestSupport
     git,
     gitOut,
     gitBytes,
+    gitBytesEnv,
     GitRun (..),
     gitSetup,
     realGitAt,
@@ -144,7 +145,11 @@ data GitRun = GitRun
 -- a non-zero exit. stdin is written from its own thread, so big inputs
 -- and outputs can't block.
 gitBytes :: FilePath -> [String] -> ByteString -> IO GitRun
-gitBytes dir args input = do
+gitBytes = gitBytesEnv []
+
+-- | 'gitBytes' with more environment variables.
+gitBytesEnv :: [(String, String)] -> FilePath -> [String] -> ByteString -> IO GitRun
+gitBytesEnv extra dir args input = do
   path <- fromMaybe "/usr/bin:/bin" <$> lookupEnv "PATH"
   let cp =
         (proc "git" args)
@@ -154,12 +159,13 @@ gitBytes dir args input = do
             std_out = CreatePipe,
             std_err = CreatePipe,
             env =
-              Just
+              Just $
                 [ ("PATH", path),
                   ("HOME", dir),
                   ("GIT_CONFIG_NOSYSTEM", "1"),
                   ("GIT_CONFIG_GLOBAL", "/dev/null")
                 ]
+                  <> extra
           }
   bracket (createProcess cp) cleanup $ \case
     (Just hIn, Just hOut, Just hErr, ph) ->

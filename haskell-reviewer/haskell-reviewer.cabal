@@ -2,7 +2,13 @@ cabal-version: 3.12
 name:          haskell-reviewer
 version:       0.1.0.0
 synopsis:      Review Haskell code in the browser
-license:       BSD-3-Clause
+-- The line diff (HaskellReviewer.Core.LineDiff*) is LGPL, ported from
+-- git; the rest is BSD-3. See ../LICENSE (D-321).
+license:       BSD-3-Clause AND LGPL-2.1-or-later
+license-files:
+  ../LICENSE
+  ../LICENSE.LGPL-2.1
+
 author:        Lorenzo Tabacchini
 maintainer:    lortabac@gmail.com
 copyright:     (c) 2026 Lorenzo Tabacchini
@@ -63,6 +69,11 @@ library
     HaskellReviewer.Core.ImportScope
     HaskellReviewer.Core.Git
     HaskellReviewer.Core.IndexQueue
+    HaskellReviewer.Core.LineDiff
+    HaskellReviewer.Core.LineDiff.Compact
+    HaskellReviewer.Core.LineDiff.Env
+    HaskellReviewer.Core.LineDiff.Histogram
+    HaskellReviewer.Core.LineDiff.Myers
     HaskellReviewer.Core.LineRegions
     HaskellReviewer.Core.ModuleGraph
     HaskellReviewer.Core.ModuleModel
@@ -262,6 +273,8 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.HighlightTest
     HaskellReviewer.Core.IndexQueueTest
     HaskellReviewer.Core.InstanceKeyTest
+    HaskellReviewer.Core.LineDiffOracleTest
+    HaskellReviewer.Core.LineDiffTest
     HaskellReviewer.Core.MarkdownUnlitTest
     HaskellReviewer.Core.ModulesGoldenTest
     HaskellReviewer.Core.ModulesTest
@@ -324,6 +337,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Session.TextStoreTest
     HighlightDump
     IndexSupport
+    LineDiffSupport
     ModulesDump
     OccurrencesDump
     ParseDump

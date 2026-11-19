@@ -38,6 +38,9 @@ import HaskellReviewer.Core.HighlightGoldenTest qualified
 import HaskellReviewer.Core.HighlightTest qualified
 import HaskellReviewer.Core.IndexQueueTest qualified
 import HaskellReviewer.Core.InstanceKeyTest qualified
+import HaskellReviewer.Core.LineDiff (warmUpLineDiff)
+import HaskellReviewer.Core.LineDiffOracleTest qualified
+import HaskellReviewer.Core.LineDiffTest qualified
 import HaskellReviewer.Core.MarkdownUnlitTest qualified
 import HaskellReviewer.Core.ModulesGoldenTest qualified
 import HaskellReviewer.Core.ModulesTest qualified
@@ -111,7 +114,8 @@ import HaskellReviewer.Session.Resolve (warmUpResolve)
 import HaskellReviewer.Session.ResolveTest qualified
 import HaskellReviewer.Session.SnapshotTest qualified
 import HaskellReviewer.Session.TextStoreTest qualified
-import Test.Tasty (defaultMain, testGroup, withResource)
+import Test.Tasty (DependencyType (..), after, defaultMain, testGroup, withResource)
+import Test.Tasty.HUnit (testCase)
 import TestSupport (warmUpTempDirs)
 
 main :: IO ()
@@ -142,6 +146,8 @@ main = do
   warmUpRefs
   -- And for the text search route.
   warmUpTextSearch
+  -- The line diff's paths, before its tests run in parallel.
+  warmUpLineDiff
   -- Tests run in parallel: share expensive values through withResource.
   -- See Note [Shared values in tests] in HaskellReviewer.Core.PackageGlobTest.
   defaultMain $
@@ -186,6 +192,25 @@ main = do
         HaskellReviewer.Core.FileListTest.tests,
         HaskellReviewer.Core.GitTest.tests,
         HaskellReviewer.Core.IndexQueueTest.tests,
+        -- The line diff tests are heavy (big diffs, GBs allocated): run
+        -- beside the others, their GC pauses push 5 s guards in the
+        -- parser and CPP tests over (D-321). So they wait for all else
+        -- but the "Linear time" groups (which run after them), through
+        -- one gate test: a broad pattern on each of them makes tasty
+        -- rescan ~1,600 dependencies per waiter (about 470 s of CPU, as
+        -- in D-318). Each worker looking for work checks the waiting
+        -- tests in list order, so the gate (which reads its ~1,600
+        -- dependencies) is last, and this group stays here, ahead of
+        -- the "Linear time" waiters. That layout cost the least CPU of
+        -- the ones measured (D-321).
+        after AllFinish "/LineDiff gate/" $
+          testGroup
+            "LineDiff all"
+            [ HaskellReviewer.Core.LineDiffOracleTest.tests,
+              HaskellReviewer.Core.LineDiffTest.tests,
+              after AllFinish "/LineDiff all/ && !/LineDiff timing/" $
+                HaskellReviewer.Core.LineDiffTest.timingTests
+            ],
         HaskellReviewer.Core.ModulesGoldenTest.tests,
         HaskellReviewer.Core.ModulesTest.tests,
         HaskellReviewer.Core.PackageGlobTest.tests,
@@ -286,5 +311,8 @@ main = do
         HaskellReviewer.Session.IndexTest.tests,
         HaskellReviewer.Session.SnapshotTest.tests,
         HaskellReviewer.Session.TextStoreTest.tests,
-        ExeTest.tests
+        ExeTest.tests,
+        -- Last: see the line diff tests above.
+        after AllFinish "!/LineDiff/ && !/Linear time/" $
+          testCase "LineDiff gate" (pure ())
       ]
