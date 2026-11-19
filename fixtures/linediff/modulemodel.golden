@@ -1,0 +1,215 @@
+@@ -10,9 +10,11 @@
+   ( -- * Result of a parse
+     ModuleParse (..),
+     TextOnlyModule (..),
++    textOnlyModule,
+     TextOnlyReason (..),
+     ParseError (..),
+     ParseWarning (..),
++    MarkdownLayout (..),
+     renderParseWarning,
+ 
+     -- * Parsed module
+@@ -21,7 +23,7 @@
+     WarningText (..),
+     WarningKind (..),
+     Located (..),
+-    RawDoc (..),
++    DocComment (..),
+     DocItem (..),
+     Export (..),
+     ModuleExport (..),
+@@ -52,16 +54,21 @@
+ import HaskellReviewer.Core.Cpp.Warning (CppWarning, renderCppWarning)
+ import HaskellReviewer.Core.Decls
+   ( Decl,
++    DocComment (..),
+     Located (..),
+     ModulePragma,
+-    RawDoc (..),
+     WarningKind (..),
+     WarningText (..),
+     forceDecls,
++    forceDocComment,
+     forcePragmas,
+     forceWarningText,
+   )
++import HaskellReviewer.Core.LineRegions (LineRegions, noLineRegions)
++import HaskellReviewer.Core.Occurrences (Occurrences, forceOccurrences)
+ import HaskellReviewer.Core.Project (ModuleName)
++import HaskellReviewer.Core.RichText (Doc, Inline, forceInlines)
++import HaskellReviewer.Core.SourceText (MarkdownLayout (..))
+ import HaskellReviewer.Core.Span (Span)
+ import HaskellReviewer.Core.Tokens (Tokens)
+ 
+@@ -79,16 +86,31 @@
+   { reason :: TextOnlyReason,
+     -- | Found before we gave up. They may explain the reason (an
+     -- unknown extension, say).
+-    warnings :: [ParseWarning]
++    warnings :: [ParseWarning],
++    -- | CPP's lines and literate prose, when we got that far.
++    regions :: LineRegions
+   }
+   deriving (Eq, Show)
+ 
++-- | Text only, with nothing to highlight.
++textOnlyModule :: TextOnlyReason -> [ParseWarning] -> TextOnlyModule
++textOnlyModule reason warnings =
++  TextOnlyModule
++    { reason = reason,
++      warnings = warnings,
++      regions = noLineRegions
++    }
++
+ -- | Why a module is text only.
+ data TextOnlyReason
+-  = ParseFailed ParseError
++  = -- | With the tokens, for highlighting, if the lex worked (Note
++    -- [Text-only tokens] in "HaskellReviewer.Core.Parser").
++    ParseFailed ParseError (Maybe Tokens)
+   | -- | A bad @LANGUAGE@ or @OPTIONS_GHC@ pragma, as GHC says it.
+     PragmaFailed ParseError
+-  | -- | @-F -pgmF <tool>@, from ghc-options and @OPTIONS_GHC@ together.
++  | -- | Run through a tool we don't run: @-F -pgmF <tool>@ (from
++    -- ghc-options and @OPTIONS_GHC@ together), or markdown-unlit when
++    -- it would move code (a 'MarkdownMovesCode' warning says how).
+     Preprocessed Text
+   | -- | The parser threw. A bug, in GHC or ours.
+     ParserCrashed Text
+@@ -120,6 +142,12 @@
+     FromCpp CppWarning
+   | -- | markdown-unlit found no Haskell block (D-84).
+     NoMarkdownCode
++  | -- | A loose .lhs/.lhsig read as markdown-unlit, our guess: no
++    -- Bird or LaTeX code outside fences, and a Haskell block (D-218).
++    ReadAsMarkdown
++  | -- | markdown-unlit would move code, so the module is text only
++    -- (D-225). See Note [Unlit] in "HaskellReviewer.Core.SourceText".
++    MarkdownMovesCode MarkdownLayout
+   | -- | Off under Safe Haskell, like GHC does (with a warning too).
+     SafeTurnsOff Text
+   | -- | Two Safe Haskell modes (first, then second). GHC fails; we keep
+@@ -138,6 +166,12 @@
+   IgnoredCppOption t -> "ignored cpp-options flag: " <> t
+   FromCpp w -> renderCppWarning w
+   NoMarkdownCode -> "no Haskell code block"
++  ReadAsMarkdown ->
++    "markdown-unlit assumed: no Bird or LaTeX code; read from haskell code blocks only"
++  MarkdownMovesCode Reorders ->
++    "markdown-unlit moves code blocks marked top: shown as text, positions not mapped"
++  MarkdownMovesCode Dedents ->
++    "markdown-unlit dedents an indented code block: shown as text, positions not mapped"
+   SafeTurnsOff t -> "turned off by Safe: " <> t
+   SafeModesClash a b -> "Safe Haskell modes clash: " <> a <> ", " <> b <> " ignored"
+   CouldNotLex -> "could not lex"
+@@ -159,7 +193,12 @@
+     pragmas :: [ModulePragma],
+     -- | The whole module's, after CPP (Note [Packed tokens] in
+     -- "HaskellReviewer.Core.Tokens").
+-    tokens :: Tokens
++    tokens :: Tokens,
++    -- | What each identifier token names, parallel to the tokens (Note
++    -- [Occurrence table] in "HaskellReviewer.Core.Occurrences").
++    occurrences :: Occurrences,
++    -- | CPP's lines and literate prose, for highlighting.
++    regions :: LineRegions
+   }
+   deriving (Eq, Show)
+ 
+@@ -168,7 +207,7 @@
+   = -- | @-- * Heading@.
+     DocHeading Section
+   | -- | @-- $name@, with its text.
+-    DocChunk (Located Text) RawDoc
++    DocChunk (Located Text) (DocComment Doc)
+   deriving (Eq, Show)
+ 
+ -- | The @module@ line and what comes with it.
+@@ -176,7 +215,7 @@
+   { -- | 'Nothing': no @module@ line (so it's @Main@).
+     name :: Maybe (Located ModuleName),
+     -- | The Haddock comment before @module@.
+-    haddock :: Maybe RawDoc,
++    haddock :: Maybe (DocComment Doc),
+     -- | A @DEPRECATED@ or @WARNING@ pragma on the module.
+     warning :: Maybe WarningText
+   }
+@@ -189,7 +228,7 @@
+   | -- | @-- * Heading@.
+     ExportSection Section
+   | -- | A doc comment in the list.
+-    ExportDoc RawDoc
++    ExportDoc (DocComment Doc)
+   | -- | @-- $name@: a chunk defined further down.
+     ExportDocNamed (Located Text)
+   deriving (Eq, Show)
+@@ -205,7 +244,7 @@
+ data Section = Section
+   { -- | How many stars.
+     level :: Int,
+-    heading :: RawDoc
++    heading :: DocComment [Inline]
+   }
+   deriving (Eq, Show)
+ 
+@@ -215,7 +254,7 @@
+     name :: ItemName,
+     subs :: Subs,
+     -- | Export lists only: @f -- ^ doc@.
+-    doc :: Maybe RawDoc,
++    doc :: Maybe (DocComment Doc),
+     -- | Export lists only: @{-# DEPRECATED "..." #-} f@.
+     warning :: Maybe WarningText
+   }
+@@ -321,10 +360,11 @@
+ forceModuleParse :: ModuleParse -> ()
+ forceModuleParse = \case
+   Parsed m -> parsed m
+-  TextOnly t -> reason t.reason `seq` list t.warnings
++  TextOnly t ->
++    reason t.reason `seq` list t.warnings `seq` t.regions `seq` ()
+   where
+     reason = \case
+-      ParseFailed e -> parseError e
++      ParseFailed e ts -> parseError e `seq` whnf ts
+       PragmaFailed e -> parseError e
+       _ -> ()
+     parseError e = whnf e.code `seq` whnf e.span
+@@ -336,19 +376,30 @@
+               list m.extensions.fromPragmas `seq`
+                 list m.warnings `seq`
+                   forceDecls m.declarations `seq`
+-                    list m.docItems `seq`
++                    each docItem m.docItems `seq`
+                       forcePragmas m.pragmas `seq`
+                         m.tokens `seq`
+-                          ()
+-    header h = whnf h.name `seq` whnf h.haddock `seq` maybe () forceWarningText h.warning
++                          forceOccurrences m.occurrences `seq`
++                            m.regions `seq`
++                              ()
++    header h =
++      whnf h.name `seq`
++        maybe () forceDocComment h.haddock `seq`
++          maybe () forceWarningText h.warning
+     export = \case
+       ExportItem i -> item i
+       ExportModule m -> maybe () forceWarningText m.warning
+-      _ -> ()
++      ExportSection s -> section s
++      ExportDoc d -> forceDocComment d
++      ExportDocNamed _ -> ()
++    docItem = \case
++      DocHeading s -> section s
++      DocChunk _ d -> forceDocComment d
++    section s = forceInlines s.heading.parsed
+     item i =
+       itemName i.name `seq`
+         subs i.subs `seq`
+-          whnf i.doc `seq`
++          maybe () forceDocComment i.doc `seq`
+             maybe () forceWarningText i.warning
+     itemName n = whnf n.qualifier
+     subs = \case
+notes: none

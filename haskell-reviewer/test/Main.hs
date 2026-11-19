@@ -39,6 +39,7 @@ import HaskellReviewer.Core.HighlightTest qualified
 import HaskellReviewer.Core.IndexQueueTest qualified
 import HaskellReviewer.Core.InstanceKeyTest qualified
 import HaskellReviewer.Core.LineDiff (warmUpLineDiff)
+import HaskellReviewer.Core.LineDiffGoldenTest qualified
 import HaskellReviewer.Core.LineDiffOracleTest qualified
 import HaskellReviewer.Core.LineDiffTest qualified
 import HaskellReviewer.Core.MarkdownUnlitTest qualified
@@ -206,7 +207,8 @@ main = do
         after AllFinish "/LineDiff gate/" $
           testGroup
             "LineDiff all"
-            [ HaskellReviewer.Core.LineDiffOracleTest.tests,
+            [ HaskellReviewer.Core.LineDiffGoldenTest.tests,
+              HaskellReviewer.Core.LineDiffOracleTest.tests,
               HaskellReviewer.Core.LineDiffTest.tests,
               after AllFinish "/LineDiff all/ && !/LineDiff timing/" $
                 HaskellReviewer.Core.LineDiffTest.timingTests

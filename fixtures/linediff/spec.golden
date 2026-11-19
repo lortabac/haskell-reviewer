@@ -1,0 +1,51 @@
+@@ -6,6 +6,13 @@
+   identical on that side. The check is by content, not by revision, so HIE
+   files from a working-tree build also serve a committed side wherever the
+   files agree.
++- **Only the user's own build output is trusted** (D-56). A `.hie` file
++  that is part of a snapshot (tracked in git, or present in the base or
++  head revision), or reached through a symlink in the snapshot, is never
++  used, since a change under review could ship forged ones. Without git
++  (browse mode only) this can't be checked: HIE files are used, and the
++  banner says so. HIE reading runs in a separate, resource-limited process
++  (§11.4.6).
+ - Every place that shows semantic information marks heuristic results
+   visibly (e.g. a dotted underline on a link, with a tooltip saying "resolved
+   heuristically").
+@@ -21,7 +28,8 @@
+   deterministic assumptions, since no build plan exists:
+   - `os(…)` / `arch(…)` conditionals and the platform macros follow the
+     **host** platform.
+-  - Cabal flags take their **default** values.
++  - Cabal flags take their `.cabal` **default** values, unless
++    `cabal.project` sets them (D-67).
+   - `MIN_VERSION_pkg(…)` evaluates to **true**. `__GLASGOW_HASKELL__` and
+     `MIN_VERSION_GLASGOW_HASKELL(…)` are both derived from the **detected
+     project GHC version** (§7.1), falling back to the parser's version, so
+@@ -158,6 +166,12 @@
+   syntactic tier, and labelled accordingly.
+ - A gutter outline shows the top-level declarations, with a link from each
+   back to the docs view.
++- **Find in file** (D-70): `f`, or a toolbar button, opens a find bar that
++  searches the whole file, with a match count announced to screen readers.
++  Views are virtualised (§11.7), so the browser's own find (Ctrl-F, left
++  untouched) sees only the lines on screen. The toolbar says so
++  permanently: "Browser find sees only visible lines — press f to search
++  the whole file".
+ - In diff mode, changed lines carry gutter markers, and a "show diff here"
+   action switches to the diff view at the same place.
+ 
+@@ -170,7 +184,11 @@
+ - Both sides are syntax-highlighted (§5.6) and navigable: identifiers link to the
+   definition on *their own side* (a base-side line links into the base
+   snapshot).
+-- Renames and copies, as detected by git, are shown as such.
++- Renames are detected the way git does by default (exact match, then
++  content similarity ≥ 50 %) and shown as such. Copies are not detected:
++  a copied file shows as added (D-74).
++- **Find in file** (`f`, or a toolbar button) searches the whole file on
++  both sides, as in §4.4.
+ - Option to ignore whitespace-only changes.
+ 
+ ### 4.6 Expanded (semantic) diff view
+notes: none
