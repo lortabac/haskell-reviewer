@@ -326,7 +326,8 @@ data DiffFiles = DiffFiles
     -- | Modified paths whose head file is filtered (D-319): their note,
     -- when they have no other.
     filtered :: Set RelPath,
-    -- | 'Nothing' when not known (the working tree).
+    -- | 'Nothing' when not known: a side read from disk (only tests do),
+    -- or the working tree's outside step failed.
     outside :: Maybe OutsideChanges,
     -- | A side's list was cut at the file cap, so the pairing was cut
     -- there too: files past it are not listed.

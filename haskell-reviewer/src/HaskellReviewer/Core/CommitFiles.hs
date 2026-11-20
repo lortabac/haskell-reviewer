@@ -12,6 +12,7 @@ module HaskellReviewer.Core.CommitFiles
 
     -- * Outside ROOT
     OutsideRows (..),
+    mkOutsideRows,
     OutsideChanges (..),
     outsideChanges,
     outsidePathCap,
@@ -26,6 +27,8 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.Set (Set)
+import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text.Encoding qualified as Text.Encoding
 import HaskellReviewer.Core.FileContent (FileSize (..), LinkInfo (..))
@@ -130,11 +133,7 @@ mkCommitFiles prefix entries =
     { files = files,
       blobs = Map.restrictKeys allBlobs (Map.keysSet files.entries),
       entries = Map.restrictKeys allEntries (Map.keysSet files.entries),
-      outside =
-        OutsideRows
-          { rows = Map.take fileListCap allOutside,
-            truncated = Map.size allOutside > fileListCap
-          },
+      outside = mkOutsideRows False allOutside Set.empty,
       dropped = [d | Skipped d <- inside]
     }
   where
@@ -186,14 +185,27 @@ mkCommitFiles prefix entries =
 
 -- * Outside ROOT
 
--- | One commit's rows outside ROOT (D-43).
+-- | One side's rows outside ROOT (D-43).
 data OutsideRows = OutsideRows
   { -- | By raw path from the top.
     rows :: Map ByteString TreeItem,
-    -- | Over 'fileListCap': 'rows' has the first ones.
+    -- | Paths that count as changed whatever the base has: the working
+    -- tree's edited and untracked files (D-329). Empty for a commit.
+    dirty :: Set ByteString,
+    -- | Over 'fileListCap': 'rows' and 'dirty' have the first ones.
     truncated :: Bool
   }
   deriving (Eq, Show)
+
+-- | Cut to 'fileListCap'. The flag is true if the caller cut already.
+mkOutsideRows :: Bool -> Map ByteString TreeItem -> Set ByteString -> OutsideRows
+mkOutsideRows cut allRows allDirty =
+  OutsideRows
+    { rows = Map.take fileListCap allRows,
+      dirty = Set.take fileListCap allDirty,
+      truncated =
+        cut || Map.size allRows > fileListCap || Set.size allDirty > fileListCap
+    }
 
 -- | The paths outside ROOT that changed between two commits (G21).
 data OutsideChanges = OutsideChanges
@@ -223,13 +235,22 @@ outsideChanges sides =
     h = sides.head.rows
     b = sides.base.rows
     changed =
-      Map.keys
-        ( Map.unions
-            [ () <$ Map.difference h b,
-              () <$ Map.difference b h,
-              () <$ Map.filter id (Map.intersectionWith (/=) h b)
-            ]
-        )
+      Set.toAscList . Set.unions $
+        [ Map.keysSet (Map.difference h b),
+          Map.keysSet (Map.difference b h),
+          Map.keysSet (Map.filter id (Map.intersectionWith differ h b)),
+          sides.head.dirty,
+          sides.base.dirty
+        ]
+    -- Sizes don't count: a working-tree row has none, and a commit
+    -- listed without sizes (D-312) has none either.
+    differ x y = noSize x /= noSize y
+    noSize = \case
+      ItemBlob e i -> ItemBlob e (unsized i)
+      ItemSymlink i -> ItemSymlink (unsized i)
+      i@(ItemGitlink _) -> i
+      i@(ItemOther _) -> i
+    unsized i = BlobItem {oid = i.oid, size = SizeNotListed}
 
 -- * Reading
 

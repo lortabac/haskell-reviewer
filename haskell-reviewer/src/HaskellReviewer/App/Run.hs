@@ -1075,7 +1075,7 @@ pairSides deps logger done diff = case (lookup HeadSide ready, lookup BaseSide r
                 head = ends.head,
                 pairing = p,
                 filtered = filtered,
-                outside = outsideChanges <$> traverse commitOutside sources,
+                outside = outsideChanges <$> traverse sideOutside sources,
                 truncated = fp.cut
               }
           body = encodeDiffFiles firstGeneration files
@@ -1085,8 +1085,9 @@ pairSides deps logger done diff = case (lookup HeadSide ready, lookup BaseSide r
       _ <- evaluate (forceMarkers markers.head)
       _ <- evaluate (forceMarkers markers.base)
       pure Encoded {pairing = p, body = body, markers = markers}
-    commitOutside = \case
+    sideOutside = \case
       CommitEntries c -> Just c.outside
+      WorkTreeEntries w -> w.outside
       _ -> Nothing
     ends = case diff.info of
       CommitsDiff ci ->

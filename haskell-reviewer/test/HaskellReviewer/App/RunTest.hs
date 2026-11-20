@@ -1026,8 +1026,15 @@ renamesTests =
         pure r.body,
       goldenVsString "rename limit 2" (golden "diff-files-limit") $
         (.body) <$> runRenames [] "HEAD~1..HEAD" limitTwo,
-      goldenVsString "working tree" (golden "diff-files-worktree") $
-        (.body) <$> runRenames ["sha1", "worktree"] "HEAD" id,
+      goldenVsString "working tree" (golden "diff-files-worktree") $ do
+        r <- runRenames ["sha1", "worktree"] "HEAD" id
+        -- Edit, deletion, chmod and an untracked file outside ROOT; the
+        -- clean other/keep and the edits inside ROOT don't count.
+        let outside =
+              "\"outside\":{\"total\":4,\"paths\":[\"other/del\",\"other/mode.sh\","
+                <> "\"other/untracked\",\"other/x\"],\"truncated\":false}"
+        assertBool (show r.body) (outside `BS.isInfixOf` LBS.toStrict r.body)
+        pure r.body,
       testCase "pairing crashes: a line, 500, no markers" $ do
         r <- runRenames [] "HEAD~1..HEAD" crashing
         (r.status, r.body) @?= (500, "cannot pair files\n")
