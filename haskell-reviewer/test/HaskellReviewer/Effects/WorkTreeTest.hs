@@ -94,7 +94,6 @@ import System.Posix.IO
     defaultFileFlags,
     openFd,
   )
-import System.Posix.IO.ByteString qualified as PIO
 import System.Posix.Types (Fd)
 import Test.Tasty (TestTree, testGroup, withResource)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
@@ -723,10 +722,13 @@ outsideCounts = withCanonicalTemp $ \tmp -> do
     $ \f -> writeFile (at f) (f <> "\n")
   Files.createSymbolicLink "target" (at "o/link")
   Dir.createDirectory (at "o/sub")
-  PIO.createFile (Char8.pack (at "o/caf\xe9")) 0o644 >>= closeFd
   -- Racy: the mtime is in the future, so not older than the index.
   Files.setFileTimes (at "o/racy") future future
   git repo ["add", "-A"]
+  -- A non-UTF-8 name: index only (macOS can't have it on disk).
+  blob <- takeWhile (/= '\n') <$> gitOut repo ["hash-object", "-w", "o/same"]
+  let odd' = "100644 " <> Char8.pack blob <> "\t" <> "o/caf\xe9\0"
+  _ <- gitBytes repo ["update-index", "-z", "--index-info"] odd'
   let gitlink = "160000," <> replicate 40 '1' <> ",o/sub"
   git repo ["update-index", "--add", "--cacheinfo", gitlink]
   git repo ["commit", "-q", "-m", "base"]
