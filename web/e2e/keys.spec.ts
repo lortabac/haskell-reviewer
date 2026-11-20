@@ -337,7 +337,7 @@ test("a file with no module: Docs is not available", async ({
   page,
   server,
 }) => {
-  await page.goto(server.base + "src/tree/README.md");
+  await page.goto(server.base + "src/tree/data/crlf.txt");
   const nav = page.getByRole("navigation", { name: "View" });
   await expect(nav.locator(".view-missing")).toHaveText("Docs (not available)");
   await page.keyboard.press("1");

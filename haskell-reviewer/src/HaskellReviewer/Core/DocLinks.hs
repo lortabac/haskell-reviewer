@@ -60,10 +60,12 @@ import HaskellReviewer.Core.ModuleModel
 import HaskellReviewer.Core.Names (DeclId, declName)
 import HaskellReviewer.Core.Project (ModuleName (..))
 import HaskellReviewer.Core.RichText
-  ( Block (..),
+  ( AnchorRef (..),
+    Block (..),
     Cell (..),
     DefItem (..),
     Doc (..),
+    FileRef (..),
     Header (..),
     Hyperlink (..),
     Inline (..),
@@ -72,6 +74,7 @@ import HaskellReviewer.Core.RichText
     NameRef (..),
     RefNamespace (..),
     TableBody (..),
+    TaskItem (..),
   )
 import HaskellReviewer.Core.Span (Span)
 
@@ -231,6 +234,10 @@ blockRefs = \case
   Examples _ -> []
   Property _ -> []
   Table t -> concat [inlineRefs c.content | row <- t.header <> t.body, c <- row]
+  BlockQuote bs -> concatMap blockRefs bs
+  ThematicBreak -> []
+  Listing _ -> []
+  TaskList items -> concatMap (concatMap blockRefs . (.content)) items
 
 inlineRefs :: [Inline] -> [NameRef]
 inlineRefs = concatMap $ \case
@@ -242,3 +249,6 @@ inlineRefs = concatMap $ \case
   Link l -> foldMap inlineRefs l.label
   Name r -> [r]
   ModuleLink l -> foldMap inlineRefs l.label
+  Strike is -> inlineRefs is
+  FileLink l -> foldMap inlineRefs l.label
+  AnchorLink l -> foldMap inlineRefs l.label

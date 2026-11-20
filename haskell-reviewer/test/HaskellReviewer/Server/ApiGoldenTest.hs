@@ -172,6 +172,10 @@ cases =
       okCbor (gatedOn "s/src/A.hs" gate) {workers = 2} (source ["s", "src", "B.hs"]),
     cbor "source-text-only" (okCbor (indexed sourceApi) (source ["s", "src", "Bad.hs"])),
     cbor "source-plain" (okCbor sourceApi {workers = 0} (source ["s", "notes.txt"])),
+    cbor "source-markdown" (okCbor sourceApi (source ["s", "docs", "All.md"])),
+    -- Markdown, rendered: every node; not text.
+    cbor "markdown-page" (okCbor sourceApi (markdown ["s", "docs", "All.md"])),
+    cbor "markdown-not-text" (okCbor sourceApi (markdown ["s", "blob.md"])),
     json "source-not-found" $
       notFoundJson sourceApi {workers = 0} (source ["s", "nope.hs"]),
     cbor "source-warm-up" $
@@ -211,6 +215,7 @@ cases =
     file p = ["api", "file", "tree"] <> p
     modulePath ref = ["api", "module", "tree", ref]
     source p = ["api", "source", "tree"] <> p
+    markdown p = ["api", "markdown", "tree"] <> p
     filteredApi = fixtureApi {fileNotes = \_ _ -> FileNotes {filtered = Filtered}}
     crashingApi = answering (ParserCrashed "boom")
     slowApi = answering TooSlow

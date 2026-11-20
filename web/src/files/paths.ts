@@ -15,6 +15,26 @@ export function lineHref(path: string, line: number): string {
   return hrefFor(path) + "#L" + String(line);
 }
 
+// A Markdown file: it has a rendered view (as the server's
+// isMarkdownPath).
+export function isMarkdownPath(path: string): boolean {
+  return /\.(md|markdown)$/i.test(path);
+}
+
+// The rendered view of a Markdown file, relative to the token.
+export function mdHref(path: string, fragment: string | null = null): string {
+  return (
+    "/md/tree/" +
+    encodePath(path) +
+    (fragment === null ? "" : "#" + encodeURIComponent(fragment))
+  );
+}
+
+// The Markdown API URL, relative to the token.
+export function apiMarkdownUrl(path: string): string {
+  return "/api/markdown/tree/" + encodePath(path);
+}
+
 // The file API URL, relative to the token.
 export function apiFileUrl(path: string): string {
   return "/api/file/tree/" + encodePath(path);
@@ -57,6 +77,12 @@ export function segmentsAfter(
 // if it is not a file view URL or the path is bad (segmentsAfter).
 export function pathFromPathname(pathname: string): string | undefined {
   return segmentsAfter(pathname, ["src", "tree"])?.join("/");
+}
+
+// The file path in a full pathname "/<token>/md/tree/<path>", as
+// pathFromPathname.
+export function mdPathFromPathname(pathname: string): string | undefined {
+  return segmentsAfter(pathname, ["md", "tree"])?.join("/");
 }
 
 // Lines to mark, from a hash like "#L3" or "#L3-L7". Undefined for

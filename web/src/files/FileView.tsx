@@ -56,7 +56,9 @@ import { bringOnPage } from "../ui/scroll";
 import {
   apiFileUrl,
   hrefFor,
+  isMarkdownPath,
   lineHref,
+  mdHref,
   parseLineHash,
   pathFromPathname,
   withBase,
@@ -112,6 +114,8 @@ function FilePage(props: { path: string }): JSX.Element {
   useViewLinks({
     current: "source",
     docs: () => {
+      // A Markdown file's docs: the file, rendered.
+      if (isMarkdownPath(props.path)) return mdHref(props.path);
       const r = moduleRef();
       return r === undefined ? undefined : docsHref(r);
     },

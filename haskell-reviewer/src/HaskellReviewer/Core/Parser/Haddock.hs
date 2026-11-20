@@ -364,7 +364,8 @@ paragraph is = [Paragraph is | not (all blank is)]
 block :: HDoc -> Maybe [Block]
 block = \case
   H.DocParagraph x -> Just (paragraph (toInlines x))
-  H.DocHeader (H.Header l x) -> Just [Heading Header {level = l, title = toInlines x}]
+  H.DocHeader (H.Header l x) ->
+    Just [Heading Header {level = l, title = toInlines x, anchor = Nothing}]
   H.DocCodeBlock x -> Just [CodeBlock (toInlines x)]
   H.DocUnorderedList xs -> Just [UnorderedList (map toBlocks xs)]
   H.DocOrderedList xs -> Just [OrderedList (map item xs)]

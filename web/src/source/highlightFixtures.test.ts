@@ -81,7 +81,9 @@ const cases = files
   .filter((f) => f.endsWith(".golden"))
   .map((g) => {
     const base = g.replace(/\.golden$/, "");
-    const src = files.find((f) => f === `${base}.hs` || f === `${base}.lhs`);
+    const src = files.find(
+      (f) => f === `${base}.hs` || f === `${base}.lhs` || f === `${base}.md`,
+    );
     if (src === undefined) throw new Error(`no source for ${g}`);
     return [g, src] as const;
   });

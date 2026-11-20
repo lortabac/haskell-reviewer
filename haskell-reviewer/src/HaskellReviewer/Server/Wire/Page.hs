@@ -172,24 +172,7 @@ import HaskellReviewer.Core.ResolveWarmUp
     resolveWarmUpInput,
     resolveWarmUpModules,
   )
-import HaskellReviewer.Core.RichText
-  ( Block (..),
-    Cell (..),
-    DefItem (..),
-    Doc (..),
-    Example (..),
-    Header (..),
-    Hyperlink (..),
-    Inline (..),
-    ListItem (..),
-    MathStyle (..),
-    ModLink (..),
-    NameRef (..),
-    RefNamespace (..),
-    Since (..),
-    TableBody (..),
-    urlText,
-  )
+import HaskellReviewer.Core.RichText (Doc, Inline)
 import HaskellReviewer.Core.SourceLinks
   ( PageLinks (..),
     linksInput,
@@ -202,6 +185,7 @@ import HaskellReviewer.Core.Tokens (TokenClass (..))
 import HaskellReviewer.Effects.Parser (declsWarmUp, haddockWarmUp)
 import HaskellReviewer.Server.Cbor qualified as Cbor
 import HaskellReviewer.Server.Wire (noSourceReason)
+import HaskellReviewer.Server.Wire.RichText (RichEnv (..), encodeDoc, encodeInlines)
 import HaskellReviewer.Server.Wire.Targets (encodeTarget)
 import HaskellReviewer.Session.Index (ParsedSource (..), newParsedSource)
 import HaskellReviewer.Session.Snapshot (Generation (..))
@@ -1290,133 +1274,23 @@ headingComment env d =
   Cbor.obj [("span", span_ d.span), ("inlines", inlines env d.parsed)]
 
 doc :: Env -> Doc -> Encoding
-doc env d =
-  Cbor.obj
-    [ ("blocks", blocks env d.blocks),
-      ("since", Cbor.nullable since d.since)
-    ]
-  where
-    since s =
-      Cbor.obj
-        [ ("package", Cbor.nullable Cbor.text s.package),
-          ("version", Cbor.text (version s.version))
-        ]
-
-blocks :: Env -> [Block] -> Encoding
-blocks env = Cbor.list block
-  where
-    block = \case
-      Paragraph is -> Cbor.obj [kind "paragraph", ("inlines", inlines env is)]
-      Heading h ->
-        Cbor.obj
-          [kind "heading", ("level", Cbor.int h.level), ("inlines", inlines env h.title)]
-      CodeBlock is -> Cbor.obj [kind "code", ("inlines", inlines env is)]
-      UnorderedList items ->
-        Cbor.obj [kind "bullets", ("items", Cbor.list (blocks env) items)]
-      OrderedList items ->
-        Cbor.obj
-          [ kind "numbered",
-            ( "items",
-              Cbor.list
-                ( \i ->
-                    Cbor.obj
-                      [ ("number", Cbor.nullable (Cbor.text . decimal) i.number),
-                        ("blocks", blocks env i.content)
-                      ]
-                )
-                items
-            )
-          ]
-      DefinitionList items ->
-        Cbor.obj
-          [ kind "definitions",
-            ( "items",
-              Cbor.list
-                ( \i ->
-                    Cbor.obj
-                      [("term", inlines env i.term), ("blocks", blocks env i.definition)]
-                )
-                items
-            )
-          ]
-      Examples es ->
-        Cbor.obj
-          [ kind "examples",
-            ( "items",
-              Cbor.list
-                ( \e ->
-                    Cbor.obj
-                      [ ("expression", Cbor.text e.expression),
-                        ("results", Cbor.list Cbor.text e.results)
-                      ]
-                )
-                es
-            )
-          ]
-      Property t -> Cbor.obj [kind "property", ("text", Cbor.text t)]
-      Table t ->
-        Cbor.obj
-          [ kind "table",
-            ("header", Cbor.list (Cbor.list cell) t.header),
-            ("body", Cbor.list (Cbor.list cell) t.body)
-          ]
-    cell c =
-      Cbor.obj
-        [ ("colspan", Cbor.int c.colspan),
-          ("rowspan", Cbor.int c.rowspan),
-          ("inlines", inlines env c.content)
-        ]
+doc env = encodeDoc (richEnv env)
 
 inlines :: Env -> [Inline] -> Encoding
-inlines env = Cbor.list inline
+inlines env = encodeInlines (richEnv env)
+
+-- | Names and modules, linked as on this page.
+richEnv :: Env -> RichEnv
+richEnv env = RichEnv {name = nameFields, moduleRef = refOf}
   where
-    inline = \case
-      Str t -> Cbor.obj [kind "text", ("text", Cbor.text t)]
-      Emphasis is -> Cbor.obj [kind "emphasis", ("inlines", inlines env is)]
-      Bold is -> Cbor.obj [kind "bold", ("inlines", inlines env is)]
-      Code is -> Cbor.obj [kind "code", ("inlines", inlines env is)]
-      Math style t ->
-        Cbor.obj
-          [ kind "math",
-            ( "style",
-              Cbor.text $ case style of
-                InlineMath -> "inline"
-                DisplayMath -> "display"
-            ),
-            ("tex", Cbor.text t)
+    nameFields r =
+      let local = target r
+       in [ ("target", Cbor.nullable Cbor.int local),
+            ("link", Cbor.nullable Cbor.word32 (outer r local))
           ]
-      Link l ->
-        Cbor.obj
-          [ kind "link",
-            ("url", Cbor.text (urlText l.url)),
-            ("label", Cbor.nullable (inlines env) l.label)
-          ]
-      Name r ->
-        Cbor.obj
-          [ kind "name",
-            ("written", Cbor.text r.written),
-            ( "ns",
-              Cbor.text $ case r.namespace of
-                ValueNs -> "value"
-                TypeNs -> "type"
-                AnyNs -> "any"
-            ),
-            ("target", Cbor.nullable Cbor.int local),
-            ("link", Cbor.nullable Cbor.word32 (outer local))
-          ]
-        where
-          local = target r
-          outer = \case
-            Nothing -> Map.lookup (docRef r) env.links.docs
-            Just _ -> Nothing
-      ModuleLink l ->
-        Cbor.obj
-          [ kind "module",
-            ("module", Cbor.text (moduleNameText l.name)),
-            ("anchor", Cbor.nullable Cbor.text l.anchor),
-            ("ref", Cbor.nullable Cbor.text (refOf l.name)),
-            ("label", Cbor.nullable (inlines env) l.label)
-          ]
+    outer r = \case
+      Nothing -> Map.lookup (docRef r) env.links.docs
+      Just _ -> Nothing
     target r = firstWithId env =<< resolveLocal env.code.names r
     refOf (ModuleName n) = moduleRef env.index <$> resolveModuleRef env.index n
 
@@ -1466,10 +1340,3 @@ line s = Cbor.int (lineNo s.startLine)
 
 lineNo :: Line -> Int
 lineNo (Line n) = fromIntegral n
-
-decimal :: Int -> Text
-decimal = Text.pack . show
-
--- | @1.2.3@.
-version :: NonEmpty.NonEmpty Int -> Text
-version = Text.intercalate "." . map decimal . NonEmpty.toList

@@ -1,9 +1,9 @@
 {-# LANGUAGE StrictData #-}
 
--- | Rich text: one small AST for Haddock comments, and later for LLM
--- answers (SPEC §11.4.9, D-59). It has no raw HTML and no images, so
--- whatever a comment says, the page can only show text, code and plain
--- links (SPEC §6.4, §9.2).
+-- | Rich text: one small AST for Haddock comments, Markdown files, and
+-- later for LLM answers (SPEC §11.4.9, D-59). It has no raw HTML and no
+-- images, so whatever a comment says, the page can only show text, code
+-- and plain links (SPEC §6.4, §9.2).
 module HaskellReviewer.Core.RichText
   ( -- * Documents
     Doc (..),
@@ -15,6 +15,9 @@ module HaskellReviewer.Core.RichText
     Example (..),
     TableBody (..),
     Cell (..),
+    CodeListing (..),
+    Piece (..),
+    TaskItem (..),
 
     -- * Inline text
     Inline (..),
@@ -23,6 +26,8 @@ module HaskellReviewer.Core.RichText
     MathStyle (..),
     NameRef (..),
     RefNamespace (..),
+    FileRef (..),
+    AnchorRef (..),
 
     -- * Links
     SafeUrl,
@@ -40,6 +45,8 @@ import Data.List.NonEmpty (NonEmpty)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import HaskellReviewer.Core.Project (ModuleName)
+import HaskellReviewer.Core.RelPath (RelPath)
+import HaskellReviewer.Core.Tokens (DisplayClass)
 
 -- * Documents
 
@@ -74,13 +81,22 @@ data Block
   | -- | @prop> ...@.
     Property Text
   | Table TableBody
+  | -- | Markdown only from here on.
+    BlockQuote [Block]
+  | ThematicBreak
+  | -- | A fenced or indented code block, maybe coloured.
+    Listing CodeListing
+  | -- | @- [x] done@ items.
+    TaskList [TaskItem]
   deriving (Eq, Show)
 
 -- | A heading inside a comment.
 data Header = Header
   { -- | 1 to 6.
     level :: Int,
-    title :: [Inline]
+    title :: [Inline],
+    -- | Its id on the page, for @#anchor@ links. Markdown only.
+    anchor :: Maybe Text
   }
   deriving (Eq, Show)
 
@@ -122,6 +138,30 @@ data Cell = Cell
   }
   deriving (Eq, Show)
 
+-- | A Markdown code block.
+data CodeListing = CodeListing
+  { -- | The first word of the info string, if any.
+    lang :: Maybe Text,
+    -- | The text, cut where the colour changes. Haskell blocks only;
+    -- others are one plain piece.
+    pieces :: [Piece]
+  }
+  deriving (Eq, Show)
+
+-- | Some code and its colour ('Nothing': plain).
+data Piece = Piece
+  { display :: Maybe DisplayClass,
+    text :: Text
+  }
+  deriving (Eq, Show)
+
+-- | An item of a task list.
+data TaskItem = TaskItem
+  { done :: Bool,
+    content :: [Block]
+  }
+  deriving (Eq, Show)
+
 -- * Inline text
 
 -- | A piece of a paragraph.
@@ -137,6 +177,30 @@ data Inline
   | -- | @'name'@: a link once it's resolved, plain code until then.
     Name NameRef
   | ModuleLink ModLink
+  | -- | Markdown only from here on. @~~text~~@.
+    Strike [Inline]
+  | -- | A link to a file of the snapshot.
+    FileLink FileRef
+  | -- | @#anchor@: a heading of the same page.
+    AnchorLink AnchorRef
+  deriving (Eq, Show)
+
+-- | A relative link in a Markdown file, resolved: the file exists.
+data FileRef = FileRef
+  { path :: RelPath,
+    -- | After the @#@, as written (like @L10@ or a heading's anchor).
+    fragment :: Maybe Text,
+    -- | 'Nothing': show the path. Never @Just []@.
+    label :: Maybe [Inline]
+  }
+  deriving (Eq, Show)
+
+-- | A link to a heading of the same page.
+data AnchorRef = AnchorRef
+  { anchor :: Text,
+    -- | 'Nothing': show the anchor. Never @Just []@.
+    label :: Maybe [Inline]
+  }
   deriving (Eq, Show)
 
 -- | An http or https link.
@@ -217,7 +281,7 @@ forceBlocks = each block
   where
     block = \case
       Paragraph is -> forceInlines is
-      Heading h -> forceInlines h.title
+      Heading h -> forceInlines h.title `seq` maybe () (`seq` ()) h.anchor
       CodeBlock is -> forceInlines is
       UnorderedList items -> each forceBlocks items
       OrderedList items -> each (\i -> forceBlocks i.content) items
@@ -226,6 +290,10 @@ forceBlocks = each block
       Examples es -> each (\e -> each (`seq` ()) e.results) es
       Property _ -> ()
       Table t -> each row t.header `seq` each row t.body
+      BlockQuote bs -> forceBlocks bs
+      ThematicBreak -> ()
+      Listing l -> maybe () (`seq` ()) l.lang `seq` each (\p -> p.display `seq` ()) l.pieces
+      TaskList items -> each (\i -> forceBlocks i.content) items
     row = each (\c -> forceInlines c.content)
 
 -- | Like 'forceDoc', for inline text.
@@ -241,6 +309,9 @@ forceInlines = each inline
       Link l -> maybe () forceInlines l.label
       Name r -> maybe () (`seq` ()) r.qualifier
       ModuleLink l -> maybe () (`seq` ()) l.anchor `seq` maybe () forceInlines l.label
+      Strike is -> forceInlines is
+      FileLink l -> maybe () (`seq` ()) l.fragment `seq` maybe () forceInlines l.label
+      AnchorLink l -> maybe () forceInlines l.label
 
 each :: (a -> ()) -> [a] -> ()
 each f = foldr (\x r -> f x `seq` r) ()

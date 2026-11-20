@@ -406,7 +406,25 @@ sourceTexts =
     ("s/src/Tool.hs", "{-# OPTIONS_GHC -F -pgmF hspec-discover #-}\n"),
     ("s/src/Lexer.x", "{ module Lexer where }\n"),
     ("s/src/A.hs-boot", "module A where\n"),
-    ("s/notes.txt", "notes\n")
+    ("s/notes.txt", "notes\n"),
+    ( "s/README.md",
+      "# Shapes\n\n\
+      \See [A](src/A.hs#L4), [up](#shapes), [web](https://x.org), [gone](Nope.md).\n\n\
+      \```haskell\n\
+      \x = 1\n\
+      \```\n"
+    ),
+    -- Every Markdown node, for the API fixtures.
+    ( "s/docs/All.md",
+      "# All\n\n\
+      \~~old~~ [file](../src/A.hs#L1) [md](../README.md#shapes) [up](#all)\n\n\
+      \> quote\n\n\
+      \---\n\n\
+      \- [x] done\n\n\
+      \```hs\n\
+      \y = 'c'\n\
+      \```\n"
+    )
   ]
 
 -- | Build the shared inputs, before parallel tests use them. See
@@ -642,6 +660,7 @@ sourceSnapshot =
         [(Text.Encoding.encodeUtf8 p, EntryFile) | (p, _) <- sourceTexts]
           <> [ ("s/s.cabal", EntryFile),
                ("s/src/Bin.hs", EntryFile),
+               ("s/blob.md", EntryFile),
                ("s/src/Big.hs", EntryFile),
                ("s/src/Link.hs", EntrySymlink),
                ("s/vendor", EntrySubmodule commit)
@@ -883,6 +902,7 @@ contents =
     ("t/ünï.txt", TextContent "naïve main\n"),
     -- Modules of the source fixture.
     ("s/src/Bin.hs", Binary (FileSize 10)),
+    ("s/blob.md", Binary (FileSize 10)),
     ( "s/src/Big.hs",
       TooLarge TooLargeInfo {size = FileSize 2_000_000, limit = textLimit}
     ),

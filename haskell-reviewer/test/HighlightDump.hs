@@ -2,7 +2,7 @@
 -- A header line, the warnings, then one line per run:
 -- @line:col-line:col class "text"@, with only the first line of a run's
 -- text.
-module HighlightDump (dumpHighlight) where
+module HighlightDump (dumpHighlight, dumpMarkdown) where
 
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -12,6 +12,7 @@ import HaskellReviewer.Core.Highlight
     highlightModule,
     runList,
   )
+import HaskellReviewer.Core.Markdown (Markdown (..))
 import HaskellReviewer.Core.ModuleModel
   ( ModuleParse (..),
     ParsedModule (..),
@@ -26,9 +27,8 @@ import HaskellReviewer.Core.Tokens (tokenCount)
 -- | The runs of a parse of this text (BOM included, as on disk).
 dumpHighlight :: Text -> ModuleParse -> Text
 dumpHighlight text p =
-  Text.unlines (header : warnings <> map run (runList (highlightModule p)))
+  Text.unlines (header : warnings <> dumpRuns text (runList (highlightModule p)))
   where
-    src = sourceLines text
     header = case p of
       Parsed _ -> "parsed"
       TextOnly t ->
@@ -47,6 +47,16 @@ dumpHighlight text p =
     tokens = \case
       ParseFailed _ (Just ts) -> Text.pack (show (tokenCount ts))
       _ -> "none"
+
+-- | The runs of a Markdown file (BOM included, as on disk).
+dumpMarkdown :: Text -> Markdown -> Text
+dumpMarkdown text m = Text.unlines ("markdown" : dumpRuns text m.runs)
+
+-- | One line per run.
+dumpRuns :: Text -> [Run] -> [Text]
+dumpRuns text = map run
+  where
+    src = sourceLines text
     run r = renderSpan r.span <> " " <> className r.display <> " " <> slice r
     slice r = case Text.lines (sliceSpan src r.span) of
       [] -> "\"\""

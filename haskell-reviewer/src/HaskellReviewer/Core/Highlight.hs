@@ -46,8 +46,13 @@ import HaskellReviewer.Core.ModuleModel
     TextOnlyReason (..),
   )
 import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
-import HaskellReviewer.Core.Tokens (Token (..), TokenClass, Tokens, tokenList)
-import HaskellReviewer.Core.Tokens qualified as Tokens (TokenClass (..))
+import HaskellReviewer.Core.Tokens
+  ( DisplayClass (..),
+    Token (..),
+    Tokens,
+    displayClass,
+    tokenList,
+  )
 
 {- Note [Highlight runs]
 
@@ -95,25 +100,6 @@ data Run = Run
   }
   deriving (Eq, Show)
 
--- | The SPEC §5.6 classes, plus CPP directive lines. The 'Enum' numbers
--- go on the wire: only add at the end.
-data DisplayClass
-  = KeywordClass
-  | -- | Capitalised names and operators starting with @:@.
-    TypeConClass
-  | VariableClass
-  | OperatorClass
-  | LiteralClass
-  | -- | Haddock and literate prose too.
-    CommentClass
-  | -- | CPP calls too.
-    PragmaClass
-  | -- | Lines CPP skipped.
-    ExcludedClass
-  | -- | CPP directive lines.
-    DirectiveClass
-  deriving (Eq, Ord, Show, Enum, Bounded)
-
 -- | Like 'Runs', 6 words a run: the 5 of 'Runs', then the link. See
 -- Note [Highlight runs].
 newtype LinkedRuns = LinkedRuns (Vector.Vector Word32)
@@ -130,24 +116,6 @@ linkedRunWidth = 6
 -- | None. Shared.
 noRuns :: Runs
 noRuns = Runs Vector.empty
-
--- | A token's class. 'Nothing': plain.
-displayClass :: TokenClass -> Maybe DisplayClass
-displayClass = \case
-  Tokens.Keyword -> Just KeywordClass
-  Tokens.ConId -> Just TypeConClass
-  Tokens.ConSym -> Just TypeConClass
-  Tokens.VarId -> Just VariableClass
-  Tokens.VarSym -> Just OperatorClass
-  Tokens.ReservedOp -> Just OperatorClass
-  Tokens.Special -> Nothing
-  Tokens.Literal -> Just LiteralClass
-  Tokens.StringLit -> Just LiteralClass
-  Tokens.CharLit -> Just LiteralClass
-  Tokens.Comment -> Just CommentClass
-  Tokens.Haddock -> Just CommentClass
-  Tokens.Pragma -> Just PragmaClass
-  Tokens.Macro -> Just PragmaClass
 
 -- | A module's runs.
 highlightModule :: ModuleParse -> Runs

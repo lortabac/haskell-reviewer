@@ -196,7 +196,7 @@ markup =
       "[maps](\"Data.Map\")" `gives` [modLink "Data.Map" Nothing (Just [Str "maps"])],
     testCase "paragraphs, headings, code blocks" $
       (parseDoc "= Title\n\nText.\n\n@\ncode /x/\n@\n\n> bird\n> two").blocks
-        @?= [ Heading Header {level = 1, title = [Str "Title"]},
+        @?= [ Heading Header {level = 1, title = [Str "Title"], anchor = Nothing},
               Paragraph [Str "Text."],
               CodeBlock [Str "code ", Emphasis [Str "x"], Str "\n"],
               CodeBlock [Str "bird\ntwo"]

@@ -78,7 +78,8 @@ tests =
         "warm-up: every kind, reason, how, class, region, outline, sig, def"
         coverage,
       testCase "text only: lexed if it has tokens or regions, else plain" textOnlyCase,
-      testGroup "route" routeTests
+      testGroup "route" routeTests,
+      testGroup "markdown" markdownTests
     ]
 
 -- * Warm-up
@@ -326,6 +327,70 @@ routeTests =
         void (within (wait c))
       atomically (requestCount snap.index) >>= (@?= 0)
   ]
+
+-- * Markdown
+
+markdownTests :: [TestTree]
+markdownTests =
+  [ testCase "api/source: lexed, no links" $ do
+      v <- okSource sourceApi "s/README.md"
+      str (field "highlight" v) @?= "lexed"
+      maybeStr (field "ref" v) @?= Nothing
+      arr (field "targets" v) @?= []
+      arr (field "outline" v) @?= []
+      -- The heading: line 1, keyword (class 0), no link.
+      take linkedRunWidth (map int (arr (field "runs" v))) @?= [1, 1, 0, 9, 0, 0],
+    testCase "api/source: not text is plain" $ do
+      v <- okSource sourceApi "s/blob.md"
+      str (field "highlight" v) @?= "plain",
+    testCase "api/markdown: the doc, links resolved" $ do
+      v <- okMarkdown "s/README.md"
+      str (field "kind" v) @?= "doc"
+      let blocks = arr (field "blocks" (field "doc" v))
+      map (str . field "kind") blocks @?= ["heading", "paragraph", "listing"]
+      str (field "anchor" (head' blocks)) @?= "shapes"
+      let inl = arr (field "inlines" (blocks !! 1))
+          kinds = map (str . field "kind") inl
+      kinds @?= ["text", "file", "text", "anchor", "text", "link", "text"]
+      str (field "path" (inl !! 1)) @?= "s/src/A.hs"
+      str (field "fragment" (inl !! 1)) @?= "L4"
+      str (field "anchor" (inl !! 3)) @?= "shapes"
+      str (field "text" (inl !! 6)) @?= ", gone <Nope.md>."
+      -- Haskell pieces: [class, text].
+      map arr (arr (field "pieces" (blocks !! 2)))
+        @?= [ [Aeson.Number 2, Aeson.String "x"],
+              [Aeson.Null, Aeson.String " = "],
+              [Aeson.Number 4, Aeson.String "1"],
+              [Aeson.Null, Aeson.String "\n"]
+            ],
+    testCase "api/markdown: not text" $ do
+      v <- okMarkdown "s/blob.md"
+      str (field "kind" v) @?= "not-text",
+    testCase "api/markdown: 404 for no file, not Markdown, bad side" $ do
+      mapM_
+        ( \segs -> do
+            r <- getApi sourceApi (["api", "markdown", "tree"] <> segs)
+            (segs, r.status, r.body) @?= (segs, 404, fileNotFound)
+        )
+        [["s", "Nope.md"], ["s", "notes.txt"], ["s", "src", "A.hs"], []]
+      r <- getApi sourceApi ["api", "markdown", "head", "s", "README.md"]
+      r.status @?= 404,
+    testCase "api/markdown: gone 404, unreadable 500, not GET 405" $ do
+      let with e = sourceApi {readEntry = \_ _ _ -> pure (Left e)}
+          path = ["api", "markdown", "tree", "s", "README.md"]
+      gone <- getApi (with ReadGone) path
+      (gone.status, gone.body) @?= (404, fileNotFound)
+      failed <- getApi (with (ReadFailed "Permission denied")) path
+      (failed.status, failed.body) @?= (500, "cannot read file")
+      post <- requestApi "POST" sourceApi path
+      post.status @?= 405
+  ]
+  where
+    okMarkdown p = do
+      r <- getApi sourceApi (["api", "markdown", "tree"] <> Text.splitOn "/" p)
+      r.status @?= 200
+      lookup "Content-Type" r.headers @?= Just "application/cbor"
+      cborValue r.body
 
 -- | Two workers, held on A and B. Cpp is Pending when asked for. B goes,
 -- a worker parses Cpp, then parks while the request computes. A is

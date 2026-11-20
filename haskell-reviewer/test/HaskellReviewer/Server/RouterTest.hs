@@ -136,6 +136,7 @@ tests =
           [ [],
             [""],
             ["src", "tree", "a", "b.hs"],
+            ["md", "tree", "README.md"],
             ["docs", "tree", "pkg:lib:Data.Foo"],
             ["refs", "tree", "pkg:lib:Data.Foo"],
             ["search", "tree"],

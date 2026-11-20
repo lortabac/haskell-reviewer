@@ -439,6 +439,29 @@
   display: block;
 }
 
+/* Markdown files (D-328). */
+.doc-quote {
+  margin-left: 0;
+  padding-left: var(--space-3);
+  border-left: 3px solid var(--color-border);
+  color: var(--color-muted);
+}
+
+.doc-rule {
+  border: none;
+  border-top: 1px solid var(--color-border);
+}
+
+.doc-tasks {
+  list-style: none;
+  padding-left: var(--space-3);
+}
+
+/* Paragraphs in list items: inline with the box or number. */
+.doc-tasks > li > p:first-of-type {
+  display: inline;
+}
+
 /* Links off the app open in a new tab: say so. */
 .ext-link::after {
   content: " ↗" / "";

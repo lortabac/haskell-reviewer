@@ -4,6 +4,7 @@ import { basePath } from "./base";
 import { defaultPrefs, type Prefs } from "./api/prefs";
 import { DocsView } from "./docs/DocsView";
 import { FileView } from "./files/FileView";
+import { MarkdownView } from "./md/MarkdownView";
 import { Frame } from "./Frame";
 import { Home } from "./Home";
 import { RefsView } from "./refs/RefsView";
@@ -43,6 +44,7 @@ export function App(props: {
       <Route path="/docs/tree/*ref" component={DocsView} />
       <Route path="/refs/tree/*ref" component={RefsView} />
       <Route path="/src/tree/*path" component={FileView} />
+      <Route path="/md/tree/*path" component={MarkdownView} />
       <Route path="/search/tree" component={TextSearchView} />
       <Route path="*" component={NotFound} />
     </Router>
