@@ -736,10 +736,12 @@ outsideCounts = withCanonicalTemp $ \tmp -> do
   -- An unmerged o/conf.
   git repo ["checkout", "-q", "-b", "side"]
   writeFile (at "o/conf") "side\n"
-  git repo ["commit", "-q", "-a", "-m", "side"]
+  git repo ["add", "o/conf"]
+  git repo ["commit", "-q", "-m", "side"]
   git repo ["checkout", "-q", "-"]
   writeFile (at "o/conf") "ours\n"
-  git repo ["commit", "-q", "-a", "-m", "ours"]
+  git repo ["add", "o/conf"]
+  git repo ["commit", "-q", "-m", "ours"]
   _ <- gitBytes repo ["merge", "side"] ""
   -- Then the working tree.
   appendFile (at "o/edit") "more\n"
