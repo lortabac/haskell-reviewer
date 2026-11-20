@@ -53,7 +53,24 @@ export type ModuleSource =
   | { kind: "preprocessed"; path: string; tool: string }
   | { kind: "no-source"; reason: NoSourceReason };
 
-export interface ModuleEntry {
+// How a module changed in diff mode. null: not changed, or browse mode.
+export const moduleChanges = [
+  "added",
+  "removed",
+  "modified",
+  "renamed",
+] as const;
+
+export type ModuleChange = (typeof moduleChanges)[number];
+
+// Diff markers, on every module. Browse mode: null and false.
+export interface Marker {
+  change: ModuleChange | null;
+  // Parse settings or role changed.
+  settingsChanged: boolean;
+}
+
+export interface ModuleEntry extends Marker {
   name: string;
   // Long form, like pkg:lib:Foo.
   id: string;
@@ -87,13 +104,13 @@ export const otherKinds = ["module", "boot"] as const;
 export type OtherFile =
   // A Haskell file no component claims. The id is the path; name is
   // null when the path isn't a module name.
-  | {
+  | ({
       kind: "module";
       path: string;
       name: string | null;
       id: string;
       ref: string;
-    }
+    } & Marker)
   // .hs-boot / .lhs-boot: text only.
   | { kind: "boot"; path: string };
 
@@ -145,6 +162,8 @@ function decodeEntry(value: unknown, path: string): ModuleEntry {
     ref: field(o, "ref", path, str),
     role: field(o, "role", path, oneOf(moduleRoles)),
     source: field(o, "source", path, decodeSource),
+    change: field(o, "change", path, nullable(oneOf(moduleChanges))),
+    settingsChanged: field(o, "settingsChanged", path, bool),
   };
 }
 
@@ -186,6 +205,8 @@ function decodeOther(value: unknown, path: string): OtherFile {
         name: field(o, "name", path, nullable(str)),
         id: field(o, "id", path, str),
         ref: field(o, "ref", path, str),
+        change: field(o, "change", path, nullable(oneOf(moduleChanges))),
+        settingsChanged: field(o, "settingsChanged", path, bool),
       };
     case "boot":
       return { kind, path: field(o, "path", path, str) };

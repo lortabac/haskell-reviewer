@@ -126,6 +126,7 @@ library
     HaskellReviewer.Effects.GitObjects
     HaskellReviewer.Effects.Helper
     HaskellReviewer.Effects.Log
+    HaskellReviewer.Effects.Pairing
     HaskellReviewer.Effects.Parser
     HaskellReviewer.Effects.Revisions
     HaskellReviewer.Effects.PosixAt
@@ -137,6 +138,7 @@ library
 
     -- Session
     HaskellReviewer.Session.Clients
+    HaskellReviewer.Session.Diff
     HaskellReviewer.Session.Index
     HaskellReviewer.Session.Prefs
     HaskellReviewer.Session.Project
@@ -149,6 +151,7 @@ library
     HaskellReviewer.Server.Assets
     HaskellReviewer.Server.Cbor
     HaskellReviewer.Server.CborJson
+    HaskellReviewer.Server.DiffFiles
     HaskellReviewer.Server.Events
     HaskellReviewer.Server.Listen
     HaskellReviewer.Server.Prefs

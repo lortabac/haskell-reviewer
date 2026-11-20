@@ -30,6 +30,7 @@ import HaskellReviewer.Server.Api
     sourceApp,
   )
 import HaskellReviewer.Server.Assets (Asset (..), lookupAsset, shellFor)
+import HaskellReviewer.Server.DiffFiles (diffFilesApp)
 import HaskellReviewer.Server.Events (EventStream, eventsApp)
 import HaskellReviewer.Server.Prefs (prefsApp)
 import HaskellReviewer.Server.Refs (refsApp)
@@ -41,6 +42,7 @@ import HaskellReviewer.Server.Security
     withSecurityHeaders,
   )
 import HaskellReviewer.Server.TextSearch (textSearchApp)
+import HaskellReviewer.Session.Diff (DiffSlot)
 import HaskellReviewer.Session.Prefs (PrefsStore)
 import Network.HTTP.Types
   ( Header,
@@ -107,6 +109,9 @@ Paths below are what the router sees, after the token.
   files that have the text, as JSON (Note [Text search route] in
   "HaskellReviewer.Server.TextSearch"). Same sides and methods; bad
   params are a plain 400.
+- api/diff-files: the changed files of a diff session, as JSON
+  (D-325). GET only (405 otherwise, HEAD too), then a plain 404 in
+  browse mode.
 - api/prefs: the UI preferences, as JSON. GET, and POST with an
   application/json body (Note [Prefs route] in
   "HaskellReviewer.Server.Prefs"); 405 otherwise, HEAD too.
@@ -145,7 +150,9 @@ first: it runs the middleware on a fake request before warp listens.
 data Routes = Routes
   { events :: EventStream,
     files :: FilesApi,
-    prefs :: PrefsStore
+    prefs :: PrefsStore,
+    -- | The pairing, in diff mode only.
+    diff :: Maybe DiffSlot
   }
 
 -- | The whole app. Paths are relative to the token: the router never
@@ -223,6 +230,7 @@ router shell routes req respond = case req.pathInfo of
   ["api", "search", side] -> searchApp routes.files side req respond
   ["api", "refs", side] -> refsApp routes.files side req respond
   ["api", "text-search", side] -> textSearchApp routes.files side req respond
+  ["api", "diff-files"] -> diffFilesApp routes.diff req respond
   ["api", "prefs"] -> prefsApp routes.prefs req respond
   _ -> respond notFound
   where

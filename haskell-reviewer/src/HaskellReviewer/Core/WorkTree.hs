@@ -9,6 +9,7 @@ module HaskellReviewer.Core.WorkTree
     IndexEntry (..),
     IndexKind (..),
     Exec (..),
+    execOfMode,
     IndexStat (..),
     StatTime (..),
     parseDebugEntries,
@@ -34,7 +35,7 @@ module HaskellReviewer.Core.WorkTree
   )
 where
 
-import Data.Bits ((.&.))
+import Data.Bits (Bits, (.&.))
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as Char8
@@ -43,7 +44,7 @@ import Data.Text (Text)
 import Data.Text.Encoding qualified as Text.Encoding
 import Data.Word (Word32, Word64)
 import HaskellReviewer.Core.Eol (CleanEol, ExecBit (..), Filtering, Symlinks (..))
-import HaskellReviewer.Core.Git (ObjectId, parseObjectId)
+import HaskellReviewer.Core.Git (Exec (..), ObjectId, parseObjectId)
 import Numeric (readHex, readOct)
 
 {- Note [Stat check]
@@ -89,9 +90,9 @@ data IndexKind
     IndexOther ByteString
   deriving (Eq, Show)
 
--- | The owner's exec bit.
-data Exec = NotExecutable | Executable
-  deriving (Eq, Show)
+-- | The owner's exec bit of a mode (index or st_mode).
+execOfMode :: (Bits a, Num a) => a -> Exec
+execOfMode mode = if mode .&. 0o100 /= 0 then Executable else NotExecutable
 
 -- | Seconds and nanoseconds, 32 bits each, as the index keeps them.
 data StatTime = StatTime
@@ -200,9 +201,7 @@ parseDebugEntries = go []
             Right (kindOf m mode, oid, stage, path)
       _ -> Left ("bad ls-files record: " <> lenient hdr)
     kindOf m mode = case mode .&. 0o170000 of
-      0o100000
-        | mode .&. 0o100 /= 0 -> IndexRegular Executable
-        | otherwise -> IndexRegular NotExecutable
+      0o100000 -> IndexRegular (execOfMode mode)
       0o120000 -> IndexSymlink
       0o160000 -> IndexGitlink
       _ -> IndexOther m
@@ -342,7 +341,7 @@ checkEntry s e look
     modeChanged st = case e.kind of
       IndexRegular x
         | s.execBit == TrustExecBit ->
-            (x == Executable) /= (st.mode .&. 0o100 /= 0)
+            x /= execOfMode st.mode
       _ -> False
     -- The size too: a recorded size of 0 can still differ.
     statDiffers st =

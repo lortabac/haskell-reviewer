@@ -25,26 +25,52 @@ import Control.Concurrent.MVar (newEmptyMVar)
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as LBS
 import Data.List (sort)
+import Data.Map.Strict qualified as Map
+import Data.Maybe (fromMaybe)
+import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
+import HaskellReviewer.Core.CommitFiles (OutsideChanges (..))
 import HaskellReviewer.Core.Config (SidebarView (..), Theme (..), UiDefaults (..))
 import HaskellReviewer.Core.Eol (Filtering (..))
 import HaskellReviewer.Core.FileContent (FileNotes (..))
+import HaskellReviewer.Core.Git (ObjectId (..))
+import HaskellReviewer.Core.Markers (Marker (..), ModuleChange (..), SettingsChange (..))
 import HaskellReviewer.Core.ModuleModel
   ( ModuleParse (..),
     TextOnlyReason (..),
     textOnlyModule,
   )
+import HaskellReviewer.Core.Modules (ModuleIndex (..))
+import HaskellReviewer.Core.RelPath (RelPath, relPathFromSegments)
+import HaskellReviewer.Core.Renames
+  ( Change (..),
+    ChangeNote (..),
+    ExecChange (..),
+    Limit (..),
+    ModifiedFile (..),
+    Pairing (..),
+    RenameStep (..),
+    RenamedFile (..),
+  )
 import HaskellReviewer.Core.ResolveWarmUp (resolveWarmUpIndex)
-import HaskellReviewer.Core.Sides (Side (..))
+import HaskellReviewer.Core.Sides (Side (..), Sides (..))
+import HaskellReviewer.Core.Similarity (Score (..), maxScore)
 import HaskellReviewer.Core.Xdg (XdgProblem (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), newLogger)
 import HaskellReviewer.Server.CborJson (cborToJson, renderCborJsonError)
-import HaskellReviewer.Server.Wire (encodeIndexing, helloPayload)
+import HaskellReviewer.Server.Wire
+  ( DiffEnd (..),
+    DiffFiles (..),
+    encodeDiffFiles,
+    encodeIndexing,
+    encodeModuleTree,
+    helloPayload,
+  )
 import HaskellReviewer.Server.Wire.Source (coveringView, encodeSource)
 import HaskellReviewer.Session.Index (Progress (..))
 import HaskellReviewer.Session.Prefs (newPrefsStore)
-import HaskellReviewer.Session.Snapshot (Generation (..))
+import HaskellReviewer.Session.Snapshot (Generation (..), Snapshot (..))
 import System.Directory qualified as Dir
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
@@ -105,6 +131,13 @@ cases =
     cbor "file-filtered" (okCbor filteredApi (file ["app", "Main.hs"])),
     json "modules" (okJson projectApi ["api", "modules", "tree"]),
     json "modules-implicit" (okJson implicitApi ["api", "modules", "tree"]),
+    -- Diff mode: every marker value, on every kind of module.
+    json "modules-diff" modulesDiff,
+    -- Commits: every status and note, outside ROOT. The working tree:
+    -- no head commit, filtered, outside unknown. Over the limit.
+    json "diff-files" (diffFiles commitsDiff),
+    json "diff-files-worktree" (diffFiles workTreeDiff),
+    json "diff-files-limit" (diffFiles limitDiff),
     -- One per reason a module is text only, a parsed one and one after
     -- CPP.
     cbor "module-parsed" (okCbor projectApi (modulePath "Foo")),
@@ -197,6 +230,122 @@ cases =
       projectApi
         { parse = \_ _ -> pure (TextOnly (textOnlyModule r []))
         }
+
+-- | GET api/diff-files with this body in the slot.
+diffFiles :: DiffFiles -> IO LBS.ByteString
+diffFiles d =
+  okJson
+    fixtureApi {diffFiles = Just (Right (encodeDiffFiles (Generation 1) d)), workers = 0}
+    ["api", "diff-files"]
+
+-- | Commits: every status and note but filtered, outside ROOT.
+commitsDiff :: DiffFiles
+commitsDiff =
+  DiffFiles
+    { base = DiffEnd {label = "main", commit = Just (hex 'a')},
+      head = DiffEnd {label = "feature", commit = Just (hex 'b')},
+      pairing =
+        Pairing
+          { changes =
+              [ Added (relPath "copy/dup.txt"),
+                Renamed (renamed "exact/a.txt" "exact/b.txt" maxScore ExactStep SameExec),
+                modified "mode/x.sh" (Just ModeChanged),
+                Renamed
+                  (renamed "run/a.sh" "run/b.sh" (Score 45000) MatrixStep ExecChanged),
+                Removed (relPath "sim40/old.txt"),
+                Modified ModifiedFile {path = relPath "src/A.hs", note = Nothing},
+                Modified ModifiedFile {path = relPath "tc/f", note = Just TypeChanged}
+              ],
+            limit = WithinLimits
+          },
+      filtered = Set.empty,
+      outside =
+        Just
+          OutsideChanges
+            { total = 3,
+              paths = ["other/moved.hs", "other/new", "other/x"],
+              truncated = False
+            },
+      truncated = False
+    }
+
+-- | The working tree: no head commit, filtered, outside not known.
+workTreeDiff :: DiffFiles
+workTreeDiff =
+  DiffFiles
+    { base = DiffEnd {label = "HEAD", commit = Just (hex 'a')},
+      head = DiffEnd {label = "working tree", commit = Nothing},
+      pairing =
+        Pairing
+          { changes =
+              [ Modified ModifiedFile {path = relPath "data.bin", note = Nothing},
+                Renamed (renamed "wt/a.txt" "wt/b.txt" maxScore ExactStep SameExec)
+              ],
+            limit = WithinLimits
+          },
+      filtered = Set.fromList [relPath "data.bin"],
+      outside = Nothing,
+      truncated = False
+    }
+
+-- | Over the rename limit, a list cut at the cap.
+limitDiff :: DiffFiles
+limitDiff =
+  DiffFiles
+    { base = DiffEnd {label = "v1", commit = Just (hex 'a')},
+      head = DiffEnd {label = "v2", commit = Just (hex 'b')},
+      pairing =
+        Pairing
+          { changes =
+              [ Renamed
+                  (renamed "d1/Same.hs" "d2/Same.hs" (Score 48000) BasenameStep SameExec),
+                Added (relPath "lim/q1.txt"),
+                Removed (relPath "lim/r1.txt")
+              ],
+            limit = OverRenameLimit
+          },
+      filtered = Set.empty,
+      outside = Just OutsideChanges {total = 100001, paths = ["a"], truncated = True},
+      truncated = True
+    }
+
+-- | A rename of these paths.
+renamed :: Text -> Text -> Score -> RenameStep -> ExecChange -> RenamedFile
+renamed a b score step exec =
+  RenamedFile {from = relPath a, to = relPath b, score = score, step = step, exec = exec}
+
+-- | A path, split at @/@.
+relPath :: Text -> RelPath
+relPath t =
+  fromMaybe (error ("bad path: " <> show t)) (relPathFromSegments (Text.splitOn "/" t))
+
+-- | A modified file with this note.
+modified :: Text -> Maybe ChangeNote -> Change
+modified p n = Modified ModifiedFile {path = relPath p, note = n}
+
+-- | A made-up SHA-1 id.
+hex :: Char -> ObjectId
+hex c = ObjectId (Text.replicate 40 (Text.singleton c))
+
+-- | The project fixture's tree, with markers: each value in turn.
+modulesDiff :: IO LBS.ByteString
+modulesDiff = do
+  snap <- case projectApi.sides of
+    BrowseSides get -> get >>= either (assertFailure . show) pure
+    DiffSides _ -> assertFailure "a diff api"
+  let changes =
+        cycle
+          [ Nothing,
+            Just ModuleAdded,
+            Just ModuleRemoved,
+            Just ModuleModified,
+            Just ModuleRenamed
+          ]
+      settings = cycle [SettingsSame, SettingsSame, SettingsChanged]
+      markers =
+        Map.fromList
+          (zip (Set.toList snap.modules.ids) (zipWith Marker changes settings))
+  pure (encodeModuleTree (Generation 1) markers snap.modules <> "\n")
 
 fixtureDir :: FilePath
 fixtureDir = "../fixtures/api/"

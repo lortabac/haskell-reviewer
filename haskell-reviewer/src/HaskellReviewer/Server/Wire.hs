@@ -5,17 +5,22 @@
 -- Field order is fixed (aeson's 'pairs', 'Cbor.obj'), so fixtures are
 -- stable. See Note [API fixtures].
 module HaskellReviewer.Server.Wire
-  ( -- * Bodies
+  ( -- * Types
+    DiffFiles (..),
+    DiffEnd (..),
+    RefsMissing (..),
+
+    -- * Bodies
     encodeFileList,
     encodeFileView,
     encodeModuleTree,
+    encodeDiffFiles,
     encodeModuleNotFound,
     encodeFileNotFound,
     encodeIndexing,
     encodePrefs,
     encodeSearch,
     encodeRefs,
-    RefsMissing (..),
     encodeRefsNotFound,
     encodeTextSearch,
     helloPayload,
@@ -31,8 +36,12 @@ import Data.Aeson qualified as Aeson
 import Data.Aeson.Encoding qualified as Encoding
 import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as LBS
+import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.Set (Set)
+import Data.Set qualified as Set
 import Data.Text (Text)
+import HaskellReviewer.Core.CommitFiles (OutsideChanges (..))
 import HaskellReviewer.Core.Config (sidebarName, themeName)
 import HaskellReviewer.Core.Eol (Filtering (..))
 import HaskellReviewer.Core.FileContent
@@ -47,6 +56,13 @@ import HaskellReviewer.Core.FileList
     EntryKind (..),
     FileList (..),
     ListSource (..),
+  )
+import HaskellReviewer.Core.Git (ObjectId (..))
+import HaskellReviewer.Core.Markers
+  ( Marker (..),
+    ModuleChange (..),
+    SettingsChange (..),
+    noMarker,
   )
 import HaskellReviewer.Core.Modules
   ( ComponentModules (..),
@@ -85,7 +101,16 @@ import HaskellReviewer.Core.References
     Reference (..),
     RefsAnswer (..),
   )
-import HaskellReviewer.Core.RelPath (relDirText, relPathText)
+import HaskellReviewer.Core.RelPath (RelPath, relDirText, relPathText)
+import HaskellReviewer.Core.Renames
+  ( Change (..),
+    ChangeNote (..),
+    ExecChange (..),
+    Limit (..),
+    ModifiedFile (..),
+    Pairing (..),
+    RenamedFile (..),
+  )
 import HaskellReviewer.Core.Search
   ( Hit (..),
     Indexing (..),
@@ -93,6 +118,7 @@ import HaskellReviewer.Core.Search
     SearchResult (..),
   )
 import HaskellReviewer.Core.Sides (Side, sideName)
+import HaskellReviewer.Core.Similarity (scorePercent)
 import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
 import HaskellReviewer.Core.TextSearch
   ( LineHit (..),
@@ -205,8 +231,13 @@ filteredValue notes = Cbor.bool $ case notes.filtered of
 -- (path), generated and preprocessed (path, tool), no-source (reason:
 -- autogen, missing, outside, symlink). An other module's name may be
 -- null. See Note [Module discovery] in "HaskellReviewer.Core.Modules".
-encodeModuleTree :: Generation -> ModuleIndex -> LBS.ByteString
-encodeModuleTree (Generation g) idx =
+--
+-- Every module (not a boot file) ends with its diff marker (D-325):
+-- @"change":null|"added"|"removed"|"modified"|"renamed"@ and
+-- @"settingsChanged":false@. A module not in the map gets null and
+-- false: all of them in browse mode.
+encodeModuleTree :: Generation -> Map ModuleId Marker -> ModuleIndex -> LBS.ByteString
+encodeModuleTree (Generation g) markers idx =
   Encoding.encodingToLazyByteString . Aeson.pairs $
     ("generation" .= g)
       <> Encoding.pair "notices" (Encoding.list notice idx.notices)
@@ -242,6 +273,7 @@ encodeModuleTree (Generation g) idx =
               <> ("ref" .= moduleRef idx i)
               <> ("role" .= role m.role)
               <> Encoding.pair "source" (source m.source)
+              <> marker i
     role :: ModuleRole -> Text
     role = \case
       RoleExposed -> "exposed"
@@ -273,7 +305,105 @@ encodeModuleTree (Generation g) idx =
                 <> ("name" .= fmap (\(ModuleName n) -> n) f.name)
                 <> ("id" .= renderModuleId i)
                 <> ("ref" .= moduleRef idx i)
+                <> marker i
       BootFile p -> Aeson.pairs (kindIs "boot" <> ("path" .= relPathText p))
+    marker i =
+      let mk = Map.findWithDefault noMarker i markers
+       in ("change" .= fmap moduleChange mk.change)
+            <> ("settingsChanged" .= (mk.settingsChange == SettingsChanged))
+    moduleChange :: ModuleChange -> Text
+    moduleChange = \case
+      ModuleAdded -> "added"
+      ModuleRemoved -> "removed"
+      ModuleModified -> "modified"
+      ModuleRenamed -> "renamed"
+
+-- | What GET api\/diff-files says, besides the generation.
+data DiffFiles = DiffFiles
+  { base :: DiffEnd,
+    head :: DiffEnd,
+    pairing :: Pairing,
+    -- | Modified paths whose head file is filtered (D-319): their note,
+    -- when they have no other.
+    filtered :: Set RelPath,
+    -- | 'Nothing' when not known (the working tree).
+    outside :: Maybe OutsideChanges,
+    -- | A side's list was cut at the file cap, so the pairing was cut
+    -- there too: files past it are not listed.
+    truncated :: Bool
+  }
+
+-- | One side of the diff: the revision as typed (or "working tree"),
+-- and its commit, if it has one.
+data DiffEnd = DiffEnd
+  { label :: Text,
+    commit :: Maybe ObjectId
+  }
+
+-- | GET api\/diff-files (D-325):
+--
+-- > {"generation":1,
+-- >  "base":{"label":"main","commit":"<hex>"},
+-- >  "head":{"label":"feature","commit":"<hex>"|null},
+-- >  "files":[{"path":"b.hs","oldPath":"a.hs"|null,
+-- >            "status":"added"|"removed"|"modified"|"renamed",
+-- >            "similarity":60|null,
+-- >            "note":null|"type-changed"|"mode-changed"|"filtered"}],
+-- >  "outside":{"total":3,"paths":["docs/x.md"],"truncated":false}|null,
+-- >  "renameLimitHit":false,"truncated":false}
+--
+-- Files by path: the head path, the base path for removed. Unchanged
+-- files are left out. oldPath and similarity only for renamed.
+encodeDiffFiles :: Generation -> DiffFiles -> LBS.ByteString
+encodeDiffFiles (Generation g) d =
+  Encoding.encodingToLazyByteString . Aeson.pairs $
+    ("generation" .= g)
+      <> Encoding.pair "base" (end d.base)
+      <> Encoding.pair "head" (end d.head)
+      <> Encoding.pair "files" (Encoding.list file d.pairing.changes)
+      <> Encoding.pair "outside" (maybe Encoding.null_ outside d.outside)
+      <> ("renameLimitHit" .= (d.pairing.limit /= WithinLimits))
+      <> ("truncated" .= d.truncated)
+  where
+    end e =
+      Aeson.pairs $
+        ("label" .= e.label) <> ("commit" .= fmap (\(ObjectId o) -> o) e.commit)
+    file = \case
+      Added p -> notRenamed p "added" Nothing
+      Removed p -> notRenamed p "removed" Nothing
+      Modified m -> notRenamed m.path "modified" (modifiedNote m)
+      Renamed r ->
+        row
+          ( ("path" .= relPathText r.to)
+              <> ("oldPath" .= relPathText r.from)
+              <> ("status" .= ("renamed" :: Text))
+              <> ("similarity" .= scorePercent r.score)
+          )
+          (renamedNote r.exec)
+    notRenamed p status =
+      row
+        ( ("path" .= relPathText p)
+            <> ("oldPath" .= Aeson.Null)
+            <> ("status" .= (status :: Text))
+            <> ("similarity" .= Aeson.Null)
+        )
+    row :: Series -> Maybe Text -> Aeson.Encoding
+    row fields note = Aeson.pairs (fields <> ("note" .= note))
+    modifiedNote m = case m.note of
+      Just n -> Just (changeNote n)
+      Nothing
+        | Set.member m.path d.filtered -> Just "filtered"
+        | otherwise -> Nothing
+    renamedNote = \case
+      ExecChanged -> Just "mode-changed"
+      SameExec -> Nothing
+    changeNote :: ChangeNote -> Text
+    changeNote = \case
+      TypeChanged -> "type-changed"
+      ModeChanged -> "mode-changed"
+    outside o =
+      Aeson.pairs $
+        ("total" .= o.total) <> ("paths" .= o.paths) <> ("truncated" .= o.truncated)
 
 -- | The 404 body of a module that isn't there (JSON):
 --

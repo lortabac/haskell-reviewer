@@ -26,6 +26,7 @@ module HaskellReviewer.Core.Git
     -- * ls-tree
     TreeEntry (..),
     TreeItem (..),
+    Exec (..),
     BlobItem (..),
     TreeSize (..),
     parseTreeEntries,
@@ -233,13 +234,17 @@ data TreeEntry = TreeEntry
 -- | What a tree row is, as far as we care.
 data TreeItem
   = -- | Mode 100644 or 100755.
-    ItemBlob BlobItem
+    ItemBlob Exec BlobItem
   | -- | Mode 120000. The blob holds the target.
     ItemSymlink BlobItem
   | -- | Mode 160000: a submodule, with its commit.
     ItemGitlink ObjectId
   | -- | Any other mode. Skipped.
     ItemOther ByteString
+  deriving (Eq, Show)
+
+-- | The owner's exec bit of a regular file: mode 100755 in git.
+data Exec = NotExecutable | Executable
   deriving (Eq, Show)
 
 -- | A file or symlink in a tree.
@@ -280,8 +285,8 @@ parseTreeEntries = traverse record . records
     build m o size = do
       oid <- parseObjectId o
       case m of
-        "100644" -> blob oid ItemBlob size
-        "100755" -> blob oid ItemBlob size
+        "100644" -> blob oid (ItemBlob NotExecutable) size
+        "100755" -> blob oid (ItemBlob Executable) size
         "120000" -> blob oid ItemSymlink size
         "160000"
           | maybe True (== "-") size -> Just (ItemGitlink oid)

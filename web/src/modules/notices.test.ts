@@ -67,7 +67,15 @@ describe("markers", () => {
   const entry = (
     role: ModuleEntry["role"],
     source: ModuleSource,
-  ): ModuleEntry => ({ name: "A", id: "p:lib:A", ref: "A", role, source });
+  ): ModuleEntry => ({
+    name: "A",
+    id: "p:lib:A",
+    ref: "A",
+    role,
+    source,
+    change: null,
+    settingsChanged: false,
+  });
 
   it("module markers", () => {
     expect(

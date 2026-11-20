@@ -50,7 +50,7 @@ where
 import Control.Concurrent.Async (mapConcurrently_, withAsync)
 import Control.Concurrent.MVar (MVar, readMVar)
 import Control.Exception (evaluate)
-import Control.Monad (forM_, void, when)
+import Control.Monad (forM, forM_, void, when)
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KeyMap
@@ -87,6 +87,7 @@ import HaskellReviewer.Core.ModuleModel
     TextOnlyReason (..),
     textOnlyModule,
   )
+import HaskellReviewer.Core.Modules (buildModuleIndex)
 import HaskellReviewer.Core.Parser (ParseSettings)
 import HaskellReviewer.Core.Prefs (effective, noPrefs)
 import HaskellReviewer.Core.Project
@@ -131,6 +132,7 @@ import HaskellReviewer.Server.CborJson (cborToJson)
 import HaskellReviewer.Server.Events (EventStream (..))
 import HaskellReviewer.Server.Router (Routes (..), application)
 import HaskellReviewer.Session.Clients (newClients)
+import HaskellReviewer.Session.Diff (DiffProblem, fillDiff, newDiffSlot)
 import HaskellReviewer.Session.Index (IndexDeps (..), IndexJob (..), runWorkers)
 import HaskellReviewer.Session.Prefs (PrefsStore (..), newPrefsStore)
 import HaskellReviewer.Session.Snapshot (Snapshot (files, index, side), newSessionShare)
@@ -167,7 +169,9 @@ data TestApi = TestApi
     workers :: Int,
     -- | The preferences store, made for each request. By default in
     -- memory, with the built-in defaults.
-    prefs :: IO PrefsStore
+    prefs :: IO PrefsStore,
+    -- | What api/diff-files answers. 'Nothing': browse mode.
+    diffFiles :: Maybe (Either DiffProblem LBS.ByteString)
   }
 
 -- | The tree snapshot of a browse-mode api.
@@ -458,7 +462,8 @@ apiFor snap =
       logger = newLogger LevelInfo (\_ -> pure ()),
       workers = 1,
       prefs =
-        newPrefsStore silent builtinDefaults (Left HomeUnset)
+        newPrefsStore silent builtinDefaults (Left HomeUnset),
+      diffFiles = Nothing
     }
 
 silent :: Logger
@@ -489,7 +494,8 @@ indexDeps api snap =
 newSnapshot :: CanonicalRoot -> FileList -> Project -> IO Snapshot
 newSnapshot root fl project = do
   share <- newSessionShare
-  Api.newSnapshot TreeSide share (DiskEntries root) fl project
+  let modules = buildModuleIndex project fl
+  Api.newSnapshot TreeSide share (DiskEntries root) fl modules Map.empty
 
 fixtureSnapshot :: IO Snapshot
 fixtureSnapshot =
@@ -1162,6 +1168,10 @@ sendApiQuery ::
 sendApiQuery method headers reqBody query api path = do
   listed <- sequence api.sides
   prefsStore <- api.prefs
+  diffSlot <- forM api.diffFiles $ \body -> do
+    slot <- newDiffSlot
+    _ <- fillDiff slot body
+    pure slot
   clients <- newClients
   let events =
         EventStream
@@ -1178,7 +1188,8 @@ sendApiQuery method headers reqBody query api path = do
             fileNotes = api.fileNotes,
             logger = api.logger
           }
-      routes = Routes {events = events, files = files, prefs = prefsStore}
+      routes =
+        Routes {events = events, files = files, prefs = prefsStore, diff = diffSlot}
       app = application (Port 8080) apiToken routes
       call = do
         r <-

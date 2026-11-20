@@ -7,6 +7,7 @@ import Control.Concurrent.STM (atomically)
 import Control.Monad (forM_)
 import Data.ByteString (ByteString)
 import Data.Map.Strict qualified as Map
+import Data.Set qualified as Set
 import Data.Text qualified as Text
 import HaskellReviewer.Core.CommitFiles (linkTargetCap)
 import HaskellReviewer.Core.Eol (CleanEol (..), Filtering (..))
@@ -18,12 +19,13 @@ import HaskellReviewer.Core.FileContent
     textLimit,
   )
 import HaskellReviewer.Core.FileList (CommitId (..), EntryKind (..), FileList (..))
-import HaskellReviewer.Core.Git (ObjectId (..))
+import HaskellReviewer.Core.Git (ObjectFormat (..), ObjectId (..))
 import HaskellReviewer.Core.ModuleModel
   ( ModuleParse (..),
     TextOnlyReason (..),
     textOnlyModule,
   )
+import HaskellReviewer.Core.Modules (buildModuleIndex)
 import HaskellReviewer.Core.Project (FileProblem (..), hostPlatform)
 import HaskellReviewer.Core.RelPath (RelPath, parseRelPath)
 import HaskellReviewer.Core.Root (Root (..))
@@ -118,6 +120,9 @@ tests =
                     WorkTreeSource
                       { root = canon,
                         reader = reader,
+                        format = Sha1,
+                        entries = Map.empty,
+                        hashable = Set.empty,
                         files =
                           Map.fromList
                             [ (rel "clean.hs", FromIndex o),
@@ -158,7 +163,8 @@ tests =
               sourceBlob l.source (rel "L.hs") @?= sourceBlob l.source (rel "B.hs")
               project <- readProject l.source l.files hostPlatform Nothing
               share <- newSessionShare
-              snap <- newSnapshot TreeSide share l.source l.files project
+              let modules = buildModuleIndex project l.files
+              snap <- newSnapshot TreeSide share l.source l.files modules Map.empty
               let deps =
                     IndexDeps
                       { readModule = \p -> readSourceEntry l.source p EntryFile,
@@ -244,7 +250,8 @@ parsingTests =
         Right l -> do
           project <- readProject l.source l.files hostPlatform Nothing
           share <- newSessionShare
-          newSnapshot TreeSide share l.source l.files project
+          let modules = buildModuleIndex project l.files
+          newSnapshot TreeSide share l.source l.files modules Map.empty
     apiOn snap =
       indexed
         searchApi

@@ -43,11 +43,13 @@ import Data.Text.Encoding qualified as Text.Encoding
 import Foreign.C.Types (CTime (..))
 import HaskellReviewer.Core.BlobId (blobId, emptyBlobId)
 import HaskellReviewer.Core.Eol
-  ( Attrs,
+  ( AttrState (..),
+    Attrs (..),
     CleanEol (..),
     CleanForms (..),
     CoreConfig (..),
     EolRule (..),
+    ExecBit (..),
     Filtering (..),
     attrNames,
     cleanForms,
@@ -67,7 +69,8 @@ import HaskellReviewer.Core.FileList
     mkFileList,
   )
 import HaskellReviewer.Core.Git
-  ( ObjectId (..),
+  ( Exec (..),
+    ObjectId (..),
     OtherEntry (..),
     RepoInfo (..),
     parseOthers,
@@ -79,6 +82,7 @@ import HaskellReviewer.Core.RelPath
     relPathBytes,
     relPathSegments,
   )
+import HaskellReviewer.Core.Renames (Blob (..), DiffEntry (..))
 import HaskellReviewer.Core.Root (CanonicalRoot (..))
 import HaskellReviewer.Core.WorkTree
   ( CheckSettings (..),
@@ -93,6 +97,8 @@ import HaskellReviewer.Core.WorkTree
     Verdict (..),
     WorkFile (..),
     checkEntry,
+    execOfMode,
+    isIntentToAdd,
     parseDebugEntries,
     statKind,
   )
@@ -146,7 +152,10 @@ the listing thread, after the URL. In order:
    Same id as the index: clean, unless the file is filtered or its
    line-end rule is unsure ('decide'): then dirty, blob unknown.
 7. The list, with each 'WorkFile' forced: request threads and workers
-   read them (Q-RTS-BLACKHOLE).
+   read them (Q-RTS-BLACKHOLE). And each path's 'DiffEntry' for
+   pairing (D-324): the exec bit is the index's for a clean file, or
+   with core.filemode off; else lstat's (an untracked file with
+   core.filemode off is not executable, as @git add@ does).
 
 Only the first 'fileListCap' entries by path are hashed. A dirty file
 under text=auto with CRLF needs its index blob, to know if git keeps
@@ -159,7 +168,19 @@ the CRs (has_crlf_in_index): read through the object reader.
 data WorkTreeFiles = WorkTreeFiles
   { files :: FileList,
     -- | How to read each file and symlink of the list.
-    work :: Map RelPath WorkFile
+    work :: Map RelPath WorkFile,
+    -- | Every path of the list but nested repos, for pairing. The blob
+    -- is the 'work' one; sizes are not known.
+    diffEntries :: Map RelPath DiffEntry,
+    -- | Disk files with an unknown blob that pairing may hash: untracked
+    -- and intent-to-add ones (no index blob to tell the line ends) with
+    -- no @text@ or @crlf@ set or unset (check-attr can't tell those from
+    -- literal values: 'HaskellReviewer.Core.Eol.eolSure'). The others
+    -- were left unknown on purpose (a doubt about the line-end rule, a
+    -- read that changed, an index blob we couldn't read, an unmerged
+    -- path whose stages git may read): pairing must not guess their
+    -- clean bytes.
+    hashable :: Set RelPath
   }
 
 -- | Files bigger than this are not hashed: dirty, blob unknown. It
@@ -199,6 +220,7 @@ listWorkTree logger git info reader canon = do
             let wt = finish cfg checked attrs hashed
             _ <- evaluate (Map.size wt.files.entries)
             mapM_ forceWorkFile (Map.elems wt.work)
+            _ <- evaluate (Map.foldl' (\() e -> e `seq` ()) () wt.diffEntries)
             logVerbose logger $
               "files: working tree: "
                 <> showText (Map.size wt.files.entries)
@@ -273,8 +295,9 @@ data Checked = Checked
 data CheckedPaths = CheckedPaths
   { -- | Tracked and on the list.
     tracked :: Map RelPath Checked,
-    -- | Untracked files on the list (not nested repos).
-    untrackedFiles :: Set RelPath,
+    -- | Untracked files on the list (not nested repos), with lstat's
+    -- exec bit.
+    untrackedFiles :: Map RelPath Exec,
     list :: FileList
   }
 
@@ -291,6 +314,10 @@ checkPaths canon settings paths = do
           paths.tracked
           looks
       untrackedLooks = Map.intersectionWith (,) paths.untracked looks
+      execOf = \case
+        LookFound st
+          | settings.execBit == TrustExecBit -> execOfMode st.mode
+        _ -> NotExecutable
       trackedKinds = Map.mapMaybe (\c -> kindFor c.entry c.verdict c.look) checked
       untrackedKinds = Map.mapMaybe (uncurry untrackedKind) untrackedLooks
       fl =
@@ -300,13 +327,13 @@ checkPaths canon settings paths = do
           (Map.toList trackedKinds <> Map.toList untrackedKinds)
       kept = Map.keysSet fl.entries
       isFile = \case
-        OtherFile _ -> True
-        OtherRepo _ -> False
+        (OtherFile _, _) -> True
+        (OtherRepo _, _) -> False
   pure
     CheckedPaths
       { tracked = Map.restrictKeys checked kept,
         untrackedFiles =
-          Map.keysSet (Map.restrictKeys (Map.filter isFile paths.untracked) kept),
+          execOf . snd <$> Map.restrictKeys (Map.filter isFile untrackedLooks) kept,
         list = fl
       }
 
@@ -316,7 +343,7 @@ diskPaths :: CheckedPaths -> [RelPath]
 diskPaths c =
   Set.toAscList
     ( Map.keysSet (Map.filter (fromDisk . (.verdict)) c.tracked)
-        <> c.untrackedFiles
+        <> Map.keysSet c.untrackedFiles
     )
   where
     fromDisk v = v `elem` [Candidate, Modified, Unhashed]
@@ -381,10 +408,54 @@ finish ::
   WorkTreeFiles
 finish cfg c attrs hashed =
   WorkTreeFiles
-    { files = c.list {entries = Map.union diskKinds c.list.entries},
-      work = work
+    { files = list,
+      work = work,
+      diffEntries =
+        Map.union
+          (Map.mapMaybeWithKey diffEntry work)
+          (Map.mapMaybe submodule list.entries),
+      hashable =
+        Map.keysSet
+          ( Map.filter
+              sureRule
+              ( Map.restrictKeys
+                  attrs
+                  ( Map.keysSet c.untrackedFiles
+                      <> Map.keysSet (Map.filter intentToAdd c.tracked)
+                  )
+              )
+          )
     }
   where
+    list = c.list {entries = Map.union diskKinds c.list.entries}
+    diffEntry p wf =
+      let blob = Blob {oid = workBlob wf, size = Nothing}
+       in case Map.lookup p list.entries of
+            Just EntrySymlink -> Just (Symlink blob)
+            Just EntryFile -> Just (File (execAt p wf) blob)
+            _ -> Nothing
+    workBlob = \case
+      FromIndex o -> Just o
+      FromDisk d -> d.blob
+    submodule = \case
+      EntrySubmodule (CommitId o) -> Just (Submodule (ObjectId o))
+      _ -> Nothing
+    -- See step 7 of Note [Working-tree listing].
+    execAt p wf = case (Map.lookup p c.tracked, wf) of
+      (Just ch, FromIndex _) -> indexExec ch.entry
+      (Just ch, FromDisk _)
+        | cfg.fileMode == TrustExecBit,
+          LookFound st <- ch.look,
+          statKind st == StatRegular ->
+            execOfMode st.mode
+        | otherwise -> indexExec ch.entry
+      (Nothing, _) -> Map.findWithDefault NotExecutable p c.untrackedFiles
+    intentToAdd ch =
+      ch.verdict == Unhashed && ch.entry.stage == 0 && isIntentToAdd ch.entry
+    sureRule a = all (`notElem` [AttrSet, AttrUnset]) [a.text, a.crlf]
+    indexExec e = case e.kind of
+      IndexRegular x -> x
+      _ -> NotExecutable
     unhashed a =
       FromDisk
         DiskFile
@@ -408,7 +479,7 @@ finish cfg c attrs hashed =
         [ snd <$> hashed,
           clean,
           notHashed,
-          unhashed <$> Map.restrictKeys attrs c.untrackedFiles
+          unhashed <$> Map.restrictKeys attrs (Map.keysSet c.untrackedFiles)
         ]
     -- A clean symlink entry that is a plain file on disk (core.symlinks
     -- off) shows as a file once dirty. Keys are on the list already.

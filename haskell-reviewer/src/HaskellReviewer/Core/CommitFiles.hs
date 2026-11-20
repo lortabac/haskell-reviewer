@@ -10,6 +10,12 @@ module HaskellReviewer.Core.CommitFiles
     -- * Building
     mkCommitFiles,
 
+    -- * Outside ROOT
+    OutsideRows (..),
+    OutsideChanges (..),
+    outsideChanges,
+    outsidePathCap,
+
     -- * Reading
     linkTargetCap,
     commitLink,
@@ -20,6 +26,7 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.Text (Text)
 import Data.Text.Encoding qualified as Text.Encoding
 import HaskellReviewer.Core.FileContent (FileSize (..), LinkInfo (..))
 import HaskellReviewer.Core.FileList
@@ -32,6 +39,7 @@ import HaskellReviewer.Core.FileList
   )
 import HaskellReviewer.Core.Git
   ( BlobItem (..),
+    Exec,
     ObjectId (..),
     TreeEntry (..),
     TreeItem (..),
@@ -43,6 +51,8 @@ import HaskellReviewer.Core.RelPath
     parseRelPath,
     resolveLinkTarget,
   )
+import HaskellReviewer.Core.Renames (Blob (..), DiffEntry (..))
+import HaskellReviewer.Core.Sides (Pair (..))
 
 {- Note [Commit files]
 
@@ -53,7 +63,8 @@ so every path is from the top of the repo. We cut ROOT's prefix (from
 "HaskellReviewer.Core.FileList": non-UTF-8 names are counted, bad paths
 (a @.git@ segment) are dropped, the list is capped.
 
-- A file or symlink keeps its blob id and size, for reads later.
+- A file or symlink keeps its blob id and size, for reads later, and
+  its exec bit, for pairing ('entries', D-324).
 - A gitlink is a submodule with its commit id.
 - An LFS pointer is just a file: we show the pointer text.
 - Rows outside ROOT are kept by raw path (D-43), capped at
@@ -71,11 +82,10 @@ data CommitFiles = CommitFiles
     files :: FileList,
     -- | The blob of every file and symlink in 'files'.
     blobs :: Map RelPath BlobRef,
-    -- | Rows outside ROOT, by raw path from the top (D-43).
-    outside :: Map ByteString TreeItem,
-    -- | More than 'fileListCap' rows outside ROOT: 'outside' holds the
-    -- first ones.
-    outsideTruncated :: Bool,
+    -- | Every path of 'files' as pairing sees it (D-324).
+    entries :: Map RelPath DiffEntry,
+    -- | Rows outside ROOT (D-43).
+    outside :: OutsideRows,
     -- | Rows under ROOT we skipped, for the log.
     dropped :: [Dropped]
   }
@@ -119,24 +129,33 @@ mkCommitFiles prefix entries =
   CommitFiles
     { files = files,
       blobs = Map.restrictKeys allBlobs (Map.keysSet files.entries),
-      outside = Map.take fileListCap allOutside,
-      outsideTruncated = Map.size allOutside > fileListCap,
+      entries = Map.restrictKeys allEntries (Map.keysSet files.entries),
+      outside =
+        OutsideRows
+          { rows = Map.take fileListCap allOutside,
+            truncated = Map.size allOutside > fileListCap
+          },
       dropped = [d | Skipped d <- inside]
     }
   where
-    (insideRows, outsideRows) = splitRows entries
-    allOutside = Map.fromList [(e.path, e.item) | e <- outsideRows]
+    (insideRows, outsideList) = splitRows entries
+    allOutside = Map.fromList [(e.path, e.item) | e <- outsideList]
     inside = map row insideRows
     notUtf8 = length [() | NotUtf8Name <- inside]
     files = mkFileList FromGit notUtf8 (concatMap listed inside)
     listed = \case
-      KeptFile p _ -> [(p, EntryFile)]
+      KeptFile p _ _ -> [(p, EntryFile)]
       KeptSymlink p _ -> [(p, EntrySymlink)]
       KeptSubmodule p c -> [(p, EntrySubmodule c)]
       _ -> []
     allBlobs =
       Map.fromList
-        ([(p, b) | KeptFile p b <- inside] <> [(p, b) | KeptSymlink p b <- inside])
+        ([(p, b) | KeptFile p _ b <- inside] <> [(p, b) | KeptSymlink p b <- inside])
+    allEntries =
+      Map.fromList $
+        [(p, File x (diffBlob b)) | KeptFile p x b <- inside]
+          <> [(p, Symlink (diffBlob b)) | KeptSymlink p b <- inside]
+          <> [(p, Submodule (ObjectId c)) | KeptSubmodule p (CommitId c) <- inside]
     splitRows :: [TreeEntry] -> ([TreeEntry], [TreeEntry])
     splitRows = foldr place ([], [])
     place :: TreeEntry -> ([TreeEntry], [TreeEntry]) -> ([TreeEntry], [TreeEntry])
@@ -148,7 +167,7 @@ mkCommitFiles prefix entries =
       Left NotUtf8 -> NotUtf8Name
       Left BadSegment -> Skipped (DroppedPath e.path)
       Right p -> case e.item of
-        ItemBlob b -> KeptFile p (ref b)
+        ItemBlob x b -> KeptFile p x (ref b)
         ItemSymlink b -> KeptSymlink p (ref b)
         ItemGitlink (ObjectId o) -> KeptSubmodule p (CommitId o)
         ItemOther m -> Skipped (DroppedMode DroppedRow {path = e.path, mode = m})
@@ -157,6 +176,60 @@ mkCommitFiles prefix entries =
       SizeKnown s -> BlobSize s
       SizeMissing -> BlobMissing
       SizeNotListed -> BlobSizeUnknown
+    diffBlob b =
+      Blob
+        { oid = Just b.oid,
+          size = case b.size of
+            BlobSize (FileSize n) -> Just n
+            _ -> Nothing
+        }
+
+-- * Outside ROOT
+
+-- | One commit's rows outside ROOT (D-43).
+data OutsideRows = OutsideRows
+  { -- | By raw path from the top.
+    rows :: Map ByteString TreeItem,
+    -- | Over 'fileListCap': 'rows' has the first ones.
+    truncated :: Bool
+  }
+  deriving (Eq, Show)
+
+-- | The paths outside ROOT that changed between two commits (G21).
+data OutsideChanges = OutsideChanges
+  { total :: Int,
+    -- | The first 'outsidePathCap', in byte order, decoded leniently.
+    paths :: [Text],
+    -- | A side had too many rows: the count may be off either way
+    -- (rows past one side's cut look one-sided).
+    truncated :: Bool
+  }
+  deriving (Eq, Show)
+
+-- | At most this many paths are sent: 100.
+outsidePathCap :: Int
+outsidePathCap = 100
+
+-- | Paths on one side only, or whose mode or blob differ. No renames
+-- across ROOT: a move into ROOT is one path outside, gone.
+outsideChanges :: Pair OutsideRows -> OutsideChanges
+outsideChanges sides =
+  OutsideChanges
+    { total = length changed,
+      paths = map Text.Encoding.decodeUtf8Lenient (take outsidePathCap changed),
+      truncated = sides.head.truncated || sides.base.truncated
+    }
+  where
+    h = sides.head.rows
+    b = sides.base.rows
+    changed =
+      Map.keys
+        ( Map.unions
+            [ () <$ Map.difference h b,
+              () <$ Map.difference b h,
+              () <$ Map.filter id (Map.intersectionWith (/=) h b)
+            ]
+        )
 
 -- * Reading
 
@@ -182,7 +255,7 @@ commitLink p (FileSize size) bytes =
 
 -- | What 'mkCommitFiles' does with one row under ROOT.
 data Row
-  = KeptFile RelPath BlobRef
+  = KeptFile RelPath Exec BlobRef
   | KeptSymlink RelPath BlobRef
   | KeptSubmodule RelPath CommitId
   | NotUtf8Name

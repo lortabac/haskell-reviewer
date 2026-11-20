@@ -21,6 +21,7 @@ module HaskellReviewer.Effects.Source
     -- * Reading
     readSourceEntry,
     fileNotes,
+    readForPairing,
 
     -- * Blobs
     sourceBlob,
@@ -35,9 +36,13 @@ where
 
 import Control.Exception (evaluate)
 import Control.Monad (forM_)
+import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.Maybe (isNothing)
+import Data.Set (Set)
+import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
 import HaskellReviewer.Core.BlobId (blobId, emptyBlobId)
@@ -45,6 +50,7 @@ import HaskellReviewer.Core.CommitFiles
   ( BlobRef (..),
     BlobSize (..),
     CommitFiles (..),
+    OutsideRows,
     commitLink,
     linkTargetCap,
     mkCommitFiles,
@@ -56,6 +62,7 @@ import HaskellReviewer.Core.Eol
     CleanEol (..),
     EolRule (..),
     ExecBit (..),
+    Filtering (..),
     Symlinks (..),
     applyEol,
     cleanForms,
@@ -84,10 +91,11 @@ import HaskellReviewer.Core.FileList (EntryKind (..), FileList)
 import HaskellReviewer.Core.Git
   ( ObjectFormat (..),
     ObjectId (..),
-    RepoInfo,
+    RepoInfo (..),
     parseTreeEntries,
   )
 import HaskellReviewer.Core.RelPath (RelPath, parseRelPath)
+import HaskellReviewer.Core.Renames (DiffEntry (File, Symlink))
 import HaskellReviewer.Core.Revspec
   ( CommitsInfo (..),
     DiffInfo (..),
@@ -110,11 +118,13 @@ import HaskellReviewer.Core.WorkTree
     parseDebugEntries,
   )
 import HaskellReviewer.Effects.FileSystem
-  ( ListError,
+  ( DiskBytes (..),
+    ListError,
     ReadError (..),
     canonicalRoot,
     listCommit,
     listFiles,
+    readDiskBytes,
     readDiskEntry,
     readEntry,
   )
@@ -186,6 +196,13 @@ data WorkTreeSource = WorkTreeSource
   { root :: CanonicalRoot,
     -- | For the clean files.
     reader :: ObjectReader,
+    -- | The repo's, for hashing disk files.
+    format :: ObjectFormat,
+    -- | Each listed path but nested repos, for pairing (D-324).
+    entries :: Map RelPath DiffEntry,
+    -- | The disk files with an unknown blob that pairing may hash
+    -- ('HaskellReviewer.Effects.WorkTree.hashable').
+    hashable :: Set RelPath,
     -- | How to read each file and symlink of the side's list: one
     -- entry each, none for submodules and nested repos.
     files :: Map RelPath WorkFile
@@ -197,6 +214,10 @@ data CommitSource = CommitSource
     commit :: ObjectId,
     -- | The blob of every file and symlink of the list.
     blobs :: Map RelPath BlobRef,
+    -- | Each listed path, for pairing (D-324).
+    entries :: Map RelPath DiffEntry,
+    -- | The commit's rows outside ROOT (D-43).
+    outside :: OutsideRows,
     reader :: ObjectReader
   }
 
@@ -336,12 +357,20 @@ commitLister logger git info reader commit =
           Left e -> pure (Left e)
           Right cf -> do
             mapM_ forceRef (Map.elems cf.blobs)
+            -- Only the listing thread reads these: WHNF is enough.
+            _ <- evaluate (Map.foldl' (\() e -> e `seq` ()) () cf.entries)
             pure . Right $
               Listed
                 { files = cf.files,
                   source =
                     CommitEntries
-                      CommitSource {commit = commit, blobs = cf.blobs, reader = reader}
+                      CommitSource
+                        { commit = commit,
+                          blobs = cf.blobs,
+                          entries = cf.entries,
+                          outside = cf.outside,
+                          reader = reader
+                        }
                 }
     }
   where
@@ -369,7 +398,14 @@ workTreeLister logger git info reader canon =
         { files = wt.files,
           source =
             WorkTreeEntries
-              WorkTreeSource {root = canon, reader = reader, files = wt.work}
+              WorkTreeSource
+                { root = canon,
+                  reader = reader,
+                  format = info.format,
+                  entries = wt.diffEntries,
+                  hashable = wt.hashable,
+                  files = wt.work
+                }
         }
 
 -- | Read one entry of the list from its source. See Note [Entry
@@ -411,6 +447,35 @@ sharedBlob source p = case source of
   WorkTreeEntries w -> case Map.lookup p w.files of
     Just (FromIndex o) -> Just o
     _ -> Nothing
+
+-- | git's clean bytes of a file, or a symlink's target, for pairing
+-- (D-324), read in full up to the cap. 'Nothing' if it can't be read,
+-- is over the cap, is not of the entry's kind any more, is a filtered
+-- disk file (its disk bytes are not git's), or is a disk file whose
+-- blob was left unknown on purpose (not 'hashable'). A disk side never
+-- pairs.
+readForPairing :: Int -> EntrySource -> RelPath -> DiffEntry -> IO (Maybe ByteString)
+readForPairing cap source p entry = case source of
+  DiskEntries _ -> pure Nothing
+  CommitEntries c -> case Map.lookup p c.blobs of
+    Nothing -> pure Nothing
+    Just ref -> fromBlob c.reader ref.oid
+  WorkTreeEntries w -> case Map.lookup p w.files of
+    Nothing -> pure Nothing
+    Just (FromIndex oid) -> fromBlob w.reader oid
+    Just (FromDisk d)
+      | d.filtered == Filtered -> pure Nothing
+      | isNothing d.blob && Set.notMember p w.hashable -> pure Nothing
+      | otherwise ->
+          readDiskBytes w.root cap p >>= \r -> pure $ case (entry, r) of
+            (File _ _, Just (DiskFileBytes b)) -> Just (applyEol d.eol b)
+            (Symlink _, Just (DiskLinkBytes t)) -> Just t
+            _ -> Nothing
+  where
+    fromBlob reader oid =
+      readBlob reader cap oid >>= \case
+        Right b | b.size == FileSize (BS.length b.bytes) -> pure (Just b.bytes)
+        _ -> pure Nothing
 
 -- | Read one entry of a commit. See Note [Entry sources].
 readCommitEntry ::

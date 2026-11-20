@@ -466,7 +466,8 @@ routesFor events =
             fileNotes = \_ _ -> unfiltered,
             logger = newLogger LevelInfo (\_ -> pure ())
           },
-      prefs = fixedPrefs
+      prefs = fixedPrefs,
+      diff = Nothing
     }
 
 -- | No indexing event ever.

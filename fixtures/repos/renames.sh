@@ -24,7 +24,7 @@
 #
 # With "worktree", also leaves the working tree dirty: pkg/wt/a.txt
 # moved to pkg/wt/b.txt (not added), pkg/exact/b.txt edited,
-# pkg/ita.txt added with -N.
+# pkg/ita.txt added with -N, pkg/copy/orig.txt made executable.
 #
 # Usage: /bin/sh renames.sh DIR [sha1|sha256] [worktree]
 . "$(dirname "$0")/lib.sh"
@@ -107,4 +107,5 @@ if [ "${3:-}" = worktree ]; then
   printf 'edited\n' >> "$p/exact/b.txt"
   lines itaa 1 3 > "$p/ita.txt"
   g -C "$d" add -N pkg/ita.txt
+  chmod +x "$p/copy/orig.txt"
 fi

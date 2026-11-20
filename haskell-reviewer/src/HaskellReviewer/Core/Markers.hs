@@ -20,7 +20,7 @@ where
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Set qualified as Set
-import HaskellReviewer.Core.Changed (ModuleKey (..), moduleKeys)
+import HaskellReviewer.Core.Changed (ModuleKey (..))
 import HaskellReviewer.Core.Modules
   ( ComponentModules (..),
     ModuleEntry (..),
@@ -68,9 +68,10 @@ data ModuleFacts = ModuleFacts
   }
   deriving (Eq, Show)
 
--- | The facts of every module of an index.
-moduleFacts :: ModuleIndex -> Map ModuleId ModuleFacts
-moduleFacts idx =
+-- | The facts of every module of an index. The keys ('moduleKeys')
+-- give the settings; the caller has them already.
+moduleFacts :: [(ModuleId, ModuleKey)] -> ModuleIndex -> Map ModuleId ModuleFacts
+moduleFacts keys idx =
   Map.fromSet
     ( \i ->
         ModuleFacts
@@ -88,8 +89,7 @@ moduleFacts idx =
           c <- p.components,
           m <- c.modules
         ]
-    -- The blob lookup only fills the key's blob; settings don't use it.
-    settingsOf = Map.fromList [(i, k.settings) | (i, k) <- moduleKeys (const Nothing) idx]
+    settingsOf = Map.fromList [(i, k.settings) | (i, k) <- keys]
 
 -- | How a module changed.
 data ModuleChange = ModuleAdded | ModuleRemoved | ModuleModified | ModuleRenamed
@@ -115,16 +115,12 @@ noMarker = Marker {change = Nothing, settingsChange = SettingsSame}
 moduleMarkers :: Pairing -> Pair (Map ModuleId ModuleFacts) -> Pair (Map ModuleId Marker)
 moduleMarkers pairing facts =
   Pair
-    { head =
-        Map.mapWithKey
-          (\i h -> maybe (alone ModuleAdded) (`onBoth` h) (Map.lookup i facts.base))
-          facts.head,
-      base =
-        Map.mapWithKey
-          (\i b -> maybe (alone ModuleRemoved) (onBoth b) (Map.lookup i facts.head))
-          facts.base
+    { head = Map.union both (alone ModuleAdded <$ facts.head),
+      base = Map.union both (alone ModuleRemoved <$ facts.base)
     }
   where
+    -- Once per module on both sides: the settings compare is the cost.
+    both = Map.intersectionWith onBoth facts.base facts.head
     alone c = Marker {change = Just c, settingsChange = SettingsSame}
     onBoth b h =
       Marker

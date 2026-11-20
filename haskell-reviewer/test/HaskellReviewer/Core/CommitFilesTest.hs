@@ -13,9 +13,13 @@ import HaskellReviewer.Core.CommitFiles
     CommitFiles (..),
     Dropped (..),
     DroppedRow (..),
+    OutsideChanges (..),
+    OutsideRows (..),
     commitLink,
     linkTargetCap,
     mkCommitFiles,
+    outsideChanges,
+    outsidePathCap,
   )
 import HaskellReviewer.Core.FileContent (FileSize (..), LinkInfo (..))
 import HaskellReviewer.Core.FileList
@@ -27,12 +31,15 @@ import HaskellReviewer.Core.FileList
   )
 import HaskellReviewer.Core.Git
   ( BlobItem (..),
+    Exec (..),
     ObjectId (..),
     TreeEntry (..),
     TreeItem (..),
     TreeSize (..),
   )
 import HaskellReviewer.Core.RelPath (RelPath, parseRelPath)
+import HaskellReviewer.Core.Renames (Blob (..), DiffEntry (..))
+import HaskellReviewer.Core.Sides (Pair (..))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 
@@ -50,20 +57,20 @@ tests =
                   blob "top.txt" (SizeKnown (FileSize 4))
                 ]
         Map.keys cf.files.entries @?= [rel "a.hs"]
-        Map.keys cf.outside @?= ["libs", "libsx/b.hs", "top.txt"]
-        cf.outsideTruncated @?= False
+        Map.keys cf.outside.rows @?= ["libs", "libsx/b.hs", "top.txt"]
+        cf.outside.truncated @?= False
         cf.files.source @?= FromGit,
       testCase "no prefix: everything is inside" $ do
         let cf =
               mkCommitFiles "" [blob "a.hs" (known 1), blob "d/b.hs" SizeNotListed]
         Map.keys cf.files.entries @?= [rel "a.hs", rel "d/b.hs"]
-        cf.outside @?= Map.empty,
+        cf.outside.rows @?= Map.empty,
       testCase "kinds and sizes" $ do
         let cf =
               mkCommitFiles
                 "p/"
                 [ blob "p/a.hs" (SizeKnown (FileSize 10)),
-                  TreeEntry "p/run" (ItemBlob (BlobItem (oid 'b') (known 3))),
+                  TreeEntry "p/run" (ItemBlob Executable (BlobItem (oid 'b') (known 3))),
                   TreeEntry "p/link" (ItemSymlink (BlobItem (oid 'c') (known 4))),
                   TreeEntry "p/sub" (ItemGitlink (oid 'd')),
                   blob "p/gone" SizeMissing,
@@ -86,6 +93,63 @@ tests =
               (rel "link", BlobRef (oid 'c') (BlobSize (FileSize 4))),
               (rel "run", BlobRef (oid 'b') (BlobSize (FileSize 3)))
             ],
+      testCase "entries for pairing: exec bit, sizes, submodule" $ do
+        let cf =
+              mkCommitFiles
+                ""
+                [ blob "a.hs" (known 10),
+                  TreeEntry "run" (ItemBlob Executable (BlobItem (oid 'b') (known 3))),
+                  TreeEntry "link" (ItemSymlink (BlobItem (oid 'c') (known 4))),
+                  TreeEntry "sub" (ItemGitlink (oid 'd')),
+                  blob "gone" SizeMissing,
+                  blob "later" SizeNotListed
+                ]
+            sized o n = Blob {oid = Just (oid o), size = n}
+        cf.entries
+          @?= Map.fromList
+            [ (rel "a.hs", File NotExecutable (sized 'a' (Just 10))),
+              (rel "gone", File NotExecutable (sized 'a' Nothing)),
+              (rel "later", File NotExecutable (sized 'a' Nothing)),
+              (rel "link", Symlink (sized 'c' (Just 4))),
+              (rel "run", File Executable (sized 'b' (Just 3))),
+              (rel "sub", Submodule (oid 'd'))
+            ],
+      testCase "outside ROOT: one side only, mode or blob changed" $ do
+        let side items truncated =
+              OutsideRows {rows = Map.fromList items, truncated = truncated}
+            file x o = ItemBlob x (BlobItem (oid o) (known 1))
+            changes =
+              outsideChanges
+                Pair
+                  { head =
+                      side
+                        [ ("new", file NotExecutable 'a'),
+                          ("same", file NotExecutable 'a'),
+                          ("chmod", file Executable 'a'),
+                          ("edit", file NotExecutable 'b')
+                        ]
+                        False,
+                    base =
+                      side
+                        [ ("gone", file NotExecutable 'a'),
+                          ("same", file NotExecutable 'a'),
+                          ("chmod", file NotExecutable 'a'),
+                          ("edit", file NotExecutable 'a')
+                        ]
+                        True
+                  }
+        changes
+          @?= OutsideChanges
+            { total = 4,
+              paths = ["chmod", "edit", "gone", "new"],
+              truncated = True
+            }
+        let many =
+              side [(Char8.pack (show i), plain) | i <- [1 .. 150 :: Int]] False
+            plain = file NotExecutable 'a'
+            none = side [] False
+            c = outsideChanges Pair {head = many, base = none}
+        (c.total, length c.paths, c.truncated) @?= (150, outsidePathCap, False),
       testCase "non-UTF-8 counted, .git dropped, odd mode dropped" $ do
         let cf =
               mkCommitFiles
@@ -113,8 +177,8 @@ tests =
         Map.size cf.files.entries @?= fileListCap
         cf.files.truncated @?= True
         Map.keys cf.blobs @?= Map.keys cf.files.entries
-        Map.size cf.outside @?= fileListCap
-        cf.outsideTruncated @?= True,
+        Map.size cf.outside.rows @?= fileListCap
+        cf.outside.truncated @?= True,
       testCase "commitLink: resolved, cut at the cap, not UTF-8" $ do
         let link = rel "docs/link"
             long = BS.replicate linkTargetCap 97
@@ -136,7 +200,7 @@ known :: Int -> TreeSize
 known = SizeKnown . FileSize
 
 blob :: ByteString -> TreeSize -> TreeEntry
-blob p s = TreeEntry p (ItemBlob (BlobItem (oid 'a') s))
+blob p s = TreeEntry p (ItemBlob NotExecutable (BlobItem (oid 'a') s))
 
 oid :: Char -> ObjectId
 oid = ObjectId . hex

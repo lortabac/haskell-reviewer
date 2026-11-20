@@ -11,8 +11,10 @@ import {
   entryKinds,
   fileViewKinds,
 } from "./files";
+import { changeNotes, decodeDiffFiles, statuses } from "./diffFiles";
 import {
   decodeModuleTree,
+  moduleChanges,
   moduleRoles,
   noSourceReasons,
   noticeKinds,
@@ -83,6 +85,10 @@ const decoders: Record<string, (value: unknown) => unknown> = {
   "file-filtered": decodeFileView,
   modules: decodeModuleTree,
   "modules-implicit": decodeModuleTree,
+  "modules-diff": decodeModuleTree,
+  "diff-files": decodeDiffFiles,
+  "diff-files-worktree": decodeDiffFiles,
+  "diff-files-limit": decodeDiffFiles,
   "module-parsed": decodeModulePage,
   "module-parse-error": decodeModulePage,
   "module-pragma-error": decodeModulePage,
@@ -199,6 +205,64 @@ describe("API fixtures", () => {
     expect(entries.some((e) => e.ref === e.id)).toBe(true);
     expect(trees.some((t) => t.broken.length > 0)).toBe(true);
     expect(trees.some((t) => t.warnings.length > 0)).toBe(true);
+  });
+
+  it("the diff fixtures cover every marker, status and note", () => {
+    const tree = decodeModuleTree(fixture("modules-diff"));
+    const marked = [
+      ...tree.packages.flatMap((p) => p.components.flatMap((c) => c.modules)),
+      ...tree.other.flatMap((o) => (o.kind === "module" ? [o] : [])),
+    ];
+    expect(sorted(marked.flatMap((m) => (m.change ? [m.change] : [])))).toEqual(
+      sorted(moduleChanges),
+    );
+    expect(marked.some((m) => m.change === null)).toBe(true);
+    expect(sorted(marked.map((m) => String(m.settingsChanged)))).toEqual([
+      "false",
+      "true",
+    ]);
+    const diffs = ["diff-files", "diff-files-worktree", "diff-files-limit"].map(
+      (n) => decodeDiffFiles(fixture(n)),
+    );
+    const files = diffs.flatMap((d) => d.files);
+    expect(sorted(files.map((f) => f.status))).toEqual(sorted(statuses));
+    expect(sorted(files.flatMap((f) => (f.note ? [f.note] : [])))).toEqual(
+      sorted(changeNotes),
+    );
+    expect(diffs.some((d) => d.head.commit === null)).toBe(true);
+    expect(diffs.some((d) => d.outside === null)).toBe(true);
+    expect(diffs.some((d) => d.outside?.truncated === true)).toBe(true);
+    expect(sorted(diffs.map((d) => String(d.renameLimitHit)))).toEqual([
+      "false",
+      "true",
+    ]);
+    expect(sorted(diffs.map((d) => String(d.truncated)))).toEqual([
+      "false",
+      "true",
+    ]);
+    for (const d of diffs) {
+      const paths = d.files.map((f) => f.path);
+      expect(paths, "sorted by path").toEqual([...paths].sort());
+    }
+  });
+
+  it("diff files: bad values are errors", () => {
+    const good = fixture("diff-files") as { files: object[] };
+    const file = good.files[0];
+    for (const bad of [
+      { ...good, outside: undefined },
+      { ...good, renameLimitHit: null },
+      { ...good, truncated: undefined },
+      { ...good, head: { label: "x" } },
+      { ...good, files: [{ ...file, status: "copied" }] },
+      { ...good, files: [{ ...file, note: "binary" }] },
+      { ...good, files: [{ ...file, similarity: -1 }] },
+      { ...good, files: [{ ...file, oldPath: undefined }] },
+    ]) {
+      expect(() => decodeDiffFiles(bad), JSON.stringify(bad)).toThrow(
+        DecodeError,
+      );
+    }
   });
 
   it("the module fixtures cover every reason", () => {
@@ -542,6 +606,8 @@ describe("decoders reject bad shapes", () => {
       ref: "A",
       role: "exposed",
       source: { kind: "module", path: "A.hs" },
+      change: "renamed",
+      settingsChanged: true,
     };
     const withModule = (m: object) => ({
       generation: 1,
@@ -577,6 +643,9 @@ describe("decoders reject bad shapes", () => {
       withModule({ ...entry, source: { kind: "generated", path: "x.y" } }),
       withModule({ ...entry, source: { kind: "no-source", reason: "lost" } }),
       withModule({ ...entry, source: { kind: "binary", path: "x" } }),
+      withModule({ ...entry, change: "moved" }),
+      withModule({ ...entry, change: undefined }),
+      withModule({ ...entry, settingsChanged: null }),
     ]) {
       expect(() => decodeModuleTree(bad), JSON.stringify(bad)).toThrow(
         DecodeError,

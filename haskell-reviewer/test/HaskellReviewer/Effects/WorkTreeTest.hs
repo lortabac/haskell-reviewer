@@ -12,6 +12,7 @@ import Data.List (sort)
 import Data.List qualified as List
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Map.Strict qualified as Map
+import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
@@ -26,8 +27,10 @@ import HaskellReviewer.Core.Eol
   )
 import HaskellReviewer.Core.FileContent (FileContent (..), FileNotes (..), LinkInfo (..))
 import HaskellReviewer.Core.FileList (CommitId (..), EntryKind (..), FileList (..))
-import HaskellReviewer.Core.Git (ObjectId (..))
+import HaskellReviewer.Core.Git (Exec (..), ObjectId (..), RepoInfo (..))
 import HaskellReviewer.Core.RelPath (RelPath, parseRelPath, relPathText)
+import HaskellReviewer.Core.Renames (Blob (..), DiffEntry (File, Symlink))
+import HaskellReviewer.Core.Renames qualified as Renames
 import HaskellReviewer.Core.Root (Root (..))
 import HaskellReviewer.Core.WorkTree
   ( DiskFile (..),
@@ -55,6 +58,7 @@ import HaskellReviewer.Effects.Source
   ( EntrySource (..),
     WorkTreeSource (..),
     fileNotes,
+    readForPairing,
     readSourceEntry,
   )
 import HaskellReviewer.Effects.WorkTree
@@ -295,7 +299,15 @@ mainRepo t dir = do
     let work p = Map.lookup (rel p) wt.work
         kind p = Map.lookup (rel p) wt.files.entries
         source =
-          WorkTreeEntries WorkTreeSource {root = canon, reader = r, files = wt.work}
+          WorkTreeEntries
+            WorkTreeSource
+              { root = canon,
+                reader = r,
+                format = info.format,
+                entries = wt.diffEntries,
+                hashable = wt.hashable,
+                files = wt.work
+              }
         readP p = case kind p of
           Just k -> readSourceEntry source (rel p) k
           Nothing -> assertFailure ("not listed: " <> p)
@@ -367,6 +379,32 @@ mainRepo t dir = do
       Right (Link l) -> l.target @?= "plain.hs"
       other -> assertFailure ("link: " <> show other)
     readP "new.hs" >>= (@?= Right (TextContent "module New where\n"))
+    -- For pairing: kinds, exec bits from disk, blobs from work.
+    let entry p = Map.lookup (rel p) wt.diffEntries
+    entry "mode.sh" @?= Just (File Executable (pairingBlob wt "mode.sh"))
+    entry "plain.hs" @?= Just (File NotExecutable (pairingBlob wt "plain.hs"))
+    entry "new.hs" @?= Just (File NotExecutable (pairingBlob wt "new.hs"))
+    entry "link" @?= Just (Symlink (pairingBlob wt "link"))
+    entry "sub" @?= Just (Renames.Submodule (ObjectId (Text.pack commit)))
+    entry "deleted.hs" @?= Nothing
+    Map.keysSet wt.diffEntries
+      @?= Map.keysSet (Map.filter (/= EntryNestedRepo) wt.files.entries)
+    -- Pairing hashes only files with no index blob to tell the line
+    -- ends; a doubt about the rule (crlf.t) stays unknown.
+    forM_ ["new.hs", "ita.hs"] $ \p ->
+      assertBool p (Set.member (rel p) wt.hashable)
+    -- Unsure: a doubt (crlf.t), untracked under text (new.t), unmerged
+    -- (conflict.txt).
+    forM_ ["crlf.t", "new.t", "conflict.txt"] $ \p ->
+      assertBool p (Set.notMember (rel p) wt.hashable)
+    let pairingRead p = case entry p of
+          Just e -> readForPairing hashCap source (rel p) e
+          Nothing -> assertFailure ("no entry: " <> p)
+    pairingRead "crlf.t" >>= (@?= Nothing)
+    pairingRead "new.t" >>= (@?= Nothing)
+    pairingRead "conflict.txt" >>= (@?= Nothing)
+    pairingRead "lfs-dirty.bin" >>= (@?= Nothing)
+    pairingRead "new.hs" >>= (@?= Just "module New where\n")
     readSourceEntry source (rel "ignored.log") EntryFile >>= (@?= Left ReadGone)
     fileNotes source (rel "lfs-dirty.bin") @?= FileNotes {filtered = Filtered}
     fileNotes source (rel "ident.id") @?= FileNotes {filtered = Filtered}
@@ -374,6 +412,15 @@ mainRepo t dir = do
     -- Last: git status may look at the files in its own way. It says
     -- clean for the two we can't be sure of.
     crossCheck repo "" wt ["crlf.t", "lfs.bin"]
+
+-- | A path's blob in the work map, as pairing sees it.
+pairingBlob :: WorkTreeFiles -> String -> Blob
+pairingBlob wt p = Blob {oid = oid, size = Nothing}
+  where
+    oid = case Map.lookup (rel p) wt.work of
+      Just (FromIndex o) -> Just o
+      Just (FromDisk d) -> d.blob
+      Nothing -> Nothing
 
 -- | core.autocrlf=true in ac/.
 autocrlf :: FilePath -> FilePath -> Assertion
@@ -385,7 +432,15 @@ autocrlf t dir = do
   withObjectReader quiet defaultReaderSettings g $ \r -> do
     wt <- either (assertFailure . show) pure =<< listWorkTree quiet g info r canon
     let source =
-          WorkTreeEntries WorkTreeSource {root = canon, reader = r, files = wt.work}
+          WorkTreeEntries
+            WorkTreeSource
+              { root = canon,
+                reader = r,
+                format = info.format,
+                entries = wt.diffEntries,
+                hashable = wt.hashable,
+                files = wt.work
+              }
     f <- filter (/= '\n') <$> gitOut repo ["rev-parse", ":f.txt"]
     Map.lookup (rel "f.txt") wt.work @?= Just (FromIndex (ObjectId (Text.pack f)))
     gId <- filter (/= '\n') <$> gitOut repo ["hash-object", "g.txt"]
@@ -430,6 +485,9 @@ fmRepo :: FilePath -> FilePath -> Assertion
 fmRepo t dir =
   listed (t </> "home") (dir </> "fm") $ \wt _ -> do
     states wt [("x.sh", "clean"), ("y.sh", "dirty")]
+    -- The index's exec bit, clean or not.
+    forM_ ["x.sh", "y.sh"] $ \p ->
+      Map.lookup (rel p) wt.diffEntries @?= Just (File NotExecutable (pairingBlob wt p))
     crossCheck (dir </> "fm") "" wt []
 
 -- | si/: a split index. Only b.hs is hashed: the others are clean by
