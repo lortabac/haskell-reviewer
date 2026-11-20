@@ -81,10 +81,14 @@ describe("decodeMarkdownPage", () => {
     });
   });
 
-  it("not text", () => {
+  it("not text, too slow", () => {
     expect(decodeMarkdownPage({ generation: 1, kind: "not-text" })).toEqual({
       generation: 1,
       kind: "not-text",
+    });
+    expect(decodeMarkdownPage({ generation: 1, kind: "too-slow" })).toEqual({
+      generation: 1,
+      kind: "too-slow",
     });
   });
 

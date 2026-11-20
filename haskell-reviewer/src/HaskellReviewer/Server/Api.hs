@@ -50,12 +50,7 @@ import HaskellReviewer.Core.FileContent
     unfiltered,
   )
 import HaskellReviewer.Core.FileList (CommitId (..), EntryKind (..), FileList (..))
-import HaskellReviewer.Core.Markdown
-  ( Markdown,
-    MarkdownEnv (..),
-    isMarkdownPath,
-    parseMarkdown,
-  )
+import HaskellReviewer.Core.Markdown (MarkdownEnv (..), isMarkdownPath)
 import HaskellReviewer.Core.Markers (Marker)
 import HaskellReviewer.Core.Modules
   ( ComponentModules (..),
@@ -80,6 +75,7 @@ import HaskellReviewer.Core.Sides (Side, parseSide, sideName, sideTag)
 import HaskellReviewer.Core.SourceLinks (LinksInput, linksInput, pageLinks, sourceLinks)
 import HaskellReviewer.Effects.FileSystem (ListError, ReadError (..))
 import HaskellReviewer.Effects.Log (Logger, logInfo)
+import HaskellReviewer.Effects.Parser (markdownGuarded)
 import HaskellReviewer.Effects.Source (EntrySource, sharedBlob)
 import HaskellReviewer.Server.Security (methodNotAllowed, notFound)
 import HaskellReviewer.Server.Wire
@@ -90,7 +86,11 @@ import HaskellReviewer.Server.Wire
     encodeModuleNotFound,
     encodeModuleTree,
   )
-import HaskellReviewer.Server.Wire.Markdown (encodeMarkdownPage, markdownSource)
+import HaskellReviewer.Server.Wire.Markdown
+  ( MarkdownAnswer (..),
+    encodeMarkdownPage,
+    markdownSource,
+  )
 import HaskellReviewer.Server.Wire.Page
   ( ModuleAnswer (..),
     ModuleView (..),
@@ -420,7 +420,7 @@ sourceApp api side segs req respond
       Nothing
         | isMarkdownPath path ->
             withMarkdown api snap path (respond (missing snap)) respond $ \md ->
-              view snap (viewOf snap path Nothing False (maybe PlainBody markdownSource md))
+              view snap (viewOf snap path Nothing False (markdownSource md))
         | otherwise -> view snap (plain snap path Nothing)
       Just i -> case (.source) <$> findModule snap.modules i of
         Just (HaskellSource _) -> do
@@ -462,15 +462,15 @@ markdownApp api side segs req respond
   where
     missing snap = jsonWith status404 (encodeFileNotFound snap.generation)
 
--- | Read a Markdown file of the list and parse it: 'Nothing' if it's no
--- text. Gone: the first action. A read error: its 500.
+-- | Read a Markdown file of the list and parse it ('markdownGuarded').
+-- Gone: the first action. A read error: its 500.
 withMarkdown ::
   FilesApi ->
   Snapshot ->
   RelPath ->
   IO ResponseReceived ->
   (Response -> IO ResponseReceived) ->
-  (Maybe Markdown -> IO ResponseReceived) ->
+  (MarkdownAnswer -> IO ResponseReceived) ->
   IO ResponseReceived
 withMarkdown api snap path gone respond k = case Map.lookup path snap.files.entries of
   Nothing -> gone
@@ -478,8 +478,9 @@ withMarkdown api snap path gone respond k = case Map.lookup path snap.files.entr
     api.readEntry snap path kind >>= \case
       Left ReadGone -> gone
       Left (ReadFailed why) -> respond =<< readFailed api snap path why
-      Right (TextContent t) -> k (Just (parseMarkdown env t))
-      Right _ -> k Nothing
+      Right (TextContent t) ->
+        k . maybe MarkdownTooSlow MarkdownDoc =<< markdownGuarded env t
+      Right _ -> k MarkdownNotText
   where
     env = MarkdownEnv {path = path, exists = (`Map.member` snap.files.entries)}
 

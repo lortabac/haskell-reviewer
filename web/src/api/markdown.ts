@@ -5,12 +5,12 @@ import { field, nat, object, oneOf } from "./decode";
 import { decodeDoc, type Doc } from "./richtext";
 
 // not-text: the file isn't text (binary, too large, ...); its file
-// view says why.
+// view says why. too-slow: parsing it took too long.
 export type MarkdownPage = { generation: number } & (
-  { kind: "doc"; doc: Doc } | { kind: "not-text" }
+  { kind: "doc"; doc: Doc } | { kind: "not-text" } | { kind: "too-slow" }
 );
 
-const kinds = ["doc", "not-text"] as const;
+const kinds = ["doc", "not-text", "too-slow"] as const;
 
 export function decodeMarkdownPage(value: unknown): MarkdownPage {
   const o = object(value, "$");

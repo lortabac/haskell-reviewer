@@ -6,3 +6,6 @@ Text `c`
 x = 1
 ```
 lonecr `d`
+mixed
+
+# After `e`

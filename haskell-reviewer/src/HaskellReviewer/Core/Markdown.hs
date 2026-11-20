@@ -43,6 +43,7 @@ import Commonmark.Extensions
   )
 import Commonmark.Types (HasAttributes (..))
 import Control.Monad (join)
+import Data.ByteString qualified as BS
 import Data.Char (isAlphaNum, isAsciiLower, isAsciiUpper, isDigit, isMark, isSpace, toLower)
 import Data.Foldable (toList)
 import Data.Functor.Identity (Identity, runIdentity)
@@ -53,6 +54,7 @@ import Data.Sequence (Seq)
 import Data.Sequence qualified as Seq
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Text.Encoding qualified as Text.Encoding
 import Data.Vector qualified as Vector
 import Data.Vector.Unboxed qualified as Unboxed
 import HaskellReviewer.Core.Highlight (Run (..))
@@ -289,11 +291,12 @@ instance HasTaskList Ils Bls where
 -- * Tokens
 
 -- | commonmark's tokenizer, without NFC, and a lone @\\r@ is a symbol.
--- See Note [Markdown].
+-- See Note [Markdown]. A @\\r@ is a group of its own (groupBy compares
+-- with a group's first char, so @\\r\\n\\n@ would be one group): the
+-- @\\n@ after it is joined here.
 tokenize :: Text -> [Tok]
 tokenize = go (initialPos "") . Text.groupBy together . Text.replace "\x0" "\xFFFD"
   where
-    together '\r' '\n' = True
     together ' ' ' ' = True
     together x y = wordChar x && wordChar y
     wordChar c = isAlphaNum c || isMark c
@@ -302,9 +305,9 @@ tokenize = go (initialPos "") . Text.groupBy together . Text.replace "\x0" "\xFF
       ' ' -> Tok Spaces pos t : go (col pos (Text.length t)) ts
       '\t' -> Tok Spaces pos t : go (col pos (4 - (sourceColumn pos - 1) `mod` 4)) ts
       '\n' -> Tok LineEnd pos t : go (nextLine pos) ts
-      '\r'
-        | t == "\r\n" -> Tok LineEnd pos t : go (nextLine pos) ts
-        | otherwise -> Tok (Symbol '\r') pos t : go (col pos 1) ts
+      '\r' -> case ts of
+        "\n" : rest -> Tok LineEnd pos "\r\n" : go (nextLine pos) rest
+        _ -> Tok (Symbol '\r') pos t : go (col pos 1) ts
       c
         | wordChar c -> Tok WordChars pos t : go (col pos (Text.length t)) ts
         | isSpace c -> Tok UnicodeSpace pos t : go (col pos 1) ts
@@ -491,12 +494,10 @@ codeMarks ls info lns = case lns of
     bodyMarks body
       | isHaskell info,
         Just ts <- lexSnippet (masked body) =
-          [ Mark
-              (Pos (shift + lineOf t.span.startLine) (colOf t.span.startCol))
-              (Pos (shift + lineOf t.span.endLine) (colOf t.span.endCol))
-              d
+          [ m
           | t <- tokenList ts,
-            Just d <- [displayClass t.kind]
+            Just d <- [displayClass t.kind],
+            m <- perLine body d t
           ]
       | otherwise = map (toEnd ls LiteralClass) body
     -- The body lines as in the file, what's before the block's column
@@ -507,6 +508,16 @@ codeMarks ls info lns = case lns of
       (n0, _) : _ -> n0
       [] -> 0
     blankTo k t = Text.replicate (k - 1) " " <> Text.drop (k - 1) t
+    -- A token over several lines (a block comment), one mark a line,
+    -- each from the body's column: in a quote, the @>@ stays a marker.
+    perLine body d t =
+      let l1 = shift + lineOf t.span.startLine
+          l2 = shift + lineOf t.span.endLine
+          c1 = colOf t.span.startCol
+          c2 = colOf t.span.endCol
+          from n = if n == l1 then c1 else fromMaybe 1 (lookup n body)
+          to n = if n == l2 then c2 else lineLength ls n + 1
+       in [Mark (Pos n (from n)) (Pos n (to n)) d | n <- [l1 .. l2]]
     lineOf (Line n) = fromIntegral n
     colOf (Col n) = fromIntegral n
 
@@ -650,7 +661,7 @@ linkTo :: MarkdownEnv -> Text -> [Inline] -> [Inline]
 linkTo env dest0 label0
   | Just a <- Text.stripPrefix "#" dest,
     not (Text.null a) =
-      [AnchorLink AnchorRef {anchor = a, label = label}]
+      [AnchorLink AnchorRef {anchor = percentDecode a, label = label}]
   | hasScheme dest || "//" `Text.isPrefixOf` dest = case safeUrl dest of
       Just u -> [Link Hyperlink {url = u, label = label}]
       Nothing -> asText
@@ -664,7 +675,7 @@ linkTo env dest0 label0
     (beforeHash, hashPart) = Text.breakOn "#" dest
     fragment = case Text.drop 1 hashPart of
       "" -> Nothing
-      f -> Just f
+      f -> Just (percentDecode f)
     pathPart = Text.takeWhile (/= '?') beforeHash
     asText = case label of
       Just is -> is <> [Str (" <" <> dest <> ">")]
@@ -703,29 +714,32 @@ resolvePath from target
             [] -> Nothing
         | otherwise -> walk (s : acc) rest
 
--- | @%20@ and the like. Bad escapes and non-UTF-8 bytes stay as they
--- are.
+-- | @%20@ and the like, as UTF-8. If the result isn't UTF-8, the text
+-- as it is.
 percentDecode :: Text -> Text
-percentDecode t = case Text.breakOn "%" t of
-  (a, "") -> a
-  (a, rest) -> case Text.unpack (Text.take 2 (Text.drop 1 rest)) of
-    [h, l]
-      | Just x <- hex h,
-        Just y <- hex l,
-        x * 16 + y < 128 ->
-          a <> Text.singleton (toEnum (x * 16 + y)) <> percentDecode (Text.drop 3 rest)
-    _ -> a <> "%" <> percentDecode (Text.drop 1 rest)
+percentDecode t
+  | Text.any (== '%') t =
+      either (const t) id (Text.Encoding.decodeUtf8' (BS.pack (go (BS.unpack bytes))))
+  | otherwise = t
   where
-    hex c
-      | isDigit c = Just (fromEnum c - fromEnum '0')
-      | c >= 'a' && c <= 'f' = Just (fromEnum c - fromEnum 'a' + 10)
-      | c >= 'A' && c <= 'F' = Just (fromEnum c - fromEnum 'A' + 10)
+    bytes = Text.Encoding.encodeUtf8 t
+    go = \case
+      37 : h : l : rest
+        | Just x <- hex h,
+          Just y <- hex l ->
+            x * 16 + y : go rest
+      b : rest -> b : go rest
+      [] -> []
+    hex b
+      | b >= 48 && b <= 57 = Just (b - 48)
+      | b >= 97 && b <= 102 = Just (b - 87)
+      | b >= 65 && b <= 70 = Just (b - 55)
       | otherwise = Nothing
 
 -- * Anchors
 
 -- | Give each heading its anchor, in page order, like GitHub: a repeat
--- gets @-1@, @-2@, ...
+-- gets @-1@, @-2@, ..., skipping any already taken (@# Foo-1@ first).
 anchors :: [Block] -> [Block]
 anchors = snd . goBlocks Map.empty
   where
@@ -733,9 +747,7 @@ anchors = snd . goBlocks Map.empty
     goBlock seen = \case
       Heading h ->
         let base = slugOf (plainText h.title)
-            (seen', a) = case Map.lookup base seen of
-              Nothing -> (Map.insert base (1 :: Int) seen, base)
-              Just k -> (Map.insert base (k + 1) seen, base <> "-" <> Text.pack (show k))
+            (seen', a) = unique seen base
          in (seen', Heading Header {level = h.level, title = h.title, anchor = Just a})
       BlockQuote bs -> BlockQuote <$> goBlocks seen bs
       UnorderedList items -> UnorderedList <$> mapAccumL goBlocks seen items
@@ -756,6 +768,15 @@ anchors = snd . goBlocks Map.empty
             seen
             items
       other -> (seen, other)
+    -- seen: each anchor taken, with the next number to try after it.
+    unique seen base = case Map.lookup base seen of
+      Nothing -> (Map.insert base (1 :: Int) seen, base)
+      Just k ->
+        let next = base <> "-" <> Text.pack (show k)
+            seen' = Map.insert base (k + 1) seen
+         in if Map.member next seen
+              then unique seen' base
+              else (Map.insert next 1 seen', next)
 
 -- | GitHub's heading anchor: lower case, only letters, digits, @-@ and
 -- @_@ kept, spaces to @-@.

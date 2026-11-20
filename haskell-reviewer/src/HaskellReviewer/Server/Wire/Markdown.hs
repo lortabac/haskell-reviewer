@@ -1,7 +1,8 @@
 -- | A Markdown file, rendered (SPEC §4.2): GET api\/markdown\/\<side>\/\<path>.
 -- See Note [Markdown page].
 module HaskellReviewer.Server.Wire.Markdown
-  ( encodeMarkdownPage,
+  ( MarkdownAnswer (..),
+    encodeMarkdownPage,
     markdownSource,
   )
 where
@@ -31,21 +32,37 @@ A file that isn't text (binary, too large, a symlink, ...):
 
 > {generation, kind: "not-text"}
 
-Its file view says why.
+Its file view says why. A file that took too long to parse (Note [Parse
+time limit] in "HaskellReviewer.Effects.Parser"):
+
+> {generation, kind: "too-slow"}
 -}
 
--- | The rendered file, or @not-text@ ('Nothing') when the file is no
--- text. See Note [Markdown page].
-encodeMarkdownPage :: Generation -> Maybe Markdown -> LBS.ByteString
+-- | What we got for a Markdown file.
+data MarkdownAnswer
+  = MarkdownDoc Markdown
+  | MarkdownNotText
+  | MarkdownTooSlow
+
+-- | The rendered file, or why not. See Note [Markdown page].
+encodeMarkdownPage :: Generation -> MarkdownAnswer -> LBS.ByteString
 encodeMarkdownPage (Generation g) md =
   Cbor.cborBody . Cbor.obj $
     ("generation", Cbor.word64 g) : case md of
-      Just m -> [("kind", Cbor.text "doc"), ("doc", encodeDoc noNames m.doc)]
-      Nothing -> [("kind", Cbor.text "not-text")]
+      MarkdownDoc m -> [("kind", Cbor.text "doc"), ("doc", encodeDoc noNames m.doc)]
+      MarkdownNotText -> [("kind", Cbor.text "not-text")]
+      MarkdownTooSlow -> [("kind", Cbor.text "too-slow")]
 
--- | The source view of a Markdown file: its runs, no links.
-markdownSource :: Markdown -> SourceBody
-markdownSource m =
+-- | The source view of a Markdown file: its runs, no links. Plain if
+-- there are none.
+markdownSource :: MarkdownAnswer -> SourceBody
+markdownSource = \case
+  MarkdownDoc m -> lexed m
+  MarkdownNotText -> PlainBody
+  MarkdownTooSlow -> PlainBody
+
+lexed :: Markdown -> SourceBody
+lexed m =
   LexedBody
     LexedSource
       { runs = linkedRunsFromList [(r, 0) | r <- m.runs],

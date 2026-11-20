@@ -33,6 +33,7 @@ import HaskellReviewer.Core.RichText
   )
 import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
 import HaskellReviewer.Core.Tokens (DisplayClass (..))
+import HaskellReviewer.Effects.Parser (markdownGuarded, markdownWithin)
 import Test.Tasty (DependencyType (..), TestTree, after, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 
@@ -140,6 +141,11 @@ blockTests =
         @?= [plain Nothing "<script>alert(1)</script>\n"]
       is <- para "a <b onclick=\"x\">b</b>"
       is @?= [Str "a <b onclick=\"x\">b</b>"],
+    testCase "CRLF then LF: two line ends" $
+      blocksOf "a\r\n\n# H\n"
+        @?= [ Paragraph [Str "a"],
+              Heading Header {level = 1, title = [Str "H"], anchor = Just "h"}
+            ],
     testCase "anything parses" $ do
       -- Deep nesting, odd bytes.
       let m = parseMarkdown env (mconcat (replicate 2000 "> ") <> "x\0\r\n[")
@@ -187,6 +193,13 @@ linkTests =
       is
         @?= [ AnchorLink AnchorRef {anchor = "usage", label = Just [Str "up"]},
               Str " x <#>"
+            ],
+    testCase "escapes decoded in anchors and fragments" $ do
+      is <- para "[c](#caf%C3%A9) [d](Other.md#caf%C3%A9)"
+      is
+        @?= [ AnchorLink AnchorRef {anchor = "café", label = Just [Str "c"]},
+              Str " ",
+              file ["docs", "Other.md"] (Just "café") "d"
             ]
   ]
 
@@ -201,7 +214,10 @@ anchorTests =
       | Heading h <- concatMap flat (blocksOf "# A\n\n> # A\n\n- # A\n"),
         Just a <- [h.anchor]
       ]
-        @?= ["a", "a-1", "a-2"]
+        @?= ["a", "a-1", "a-2"],
+    testCase "a number already taken is skipped" $
+      [a | Heading h <- blocksOf "# Foo-1\n\n# Foo\n\n# Foo\n", Just a <- [h.anchor]]
+        @?= ["foo-1", "foo", "foo-2"]
   ]
   where
     flat = \case
@@ -217,6 +233,9 @@ pathTests =
       resolvePath from "../x/./y.md" @?= Just (path ["a", "x", "y.md"])
       resolvePath from "/top.md" @?= Just (path ["top.md"])
       resolvePath from "My%20File.md" @?= Just (path ["a", "b", "My File.md"])
+      resolvePath from "%C3%A9.md" @?= Just (path ["a", "b", "é.md"])
+      -- Not UTF-8: as written.
+      resolvePath from "%FF.md" @?= Just (path ["a", "b", "%FF.md"])
       resolvePath from "../../../x" @?= Nothing
       resolvePath from "" @?= Nothing
       resolvePath from "./" @?= Just (path ["a", "b"]),
@@ -250,6 +269,17 @@ haskellTests =
       m.doc.blocks
         @?= [plain (Just "hs") "x = \"open\n"]
       [r.display | r <- m.runs] @?= [OperatorClass, LiteralClass, OperatorClass],
+    testCase "a comment over lines in a quote: the > stays a marker" $ do
+      let m = parseMarkdown env "> ```hs\n> {- a\n> b -}\n> ```\n"
+          line3 = [(r.span.startCol, r.span.endCol, r.display) | r <- m.runs, onLine3 r]
+          onLine3 r = r.span.startLine == Line 3
+      line3 @?= [(Col 1, Col 2, OperatorClass), (Col 3, Col 7, CommentClass)],
+    testCase "time limit: a paragraph of many links gives up" $ do
+      let links = Text.replicate 50_000 "[a](b) "
+      slow <- markdownWithin 50_000 env links
+      fmap (const ()) slow @?= Nothing
+      ok <- markdownGuarded env "# Fine\n"
+      fmap (\m -> length m.doc.blocks) ok @?= Just 1,
     testCase "tokens of an indented block at file columns" $ do
       let m = parseMarkdown env "- a\n\n  ```haskell\n  yes\n  ```\n"
       [r | r <- m.runs, r.display == VariableClass]

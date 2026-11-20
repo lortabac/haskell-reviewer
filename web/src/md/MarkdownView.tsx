@@ -103,7 +103,9 @@ function MarkdownPageView(props: { path: string }): JSX.Element {
               <Rendered path={props.path} doc={p.doc} />
             ) : (
               <p>
-                This file is not text, so it can't be shown rendered.{" "}
+                {p.kind === "not-text"
+                  ? "This file is not text, so it can't be shown rendered."
+                  : "This file took too long to render."}{" "}
                 <a href={withBase(base(), hrefFor(props.path))}>See the file</a>
                 .
               </p>
@@ -137,7 +139,8 @@ function Rendered(props: { path: string; doc: Doc }): JSX.Element {
         base(),
         isMarkdownPath(p)
           ? mdHref(p, fragment)
-          : hrefFor(p) + (fragment === null ? "" : "#" + fragment),
+          : hrefFor(p) +
+              (fragment === null ? "" : "#" + encodeURIComponent(fragment)),
       ),
     anchor: (a) => withBase(base(), mdHref(props.path, a)),
   };
