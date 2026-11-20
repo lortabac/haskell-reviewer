@@ -43,6 +43,7 @@ import HaskellReviewer.Core.LineDiffGoldenTest qualified
 import HaskellReviewer.Core.LineDiffOracleTest qualified
 import HaskellReviewer.Core.LineDiffTest qualified
 import HaskellReviewer.Core.MarkdownUnlitTest qualified
+import HaskellReviewer.Core.MarkersTest qualified
 import HaskellReviewer.Core.ModulesGoldenTest qualified
 import HaskellReviewer.Core.ModulesTest qualified
 import HaskellReviewer.Core.NameTableTest qualified
@@ -58,12 +59,16 @@ import HaskellReviewer.Core.ProjectLoadTest qualified
 import HaskellReviewer.Core.ProjectTest qualified
 import HaskellReviewer.Core.ReferencesTest qualified
 import HaskellReviewer.Core.RelPathTest qualified
+import HaskellReviewer.Core.Renames (warmUpRenames)
+import HaskellReviewer.Core.RenamesOracleTest qualified
+import HaskellReviewer.Core.RenamesTest qualified
 import HaskellReviewer.Core.ResolveGoldenTest qualified
 import HaskellReviewer.Core.ResolveTest qualified
 import HaskellReviewer.Core.RevspecTest qualified
 import HaskellReviewer.Core.RichTextGoldenTest qualified
 import HaskellReviewer.Core.RootTest qualified
 import HaskellReviewer.Core.SearchTest qualified
+import HaskellReviewer.Core.SimilarityTest qualified
 import HaskellReviewer.Core.SourceLinksTest qualified
 import HaskellReviewer.Core.SourceTextTest qualified
 import HaskellReviewer.Core.TextSearchTest qualified
@@ -149,6 +154,8 @@ main = do
   warmUpTextSearch
   -- The line diff's paths, before its tests run in parallel.
   warmUpLineDiff
+  -- And the file pairing's.
+  warmUpRenames
   -- Tests run in parallel: share expensive values through withResource.
   -- See Note [Shared values in tests] in HaskellReviewer.Core.PackageGlobTest.
   defaultMain $
@@ -213,6 +220,7 @@ main = do
               after AllFinish "/LineDiff all/ && !/LineDiff timing/" $
                 HaskellReviewer.Core.LineDiffTest.timingTests
             ],
+        HaskellReviewer.Core.MarkersTest.tests,
         HaskellReviewer.Core.ModulesGoldenTest.tests,
         HaskellReviewer.Core.ModulesTest.tests,
         HaskellReviewer.Core.PackageGlobTest.tests,
@@ -221,9 +229,15 @@ main = do
         HaskellReviewer.Core.ProjectLoadTest.tests,
         HaskellReviewer.Core.ProjectTest.tests,
         HaskellReviewer.Core.RelPathTest.tests,
+        HaskellReviewer.Core.RenamesTest.tests,
+        -- Not with the line diff tests: they spawn git a lot, and a fork
+        -- next to LineDiff's GB heaps is slow (D-324).
+        HaskellReviewer.Core.RenamesOracleTest.tests,
+        HaskellReviewer.Core.SimilarityTest.oracleTests,
         HaskellReviewer.Core.RevspecTest.tests,
         HaskellReviewer.Core.RootTest.tests,
         HaskellReviewer.Core.SearchTest.tests,
+        HaskellReviewer.Core.SimilarityTest.tests,
         HaskellReviewer.Core.TextSearchTest.tests,
         HaskellReviewer.Core.TokensTest.tests,
         HaskellReviewer.Core.XdgTest.tests,

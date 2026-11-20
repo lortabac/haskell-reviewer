@@ -2,9 +2,10 @@ cabal-version: 3.12
 name:          haskell-reviewer
 version:       0.1.0.0
 synopsis:      Review Haskell code in the browser
--- The line diff (HaskellReviewer.Core.LineDiff*) is LGPL, ported from
--- git; the rest is BSD-3. See ../LICENSE (D-321).
-license:       BSD-3-Clause AND LGPL-2.1-or-later
+-- GPL-2.0-only (the rename code is ported from git's diffcore). The
+-- line diff (HaskellReviewer.Core.LineDiff*) stays LGPL-2.1-or-later.
+-- See ../LICENSE (D-323).
+license:       GPL-2.0-only
 license-files:
   ../LICENSE
   ../LICENSE.LGPL-2.1
@@ -75,6 +76,7 @@ library
     HaskellReviewer.Core.LineDiff.Histogram
     HaskellReviewer.Core.LineDiff.Myers
     HaskellReviewer.Core.LineRegions
+    HaskellReviewer.Core.Markers
     HaskellReviewer.Core.ModuleGraph
     HaskellReviewer.Core.ModuleModel
     HaskellReviewer.Core.Modules
@@ -97,6 +99,7 @@ library
     HaskellReviewer.Core.ProjectLoad
     HaskellReviewer.Core.RelPath
     HaskellReviewer.Core.References
+    HaskellReviewer.Core.Renames
     HaskellReviewer.Core.Resolve
     HaskellReviewer.Core.ResolveWarmUp
     HaskellReviewer.Core.Revspec
@@ -104,6 +107,7 @@ library
     HaskellReviewer.Core.Root
     HaskellReviewer.Core.Search
     HaskellReviewer.Core.Sides
+    HaskellReviewer.Core.Similarity
     HaskellReviewer.Core.SourceLinks
     HaskellReviewer.Core.SourceText
     HaskellReviewer.Core.Span
@@ -277,6 +281,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.LineDiffOracleTest
     HaskellReviewer.Core.LineDiffTest
     HaskellReviewer.Core.MarkdownUnlitTest
+    HaskellReviewer.Core.MarkersTest
     HaskellReviewer.Core.ModulesGoldenTest
     HaskellReviewer.Core.ModulesTest
     HaskellReviewer.Core.NameTableTest
@@ -292,12 +297,15 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.ProjectTest
     HaskellReviewer.Core.ReferencesTest
     HaskellReviewer.Core.RelPathTest
+    HaskellReviewer.Core.RenamesOracleTest
+    HaskellReviewer.Core.RenamesTest
     HaskellReviewer.Core.RevspecTest
     HaskellReviewer.Core.ResolveGoldenTest
     HaskellReviewer.Core.ResolveTest
     HaskellReviewer.Core.RichTextGoldenTest
     HaskellReviewer.Core.RootTest
     HaskellReviewer.Core.SearchTest
+    HaskellReviewer.Core.SimilarityTest
     HaskellReviewer.Core.SourceLinksTest
     HaskellReviewer.Core.SourceTextTest
     HaskellReviewer.Core.TextSearchTest
@@ -344,6 +352,7 @@ test-suite haskell-reviewer-test
     OccurrencesDump
     ParseDump
     ProjectDump
+    RenamesSupport
     ResolveDump
     RichDump
     TestSupport
