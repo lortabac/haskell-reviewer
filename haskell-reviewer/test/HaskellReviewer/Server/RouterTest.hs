@@ -288,7 +288,8 @@ call req = do
             minGap = Microseconds 0,
             logger = newLogger LevelInfo (\_ -> pure ())
           }
-      routes = Routes {events = events, files = noFiles, prefs = fixedPrefs}
+      routes =
+        Routes {events = events, files = noFiles, prefs = fixedPrefs, diff = Nothing}
   saved <- newIORef Nothing
   ResponseReceived <-
     application port token routes req $ \resp -> do

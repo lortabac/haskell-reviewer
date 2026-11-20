@@ -6,6 +6,7 @@ import Data.List (sortOn)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
+import HaskellReviewer.Core.Changed (moduleKeys)
 import HaskellReviewer.Core.FileList (ListSource (..), fileListCap, mkFileList)
 import HaskellReviewer.Core.Markers
   ( Marker (..),
@@ -157,4 +158,5 @@ cabalChange = withCanonicalTemp $ \tmp -> do
       let fl = mkFileList FromDisk w.skippedNames w.entries
       let platform = Platform {os = "linux", arch = "x86_64"}
       project <- readProject (DiskEntries canon) fl platform Nothing
-      pure (moduleFacts (buildModuleIndex project fl))
+      let idx = buildModuleIndex project fl
+      pure (moduleFacts (moduleKeys (const Nothing) idx) idx)

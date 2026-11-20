@@ -300,6 +300,8 @@ describe("ModuleTree alone", () => {
       ref: `p:${comp}:Foo`,
       role: "other" as const,
       source: shared,
+      change: null,
+      settingsChanged: false,
     });
     const tree: Tree = {
       generation: 1,
@@ -362,6 +364,8 @@ describe("ModuleTree alone", () => {
           ref: name,
           role: "other" as const,
           source: { kind: "module" as const, path },
+          change: null,
+          settingsChanged: false,
         },
       ],
     });

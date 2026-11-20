@@ -11,7 +11,7 @@ import Data.Text qualified as Text
 import HaskellReviewer.Core.CommitFiles (BlobRef (..), BlobSize (..), CommitFiles (..))
 import HaskellReviewer.Core.Eol (Filtering (..))
 import HaskellReviewer.Core.FileList (FileList (..))
-import HaskellReviewer.Core.Git (ObjectId (..))
+import HaskellReviewer.Core.Git (ObjectId (..), RepoInfo (..))
 import HaskellReviewer.Core.RelPath (parseRelPath, relPathText)
 import HaskellReviewer.Core.Root (Root (..))
 import HaskellReviewer.Core.WorkTree (DiskFile (..), WorkFile (..))
@@ -180,7 +180,14 @@ workTreeCalls t = do
       assertBool (r <> ": files") (Map.size wt.files.entries >= 1)
       let source =
             WorkTreeEntries
-              WorkTreeSource {root = canon, reader = reader, files = wt.work}
+              WorkTreeSource
+                { root = canon,
+                  reader = reader,
+                  format = info.format,
+                  entries = wt.diffEntries,
+                  hashable = wt.hashable,
+                  files = wt.work
+                }
       -- Reads through the index blobs (cat-file) and from disk.
       when (r `elem` ["r2", "r4", "r2/sub"]) $
         forM_ (Map.toList wt.files.entries) $ \(p, k) -> do

@@ -20,6 +20,8 @@ module HaskellReviewer.Effects.FileSystem
     -- * Reading
     readEntry,
     readDiskEntry,
+    DiskBytes (..),
+    readDiskBytes,
 
     -- * For the working-tree side
     dirFlags,
@@ -55,6 +57,7 @@ import HaskellReviewer.Core.CommitFiles
   ( CommitFiles (..),
     Dropped (..),
     DroppedRow (..),
+    OutsideRows (..),
     mkCommitFiles,
   )
 import HaskellReviewer.Core.FileContent
@@ -282,7 +285,7 @@ commitFiles logger info out = case parseTreeEntries out of
     logSome (logVerbose logger) "files: skipped bad path " "bad paths" bad
     logSome (logVerbose logger) "files: skipped " "unknown modes" oddModes
     -- As in listFiles: build it here, so a crash is a listing error.
-    let sizes = Map.size cf.files.entries + Map.size cf.blobs + Map.size cf.outside
+    let sizes = Map.size cf.files.entries + Map.size cf.blobs + Map.size cf.outside.rows
     Right cf <$ evaluate sizes
   where
     decode = Text.Encoding.decodeUtf8Lenient
@@ -467,6 +470,54 @@ readDiskEntry canon clean p = \case
                 | BS.length bytes <= maxText = clean bytes
                 | otherwise = bytes
           pure (Right (contentFromBytes size cleaned))
+
+-- | What 'readDiskBytes' found.
+data DiskBytes
+  = -- | A regular file's bytes, all of them.
+    DiskFileBytes ByteString
+  | -- | A symlink's target.
+    DiskLinkBytes ByteString
+  deriving (Eq, Show)
+
+-- | All of a file's bytes, or a symlink's target, as on disk now,
+-- never through a symlink (pairing, D-324). 'Nothing' if it is gone,
+-- not a file or symlink, over the cap, or can't be read.
+readDiskBytes :: CanonicalRoot -> Int -> RelPath -> IO (Maybe DiskBytes)
+readDiskBytes canon cap p =
+  either (const Nothing) id
+    <$> try @IOException (bracket (openParents canon p) closeFd readIn)
+  where
+    name = case reverse (relPathSegments p) of
+      n : _ -> Text.Encoding.encodeUtf8 n
+      [] -> ""
+    readIn dirFd = do
+      st <- statAt dirFd name
+      case st.kind of
+        KindSymlink -> Just . DiskLinkBytes <$> readLinkAt dirFd name
+        KindFile -> readRegular dirFd
+        _ -> pure Nothing
+    readRegular dirFd = do
+      opened <- bracketOnError (openFdAt (Just dirFd) name ReadOnly fileFlags) closeFd $
+        \fd -> do
+          st <- PosixFiles.getFdStatus fd
+          if PosixFiles.isRegularFile st
+            then Just . (,st) <$> fdToHandle fd
+            else closeFd fd >> pure Nothing
+      case opened of
+        Nothing -> pure Nothing
+        Just (h, st)
+          | size > cap -> Nothing <$ hClose h
+          | otherwise -> (`finally` hClose h) $ do
+              -- The fstat size, not the cap: hGet allocates all it may
+              -- read up front.
+              bytes <- BS.hGet h size
+              more <- BS.hGetSome h 1
+              pure $
+                if BS.length bytes /= size || not (BS.null more)
+                  then Nothing
+                  else Just (DiskFileBytes bytes)
+          where
+            size = fromIntegral (PosixFiles.fileSize st) :: Int
 
 -- * Shared with the working-tree side
 

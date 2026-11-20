@@ -3,8 +3,10 @@ module HaskellReviewer.Session.SnapshotTest (tests) where
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (poll, wait, withAsync)
 import Control.Concurrent.STM (atomically)
+import Data.Map.Strict qualified as Map
 import Data.Maybe (isNothing)
 import HaskellReviewer.Core.FileList (ListSource (..), mkFileList)
+import HaskellReviewer.Core.Modules (buildModuleIndex)
 import HaskellReviewer.Core.Project
   ( DetectedGhc (..),
     GhcSource (..),
@@ -89,16 +91,21 @@ stateOn side =
 emptySnapshot :: Side -> IO Snapshot
 emptySnapshot side = do
   share <- newSessionShare
+  let fl = mkFileList FromDisk 0 []
   newSnapshot
     side
     share
     (DiskEntries (CanonicalRoot "/x" "/x"))
-    (mkFileList FromDisk 0 [])
-    Project
-      { source = ImplicitRootCabalFiles,
-        withCompiler = Nothing,
-        ghc = DetectedGhc {version = parserGhcVersion, source = GhcFromParser},
-        packages = [],
-        brokenPackages = [],
-        warnings = []
-      }
+    fl
+    (buildModuleIndex project fl)
+    Map.empty
+  where
+    project =
+      Project
+        { source = ImplicitRootCabalFiles,
+          withCompiler = Nothing,
+          ghc = DetectedGhc {version = parserGhcVersion, source = GhcFromParser},
+          packages = [],
+          brokenPackages = [],
+          warnings = []
+        }

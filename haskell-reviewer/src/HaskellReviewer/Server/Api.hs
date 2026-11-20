@@ -18,6 +18,10 @@ module HaskellReviewer.Server.Api
     sourceApp,
     indexingApp,
 
+    -- * Responses
+    json,
+    serverError,
+
     -- * Internal, for tests
     cborWarmUp,
     computed,
@@ -30,6 +34,7 @@ import Control.Monad (guard, void)
 import Data.ByteString (ByteString)
 import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Lazy qualified as LBS
+import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Set qualified as Set
 import Data.Text (Text)
@@ -44,6 +49,7 @@ import HaskellReviewer.Core.FileContent
     unfiltered,
   )
 import HaskellReviewer.Core.FileList (CommitId (..), EntryKind (..), FileList (..))
+import HaskellReviewer.Core.Markers (Marker)
 import HaskellReviewer.Core.Modules
   ( ComponentModules (..),
     FoundModule (..),
@@ -54,13 +60,12 @@ import HaskellReviewer.Core.Modules
     ModuleSource (..),
     PackageModules (..),
     PreprocessedFile (..),
-    buildModuleIndex,
     findModule,
     forceSettings,
     moduleAtPath,
     resolveModuleRef,
   )
-import HaskellReviewer.Core.Project (GhcVersion (..), Project)
+import HaskellReviewer.Core.Project (GhcVersion (..))
 import HaskellReviewer.Core.RelPath (RelPath, relPathFromSegments, relPathText)
 import HaskellReviewer.Core.Resolve (ModuleState (..), ParsedInput (..), isPartial)
 import HaskellReviewer.Core.Search (forceCandidates, moduleCandidates)
@@ -185,16 +190,24 @@ What the workers put in the slots is forced before it gets there (Note
 [Indexing] in "HaskellReviewer.Session.Index").
 -}
 
--- | The snapshot of one side's file list and its project, with the
--- JSON bodies, an index in this pool with every module Pending, and its
--- resolver. Its index and text store share results by blob with the
--- session's other snapshots (D-320). Fully built before it returns. See
--- Note [Forced snapshot].
-newSnapshot :: Side -> SessionShare -> EntrySource -> FileList -> Project -> IO Snapshot
-newSnapshot side share source fl project = do
-  let modules = buildModuleIndex project fl
-      fileListJson = encodeFileList firstGeneration fl
-      moduleTreeJson = encodeModuleTree firstGeneration modules
+-- | The snapshot of one side's file list and its modules (from
+-- 'HaskellReviewer.Core.Modules.buildModuleIndex'), with the JSON
+-- bodies (the module tree with these diff markers, D-325; none in
+-- browse mode), an index in this pool with every module Pending, and
+-- its resolver. Its index and text store share results by blob with
+-- the session's other snapshots (D-320). Fully built before it
+-- returns. See Note [Forced snapshot].
+newSnapshot ::
+  Side ->
+  SessionShare ->
+  EntrySource ->
+  FileList ->
+  ModuleIndex ->
+  Map ModuleId Marker ->
+  IO Snapshot
+newSnapshot side share source fl modules markers = do
+  let fileListJson = encodeFileList firstGeneration fl
+      moduleTreeJson = encodeModuleTree firstGeneration markers modules
   forceSnapshot modules fileListJson moduleTreeJson
   searchModules <- evaluate (moduleCandidates modules)
   _ <- evaluate (forceCandidates searchModules)
@@ -519,6 +532,7 @@ indexFailed gone = \case
 cannotList :: Response
 cannotList = serverError "cannot list files"
 
+-- | A plain-text 500.
 serverError :: LBS.ByteString -> Response
 serverError =
   responseLBS status500 [(hContentType, "text/plain; charset=utf-8")]

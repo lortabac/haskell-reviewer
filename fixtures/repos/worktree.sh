@@ -13,7 +13,7 @@
 #         a size change with the same clean bytes; filter=unset with a
 #         driver named unset
 #   sl/   core.symlinks=false: link is a plain file holding its target
-#   fm/   core.filemode=false: x.sh made executable
+#   fm/   core.filemode=false: x.sh made executable, y.sh too and edited
 #   si/   a split index
 #   sd/   ROOT is sd/pkg
 #   bn/   binary and -crlf files with CRLF bytes, touched: clean
@@ -76,6 +76,8 @@ printf '$Id$\nx\ny\n' > "$w/ident.id"
 printf 'x\r\ny\r\nz\r\n' > "$w/crlf-auto.a"
 printf '\001\002\003\004\005\006\007\001\002\003\r\nmore\r\n' > "$w/bin.a"
 printf 'module New where\n' > "$w/new.hs"
+# Untracked under text: check-attr says set, so the rule isn't sure.
+printf 'a\r\nb\r\n' > "$w/new.t"
 printf 'log\n' > "$w/ignored.log"
 printf 'module M where\n-- staged, changed\n' > "$w/staged.hs"
 g -C "$w" add staged.hs
@@ -171,6 +173,7 @@ g -C "$m" config core.filemode false
 old "$m"
 chmod +x "$m/x.sh"
 printf 'echo y2\n' > "$m/y.sh"
+chmod +x "$m/y.sh"
 
 i=$T/si
 repo_init "$i" "$fmt"

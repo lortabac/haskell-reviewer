@@ -51,6 +51,7 @@ import HaskellReviewer.Core.ModuleModel
   )
 import HaskellReviewer.Core.Project (GhcVersion (..))
 import HaskellReviewer.Core.RelPath (relPathFromBytes, relPathText)
+import HaskellReviewer.Core.Renames (RenameLimit (..), Settings (..), defaultSettings)
 import HaskellReviewer.Core.Revspec
   ( BaseFrom (..),
     CommitsInfo (..),
@@ -83,6 +84,7 @@ import HaskellReviewer.Effects.Git
   )
 import HaskellReviewer.Effects.GitObjects (defaultReaderSettings, withObjectReader)
 import HaskellReviewer.Effects.Log (LogLevel (..), Logger, logInfo, newLogger)
+import HaskellReviewer.Effects.Pairing (pairListed)
 import HaskellReviewer.Effects.Revisions (DiffError (..))
 import HaskellReviewer.Effects.Shutdown (Shutdown (..))
 import HaskellReviewer.Effects.Source
@@ -237,6 +239,7 @@ tests =
       indexingTests,
       diffTests,
       cabalChangeTests,
+      renamesTests,
       testCase "--port is passed to listen" $ do
         fake <- newFake
         ports <- newIORef []
@@ -375,6 +378,10 @@ listingTests =
           assertBool "not listed" ok
           out <- readIORef fake.console
           take 2 out @?= ["haskell-reviewer: serving at " <> fakeUrl, "listing"],
+      testCase "browse mode: api/diff-files is a plain 404" $
+        withRunning (const oneLister) $ \_ app -> do
+          r <- getSidePath app ["diff-files"]
+          (r.status, r.body) @?= (404, "not found"),
       testCase "listing fails: a line, 500, no exit" $
         withRunning (\_ -> fakeLister (pure (Left (ListCrashed "boom")))) $
           \fake app -> do
@@ -683,6 +690,8 @@ diffTests =
             ok <- waitFor 5 (any isDone <$> readIORef fake.console)
             assertBool "not indexed" ok
             checkSides app "C" "B"
+            d <- getSidePath app ["diff-files"]
+            (d.status, d.body) @?= (500, "cannot pair files")
             out <- readIORef fake.console
             filter isDone out
               @?= [allDone]
@@ -877,7 +886,9 @@ diffTests =
           code @?= Just ExitSuccess
           forM_ ["head", "base"] $ \side -> do
             r <- timeout 5_000_000 (getSide app "files" side)
-            fmap (\x -> (x.status, x.body)) r @?= Just (500, "cannot list files"),
+            fmap (\x -> (x.status, x.body)) r @?= Just (500, "cannot list files")
+          d <- timeout 5_000_000 (getSidePath app ["diff-files"])
+          fmap (\x -> (x.status, x.body)) d @?= Just (500, "cannot list files"),
       testCase "stop during listing: both sides 500, exit 0" $ do
         fake <- newFake
         stop <- newEmptyMVar
@@ -901,7 +912,9 @@ diffTests =
           code @?= Just ExitSuccess
           forM_ ["head", "base"] $ \side -> do
             r <- timeout 5_000_000 (getSide app "files" side)
-            fmap (\x -> (x.status, x.body)) r @?= Just (500, "cannot list files"),
+            fmap (\x -> (x.status, x.body)) r @?= Just (500, "cannot list files")
+          d <- timeout 5_000_000 (getSidePath app ["diff-files"])
+          fmap (\x -> (x.status, x.body)) d @?= Just (500, "cannot list files"),
       testCase "both sides fail to list: no warm-up, no workers, both 500" $ do
         count <- newIORef (0 :: Int)
         asked <- newIORef False
@@ -996,6 +1009,91 @@ cabalChangeTests =
       ]
   where
     golden side = "../fixtures/repos/cabal-change." <> side <> ".json"
+
+-- | api/diff-files through 'run' and the real probe on @renames.sh@
+-- (D-325): ROOT is pkg/, so other/ is outside. Goldens in
+-- fixtures/repos.
+renamesTests :: TestTree
+renamesTests =
+  testGroup
+    "renames"
+    [ goldenVsString "commits" (golden "diff-files") $ do
+        r <- runRenames [] "HEAD~1..HEAD" id
+        let has l = assertBool (show r.console) (any (l `Text.isPrefixOf`) r.console)
+        (r.status, r.contentType) @?= (200, Just "application/json")
+        has "pairing: 21 changed, 11 renamed in "
+        assertBool (show r.spans) ("pairing" `elem` r.spans)
+        pure r.body,
+      goldenVsString "rename limit 2" (golden "diff-files-limit") $
+        (.body) <$> runRenames [] "HEAD~1..HEAD" limitTwo,
+      goldenVsString "working tree" (golden "diff-files-worktree") $
+        (.body) <$> runRenames ["sha1", "worktree"] "HEAD" id,
+      testCase "pairing crashes: a line, 500, no markers" $ do
+        r <- runRenames [] "HEAD~1..HEAD" crashing
+        (r.status, r.body) @?= (500, "cannot pair files\n")
+        let line = "haskell-reviewer: cannot pair files: user error (boom)"
+        assertBool (show r.console) (line `elem` r.console)
+        forM_ [r.headTree, r.baseTree] $ \tree -> do
+          let t = LBS.toStrict tree
+              none = "\"change\":null,\"settingsChanged\":false"
+          assertBool (show t) (none `BS.isInfixOf` t)
+          assertBool (show t) (not ("\"change\":\"" `BS.isInfixOf` t)),
+      testCase "module trees: loose modules by path, added and removed" $ do
+        r <- runRenames [] "HEAD~1..HEAD" id
+        let has needle tree =
+              assertBool (show tree) (needle `BS.isInfixOf` LBS.toStrict tree)
+        has "\"id\":\"d2/Same.hs\",\"ref\":\"Same\",\"change\":\"added\"" r.headTree
+        has "\"id\":\"d1/Same.hs\",\"ref\":\"Same\",\"change\":\"removed\"" r.baseTree
+    ]
+  where
+    golden n = "../fixtures/repos/renames." <> n <> ".json"
+    limitTwo d = d {pairFiles = pairListed defaultSettings {renameLimit = RenameLimit 2}}
+    crashing d = d {pairFiles = \_ -> ioError (userError "boom")}
+
+-- | What 'runRenames' saw.
+data RenamesRun = RenamesRun
+  { status :: Int,
+    contentType :: Maybe BS.ByteString,
+    -- | With a newline, for the goldens.
+    body :: LBS.ByteString,
+    headTree :: LBS.ByteString,
+    baseTree :: LBS.ByteString,
+    console :: [Text],
+    spans :: [Text]
+  }
+
+-- | @renames.sh@ with these extra args, served with @--diff@ at pkg/.
+runRenames :: [String] -> String -> (Deps -> Deps) -> IO RenamesRun
+runRenames extra diff tweak = withCanonicalTemp $ \tmp -> do
+  let repo = tmp </> "repo"
+  fixtureRepo "renames" (repo : extra)
+  Dir.createDirectory (tmp </> "home")
+  setup <- gitSetup (tmp </> "home") gitProbeTimeLimit
+  let change _ d =
+        tweak
+          d
+            { checkRoot = \p -> pure (Right (Root p)),
+              probeFiles = probeFilesWith setup,
+              readEntry = readSourceEntry
+            }
+      args = [repo </> "pkg", "--idle-exit", "0", "--verbose", "--diff", diff]
+      args' = args <> ["--trace-file", "t.jsonl"]
+  withRunningProbe args' change $ \fake app -> do
+    r <- getSidePath app ["diff-files"]
+    h <- getSide app "modules" "head"
+    b <- getSide app "modules" "base"
+    out <- readIORef fake.console
+    names <- map (.name) <$> readIORef fake.spans
+    pure
+      RenamesRun
+        { status = r.status,
+          contentType = lookup "Content-Type" r.headers,
+          body = r.body <> "\n",
+          headTree = h.body,
+          baseTree = b.body,
+          console = out,
+          spans = names
+        }
 
 -- | What 'runCabalChange' saw.
 data CabalChange = CabalChange
@@ -1256,8 +1354,9 @@ neverDone = Left (ListCrashed "") <$ blockForever
 -- | A lister for a fake ROOT.
 fakeLister :: IO (Either ListError FileList) -> Lister
 fakeLister action =
-  Lister {list = fmap (\fl -> Listed {files = fl, source = fakeRoot}) <$> action}
+  Lister {list = fmap listed <$> action}
   where
+    listed fl = Listed {files = fl, source = fakeRoot}
     fakeRoot = DiskEntries (CanonicalRoot "/abs/x" "/abs/x")
 
 -- | Poll every 20 ms, up to the given seconds.
@@ -1348,6 +1447,7 @@ newFake = do
             warmUp = [],
             readEntry = \_ _ _ -> pure (Right (TextContent "module A where\n")),
             parse = \_ _ -> pure textOnly,
+            pairFiles = pairListed defaultSettings,
             indexWorkers = pure 1,
             openBrowser = \_ _ url -> modifyIORef' opened (<> [url]),
             installShutdown = \_ ->

@@ -12,7 +12,12 @@ import Data.Either (isLeft)
 import Data.List (isInfixOf, isPrefixOf, sort)
 import Data.Map.Strict qualified as Map
 import Data.Text qualified as Text
-import HaskellReviewer.Core.CommitFiles (BlobRef (..), BlobSize (..), CommitFiles (..))
+import HaskellReviewer.Core.CommitFiles
+  ( BlobRef (..),
+    BlobSize (..),
+    CommitFiles (..),
+    OutsideRows (..),
+  )
 import HaskellReviewer.Core.FileContent (FileSize (..))
 import HaskellReviewer.Core.FileList (CommitId (..), EntryKind (..), FileList (..))
 import HaskellReviewer.Core.Git
@@ -267,7 +272,7 @@ checkKinds k repo format idLength = do
       ]
   forM_ (Map.elems cf.blobs) $ \b ->
     let ObjectId o = b.oid in Text.length o @?= idLength
-  Map.keys cf.outside @?= ["other/x.hs", "outside.txt"]
+  Map.keys cf.outside.rows @?= ["other/x.hs", "outside.txt"]
 
 oidOf :: CommitFiles -> ByteString -> ObjectId
 oidOf cf p = maybe (error ("no blob " <> show p)) (.oid) (Map.lookup (rel p) cf.blobs)

@@ -50,6 +50,7 @@ import HaskellReviewer.Effects.FileSystem (ListError (..), ReadError (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), newLogger)
 import HaskellReviewer.Server.Api (cborWarmUp)
 import HaskellReviewer.Server.CborJson (cborToJson)
+import HaskellReviewer.Session.Diff (DiffProblem (..))
 import HaskellReviewer.Session.Prefs (newPrefsStore)
 import Network.HTTP.Types (Header)
 import System.Directory qualified as Dir
@@ -61,7 +62,18 @@ import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 tests :: TestTree
 tests =
   testGroup "Api" $
-    [ testCase "bad paths: 404, readEntry not called" $ do
+    [ testCase "diff-files: 405 first, 404 in browse mode, 500s, 200" $ do
+        let with d = fixtureApi {diffFiles = d, workers = 0}
+            call method d = do
+              r <- requestApi method (with d) ["api", "diff-files"]
+              pure (r.status, r.body)
+        call "POST" Nothing >>= (@?= (405, "method not allowed"))
+        call "POST" (Just (Right "{}")) >>= (@?= (405, "method not allowed"))
+        call "GET" Nothing >>= (@?= (404, "not found"))
+        call "GET" (Just (Left DiffNotListed)) >>= (@?= (500, "cannot list files"))
+        call "GET" (Just (Left (DiffNotPaired "x"))) >>= (@?= (500, "cannot pair files"))
+        call "GET" (Just (Right "{}")) >>= (@?= (200, "{}")),
+      testCase "bad paths: 404, readEntry not called" $ do
         calls <- newIORef (0 :: Int)
         let api =
               fixtureApi

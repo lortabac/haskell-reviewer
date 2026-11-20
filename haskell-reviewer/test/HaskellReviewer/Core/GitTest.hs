@@ -7,6 +7,7 @@ import HaskellReviewer.Core.FileContent (FileSize (..))
 import HaskellReviewer.Core.Git
   ( BlobItem (..),
     CatFileHeader (..),
+    Exec (..),
     FoundHeader (..),
     GitVersion (..),
     History (..),
@@ -119,17 +120,17 @@ tests =
           )
           @?= Right
             [ entry "a.hs" (file a (known 42)),
-              entry "bin/run" (ItemBlob (BlobItem (oid b) (known 7))),
+              entry "bin/run" (ItemBlob Executable (BlobItem (oid b) (known 7))),
               entry "link" (ItemSymlink (BlobItem (oid c) (known 4))),
               entry "sub" (ItemGitlink (oid d)),
-              entry "gone.txt" (ItemBlob (BlobItem (oid a) SizeMissing))
+              entry "gone.txt" (file a SizeMissing)
             ],
       testCase "ls-tree --long: big size, no padding" $
         parseTreeEntries ("100644 blob " <> a <> " 1200000\tbig.txt\0")
           @?= Right [entry "big.txt" (file a (known 1200000))],
       testCase "ls-tree: sha256 ids" $
         parseTreeEntries ("100644 blob " <> long <> "\tf\0")
-          @?= Right [entry "f" (ItemBlob (BlobItem (oid long) SizeNotListed))],
+          @?= Right [entry "f" (file long SizeNotListed)],
       testCase "ls-tree: TAB and newline in a path, non-UTF-8 bytes kept" $
         parseTreeEntries
           ( "100644 blob "
@@ -143,15 +144,15 @@ tests =
               <> "\tcaf\xe9\0"
           )
           @?= Right
-            [ entry "a\tb" (ItemBlob (BlobItem (oid a) (SizeKnown (FileSize 1)))),
-              entry "new\nline" (ItemBlob (BlobItem (oid a) SizeNotListed)),
-              entry "caf\xe9" (ItemBlob (BlobItem (oid a) SizeNotListed))
+            [ entry "a\tb" (file a (SizeKnown (FileSize 1))),
+              entry "new\nline" (file a SizeNotListed),
+              entry "caf\xe9" (file a SizeNotListed)
             ],
       testCase "ls-tree plain: no sizes, gitlink" $
         parseTreeEntries
           ("100644 blob " <> a <> "\ta.hs\0\&160000 commit " <> d <> "\tsub\0")
           @?= Right
-            [ entry "a.hs" (ItemBlob (BlobItem (oid a) SizeNotListed)),
+            [ entry "a.hs" (file a SizeNotListed),
               entry "sub" (ItemGitlink (oid d))
             ],
       testCase "ls-tree: empty, unknown mode" $ do
@@ -235,5 +236,5 @@ tests =
     long = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     oid = ObjectId . Text.Encoding.decodeLatin1
     entry = TreeEntry
-    file o s = ItemBlob (BlobItem (oid o) s)
+    file o s = ItemBlob NotExecutable (BlobItem (oid o) s)
     known = SizeKnown . FileSize

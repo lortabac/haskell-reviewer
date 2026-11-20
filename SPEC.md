@@ -290,7 +290,8 @@ The UI has a fixed **frame** and one **main view** at a time.
   location" (§5.7) and a Shortcuts button (§5.3).
 - **Sidebar**: the module tree, grouped by package and component. In diff
   mode every module carries a change marker (added / removed / modified /
-  renamed) and a filter "changed only". The tree also has the "Other
+  renamed, and "settings changed" for its parse settings or role; from
+  `api/modules/<side>`, D-325) and a filter "changed only". The tree also has the "Other
   files" group, and shows "listed, no source" and banner entries (§2.3).
 - **LLM panel** (§6): a collapsible right-hand panel.
 
@@ -455,7 +456,9 @@ Available in diff mode only. It shows the textual diff file by file.
   snapshot).
 - Renames are detected the way git does by default (exact match, then
   content similarity ≥ 50 %) and shown as such. Copies are not detected:
-  a copied file shows as added (D-74).
+  a copied file shows as added (D-74). The file list with statuses,
+  similarity and changes outside ROOT comes from `api/diff-files`
+  (D-325).
 - **Find in file** (`f`, or a toolbar button) searches the whole file on
   both sides, as in §4.4.
 - Option to ignore whitespace-only changes (as git's `-w`).
@@ -1708,7 +1711,15 @@ a framework would cost more than it saves.
   missing module or declaration is a 404 with a small JSON body. Text search is
   `GET api/text-search/<side>?q=&limit=` (JSON, D-307): one result per
   matching line, cut to 240 code points, with its hit columns; a total, a
-  file count, the files not searched by why, and a `stopped` flag. Every response
+  file count, the files not searched by why, and a `stopped` flag. In
+  diff mode, `GET api/diff-files` (JSON, D-325) lists the changed
+  files: path, old path and similarity for a rename, status (added,
+  removed, modified, renamed), a note (type-changed, mode-changed,
+  filtered), the two sides' labels and commits, the changes outside
+  ROOT (count, first 100 paths; null when not known), whether the
+  rename limit was hit and whether a side's list was cut at the cap; a plain 404 in browse mode. Every module of
+  `api/modules/<side>` has `change` and `settingsChanged` (null and
+  false in browse mode). Every response
   carries its snapshot generation id, and the client caches by
   *(generation, resource)*. Preferences (`api/prefs`) are the exception:
   they don't belong to a snapshot, so they have no generation (D-197). A

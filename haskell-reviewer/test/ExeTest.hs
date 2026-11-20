@@ -547,7 +547,8 @@ filesTests =
                   \\"notices\":[{\"kind\":\"stack\"},{\"kind\":\"implicit\"}],\
                   \\"packages\":[],\"broken\":[],\
                   \\"other\":[{\"kind\":\"module\",\"path\":\"Foo.hs\",\
-                  \\"name\":\"Foo\",\"id\":\"Foo.hs\",\"ref\":\"Foo\"}],\
+                  \\"name\":\"Foo\",\"id\":\"Foo.hs\",\"ref\":\"Foo\",\
+                  \\"change\":null,\"settingsChanged\":false}],\
                   \\"warnings\":[]}",
       testCase "module: a CBOR page, gzipped too; a symlink is never read" $
         withCanonicalTemp $ \dir -> do
@@ -977,11 +978,44 @@ diffTests =
             (_, err) <- stopServer server sigTERM
             assertContains "diff: light..feature\n" err
             length (filter ("indexing: done" `isPrefixOf`) (lines err)) @?= 1,
+        testCase "api/diff-files: a rename with its score; 405" $ do
+          t <- get
+          let root = t </> "renames" </> "pkg"
+          withServer id [root, "--diff", "HEAD~1..HEAD"] $ \server -> do
+            r <- getPath server "api/diff-files"
+            r.status @?= 200
+            lookup "content-type" r.headers @?= Just "application/json"
+            let body = Char8.unpack r.body
+            assertContains
+              "{\"path\":\"sim60/new.txt\",\"oldPath\":\"sim60/old.txt\",\
+              \\"status\":\"renamed\",\"similarity\":60,\"note\":null}"
+              body
+            assertContains "\"outside\":{\"total\":3," body
+            let origin =
+                  "Origin: http://127.0.0.1:"
+                    <> Char8.pack (show server.port)
+                    <> "\r\nContent-Length: 0\r\n"
+                path = tokenPath server <> "api/diff-files"
+            post <-
+              rawHttp server.port (requestBytes "POST" (goodHost server) path origin)
+            post.status @?= 405,
         testCase "BASE...HEAD: base is the merge base" $ do
           t <- get
           let root = t </> "repo" </> "pkg"
-          f2 <- take 7 <$> gitOut (t </> "repo") ["rev-parse", "feature~1"]
+          [mergeBase, feature] <-
+            lines <$> gitOut (t </> "repo") ["rev-parse", "feature~1", "feature"]
+          let f2 = take 7 mergeBase
           withServer id ["--verbose", root, "--diff", "main...feature"] $ \server -> do
+            -- Labels as typed, base's commit the merge base.
+            diff <- getPath server "api/diff-files"
+            assertContains
+              ( "\"base\":{\"label\":\"main\",\"commit\":\""
+                  <> mergeBase
+                  <> "\"},\"head\":{\"label\":\"feature\",\"commit\":\""
+                  <> feature
+                  <> "\"}"
+              )
+              (Char8.unpack diff.body)
             base <- getPath server "api/files/base"
             let body = Char8.unpack base.body
             assertContains "\"path\":\"src/G.hs\"" body
@@ -1020,6 +1054,7 @@ makeDiffRepos = do
   git t ["clone", "-q", "--bare", url, "bare.git"]
   fixtureRepo "planted" [t </> "planted"]
   fixtureRepo "edits" [t </> "edits"]
+  fixtureRepo "renames" [t </> "renames"]
   pure t
 
 -- | Exit 2, and stderr is this one line.

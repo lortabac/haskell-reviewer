@@ -32,10 +32,13 @@ import Control.Exception
     throwIO,
     try,
   )
-import Control.Monad (forM_, unless, void, when)
+import Control.Monad (forM_, unless, void, when, (<$!>))
 import Crypto.Random (getRandomBytes)
+import Data.ByteString.Lazy qualified as LBS
 import Data.Foldable (toList)
+import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as Text.IO
@@ -57,20 +60,25 @@ import HaskellReviewer.Core.Address
     tokenByteCount,
     tokenFromBytes,
   )
-import HaskellReviewer.Core.Changed (changedModules, moduleKeys)
+import HaskellReviewer.Core.Changed (ModuleKey, changedModules, moduleKeys)
+import HaskellReviewer.Core.CommitFiles (outsideChanges)
 import HaskellReviewer.Core.Config (UiDefaults)
-import HaskellReviewer.Core.FileContent (FileContent)
+import HaskellReviewer.Core.Eol (Filtering (..))
+import HaskellReviewer.Core.FileContent (FileContent, FileNotes (..))
 import HaskellReviewer.Core.FileList
   ( EntryKind (..),
     FileList (..),
     ListSource (..),
     fileListCap,
   )
+import HaskellReviewer.Core.Markers (Marker (..), moduleFacts, moduleMarkers)
 import HaskellReviewer.Core.ModuleModel (ModuleParse (..))
 import HaskellReviewer.Core.Modules
   ( ComponentModules (..),
+    ModuleId,
     ModuleIndex (..),
     PackageModules (..),
+    buildModuleIndex,
   )
 import HaskellReviewer.Core.Parser (ParseSettings)
 import HaskellReviewer.Core.Project
@@ -86,7 +94,23 @@ import HaskellReviewer.Core.Project
     renderGhcVersion,
   )
 import HaskellReviewer.Core.RelPath (RelPath)
-import HaskellReviewer.Core.Revspec (Revspec, diffInfoLines)
+import HaskellReviewer.Core.Renames
+  ( Change (..),
+    Limit (..),
+    ModifiedFile (..),
+    Pairing (..),
+    defaultSettings,
+    forcePairing,
+    warmUpRenames,
+  )
+import HaskellReviewer.Core.Revspec
+  ( CommitsInfo (..),
+    DiffInfo (..),
+    Range (..),
+    Revspec,
+    WorkTreeInfo (..),
+    diffInfoLines,
+  )
 import HaskellReviewer.Core.Root (Root (..))
 import HaskellReviewer.Core.Sides
   ( Pair (..),
@@ -95,7 +119,6 @@ import HaskellReviewer.Core.Sides
     lookupSide,
     sideName,
     sideTag,
-    withSide,
   )
 import HaskellReviewer.Core.Xdg (XdgProblem, prefsFile, renderXdgProblem)
 import HaskellReviewer.Effects.Browser qualified as Browser
@@ -125,6 +148,7 @@ import HaskellReviewer.Effects.Log
     logVerbose,
     newLogger,
   )
+import HaskellReviewer.Effects.Pairing (FilePairing (..), pairListed)
 import HaskellReviewer.Effects.Parser qualified as Parser
 import HaskellReviewer.Effects.Shutdown (Shutdown (..), installShutdownHandlers)
 import HaskellReviewer.Effects.Source
@@ -172,9 +196,15 @@ import HaskellReviewer.Server.Refs (warmUpRefs)
 import HaskellReviewer.Server.Router (Routes (..), application, warmUpGzip)
 import HaskellReviewer.Server.Search (warmUpSearch)
 import HaskellReviewer.Server.TextSearch (warmUpTextSearch)
+import HaskellReviewer.Server.Wire
+  ( DiffEnd (..),
+    DiffFiles (..),
+    encodeDiffFiles,
+  )
 import HaskellReviewer.Server.Wire.Page (warmUpPages)
 import HaskellReviewer.Server.Wire.Source (warmUpSource)
 import HaskellReviewer.Session.Clients (newClients, waitIdle)
+import HaskellReviewer.Session.Diff (DiffProblem (..), DiffSlot, fillDiff, newDiffSlot)
 import HaskellReviewer.Session.Index
   ( IndexDeps (..),
     IndexFailure (..),
@@ -199,6 +229,7 @@ import HaskellReviewer.Session.Snapshot
     SnapshotSlot,
     awaitSnapshot,
     fillSnapshot,
+    firstGeneration,
     indexingStates,
     newSessionShare,
     newSnapshotSlot,
@@ -302,18 +333,24 @@ tree): a bad git is exit 2, before the URL. The listing itself runs in
 a thread that starts once the URL is printed. Then it reads the
 project and finds the modules. The sides of the session (Note [Sides]
 in "HaskellReviewer.Core.Sides") are listed at the same time, each in
-its own thread, then built one after the other, head first: building
-reads the project and forces shared values, which threads must not do
-at once (Q-RTS-BLACKHOLE). The listing step's shared values are built
-before warp (warmUpListing in "HaskellReviewer.Effects.Source"). A
-crash fails that side only. In diff mode, once both sides are built,
-their changed modules go to the front of the queues (D-317), before
-any fill. The object reader of diff mode wraps the whole server, so it
-stops after the listing thread. The snapshot routes wait for their side
-(Session.Snapshot), so an early request is just slower. Each snapshot
-is fully built before the routes see it (Note [Forced snapshot] in
-"HaskellReviewer.Server.Api"), and the warm-ups run once, before any
-slot is filled.
+its own thread, then their projects are read and their snapshots built
+one after the other, head first: this forces shared values, which
+threads must not do at once (Q-RTS-BLACKHOLE). The listing step's
+shared values are built before warp (warmUpListing in
+"HaskellReviewer.Effects.Source"). A crash fails that side only.
+
+In diff mode, once both projects are read, the files are paired
+(D-326): the api/diff-files body and the module markers, which go into
+each snapshot's module tree. Once both sides are built, their changed
+modules go to the front of the queues (D-317). All before any fill;
+the diff slot is filled with the snapshot slots. The object reader of
+diff mode wraps the whole server, so it stops after the listing
+thread.
+
+The snapshot routes wait for their side (Session.Snapshot), so an
+early request is just slower. Each snapshot is fully built before the
+routes see it (Note [Forced snapshot] in "HaskellReviewer.Server.Api"),
+and the warm-ups run once, before any slot is filled.
 
 Once every slot is filled, the same thread runs the parse workers, one
 per capability, in one pool over every listed side's index, head first
@@ -321,8 +358,8 @@ per capability, in one pool over every listed side's index, head first
 computing parks one of them, never the last. So parsing never delays
 the URL either. No workers if no side was listed: there is nothing to
 index. However the thread ends (a crash, or a cancel at shutdown),
-every slot is filled and the modules not done are set Failed, so no
-request waits for ever.
+every slot (the diff slot too) is filled and the modules not done are
+set Failed, so no request waits for ever.
 
 If reading the project crashes (a bug), the snapshot gets no packages
 and a warning, logged and shown in the module tree. The file routes
@@ -374,6 +411,10 @@ data Deps = Deps
       IO (Either ReadError FileContent),
     -- | Parse one module, fully forced.
     parse :: ParseSettings -> Text -> IO ModuleParse,
+    -- | Pair the files of two listed sides, in diff mode (D-326).
+    -- 'Nothing' if a side can't be paired. Tests set a small rename
+    -- limit, or make it crash.
+    pairFiles :: Pair Listed -> IO (Maybe FilePairing),
     -- | How many parse workers to run.
     indexWorkers :: IO Int,
     -- | Open the URL in the browser. Must not block or throw.
@@ -409,6 +450,7 @@ newRealDeps spawnSetup = do
           [Parser.warmUpParser, warmUpResolve, warmUpPages, warmUpSource, warmUpRefs],
         readEntry = readSourceEntry,
         parse = Parser.parseGuarded,
+        pairFiles = pairListed defaultSettings,
         indexWorkers = getNumCapabilities,
         openBrowser = Browser.openBrowser,
         installShutdown = installShutdownHandlers,
@@ -514,15 +556,21 @@ serve ::
   UTCTime ->
   IO ExitCode
 serve deps logger opts root defaults probe tracer shutdown t0 w0 = case probe of
-  BrowseProbe l -> go (BrowseSides l)
+  BrowseProbe l -> go (BrowseListers l)
   DiffProbe info with -> do
     -- Built here, on this thread, before warp (Q-RTS-BLACKHOLE).
     let ls = diffInfoLines info
     _ <- evaluate (sum (map Text.length ls))
     mapM_ (logVerbose logger) ls
-    with (go . DiffSides)
+    with (go . DiffListers info)
   where
     go listers = serveSides deps logger opts root defaults listers tracer shutdown t0 w0
+
+-- | The listers of a session, by mode.
+data Listers
+  = BrowseListers Lister
+  | -- | With what @--diff@ resolved to.
+    DiffListers DiffInfo (Pair Lister)
 
 -- | 'serve', with the listers.
 serveSides ::
@@ -531,7 +579,7 @@ serveSides ::
   Options ->
   Root ->
   UiDefaults ->
-  Sides Lister ->
+  Listers ->
   Tracer ->
   Shutdown ->
   MonotonicTime ->
@@ -564,12 +612,13 @@ serveSides deps logger opts root defaults listers tracer shutdown t0 w0 = do
           warmUpListing
           warmUpObjects
           warmUpWorkTree
+          warmUpRenames
           -- On this thread, before warp: see Note [Forced snapshot] in
           -- "HaskellReviewer.Server.Api".
-          let sideWork s l = SideWork s l <$> newSnapshotSlot
-          sides <- strictSides =<< sequence (withSide sideWork listers)
+          session <- newSessionWork listers
+          let sides = sessionSides session
           slots <- strictSides ((.slot) <$> sides)
-          let work = toList sides
+          diffSlot <- forcedMaybe (sessionDiffSlot session)
           share <- newSessionShare
           -- Filled by ready: the listing starts after the URL line.
           start <- newEmptyMVar
@@ -602,7 +651,8 @@ serveSides deps logger opts root defaults listers tracer shutdown t0 w0 = do
                     fileNotes = \snap -> fileNotes snap.source,
                     logger = logger
                   }
-              routes = Routes {events = events, files = files, prefs = prefs}
+              routes =
+                Routes {events = events, files = files, prefs = prefs, diff = diffSlot}
               app = application listener.port token routes
               waitStop = do
                 why <- case opts.idleExit of
@@ -621,10 +671,10 @@ serveSides deps logger opts root defaults listers tracer shutdown t0 w0 = do
               -- runs: every slot is filled.
               listing =
                 ( takeMVar start
-                    >> runListing deps logger tracer share work opts.ghc
+                    >> runListing deps logger tracer share session opts.ghc
                     >>= runIndexing deps logger tracer
                 )
-                  `finally` stopIndexing work
+                  `finally` stopIndexing session
               serving _ = do
                 r <- race waitStop (listener.serve ready app)
                 step "warp stopped, stopping the listing"
@@ -632,7 +682,7 @@ serveSides deps logger opts root defaults listers tracer shutdown t0 w0 = do
               closing = step "closing the socket" >> listener.close
           -- stopIndexing again: a cancel can come before the listing
           -- thread runs at all, and then its finally never does.
-          result <- withAsync listing serving `finally` (stopIndexing work >> closing)
+          result <- withAsync listing serving `finally` (stopIndexing session >> closing)
           step "socket closed, exiting"
           case result of
             Left StopSignal -> pure ExitSuccess
@@ -648,6 +698,46 @@ data SideWork = SideWork
     slot :: SnapshotSlot
   }
 
+-- | The session's sides, by mode. Diff mode also pairs the files.
+data SessionWork
+  = BrowseWork SideWork
+  | DiffModeWork DiffWork (Pair SideWork)
+
+-- | Diff mode: what @--diff@ resolved to, and the pairing's slot.
+data DiffWork = DiffWork
+  { info :: DiffInfo,
+    slot :: DiffSlot
+  }
+
+-- | The slots of a session, with no thunk left in the structure:
+-- request threads read it (Q-RTS-BLACKHOLE).
+newSessionWork :: Listers -> IO SessionWork
+newSessionWork = \case
+  BrowseListers l -> do
+    w <- sideWork TreeSide l
+    pure $! BrowseWork w
+  DiffListers info p -> do
+    h <- sideWork HeadSide p.head
+    b <- sideWork BaseSide p.base
+    slot <- newDiffSlot
+    d <- evaluate DiffWork {info = info, slot = slot}
+    pair <- evaluate Pair {head = h, base = b}
+    pure $! DiffModeWork d pair
+  where
+    sideWork s l = newSnapshotSlot >>= \slot -> evaluate (SideWork s l slot)
+
+-- | The sides of a session.
+sessionSides :: SessionWork -> Sides SideWork
+sessionSides = \case
+  BrowseWork w -> BrowseSides w
+  DiffModeWork _ p -> DiffSides p
+
+-- | The pairing's slot, in diff mode.
+sessionDiffSlot :: SessionWork -> Maybe DiffSlot
+sessionDiffSlot = \case
+  BrowseWork _ -> Nothing
+  DiffModeWork d _ -> Just d.slot
+
 -- | The same sides, with no thunk left in the structure: request
 -- threads read it (Q-RTS-BLACKHOLE). Not the values' insides.
 strictSides :: Sides a -> IO (Sides a)
@@ -660,6 +750,21 @@ strictSides = \case
     b <- evaluate p.base
     pair <- evaluate Pair {head = h, base = b}
     pure $! DiffSides pair
+
+-- | The value and what is in it, to WHNF: no thunk goes in a slot
+-- (Q-RTS-BLACKHOLE).
+forcedEither :: Either a b -> IO (Either a b)
+forcedEither x =
+  evaluate x >>= \case
+    Left a -> Left <$!> evaluate a
+    Right b -> Right <$!> evaluate b
+
+-- | Like 'forcedEither'.
+forcedMaybe :: Maybe a -> IO (Maybe a)
+forcedMaybe x =
+  evaluate x >>= \case
+    Nothing -> pure Nothing
+    Just a -> Just <$!> evaluate a
 
 -- | When a step started, and how long it took.
 data Timing = Timing
@@ -676,30 +781,43 @@ data Listing
   | -- | The listing threw, with the message.
     ListingThrew Text
 
--- | How one side ended, before the fill.
-data SideResult
-  = SideBuilt Built
+-- | How one side ended so far: with an @a@, or not.
+data SideResult a
+  = SideOk a
   | -- | The listing gave an error, after this long.
     SideNotListed ListError Timing
   | -- | The listing or the build threw, with the message.
     SideCrashed Text
 
--- | A side listed and built.
-data Built = Built
-  { snapshot :: Snapshot,
+-- | A side listed, with its modules: what pairing and markers need.
+data Prepared = Prepared
+  { listed :: Listed,
+    modules :: ModuleIndex,
+    -- | Its modules' keys, for diff mode: the changed modules and the
+    -- markers. Lazy: made once, only if used, on the listing thread.
+    keys :: [(ModuleId, ModuleKey)],
     files :: Timing,
+    -- | Reading the project and finding the modules.
     project :: Timing
   }
 
--- | A side and how it ended.
-data SideDone = SideDone
-  { work :: SideWork,
-    result :: SideResult
+-- | A side built.
+data Built = Built
+  { prepared :: Prepared,
+    snapshot :: Snapshot,
+    -- | From reading the project to the snapshot built.
+    project :: Timing
   }
 
--- | Make every side's file list, read its project, fill the slots,
--- report. Gives back the snapshots in the slots, head first. See Note
--- [Listing after the URL].
+-- | A side and how it ended so far.
+data SideDone a = SideDone
+  { work :: SideWork,
+    result :: SideResult a
+  }
+
+-- | Make every side's file list, read its project, pair the files in
+-- diff mode, fill the slots, report. Gives back the snapshots in the
+-- slots, head first. See Note [Listing after the URL].
 --
 -- Every slot is filled here, or by 'stopIndexing' on a cancel: else
 -- requests would wait for ever.
@@ -708,29 +826,43 @@ runListing ::
   Logger ->
   Tracer ->
   SessionShare ->
-  [SideWork] ->
+  SessionWork ->
   Maybe GhcVersion ->
   IO [Snapshot]
-runListing deps logger tracer share work cliGhc = do
+runListing deps logger tracer share session cliGhc = do
   result <- try @SomeException $ do
     -- Listed at once, built one at a time, head first: building reads
     -- the project and forces shared values (Q-RTS-BLACKHOLE).
     listings <- forConcurrently work (listSide deps)
-    done <- mapM (uncurry (buildSide deps logger share cliGhc)) (zip work listings)
+    prepared <- mapM (uncurry (prepareSide deps logger cliGhc)) (zip work listings)
+    -- Before the snapshots: they encode the module trees with the
+    -- markers.
+    paired <- case session of
+      DiffModeWork d _ -> pairSides deps logger prepared d
+      BrowseWork _ -> pure PairNotRun
+    done <- mapM (buildSide deps share (markersOf paired)) prepared
     -- Before the warm-ups and the fill: no worker or request runs yet.
     changedFirst logger done
     t2 <- deps.clock.monotonic
     w2 <- deps.clock.now
-    let built = [b.snapshot | SideDone {result = SideBuilt b} <- done]
+    let built = [b.snapshot | SideDone {result = SideOk b} <- done]
     -- Warm up once, before any fill: requests parse. See Note [Forced
     -- snapshot] in "HaskellReviewer.Server.Api".
     unless (null built) (runWarmUp deps logger)
     t3 <- deps.clock.monotonic
-    forM_ done $ \d -> fillSnapshot d.work.slot (slotValue d.result)
+    forM_ done $ \d -> do
+      -- No thunk goes in a slot (Q-RTS-BLACKHOLE).
+      v <- forcedEither (slotValue d.result)
+      fillSnapshot d.work.slot v
+    case session of
+      DiffModeWork d _ -> do
+        v <- forcedEither (diffBody paired)
+        void (fillDiff d.slot v)
+      BrowseWork _ -> pure ()
     -- After the fill: a slow trace file can't hold up requests.
     forM_ done $ \d -> case d.result of
-      SideBuilt b -> do
-        tracer.record (timed "files" d.work.side b.files)
+      SideOk b -> do
+        tracer.record (timed "files" d.work.side b.prepared.files)
         tracer.record (timed "project" d.work.side b.project)
       SideNotListed _ files -> tracer.record (timed "files" d.work.side files)
       SideCrashed _ -> pure ()
@@ -738,12 +870,18 @@ runListing deps logger tracer share work cliGhc = do
       tracer.record
         Span {name = "parser-warm-up", start = w2, duration = elapsed t2 t3}
     forM_ done $ \d -> case d.result of
-      SideBuilt b -> do
-        reportFiles d.work.side b.snapshot.files b.files.duration
+      SideOk b -> do
+        reportFiles d.work.side b.snapshot.files b.prepared.files.duration
         reportProject d.work.side b.snapshot.modules b.project.duration
       SideNotListed e _ -> reportError d.work.side e
       SideCrashed msg -> reportError d.work.side (ListCrashed msg)
     unless (null built) (reportWarmUp (elapsed t2 t3))
+    case paired of
+      PairedOk o -> do
+        tracer.record (pairingSpan o.timing)
+        logVerbose logger o.report
+      PairFailed _ t -> tracer.record (pairingSpan t)
+      PairNotRun -> pure ()
     pure built
   case result of
     Right built -> pure built
@@ -755,15 +893,27 @@ runListing deps logger tracer share work cliGhc = do
           forM_ work $ \w -> do
             filled <- fillSnapshot w.slot (Left err)
             when filled (reportError w.side err)
+          -- A crash in pairing is caught there: this one is in the
+          -- listing (or after the fill, and then this does nothing).
+          forM_ (sessionDiffSlot session) $ \slot -> fillDiff slot (Left DiffNotListed)
           -- It may have crashed after the fill: then the snapshots are
           -- served, and their modules still need the workers.
           slots <- mapM (awaitSnapshot . (.slot)) work
           pure [snap | Right snap <- slots]
   where
+    work = toList (sessionSides session)
     slotValue = \case
-      SideBuilt b -> Right b.snapshot
+      SideOk b -> Right b.snapshot
       SideNotListed e _ -> Left e
       SideCrashed msg -> Left (ListCrashed msg)
+    diffBody = \case
+      PairedOk o -> Right o.body
+      PairFailed problem _ -> Left problem
+      PairNotRun -> Left DiffNotListed
+    markersOf paired side = case paired of
+      PairedOk o | Just m <- onSide side o.markers -> m
+      _ -> Map.empty
+    pairingSpan t = Span {name = "pairing", start = t.start, duration = t.duration}
     timed what side t =
       Span {name = spanName what side, start = t.start, duration = t.duration}
     reportError side e =
@@ -812,10 +962,18 @@ runListing deps logger tracer share work cliGhc = do
     reportWarmUp (Nanoseconds ns) =
       logVerbose logger ("parser warm-up: " <> showText (ns `div` 1_000) <> " us")
 
+-- | A diff side's value of a pair. 'Nothing' for the browse side, which
+-- has no pair.
+onSide :: Side -> Pair a -> Maybe a
+onSide side p = case side of
+  HeadSide -> Just p.head
+  BaseSide -> Just p.base
+  TreeSide -> Nothing
+
 -- | In diff mode, push each side's changed modules to the front of its
 -- queue (D-317). Only when both sides are built. A crash only logs a
 -- line: indexing works without it.
-changedFirst :: Logger -> [SideDone] -> IO ()
+changedFirst :: Logger -> [SideDone Built] -> IO ()
 changedFirst logger done = case (lookup HeadSide built, lookup BaseSide built) of
   (Just h, Just b) ->
     try @SomeException (go h b) >>= \case
@@ -828,21 +986,138 @@ changedFirst logger done = case (lookup HeadSide built, lookup BaseSide built) o
                 <> exceptionMessage e
   _ -> pure ()
   where
-    built = [(w.side, b.snapshot) | SideDone {work = w, result = SideBuilt b} <- done]
-    go h b = do
-      let keys snap = moduleKeys (sourceBlob snap.source) snap.modules
-          changed = changedModules Pair {head = keys h, base = keys b}
+    built = [(w.side, b) | SideDone {work = w, result = SideOk b} <- done]
+    go hb bb = do
+      let changed =
+            changedModules Pair {head = hb.prepared.keys, base = bb.prepared.keys}
       nh <- evaluate (length changed.head)
       nb <- evaluate (length changed.base)
       atomically $ do
-        prioritise h.index changed.head
-        prioritise b.index changed.base
+        prioritise hb.snapshot.index changed.head
+        prioritise bb.snapshot.index changed.base
       logVerbose logger $
         "changed: "
           <> showText nh
           <> " on head, "
           <> showText nb
           <> " on base, indexed first"
+
+-- | How pairing ended, before the fill.
+data Paired
+  = PairedOk PairOutput
+  | -- | Pairing threw, or a side can't be paired; after this long.
+    PairFailed DiffProblem Timing
+  | -- | A side was not listed.
+    PairNotRun
+
+-- | What a pairing gave, all forced.
+data PairOutput = PairOutput
+  { -- | The body of api/diff-files.
+    body :: LBS.ByteString,
+    markers :: Pair (Map ModuleId Marker),
+    timing :: Timing,
+    -- | For --verbose, after the fill.
+    report :: Text
+  }
+
+-- | In diff mode, once both sides are listed and their projects read:
+-- pair their files, make the api/diff-files body and the module markers
+-- (D-325, D-326). All forced: request threads share them
+-- (Q-RTS-BLACKHOLE). A crash logs a line; then api/diff-files is a 500
+-- and the markers are null. A cancel goes through.
+pairSides :: Deps -> Logger -> [SideDone Prepared] -> DiffWork -> IO Paired
+pairSides deps logger done diff = case (lookup HeadSide ready, lookup BaseSide ready) of
+  (Just h, Just b) -> do
+    t0 <- deps.clock.monotonic
+    w0 <- deps.clock.now
+    result <- try @SomeException (pairPrepared Pair {head = h, base = b})
+    t1 <- deps.clock.monotonic
+    let timing = Timing {start = w0, duration = elapsed t0 t1}
+        Nanoseconds ns = timing.duration
+        ms = showText (ns `div` 1_000_000) <> " ms"
+    case result of
+      Right (Just o) ->
+        pure . PairedOk $
+          PairOutput
+            { body = o.body,
+              markers = o.markers,
+              timing = timing,
+              report = pairingLine o.pairing <> " in " <> ms
+            }
+      -- Only tests have diff sessions on disk.
+      Right Nothing -> pure (PairFailed (DiffNotPaired "a side is read from disk") timing)
+      Left e
+        | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
+        | otherwise -> do
+            let msg = exceptionMessage e
+            logInfo logger ("haskell-reviewer: cannot pair files: " <> msg)
+            pure (PairFailed (DiffNotPaired msg) timing)
+  _ -> pure PairNotRun
+  where
+    ready = [(w.side, p) | SideDone {work = w, result = SideOk p} <- done]
+    pairPrepared sides =
+      deps.pairFiles ((.listed) <$> sides) >>= \case
+        Nothing -> pure Nothing
+        Just fp -> Just <$> encodePairing sides fp
+    encodePairing sides fp = do
+      let p = fp.pairing
+      _ <- evaluate (forcePairing p)
+      let sources = (.listed.source) <$> sides
+          filtered =
+            Set.fromList
+              [ m.path
+              | Modified m <- p.changes,
+                (fileNotes sources.head m.path).filtered == Filtered
+              ]
+          files =
+            DiffFiles
+              { base = ends.base,
+                head = ends.head,
+                pairing = p,
+                filtered = filtered,
+                outside = outsideChanges <$> traverse commitOutside sources,
+                truncated = fp.cut
+              }
+          body = encodeDiffFiles firstGeneration files
+      _ <- evaluate (LBS.length body)
+      let facts s = moduleFacts s.keys s.modules
+          markers = moduleMarkers p (facts <$> sides)
+      _ <- evaluate (forceMarkers markers.head)
+      _ <- evaluate (forceMarkers markers.base)
+      pure Encoded {pairing = p, body = body, markers = markers}
+    commitOutside = \case
+      CommitEntries c -> Just c.outside
+      _ -> Nothing
+    ends = case diff.info of
+      CommitsDiff ci ->
+        Pair
+          { head = DiffEnd {label = ci.range.head, commit = Just ci.sides.head},
+            base = DiffEnd {label = ci.range.base, commit = Just ci.sides.base}
+          }
+      WorkTreeDiff wi ->
+        Pair
+          { head = DiffEnd {label = "working tree", commit = Nothing},
+            base = DiffEnd {label = wi.rev, commit = Just wi.base}
+          }
+    forceMarkers :: Map ModuleId Marker -> ()
+    forceMarkers = Map.foldl' (\() m -> m.change `seq` m.settingsChange `seq` ()) ()
+    pairingLine p =
+      "pairing: "
+        <> showText (length p.changes)
+        <> " changed, "
+        <> showText (length [() | Renamed _ <- p.changes])
+        <> " renamed"
+        <> case p.limit of
+          WithinLimits -> ""
+          OverRenameLimit -> ", over the rename limit"
+          OverWorkBudget -> ", over the work budget"
+
+-- | A pairing, encoded.
+data Encoded = Encoded
+  { pairing :: Pairing,
+    body :: LBS.ByteString,
+    markers :: Pair (Map ModuleId Marker)
+  }
 
 -- | List one side. A crash fails this side only; a cancel goes through.
 listSide :: Deps -> SideWork -> IO Listing
@@ -857,21 +1132,53 @@ listSide deps w =
       Left e -> ListingFailed e files
       Right l -> ListingOk l files
 
--- | Build one listed side's snapshot. A crash fails this side only; a
--- cancel goes through.
-buildSide ::
-  Deps -> Logger -> SessionShare -> Maybe GhcVersion -> SideWork -> Listing -> IO SideDone
-buildSide deps logger share cliGhc w listing =
+-- | Read one listed side's project and find its modules. If reading the
+-- project crashes, the side has no project, only a warning. A crash
+-- past that fails this side only; a cancel goes through. See Note
+-- [Listing after the URL].
+prepareSide ::
+  Deps -> Logger -> Maybe GhcVersion -> SideWork -> Listing -> IO (SideDone Prepared)
+prepareSide deps logger cliGhc w listing =
   SideDone w <$> case listing of
     ListingFailed e files -> pure (SideNotListed e files)
     ListingThrew msg -> pure (SideCrashed msg)
     ListingOk l files -> catchCrash SideCrashed $ do
       t1 <- deps.clock.monotonic
       w1 <- deps.clock.now
-      snap <- snapshotOf deps logger share w.side l cliGhc
+      modules <- modulesOf deps logger w.side l cliGhc
       t2 <- deps.clock.monotonic
-      let project = Timing {start = w1, duration = elapsed t1 t2}
-      pure (SideBuilt Built {snapshot = snap, files = files, project = project})
+      pure . SideOk $
+        Prepared
+          { listed = l,
+            modules = modules,
+            keys = moduleKeys (sourceBlob l.source) modules,
+            files = files,
+            project = Timing {start = w1, duration = elapsed t1 t2}
+          }
+
+-- | Build one side's snapshot, with its markers. A crash fails this
+-- side only; a cancel goes through.
+buildSide ::
+  Deps ->
+  SessionShare ->
+  (Side -> Map ModuleId Marker) ->
+  SideDone Prepared ->
+  IO (SideDone Built)
+buildSide deps share markersOn d =
+  SideDone d.work <$> case d.result of
+    SideNotListed e files -> pure (SideNotListed e files)
+    SideCrashed msg -> pure (SideCrashed msg)
+    SideOk p -> catchCrash SideCrashed $ do
+      t1 <- deps.clock.monotonic
+      let side = d.work.side
+      snap <-
+        newSnapshot side share p.listed.source p.listed.files p.modules (markersOn side)
+      t2 <- deps.clock.monotonic
+      let Nanoseconds before = p.project.duration
+          Nanoseconds after = elapsed t1 t2
+          project =
+            Timing {start = p.project.start, duration = Nanoseconds (before + after)}
+      pure (SideOk Built {prepared = p, snapshot = snap, project = project})
 
 -- | Run it; a crash gives the message to the handler, a cancel goes
 -- through.
@@ -903,18 +1210,10 @@ runWarmUp deps logger =
             logInfo logger $
               "haskell-reviewer: parser warm-up failed: " <> exceptionMessage e
 
--- | Read the project and build the snapshot, all of it. If that
--- crashes, the snapshot has no project, only a warning. See
--- Note [Listing after the URL].
-snapshotOf ::
-  Deps ->
-  Logger ->
-  SessionShare ->
-  Side ->
-  Listed ->
-  Maybe GhcVersion ->
-  IO Snapshot
-snapshotOf deps logger share side listed cliGhc = do
+-- | Read the project and find its modules. If that crashes, the side
+-- has no project, only a warning. See Note [Listing after the URL].
+modulesOf :: Deps -> Logger -> Side -> Listed -> Maybe GhcVersion -> IO ModuleIndex
+modulesOf deps logger side listed cliGhc = do
   result <- try @SomeException $ do
     project <- deps.readProject listed.source listed.files hostPlatform cliGhc
     logVerbose logger $
@@ -924,17 +1223,22 @@ snapshotOf deps logger share side listed cliGhc = do
         <> " ("
         <> renderGhcSource project.ghc.source
         <> ")"
-    newSnapshot side share listed.source listed.files project
+    forced (buildModuleIndex project listed.files)
   case result of
-    Right snap -> pure snap
+    Right idx -> pure idx
     Left e
       | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
       | otherwise -> do
           let msg = exceptionMessage e
           logInfo logger $
             "haskell-reviewer: " <> sideTag side <> "cannot read the project: " <> msg
-          newSnapshot side share listed.source listed.files (crashed msg)
+          forced (buildModuleIndex (crashed msg) listed.files)
   where
+    -- Enough to hit a crash here; the snapshot forces the rest.
+    forced idx = do
+      _ <- evaluate idx
+      _ <- evaluate (Set.size idx.ids + Map.size idx.paths + length idx.packages)
+      pure idx
     -- Not the implicit source: there may be a project we failed to read.
     -- Never got to with-compiler: --ghc, else the parser's version.
     crashed msg =
@@ -962,13 +1266,14 @@ runIndexing deps logger tracer = \case
         forM_ snaps $ \snap -> failUnfinished snap.index (IndexCrashed msg)
         logInfo logger ("haskell-reviewer: indexing crashed: " <> msg)
 
--- | However the listing thread ends, every slot is filled and no
--- module is left Pending or Parsing: requests would wait for ever. For
--- a cancel (shutdown) anywhere, or a crash after the fill. A slot
--- filled already keeps what it has.
-stopIndexing :: [SideWork] -> IO ()
-stopIndexing work =
-  forM_ work $ \w -> do
+-- | However the listing thread ends, every slot is filled (the diff
+-- slot too) and no module is left Pending or Parsing: requests would
+-- wait for ever. For a cancel (shutdown) anywhere, or a crash after
+-- the fill. A slot filled already keeps what it has.
+stopIndexing :: SessionWork -> IO ()
+stopIndexing session = do
+  forM_ (sessionDiffSlot session) $ \slot -> fillDiff slot (Left DiffNotListed)
+  forM_ (sessionSides session) $ \w -> do
     _ <- fillSnapshot w.slot (Left (ListCrashed "the listing was stopped"))
     atomically (snapshotSTM w.slot) >>= \case
       Just (Right snap) ->
