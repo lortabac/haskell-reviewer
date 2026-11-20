@@ -196,7 +196,7 @@ markup =
       "[maps](\"Data.Map\")" `gives` [modLink "Data.Map" Nothing (Just [Str "maps"])],
     testCase "paragraphs, headings, code blocks" $
       (parseDoc "= Title\n\nText.\n\n@\ncode /x/\n@\n\n> bird\n> two").blocks
-        @?= [ Heading Header {level = 1, title = [Str "Title"]},
+        @?= [ Heading Header {level = 1, title = [Str "Title"], anchor = Nothing},
               Paragraph [Str "Text."],
               CodeBlock [Str "code ", Emphasis [Str "x"], Str "\n"],
               CodeBlock [Str "bird\ntwo"]
@@ -396,6 +396,11 @@ kinds d =
       Examples _ -> ["examples"]
       Property _ -> ["property"]
       Table _ -> ["table"]
+      -- Markdown only: never from Haddock.
+      BlockQuote _ -> []
+      ThematicBreak -> []
+      Listing _ -> []
+      TaskList _ -> []
     defs (i :: DefItem) = i.definition
 
 -- | What these inlines are, by name.
@@ -420,6 +425,10 @@ kindsOfInlines = concatMap $ \case
       maybe "no anchor" (const "anchor") l.anchor,
       maybe "no label" (const "label") l.label
     ]
+  -- Markdown only: never from Haddock.
+  Strike _ -> []
+  FileLink _ -> []
+  AnchorLink _ -> []
 
 -- | Every name 'kinds' gives.
 allKinds :: [Text]
@@ -476,6 +485,11 @@ inlines d = concatMap block d.blocks
       Examples _ -> []
       Property _ -> []
       Table t -> [i | r <- t.header <> t.body, c <- r, i <- deep c.content]
+      -- Markdown only: never from Haddock.
+      BlockQuote _ -> []
+      ThematicBreak -> []
+      Listing _ -> []
+      TaskList _ -> []
     definition i = deep i.term <> concatMap block i.definition
 
 -- | These inlines and all the ones inside them.

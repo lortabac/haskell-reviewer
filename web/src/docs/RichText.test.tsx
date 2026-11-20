@@ -180,6 +180,7 @@ describe.each([false, true])("live: %s", (live) => {
         kind: "heading",
         level,
         inlines: [t(`l${level}`)],
+        anchor: null,
       });
       const root = show(doc([h(1), h(2), h(6)]), 3);
       expect(
@@ -192,6 +193,7 @@ describe.each([false, true])("live: %s", (live) => {
         kind: "heading",
         level,
         inlines: [t(`l${level}`)],
+        anchor: null,
       });
       // Straight to "===" (level 3): still one below the context (h4),
       // not level + 3 (would have been h6).
@@ -347,5 +349,92 @@ describe.each([false, true])("live: %s", (live) => {
         ),
       ).toEqual(["f :: T", "-> U V"]);
     });
+  });
+});
+
+describe("Markdown nodes", () => {
+  beforeEach(() => {
+    liveMode = false;
+  });
+
+  it("quote, rule, tasks, a coloured listing, a heading id", () => {
+    const root = show(
+      doc([
+        { kind: "heading", level: 1, inlines: [t("Top")], anchor: "top" },
+        { kind: "quote", blocks: [para(t("q"))] },
+        { kind: "rule" },
+        {
+          kind: "tasks",
+          items: [
+            { done: true, blocks: [para(t("a"))] },
+            { done: false, blocks: [para(t("b"))] },
+          ],
+        },
+        {
+          kind: "listing",
+          lang: "haskell",
+          pieces: [
+            [2, "x"],
+            [null, " = "],
+            [4, "1"],
+          ],
+        },
+      ]),
+      1,
+    );
+    expect(root.querySelector("h2")?.id).toBe("md-top");
+    expect(root.querySelector("blockquote")?.textContent).toBe("q");
+    expect(root.querySelector("hr")).not.toBeNull();
+    expect(
+      [...root.querySelectorAll(".doc-task")].map((e) =>
+        e.getAttribute("aria-label"),
+      ),
+    ).toEqual(["Done", "Not done"]);
+    const code = root.querySelector("pre code");
+    expect(code?.textContent).toBe("x = 1");
+    expect([...(code?.children ?? [])].map((e) => e.className)).toEqual([
+      "hl-variable",
+      "hl-literal",
+    ]);
+  });
+
+  it("strike; file and anchor links only with the page's helpers", () => {
+    const inl: Inline[] = [
+      { kind: "strike", inlines: [t("old")] },
+      { kind: "file", path: "src/A.hs", fragment: "L3", label: null },
+      { kind: "anchor", anchor: "top", label: [t("up")] },
+    ];
+    // A module page: no helpers, text only.
+    const plain = show(doc([para(...inl)]));
+    expect(plain.querySelector("del")?.textContent).toBe("old");
+    expect(plain.querySelectorAll("a")).toHaveLength(0);
+    expect(plain.textContent).toBe("oldsrc/A.hsup");
+    dispose?.();
+    document.body.replaceChildren();
+    const root = document.createElement("div");
+    document.body.append(root);
+    dispose = render(
+      () => (
+        <LinksContext.Provider
+          value={{
+            ...links,
+            file: (p, f) => `/tok/src/tree/${p}#${f ?? ""}`,
+            anchor: (a) => `/tok/md/tree/R.md#${a}`,
+          }}
+        >
+          <DocView doc={doc([para(...inl)])} level={1} />
+        </LinksContext.Provider>
+      ),
+      root,
+    );
+    expect(
+      [...root.querySelectorAll("a")].map((a) => [
+        a.textContent,
+        a.getAttribute("href"),
+      ]),
+    ).toEqual([
+      ["src/A.hs", "/tok/src/tree/src/A.hs#L3"],
+      ["up", "/tok/md/tree/R.md#top"],
+    ]);
   });
 });

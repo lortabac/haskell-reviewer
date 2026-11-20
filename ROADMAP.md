@@ -285,6 +285,8 @@ nicer than a web diff, because every line links into the right snapshot.
 - Source view: gutter markers and "show diff here" (§4.4).
 - Docs view on head with side switch (§4.2). Search on head by default
   (§4.7). Badges come in M4.
+- Markdown files in browse mode: highlighted source, rendered docs view
+  (§4.2, §5.6; D-327, D-328). Added during M3.
 - Header shows revisions; copy buttons give full hashes (§5.7).
 - Keys: `n p ] [ u 3`. Diff URLs (§4.1).
 - Reload (§5.2): a new snapshot generation swapped in atomically (D-60),
@@ -596,7 +598,7 @@ Every section of SPEC.md and the milestone(s) that deliver it.
 | §11.4.6 | HIE companions | M8 |
 | §11.4.7 | Line diff, renames | M3 |
 | §11.4.8 | Semantic diff | M4 |
-| §11.4.9 | Rich text | Haddock M1; Markdown M6 |
+| §11.4.9 | Rich text | Haddock M1; Markdown files M3; LLM Markdown M6 |
 | §11.4.10 | Search | M1 |
 | §11.5 | State, concurrency | M1; reload M3; LLM state M6 |
 | §11.6.1 | HTTP server | M0 (gzip: M1) |

@@ -175,9 +175,9 @@ describe("the view switch", () => {
     stubFetch({
       "/tok/api/modules/tree": [200, fixture("modules")],
       "/tok/api/files/tree": [200, fixture("files")],
-      "/tok/api/file/tree/README.md": [200, cborFixture("file-text")],
+      "/tok/api/file/tree/notes.txt": [200, cborFixture("file-text")],
     });
-    mountAppAt("/tok/src/tree/README.md", defaultPrefs);
+    mountAppAt("/tok/src/tree/notes.txt", defaultPrefs);
     const status = () => document.querySelector(".keys-status")?.textContent;
     await vi.waitFor(() => {
       expect(document.querySelector(".view-missing")).not.toBeNull();
@@ -197,13 +197,45 @@ describe("the view switch", () => {
     });
   });
 
+  it("a Markdown file: Docs is its rendered page, 1 goes there", async () => {
+    stubFetch({
+      "/tok/api/modules/tree": [200, fixture("modules")],
+      "/tok/api/files/tree": [200, fixture("files")],
+      "/tok/api/file/tree/s/docs/All.md": [200, cborFixture("file-text")],
+      "/tok/api/source/tree/s/docs/All.md": [
+        200,
+        cborFixture("source-markdown"),
+      ],
+      "/tok/api/markdown/tree/s/docs/All.md": [
+        200,
+        cborFixture("markdown-page"),
+      ],
+    });
+    mountAppAt("/tok/src/tree/s/docs/All.md", defaultPrefs);
+    const docs = await vi.waitFor(() => {
+      const el = document.querySelector<HTMLAnchorElement>(
+        ".view-switch a.view-link",
+      );
+      if (el === null) throw new Error("no docs link");
+      return el;
+    });
+    expect(docs.getAttribute("href")).toBe("/tok/md/tree/s/docs/All.md");
+    press("1");
+    await vi.waitFor(() => {
+      expect(document.querySelector("#md-all")?.textContent).toBe("All");
+    });
+    expect(
+      document.querySelector(".view-link[aria-current=page]")?.textContent,
+    ).toBe("Docs");
+  });
+
   it("a file with no module: Docs is muted, said not available", async () => {
     stubFetch({
       "/tok/api/modules/tree": [200, fixture("modules")],
       "/tok/api/files/tree": [200, fixture("files")],
-      "/tok/api/file/tree/README.md": [200, cborFixture("file-text")],
+      "/tok/api/file/tree/notes.txt": [200, cborFixture("file-text")],
     });
-    mountAppAt("/tok/src/tree/README.md", defaultPrefs);
+    mountAppAt("/tok/src/tree/notes.txt", defaultPrefs);
     await vi.waitFor(() => {
       expect(document.querySelector(".view-missing")?.textContent).toBe(
         "Docs (not available)",

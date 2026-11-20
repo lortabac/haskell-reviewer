@@ -42,7 +42,7 @@ const shownSig = (p: ModulePage) => {
 const shownMissing = (p: ModulePage) => {
   const h = parsed(p).header.haddock;
   return h!.doc.blocks[0]!.kind === "paragraph"
-    ? (h!.doc.blocks[0]!.inlines[3] as NameInline)
+    ? (h!.doc.blocks[0].inlines[3] as NameInline)
     : undefined;
 };
 

@@ -35,12 +35,16 @@ import HaskellReviewer.Core.ModuleModel
   )
 import HaskellReviewer.Core.Names (renderDeclId)
 import HaskellReviewer.Core.Project (ModuleName (..))
+import HaskellReviewer.Core.RelPath (relPathText)
 import HaskellReviewer.Core.RichText
-  ( Block (..),
+  ( AnchorRef (..),
+    Block (..),
     Cell (..),
+    CodeListing (..),
     DefItem (..),
     Doc (..),
     Example (..),
+    FileRef (..),
     Header (..),
     Hyperlink (..),
     Inline (..),
@@ -51,6 +55,7 @@ import HaskellReviewer.Core.RichText
     RefNamespace (..),
     Since (..),
     TableBody (..),
+    TaskItem (..),
     urlText,
   )
 import HaskellReviewer.Core.Span (Span, renderSpan)
@@ -130,6 +135,12 @@ block names = \case
   Examples es -> "examples" : nested (concatMap example es)
   Property p -> ["property " <> quote p]
   Table t -> "table" : nested (rows "header row" t.header <> rows "row" t.body)
+  -- Markdown only: never in a Haddock dump.
+  BlockQuote bs -> "quote" : blocks bs
+  ThematicBreak -> ["rule"]
+  Listing l -> ["listing " <> maybe "" id l.lang]
+  TaskList items ->
+    "tasks" : nested (concatMap task items)
   where
     inlines = nested . concatMap (inline names)
     blocks = nested . concatMap (block names)
@@ -137,6 +148,7 @@ block names = \case
     definition i = ("term" : inlines i.term) <> ("definition" : blocks i.definition)
     example e = (">>> " <> quote e.expression) : nested (map quote e.results)
     rows title = concatMap (\r -> title : nested (concatMap cell r))
+    task i = (if i.done then "done" else "todo") : blocks i.content
     cell c = ("cell " <> showT c.colspan <> "x" <> showT c.rowspan) : inlines c.content
 
 inline :: LocalNames -> Inline -> [Text]
@@ -159,6 +171,10 @@ inline names = \case
     ]
   ModuleLink l ->
     ("module " <> modText l.name <> maybe "" ("#" <>) l.anchor) : maybe [] sub l.label
+  -- Markdown only: never in a Haddock dump.
+  Strike is -> "strike" : sub is
+  FileLink l -> ("file " <> relPathText l.path) : maybe [] sub l.label
+  AnchorLink l -> ("anchor " <> l.anchor) : maybe [] sub l.label
   where
     sub = nested . concatMap (inline names)
     ns = \case

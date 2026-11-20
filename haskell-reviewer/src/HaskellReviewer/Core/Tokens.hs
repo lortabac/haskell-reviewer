@@ -7,6 +7,8 @@ module HaskellReviewer.Core.Tokens
     Tokens,
     Token (..),
     TokenClass (..),
+    DisplayClass (..),
+    displayClass,
 
     -- * Building
     tokensFromList,
@@ -127,6 +129,43 @@ tokenClassAt (Tokens v) i = toClass (v Vector.! (i * width + 4))
 -- | The span of the token at this index, which must be in range.
 tokenSpanAt :: Tokens -> Int -> Span
 tokenSpanAt (Tokens v) i = wordsSpan v (i * width)
+
+-- | The SPEC §5.6 classes, plus CPP directive lines. The 'Enum' numbers
+-- go on the wire: only add at the end.
+data DisplayClass
+  = KeywordClass
+  | -- | Capitalised names and operators starting with @:@.
+    TypeConClass
+  | VariableClass
+  | OperatorClass
+  | LiteralClass
+  | -- | Haddock and literate prose too.
+    CommentClass
+  | -- | CPP calls too.
+    PragmaClass
+  | -- | Lines CPP skipped.
+    ExcludedClass
+  | -- | CPP directive lines.
+    DirectiveClass
+  deriving (Eq, Ord, Show, Enum, Bounded)
+
+-- | A token's class. 'Nothing': plain.
+displayClass :: TokenClass -> Maybe DisplayClass
+displayClass = \case
+  Keyword -> Just KeywordClass
+  ConId -> Just TypeConClass
+  ConSym -> Just TypeConClass
+  VarId -> Just VariableClass
+  VarSym -> Just OperatorClass
+  ReservedOp -> Just OperatorClass
+  Special -> Nothing
+  Literal -> Just LiteralClass
+  StringLit -> Just LiteralClass
+  CharLit -> Just LiteralClass
+  Comment -> Just CommentClass
+  Haddock -> Just CommentClass
+  Pragma -> Just PragmaClass
+  Macro -> Just PragmaClass
 
 -- | The classes that are always names, or words that look like names:
 -- each such token gets an occurrence entry.

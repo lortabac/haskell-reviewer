@@ -42,6 +42,7 @@ import {
   type ItemName,
   type ModulePage,
 } from "./module";
+import { decodeMarkdownPage } from "./markdown";
 import { decodePrefs, sidebarViews, themes } from "./prefs";
 import { decodeRefs, decodeRefsNotFound, refKinds, refsUrl } from "./refs";
 import {
@@ -118,6 +119,9 @@ const decoders: Record<string, (value: unknown) => unknown> = {
   "source-partial": decodeSourceView,
   "source-text-only": decodeSourceView,
   "source-plain": decodeSourceView,
+  "source-markdown": decodeSourceView,
+  "markdown-page": decodeMarkdownPage,
+  "markdown-not-text": decodeMarkdownPage,
   "source-warm-up": decodeSourceView,
   "source-not-found": decodeSourceNotFound,
   "text-search": decodeTextSearch,
@@ -129,7 +133,8 @@ const cborNames = Object.keys(decoders).filter(
   (n) =>
     n.startsWith("file-") ||
     (n.startsWith("module-") && n !== "module-not-found") ||
-    (n.startsWith("source-") && n !== "source-not-found"),
+    (n.startsWith("source-") && n !== "source-not-found") ||
+    n.startsWith("markdown-"),
 );
 
 const sorted = (xs: Iterable<string>) => [...new Set(xs)].sort();
@@ -284,6 +289,8 @@ describe("API fixtures", () => {
       const p = decodeModulePage(fixture(n)).parse;
       return p.kind === "parsed" ? [p] : [];
     });
+    // Markdown nodes come from a Markdown file.
+    const markdown = decodeMarkdownPage(fixture("markdown-page"));
     const decls = parsed.flatMap((p) => p.declarations);
     const kinds = new Set<string>();
     const walk = (v: unknown): void => {
@@ -295,6 +302,7 @@ describe("API fixtures", () => {
       }
     };
     parsed.forEach(walk);
+    walk(markdown);
     for (const k of [...blockKinds, ...inlineKinds, ...declKinds]) {
       expect(kinds.has(k), k).toBe(true);
     }

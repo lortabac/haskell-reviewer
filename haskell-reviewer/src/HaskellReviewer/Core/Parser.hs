@@ -16,6 +16,7 @@ module HaskellReviewer.Core.Parser
     -- * Parsing
     parseSource,
     earlyWarnings,
+    lexSnippet,
 
     -- * For tests
     ParsedAst (..),
@@ -510,6 +511,15 @@ unlit settings input = case settings.literate of
     markdown = \case
       InPlace t -> Right t
       NeedsLayout l -> Left l
+
+-- | The tokens of a piece of Haskell that isn't a module, like a code
+-- block in a Markdown file: GHC2021, no pragmas read, no CPP. Spans are
+-- on the text given. 'Nothing' if it doesn't lex.
+lexSnippet :: Text -> Maybe Tokens
+lexSnippet t =
+  (.tokens) <$> lexTokens opts (plainSpans t) startLoc (toBuffer t)
+  where
+    opts = initParserOpts (componentFlags defaultParseSettings).dflags
 
 -- | Spans on text that didn't go through CPP.
 plainSpans :: Text -> SpanMap

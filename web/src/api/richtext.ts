@@ -1,7 +1,11 @@
-// Rich text: Haddock comments as the module page sends them. Shape: see
-// Note [Module page] in HaskellReviewer.Server.Wire.Page.
+// Rich text: Haddock comments as the module page sends them, and
+// Markdown files. Shape: see Note [Module page] in
+// HaskellReviewer.Server.Wire.Page and Note [Markdown page] in
+// HaskellReviewer.Server.Wire.Markdown.
+import { displayClasses } from "./source";
 import {
   array,
+  bool,
   DecodeError,
   field,
   nat,
@@ -24,6 +28,10 @@ export const blockKinds = [
   "examples",
   "property",
   "table",
+  "quote",
+  "rule",
+  "listing",
+  "tasks",
 ] as const;
 
 export const inlineKinds = [
@@ -35,6 +43,9 @@ export const inlineKinds = [
   "link",
   "name",
   "module",
+  "strike",
+  "file",
+  "anchor",
 ] as const;
 
 export const mathStyles = ["inline", "display"] as const;
@@ -53,9 +64,14 @@ export interface Cell {
   inlines: Inline[];
 }
 
+// A piece of a Markdown code block: its class (null: plain), as the
+// source view's wire number (displayClasses), and its text.
+export type Piece = [cls: number | null, text: string];
+
 export type Block =
   | { kind: "paragraph" | "code"; inlines: Inline[] }
-  | { kind: "heading"; level: number; inlines: Inline[] }
+  // anchor: its id on a Markdown page, null in Haddock.
+  | { kind: "heading"; level: number; inlines: Inline[]; anchor: string | null }
   | { kind: "bullets"; items: Block[][] }
   // number: decimal text (can be over 2^53), or null: number the
   // items yourself (the comment had a number haddock-library got wrong).
@@ -63,7 +79,12 @@ export type Block =
   | { kind: "definitions"; items: { term: Inline[]; blocks: Block[] }[] }
   | { kind: "examples"; items: { expression: string; results: string[] }[] }
   | { kind: "property"; text: string }
-  | { kind: "table"; header: Cell[][]; body: Cell[][] };
+  | { kind: "table"; header: Cell[][]; body: Cell[][] }
+  // Markdown only from here on.
+  | { kind: "quote"; blocks: Block[] }
+  | { kind: "rule" }
+  | { kind: "listing"; lang: string | null; pieces: Piece[] }
+  | { kind: "tasks"; items: { done: boolean; blocks: Block[] }[] };
 
 export type Inline =
   | { kind: "text"; text: string }
@@ -89,7 +110,18 @@ export type Inline =
       anchor: string | null;
       ref: string | null;
       label: Inline[] | null;
-    };
+    }
+  // Markdown only from here on.
+  | { kind: "strike"; inlines: Inline[] }
+  // A file of the snapshot. fragment: after the "#", as written.
+  | {
+      kind: "file";
+      path: string;
+      fragment: string | null;
+      label: Inline[] | null;
+    }
+  // A heading of the same page.
+  | { kind: "anchor"; anchor: string; label: Inline[] | null };
 
 // A Haddock comment and where it is.
 export interface DocComment {
@@ -124,6 +156,7 @@ export function decodeInline(value: unknown, path: string): Inline {
     case "emphasis":
     case "bold":
     case "code":
+    case "strike":
       return { kind, inlines: field(o, "inlines", path, decodeInlines) };
     case "math":
       return {
@@ -151,6 +184,19 @@ export function decodeInline(value: unknown, path: string): Inline {
         module: field(o, "module", path, str),
         anchor: field(o, "anchor", path, nullable(str)),
         ref: field(o, "ref", path, nullable(str)),
+        label: field(o, "label", path, nullable(decodeInlines)),
+      };
+    case "file":
+      return {
+        kind,
+        path: field(o, "path", path, str),
+        fragment: field(o, "fragment", path, nullable(str)),
+        label: field(o, "label", path, nullable(decodeInlines)),
+      };
+    case "anchor":
+      return {
+        kind,
+        anchor: field(o, "anchor", path, str),
         label: field(o, "label", path, nullable(decodeInlines)),
       };
   }
@@ -186,6 +232,7 @@ export function decodeBlock(value: unknown, path: string): Block {
         kind,
         level: field(o, "level", path, nat),
         inlines: field(o, "inlines", path, decodeInlines),
+        anchor: field(o, "anchor", path, nullable(str)),
       };
     case "bullets":
       return { kind, items: field(o, "items", path, array(decodeBlocks)) };
@@ -245,7 +292,49 @@ export function decodeBlock(value: unknown, path: string): Block {
         header: field(o, "header", path, array(array(decodeCell))),
         body: field(o, "body", path, array(array(decodeCell))),
       };
+    case "quote":
+      return { kind, blocks: field(o, "blocks", path, decodeBlocks) };
+    case "rule":
+      return { kind };
+    case "listing":
+      return {
+        kind,
+        lang: field(o, "lang", path, nullable(str)),
+        pieces: field(o, "pieces", path, array(decodePiece)),
+      };
+    case "tasks":
+      return {
+        kind,
+        items: field(
+          o,
+          "items",
+          path,
+          array((v, p) => {
+            const i = object(v, p);
+            return {
+              done: field(i, "done", p, bool),
+              blocks: field(i, "blocks", p, decodeBlocks),
+            };
+          }),
+        ),
+      };
   }
+}
+
+// [class, text]: class a display class number (as the source view's
+// runs) or null.
+function decodePiece(value: unknown, path: string): Piece {
+  if (!Array.isArray(value) || value.length !== 2) {
+    throw new DecodeError(path, "a piece: [class, text]");
+  }
+  const c: unknown = value[0];
+  const text = str(value[1], `${path}[1]`);
+  if (c === null) return [null, text];
+  const cls = nat(c, `${path}[0]`);
+  if (cls >= displayClasses.length) {
+    throw new DecodeError(`${path}[0]`, "a class");
+  }
+  return [cls, text];
 }
 
 export const decodeBlocks = array(decodeBlock);

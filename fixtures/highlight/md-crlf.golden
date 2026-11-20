@@ -1,0 +1,9 @@
+markdown
+1:1-1:7 keyword "# CRLF"
+3:6-3:9 literal "`c`"
+5:1-5:11 operator "```haskell"
+6:1-6:2 variable "x"
+6:5-6:6 literal "1"
+7:1-7:4 operator "```"
+8:9-8:12 literal "`d`"
+11:1-11:12 keyword "# After `e`"

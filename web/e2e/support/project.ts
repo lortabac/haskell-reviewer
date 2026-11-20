@@ -15,7 +15,19 @@ export const mainHs = [
   "",
 ].join("\n");
 
-export const readme = "# Fixture\n\nA test project.\n";
+// Markdown: a link to a file line, one to a heading, a Haskell block.
+export const readme = [
+  "# Fixture",
+  "",
+  "A test project. See [Main](src/Main.hs#L1) and [usage](#usage).",
+  "",
+  "## Usage",
+  "",
+  "```haskell",
+  "main = pure ()",
+  "```",
+  "",
+].join("\n");
 export const deepHs = "module Data.Deep.Nested.Mod where\n\nx :: Int\nx = 1\n";
 
 // Markup that must show up as text, never run.

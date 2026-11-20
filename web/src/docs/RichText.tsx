@@ -1,8 +1,9 @@
-// Haddock comments, from the AST the server sends: JSX only, no raw
-// HTML, so text in a comment is always text.
+// Haddock comments and Markdown files, from the AST the server sends:
+// JSX only, no raw HTML, so text in a comment is always text.
 import { createMemo, onCleanup, type JSX } from "solid-js";
 import { Dynamic } from "solid-js/web";
-import type { Block, Cell, Doc, Inline } from "../api/richtext";
+import type { Block, Cell, Doc, Inline, Piece } from "../api/richtext";
+import { displayClasses } from "../api/source";
 import { type Links, outerAttrs, useLinks } from "./links";
 import type { NameInline } from "./relink";
 
@@ -57,6 +58,12 @@ export function InlineText(props: { inlines: Inline[] }): JSX.Element {
   return <>{inlines(props.inlines, links)}</>;
 }
 
+// The id of a Markdown heading on the page. A prefix, so a heading
+// can't take an id the app uses.
+export function anchorId(anchor: string): string {
+  return "md-" + anchor;
+}
+
 // One comment's open headings, shallowest first: the Haddock level it
 // was written at, and the HTML level it actually got.
 type HeadingStack = { haddock: number; rendered: number }[];
@@ -103,6 +110,7 @@ function block(
         <Dynamic
           component={`h${headingLevel(b.level, level, stack)}`}
           class="doc-heading"
+          id={b.anchor === null ? undefined : anchorId(b.anchor)}
         >
           {inlines(b.inlines, links)}
         </Dynamic>
@@ -159,7 +167,47 @@ function block(
           <tbody>{rows(b.body, "td", links)}</tbody>
         </table>
       );
+    case "quote":
+      return (
+        <blockquote class="doc-quote">
+          {blocks(b.blocks, level, links, stack)}
+        </blockquote>
+      );
+    case "rule":
+      return <hr class="doc-rule" />;
+    case "listing":
+      return (
+        <pre class="doc-code" ref={scrollableRef}>
+          <code>{pieces(b.pieces)}</code>
+        </pre>
+      );
+    case "tasks": {
+      const items = b.items.map((item) => (
+        <li>
+          <span
+            class="doc-task"
+            role="img"
+            aria-label={item.done ? "Done" : "Not done"}
+          >
+            {item.done ? "\u2611" : "\u2610"}
+          </span>{" "}
+          {blocks(item.blocks, level, links, stack)}
+        </li>
+      ));
+      return <ul class="doc-tasks">{items}</ul>;
+    }
   }
+}
+
+// A Markdown code block: the source view's colours (code.css).
+function pieces(ps: Piece[]): (JSX.Element | string)[] {
+  return ps.map(([cls, text]) =>
+    cls === null ? (
+      text
+    ) : (
+      <span class={`hl-${displayClasses[cls] ?? ""}`}>{text}</span>
+    ),
+  );
 }
 
 function rows(rs: Cell[][], cell: "th" | "td", links: Links): JSX.Element[] {
@@ -261,6 +309,19 @@ function inline(i: Inline, links: Links): JSX.Element {
       ) : (
         <a href={links.module(i.ref, i.anchor)}>{text}</a>
       );
+    }
+    case "strike":
+      return <del>{inlines(i.inlines, links)}</del>;
+    case "file": {
+      const text =
+        i.label === null ? <code>{i.path}</code> : inlines(i.label, links);
+      const href = links.file?.(i.path, i.fragment);
+      return href === undefined ? text : <a href={href}>{text}</a>;
+    }
+    case "anchor": {
+      const text = i.label === null ? "#" + i.anchor : inlines(i.label, links);
+      const href = links.anchor?.(i.anchor);
+      return href === undefined ? text : <a href={href}>{text}</a>;
     }
   }
 }

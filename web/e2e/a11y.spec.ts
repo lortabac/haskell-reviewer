@@ -287,6 +287,18 @@ test.describe("reflow at 320 px (SPEC §5.4)", () => {
       await expect(page.locator("section.decl").first()).toBeVisible();
       await axe(page, "module page at 320px");
     });
+
+    test(`axe and reflow on a Markdown page, ${t.scheme} theme`, async ({
+      page,
+      server,
+    }) => {
+      await page.setViewportSize({ width: 320, height: 640 });
+      await page.emulateMedia({ colorScheme: t.scheme });
+      await page.goto(server.base + "md/tree/README.md");
+      await expect(page.locator("#md-usage")).toBeVisible();
+      await noSideways(page);
+      await axe(page, "Markdown page at 320px");
+    });
   }
 
   // One more check at 640 px: 200% zoom of a 1280 px window (SPEC §5.4).

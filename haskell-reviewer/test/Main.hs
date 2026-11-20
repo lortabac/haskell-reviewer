@@ -42,6 +42,7 @@ import HaskellReviewer.Core.LineDiff (warmUpLineDiff)
 import HaskellReviewer.Core.LineDiffGoldenTest qualified
 import HaskellReviewer.Core.LineDiffOracleTest qualified
 import HaskellReviewer.Core.LineDiffTest qualified
+import HaskellReviewer.Core.MarkdownTest qualified
 import HaskellReviewer.Core.MarkdownUnlitTest qualified
 import HaskellReviewer.Core.MarkersTest qualified
 import HaskellReviewer.Core.ModulesGoldenTest qualified
@@ -220,6 +221,7 @@ main = do
               after AllFinish "/LineDiff all/ && !/LineDiff timing/" $
                 HaskellReviewer.Core.LineDiffTest.timingTests
             ],
+        HaskellReviewer.Core.MarkdownTest.tests,
         HaskellReviewer.Core.MarkersTest.tests,
         HaskellReviewer.Core.ModulesGoldenTest.tests,
         HaskellReviewer.Core.ModulesTest.tests,
@@ -277,6 +279,7 @@ main = do
                 HaskellReviewer.Core.HighlightGoldenTest.tests,
                 HaskellReviewer.Core.HighlightTest.tests,
                 HaskellReviewer.Core.HighlightTest.linearTests,
+                HaskellReviewer.Core.MarkdownTest.linearTests,
                 HaskellReviewer.Core.InstanceKeyTest.tests,
                 -- The library is a test-only oracle: its shared values
                 -- too, built once (Q-RTS-BLACKHOLE).

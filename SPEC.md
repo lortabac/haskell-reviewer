@@ -303,6 +303,7 @@ back/forward, new tabs and copy-paste between tabs work. Shape:
 ```
 /<token>/docs/<side>/<module>[#<decl>]
 /<token>/src/<side>/<path/to/File.hs>[#L<n>[-L<m>]]
+/<token>/md/<side>/<path/to/File.md>[#<anchor>]
 /<token>/diff/<path/to/File.hs>[?layout=unified|split][#<side>-L<n>]
 /<token>/changes[#<decl-id>]
 /<token>/refs/<side>/<module>?decl=<decl>
@@ -389,6 +390,15 @@ side switch. Each declaration touched by the diff carries the badge of its
 declaration's diff. Declarations removed on head are
 listed in a collapsed "Removed in this change" block at the end of the
 module page. The sidebar's "changed only" filter also applies here.
+
+**Markdown files** (`.md`, `.markdown`; D-328) have a docs view too: the
+file rendered, at `/md/<side>/<path>`, with the same rich text rules as
+Haddock (§6.4, §11.4.9): no raw HTML (shown as text), images shown as
+links. A relative link to a file of the snapshot opens it in the tool
+(a Markdown file rendered, anything else in the source view, `#L<n>`
+kept); `#anchor` links go to a heading of the page (GitHub's anchors);
+http and https links are external; anything else is text. `haskell` and
+`hs` code blocks are coloured as in §5.6. Browse mode only for now.
 
 ### 4.3 Inline declaration source
 
@@ -733,7 +743,11 @@ keep the column (D-284).
   directive and excluded lines (from our CPP pass, §3.1) and its literate
   prose are still shown as such (D-234). A file that lexes but fails to
   parse is still highlighted (§3.1, D-229).
-  Non-Haskell files (`.cabal`, `.yaml`, Markdown, …) are always plain text.
+  Markdown files are highlighted too, with the same classes (D-327):
+  headings keyword, code literal, markers (list, quote, fence, rule,
+  table delimiter row) operator, links typeCon, HTML comment; `haskell` /
+  `hs` code blocks get GHC's tokens, with no links. Other non-Haskell
+  files (`.cabal`, `.yaml`, …) are always plain text.
 - Each class has its own theme colour, checked ≥ 4.5:1 in both themes on
   every background code shows on, selection too (D-280). CPP-excluded
   lines are greyed and also get a dashed bar and a label; directives use
@@ -1274,7 +1288,7 @@ The main library splits into layers. Lower layers never import upper ones:
 | `.cabal` files | `Cabal-syntax` | The reference parser: conditionals, common stanzas (D-67). |
 | `cabal.project` | Our own small parser | Only the fields we need (§11.4.2). |
 | CPP | Our own evaluator | Keeps positions and excluded regions (D-55). |
-| Markdown | `commonmark` (+ `commonmark-extensions`) | Parsed into our rich-text AST (D-59). |
+| Markdown | `commonmark` (+ `commonmark-extensions`) | Parsed into our rich-text AST (D-59): Markdown files (D-327, D-328), LLM answers. |
 | Haddock markup | `haddock-library` | Same AST. |
 | HTTP server | `warp` + `wai`, small hand-written router | D-49. |
 | Compression | gzip middleware (`wai-extra`) | For responses above a size threshold. |
@@ -1595,8 +1609,9 @@ early.
 
 #### 11.4.9 Rich text
 
-(D-59) LLM Markdown (`commonmark`) and project Haddock (`haddock-library`)
-are parsed **on the server** into one small rich-text AST. The AST cannot
+(D-59) LLM Markdown and Markdown files (`commonmark`) and project
+Haddock (`haddock-library`) are parsed **on the server** into one small
+rich-text AST. The AST cannot
 express raw HTML, so sanitising (§6.4, §9.2) is structural rather than a
 filter. Identifier and `path:line` references are resolved on the server
 into links. While an answer streams, the server re-parses at most every

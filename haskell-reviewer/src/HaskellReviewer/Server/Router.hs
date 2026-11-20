@@ -25,6 +25,7 @@ import HaskellReviewer.Server.Api
     fileApp,
     filesApp,
     indexingApp,
+    markdownApp,
     moduleApp,
     modulesApp,
     sourceApp,
@@ -76,7 +77,7 @@ import Network.Wai.Middleware.Gzip
 Paths below are what the router sees, after the token.
 
 - The app shell (index.html): [], [""], and any path whose first segment
-  is docs, src, refs, search, diff or changes. The client router handles
+  is docs, src, md, refs, search, diff or changes. The client router handles
   the rest. So /<token> (no slash) gets the shell too, with no redirect.
 - assets/<name>: a file of the bundle, exact name. Hashed names, so they
   are cached as immutable (Note [Caching] in
@@ -93,6 +94,9 @@ Paths below are what the router sees, after the token.
   body. api/source/<side>/<path...>: one file as the source view, as
   CBOR (Note [Source view] in "HaskellReviewer.Server.Wire.Source"); a
   path not in the list, or a file gone, is a 404 with a JSON body.
+  api/markdown/<side>/<path...>: a Markdown file, rendered, as CBOR
+  (Note [Markdown page] in "HaskellReviewer.Server.Wire.Markdown");
+  404 as api/source, and for a path that isn't Markdown.
   api/indexing/<side>: how far indexing is, as JSON. The sides are
   the session's: tree in browse mode, base and head in diff mode
   (Note [Sides] in "HaskellReviewer.Core.Sides"); another one is a
@@ -226,6 +230,7 @@ router shell routes req respond = case req.pathInfo of
   ["api", "modules", side] -> modulesApp routes.files side req respond
   "api" : "module" : side : ref -> moduleApp routes.files side ref req respond
   "api" : "source" : side : path -> sourceApp routes.files side path req respond
+  "api" : "markdown" : side : path -> markdownApp routes.files side path req respond
   ["api", "indexing", side] -> indexingApp routes.files side req respond
   ["api", "search", side] -> searchApp routes.files side req respond
   ["api", "refs", side] -> refsApp routes.files side req respond
@@ -242,7 +247,7 @@ isShellPath :: [Text] -> Bool
 isShellPath = \case
   [] -> True
   [""] -> True
-  first : _ -> first `elem` ["docs", "src", "refs", "search", "diff", "changes"]
+  first : _ -> first `elem` ["docs", "src", "md", "refs", "search", "diff", "changes"]
 
 -- | No Cache-Control here: it gets no-store. See Note [Caching] in
 -- "HaskellReviewer.Server.Security".

@@ -19,6 +19,11 @@ export interface Links {
   // A token or name as it is now.
   token: (t: CodeToken) => CodeToken;
   name: (n: NameInline) => NameInline;
+  // Markdown pages only: the URL of a file of the snapshot (fragment:
+  // after the "#", as written), and of a heading of this page. Without
+  // them, such links are text.
+  file?: (path: string, fragment: string | null) => string;
+  anchor?: (anchor: string) => string;
 }
 
 // The attributes of a link out of a page's code or docs: marks for a

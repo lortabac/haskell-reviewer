@@ -1,15 +1,17 @@
 -- | Running the parser from IO: a time limit, crash catching, and a
--- warm-up.
+-- warm-up. Markdown files too.
 module HaskellReviewer.Effects.Parser
   ( -- * Parsing
     parseGuarded,
     parseTimeLimit,
+    markdownGuarded,
 
     -- * Warm-up
     warmUpParser,
 
     -- * For tests
     parseWithin,
+    markdownWithin,
     parserWarmUp,
     cppParseWarmUp,
     cppSettings,
@@ -46,6 +48,7 @@ import HaskellReviewer.Core.Cpp
   )
 import HaskellReviewer.Core.Highlight (Run (..), highlightModule, noRuns, runList)
 import HaskellReviewer.Core.LineRegions (noLineRegions)
+import HaskellReviewer.Core.Markdown (Markdown (..), MarkdownEnv (..), parseMarkdown)
 import HaskellReviewer.Core.ModuleModel
   ( ModuleParse (..),
     ParsedModule (occurrences),
@@ -68,6 +71,8 @@ import HaskellReviewer.Core.Project
     hostPlatform,
     parserGhcVersion,
   )
+import HaskellReviewer.Core.RelPath (relPathFromSegments)
+import HaskellReviewer.Core.RichText (forceDoc)
 import HaskellReviewer.Core.Tokens (noTokens)
 import System.Timeout (timeout)
 
@@ -117,6 +122,22 @@ parseWithin limit settings text = do
       either (const (textOnly reason [])) id
         <$> tryParse (textOnly reason (earlyWarnings settings text))
 
+-- | 'parseMarkdown', fully forced, within 'parseTimeLimit' (Note [Parse
+-- time limit]): commonmark is quadratic on some input, like a
+-- paragraph of many links. 'Nothing' if too slow, or if it throws.
+markdownGuarded :: MarkdownEnv -> Text -> IO (Maybe Markdown)
+markdownGuarded = markdownWithin parseTimeLimit
+
+-- | 'markdownGuarded' with this time limit, in microseconds.
+markdownWithin :: Int -> MarkdownEnv -> Text -> IO (Maybe Markdown)
+markdownWithin limit env text = do
+  let m = parseMarkdown env text
+  -- try outside timeout: timeout catches its own exception first.
+  r <- try (timeout limit (evaluate (forceDoc m.doc `seq` foldr seq () m.runs `seq` m)))
+  case r of
+    Right x -> pure x
+    Left e -> Nothing <$ rethrowAsync e
+
 -- | Force a result, or GHC's crash message. Async exceptions, like the
 -- timeout's, go through.
 tryParse :: ModuleParse -> IO (Either Text ModuleParse)
@@ -138,6 +159,12 @@ rethrowAsync :: SomeException -> IO ()
 rethrowAsync e = case fromException e of
   Just (_ :: SomeAsyncException) -> throwIO e
   Nothing -> pure ()
+
+-- | A small Markdown file with most kinds of nodes.
+markdownFileWarmUp :: Text
+markdownFileWarmUp =
+  "# T &amp;\n\n- [x] *a* ~~b~~ [c](d.md) <https://e.org>\n\n\
+  \> q\n\n| a |\n|---|\n| 1 |\n\n```haskell\nx = 1\n```\n"
 
 -- | Parse a few tiny modules once, so the shared top-level values (ours
 -- and ghc-lib-parser's) are built before parallel threads use them
@@ -163,6 +190,13 @@ warmUpParser = do
   _ <- evaluate (forceCpp cppWarmUp)
   _ <- evaluate (forceCpp cppLimitsWarmUp)
   _ <- evaluate (sum (map (Text.length . renderCppWarning . CppWarning 1) allProblems))
+  -- Markdown: commonmark's tables, an entity, a Haskell block.
+  case relPathFromSegments ["warm-up.md"] of
+    Just p -> do
+      let m = parseMarkdown MarkdownEnv {path = p, exists = const True} markdownFileWarmUp
+      _ <- evaluate (forceDoc m.doc `seq` length m.runs)
+      pure ()
+    Nothing -> pure ()
   pure ()
   where
     -- No time limit (Note [Parse time limit]).

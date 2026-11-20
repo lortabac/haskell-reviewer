@@ -5,8 +5,8 @@
 -- "HaskellReviewer.Core.PackageGlobTest".
 
 -- | Golden tests for highlighting: each case is a file in
--- fixtures/highlight, parsed with the settings below, its runs dumped
--- next to it.
+-- fixtures/highlight, parsed with the settings below (or as Markdown),
+-- its runs dumped next to it.
 --
 -- Tests run from the package dir, so fixtures/highlight is one level up.
 module HaskellReviewer.Core.HighlightGoldenTest (tests) where
@@ -15,13 +15,16 @@ import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as LBS
 import Data.List (nub, sort)
 import Data.Text (Text)
+import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
 import HaskellReviewer.Core.Highlight (DisplayClass, Run (..), highlightModule, runList)
+import HaskellReviewer.Core.Markdown (MarkdownEnv (..), parseMarkdown)
 import HaskellReviewer.Core.Modules (Literate (..))
 import HaskellReviewer.Core.Parser (ParseSettings (..), defaultParseSettings)
 import HaskellReviewer.Core.Project (Extension (..))
+import HaskellReviewer.Core.RelPath (relPathFromSegments)
 import HaskellReviewer.Effects.Parser (parseGuarded)
-import HighlightDump (dumpHighlight)
+import HighlightDump (dumpHighlight, dumpMarkdown)
 import System.Directory qualified as Dir
 import System.FilePath (dropExtension, takeExtension)
 import Test.Tasty (TestTree, testGroup)
@@ -38,6 +41,9 @@ tests =
     ]
       <> [ goldenVsString c.golden (fixtureDir <> c.golden <> ".golden") (dump c)
          | c <- cases
+         ]
+      <> [ goldenVsString f (fixtureDir <> dropExtension f <> ".golden") (dumpMd f)
+         | f <- markdownCases
          ]
 
 -- | One golden file: a fixture parsed with some settings.
@@ -89,6 +95,28 @@ cases =
     with = defaultParseSettings
     ext n = Extension {name = n, enabled = True}
 
+-- | Markdown files: the runs of the source view (D-327).
+markdownCases :: [FilePath]
+markdownCases =
+  [ -- Every kind of block and inline, a Haskell block, an unclosed fence.
+    "md-basic.md",
+    -- A BOM, tabs, astral chars, a Haskell block in a list item.
+    "md-tabs.md",
+    -- CRLF, and a lone CR (no line end).
+    "md-crlf.md"
+  ]
+
+-- | Parse a Markdown fixture and dump its runs. Links resolve to
+-- nothing: they don't change the runs.
+dumpMd :: FilePath -> IO LBS.ByteString
+dumpMd f = do
+  text <- Text.Encoding.decodeUtf8Lenient <$> BS.readFile (fixtureDir <> f)
+  let env = case relPathFromSegments [Text.pack f] of
+        Just p -> MarkdownEnv {path = p, exists = const False}
+        Nothing -> error "bad fixture name"
+  let dumped = dumpMarkdown text (parseMarkdown env text)
+  pure (LBS.fromStrict (Text.Encoding.encodeUtf8 dumped))
+
 fixtureDir :: FilePath
 fixtureDir = "../fixtures/highlight/"
 
@@ -112,5 +140,6 @@ noStale :: IO ()
 noStale = do
   files <- Dir.listDirectory fixtureDir
   sort [dropExtension f | f <- files, takeExtension f == ".golden"]
-    @?= sort (map (.golden) cases)
-  sort [f | f <- files, takeExtension f /= ".golden"] @?= sort (nub (map (.file) cases))
+    @?= sort (map (.golden) cases <> map dropExtension markdownCases)
+  sort [f | f <- files, takeExtension f /= ".golden"]
+    @?= sort (nub (map (.file) cases) <> markdownCases)
