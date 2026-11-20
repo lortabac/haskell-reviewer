@@ -352,10 +352,15 @@ gitCaseRows extra cases = withCanonicalTemp $ \dir -> do
     dataBlock b = BS.concat ["data ", Char8.pack (show (BS.length b)), "\n", b, "\n"]
 
 -- | Pinned config for the oracle: nothing from the user, no rename
--- config.
+-- config. @core.ignorecase=false@: on a case-insensitive file system
+-- (macOS) @git init@ sets it to true, and then fast-import folds paths
+-- that differ only by case (@x.hs@, @X.hs@) into one tree entry. The
+-- repo has no work tree files, so false is safe there.
 flags :: [String]
 flags =
   [ "-c",
+    "core.ignorecase=false",
+    "-c",
     "core.autocrlf=false",
     "-c",
     "diff.renames=true",

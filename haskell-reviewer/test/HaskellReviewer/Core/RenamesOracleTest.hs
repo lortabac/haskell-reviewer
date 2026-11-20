@@ -100,6 +100,23 @@ corners = do
         ( "a symlink and a file with the same blob",
           Case {base = [("l", ISymlink "dup\n")], head = [("f", dup)]}
         ),
+        -- Paths that differ only by case: on macOS a git repo folds
+        -- them unless core.ignorecase is false (as in the CI failure).
+        ( "paths that differ only by case",
+          Case
+            { base =
+                [ ("x.hs", file "1\n2\n3\n"),
+                  ("X.hs", file "a\nb\nc\n"),
+                  ("a/x.hs", file ""),
+                  ("a/X.hs", file "q\n")
+                ],
+              head =
+                [ ("x.hs", file "1\n2\n3\n4\n"),
+                  ("b/X.hs", file "a\nb\nc\n"),
+                  ("a/x.hs", file "")
+                ]
+            }
+        ),
         ( "matrix: 5 sources for one destination, 4 slots",
           Case
             { base = [(Text.pack ("m" <> show i), file (body i)) | i <- [1 .. 5 :: Int]],
