@@ -12,11 +12,17 @@ import Data.List (sort)
 import Data.List qualified as List
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Map.Strict qualified as Map
+import Data.Maybe (isNothing)
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
 import Data.Time.Clock.POSIX (POSIXTime)
+import HaskellReviewer.Core.CommitFiles
+  ( CommitFiles (..),
+    OutsideChanges (..),
+    outsideChanges,
+  )
 import HaskellReviewer.Core.Eol
   ( CleanEol (..),
     Filtering (..),
@@ -31,7 +37,8 @@ import HaskellReviewer.Core.Git (Exec (..), ObjectId (..), RepoInfo (..))
 import HaskellReviewer.Core.RelPath (RelPath, parseRelPath, relPathText)
 import HaskellReviewer.Core.Renames (Blob (..), DiffEntry (File, Symlink))
 import HaskellReviewer.Core.Renames qualified as Renames
-import HaskellReviewer.Core.Root (Root (..))
+import HaskellReviewer.Core.Root (CanonicalRoot (..), Root (..))
+import HaskellReviewer.Core.Sides (Pair (..))
 import HaskellReviewer.Core.WorkTree
   ( DiskFile (..),
     FullStat (..),
@@ -40,7 +47,12 @@ import HaskellReviewer.Core.WorkTree
     WorkFile (..),
   )
 import HaskellReviewer.Effects.Clock (Microseconds (..))
-import HaskellReviewer.Effects.FileSystem (ListError (..), ReadError (..), canonicalRoot)
+import HaskellReviewer.Effects.FileSystem
+  ( ListError (..),
+    ReadError (..),
+    canonicalRoot,
+    listCommit,
+  )
 import HaskellReviewer.Effects.Git
   ( Git,
     GitError (..),
@@ -68,6 +80,7 @@ import HaskellReviewer.Effects.WorkTree
     listWorkTree,
     lookPath,
     readForHash,
+    stripPrefixLevels,
     withWalker,
   )
 import System.Directory qualified as Dir
@@ -179,6 +192,70 @@ tests =
               Left (ListGitFailed (GitTimedOut _)) -> pure ()
               Left e -> assertFailure ("listing: " <> show e)
               Right _ -> assertFailure "listing: no time out",
+      testCase "stripPrefixLevels: one level, two levels, the top" $ do
+        let root r = CanonicalRoot (Char8.unpack r) r
+            top prefix r = (.bytes) <$> stripPrefixLevels prefix (root r)
+        top "pkg/" "/pkg" @?= Just "/"
+        top "pkg/" "/r/pkg" @?= Just "/r"
+        top "a/b/" "/r/a/b" @?= Just "/r"
+        top "a/b/" "/r/x/a/b" @?= Just "/r/x"
+        top "a/b/" "/r/a/c" @?= Nothing
+        top "" "/r" @?= Just "/r"
+        stripPrefixLevels "a/b/" (root "/r/a/b") @?= Just (root "/r"),
+      testCase "outside ROOT: what counts, with a two-level prefix" outsideCounts,
+      testCase "outside ROOT: a FIFO .gitignore there: not known, the listing goes on" $
+        withCanonicalTemp $ \tmp -> do
+          let repo = tmp </> "r"
+          git tmp ["init", "-q", "r"]
+          Dir.createDirectoryIfMissing True (repo </> "o")
+          Dir.createDirectoryIfMissing True (repo </> "root")
+          writeFile (repo </> "o/f") "x\n"
+          writeFile (repo </> "root/a.hs") "y\n"
+          git repo ["add", "-A"]
+          Files.createNamedPipe (repo </> "o/.gitignore") 0o644
+          Dir.createDirectory (tmp </> "home")
+          setup <- gitSetup (tmp </> "home") (Microseconds 1_000_000)
+          g <- gitWith setup (repo </> "root")
+          info <- either (assertFailure . show) pure =<< repoInfo g
+          canon <- canonicalRoot (Root (repo </> "root"))
+          logs <- newIORef []
+          let logger = newLogger LevelVerbose (\l -> modifyIORef' logs (l :))
+          withObjectReader quiet defaultReaderSettings g $ \r ->
+            listWorkTree logger g info r canon >>= \case
+              Left e -> assertFailure ("listing: " <> show e)
+              Right wt -> do
+                Map.size wt.files.entries @?= 1
+                assertBool "outside is not known" (isNothing wt.outside)
+                ls <- readIORef logs
+                assertBool (show ls) (any ("outside ROOT not known" `Text.isInfixOf`) ls),
+      testCase "outside ROOT: check-attr fails there: not known, the listing goes on" $
+        withCanonicalTemp $ \tmp -> do
+          let repo = tmp </> "r"
+          git tmp ["init", "-q", "r"]
+          Dir.createDirectoryIfMissing True (repo </> "root")
+          Dir.createDirectoryIfMissing True (repo </> "o")
+          writeFile (repo </> "o/f") "x\n"
+          writeFile (repo </> "root/a.hs") "y\n"
+          git repo ["add", "-A"]
+          -- Racy: the outside step needs check-attr for it. Only that
+          -- reads o/.gitattributes, not ROOT's files.
+          Files.setFileTimes (repo </> "o/f") 4102444800 4102444800
+          git repo ["add", "-A"]
+          Files.createNamedPipe (repo </> "o/.gitattributes") 0o644
+          Dir.createDirectory (tmp </> "home")
+          setup <- gitSetup (tmp </> "home") (Microseconds 1_000_000)
+          g <- gitWith setup (repo </> "root")
+          info <- either (assertFailure . show) pure =<< repoInfo g
+          canon <- canonicalRoot (Root (repo </> "root"))
+          logs <- newIORef []
+          let logger = newLogger LevelVerbose (\l -> modifyIORef' logs (l :))
+          withObjectReader quiet defaultReaderSettings g $ \r ->
+            listWorkTree logger g info r canon >>= \case
+              Left e -> assertFailure ("listing: " <> show e)
+              Right wt -> do
+                assertBool "outside is not known" (isNothing wt.outside)
+                ls <- readIORef logs
+                assertBool (show ls) (any ("outside ROOT not known" `Text.isInfixOf`) ls),
       testCase "lstatAt: same as lstat, never follows" $ withCanonicalTemp $ \tmp -> do
         writeFile (tmp </> "f") "hello"
         Files.createSymbolicLink "f" (tmp </> "l")
@@ -306,6 +383,7 @@ mainRepo t dir = do
                 format = info.format,
                 entries = wt.diffEntries,
                 hashable = wt.hashable,
+                outside = wt.outside,
                 files = wt.work
               }
         readP p = case kind p of
@@ -439,6 +517,7 @@ autocrlf t dir = do
                 format = info.format,
                 entries = wt.diffEntries,
                 hashable = wt.hashable,
+                outside = wt.outside,
                 files = wt.work
               }
     f <- filter (/= '\n') <$> gitOut repo ["rev-parse", ":f.txt"]
@@ -616,3 +695,74 @@ rel p = either (error . show) id (parseRelPath (Text.Encoding.encodeUtf8 (Text.p
 
 quiet :: Logger
 quiet = newLogger LevelInfo (\_ -> pure ())
+
+-- | A repo with ROOT at a/b. Against the first commit: the edit,
+-- deletion, chmod, untracked, intent-to-add and unmerged paths outside
+-- ROOT count. Clean files, a racy one with the same content, a
+-- symlink, a gitlink, a non-UTF-8 name, and a file added then deleted
+-- (not in the base) do not.
+outsideCounts :: Assertion
+outsideCounts = withCanonicalTemp $ \tmp -> do
+  let repo = tmp </> "r"
+      at p = repo </> p
+      future = fromIntegral (4102444800 :: Int)
+  git tmp ["init", "-q", "r"]
+  forM_ ["o", "a/b"] $ \d -> Dir.createDirectoryIfMissing True (at d)
+  forM_
+    [ "top.txt",
+      "o/same",
+      "o/racy",
+      "o/edit",
+      "o/del",
+      "o/mode.sh",
+      "o/conf",
+      "a/other",
+      "a/b/in.hs"
+    ]
+    $ \f -> writeFile (at f) (f <> "\n")
+  Files.createSymbolicLink "target" (at "o/link")
+  Dir.createDirectory (at "o/sub")
+  -- Racy: the mtime is in the future, so not older than the index.
+  Files.setFileTimes (at "o/racy") future future
+  git repo ["add", "-A"]
+  -- A non-UTF-8 name: index only (macOS can't have it on disk).
+  blob <- takeWhile (/= '\n') <$> gitOut repo ["hash-object", "-w", "o/same"]
+  let odd' = "100644 " <> Char8.pack blob <> "\t" <> "o/caf\xe9\0"
+  _ <- gitBytes repo ["update-index", "-z", "--index-info"] odd'
+  let gitlink = "160000," <> replicate 40 '1' <> ",o/sub"
+  git repo ["update-index", "--add", "--cacheinfo", gitlink]
+  git repo ["commit", "-q", "-m", "base"]
+  base <- takeWhile (/= '\n') <$> gitOut repo ["rev-parse", "HEAD"]
+  -- An unmerged o/conf.
+  git repo ["checkout", "-q", "-b", "side"]
+  writeFile (at "o/conf") "side\n"
+  git repo ["add", "o/conf"]
+  git repo ["commit", "-q", "-m", "side"]
+  git repo ["checkout", "-q", "-"]
+  writeFile (at "o/conf") "ours\n"
+  git repo ["add", "o/conf"]
+  git repo ["commit", "-q", "-m", "ours"]
+  _ <- gitBytes repo ["merge", "side"] ""
+  -- Then the working tree.
+  appendFile (at "o/edit") "more\n"
+  Dir.removeFile (at "o/del")
+  Files.setFileMode (at "o/mode.sh") 0o755
+  writeFile (at "o/untracked") "u\n"
+  writeFile (at "o/ita") "i\n"
+  git repo ["add", "-N", "o/ita"]
+  writeFile (at "o/ghost") "g\n"
+  git repo ["add", "o/ghost"]
+  Dir.removeFile (at "o/ghost")
+  Dir.createDirectory (tmp </> "home")
+  g <- realGitAt (tmp </> "home") (at "a/b")
+  info <- either (assertFailure . show) pure =<< repoInfo g
+  info.prefix @?= "a/b/"
+  canon <- canonicalRoot (Root (at "a/b"))
+  withObjectReader quiet defaultReaderSettings g $ \r -> do
+    wt <- either (assertFailure . show) pure =<< listWorkTree quiet g info r canon
+    let baseId = ObjectId (Text.pack base)
+    cf <- either (assertFailure . show) pure =<< listCommit quiet g info baseId
+    side <- maybe (assertFailure "outside is not known") pure wt.outside
+    let c = outsideChanges Pair {head = side, base = cf.outside}
+    c.paths @?= ["o/conf", "o/del", "o/edit", "o/ita", "o/mode.sh", "o/untracked"]
+    c.total @?= 6

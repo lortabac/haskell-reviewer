@@ -21,6 +21,7 @@ module HaskellReviewer.Effects.Git
     systemGitSetup,
     lsFiles,
     lsFilesDebug,
+    atTop,
     gitIndexPath,
     checkAttr,
     coreConfig,
@@ -362,6 +363,22 @@ lsFilesDebug git = do
   pure (LsFilesOutput <$> staged <*> others)
   where
     runOk = runOkWithin git.listTimeLimit
+
+-- | The same git, run from another dir: the work-tree top, for the
+-- calls outside ROOT (D-329). Same hardening, but a short limit for
+-- ls-files and check-attr (5 s at most): the count is a bonus, and a
+-- FIFO @.gitignore@ out there must not hold the listing.
+atTop :: FilePath -> Git -> Git
+atTop dir git =
+  -- Built by hand: a new field of 'Git' makes this fail to compile,
+  -- so we think about it (record update is ambiguous here).
+  Git
+    { exe = git.exe,
+      cwd = dir,
+      env = git.env,
+      probeTimeLimit = git.probeTimeLimit,
+      listTimeLimit = min git.listTimeLimit (Microseconds 5_000_000)
+    }
 
 -- | Where the index file is: @rev-parse --git-path index@. Raw bytes,
 -- absolute or relative to ROOT. git prints no @-z@ form: one trailing

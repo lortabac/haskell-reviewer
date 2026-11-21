@@ -5,6 +5,7 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as Char8
 import Data.Map.Strict qualified as Map
+import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
 import HaskellReviewer.Core.CommitFiles
@@ -18,6 +19,7 @@ import HaskellReviewer.Core.CommitFiles
     commitLink,
     linkTargetCap,
     mkCommitFiles,
+    mkOutsideRows,
     outsideChanges,
     outsidePathCap,
   )
@@ -116,7 +118,7 @@ tests =
             ],
       testCase "outside ROOT: one side only, mode or blob changed" $ do
         let side items truncated =
-              OutsideRows {rows = Map.fromList items, truncated = truncated}
+              (mkOutsideRows truncated (Map.fromList items) Set.empty)
             file x o = ItemBlob x (BlobItem (oid o) (known 1))
             changes =
               outsideChanges
@@ -150,6 +152,23 @@ tests =
             none = side [] False
             c = outsideChanges Pair {head = many, base = none}
         (c.total, length c.paths, c.truncated) @?= (150, outsidePathCap, False),
+      testCase "outside: a size difference alone is no change" $ do
+        let side sz = mkOutsideRows False (Map.fromList [("a", file sz)]) Set.empty
+            file sz = ItemBlob NotExecutable (BlobItem (oid 'a') sz)
+            c = outsideChanges Pair {head = side SizeNotListed, base = side (known 3)}
+        c.total @?= 0,
+      testCase "outside: sized and unsized commit listings agree (D-312)" $ do
+        let list sz = (mkCommitFiles "p/" [TreeEntry "o/x" (blobOf sz)]).outside
+            blobOf sz = ItemBlob NotExecutable (BlobItem (oid 'a') sz)
+            c = outsideChanges Pair {head = list (known 3), base = list SizeNotListed}
+        c.total @?= 0,
+      testCase "outside: dirty paths count, with or without a base row" $ do
+        let row = ItemBlob NotExecutable (BlobItem (oid 'a') SizeNotListed)
+            rows = Map.fromList
+            h = mkOutsideRows False (rows [("same", row)]) (Set.fromList ["same", "new"])
+            b = mkOutsideRows False (rows [("same", row), ("gone", row)]) Set.empty
+            c = outsideChanges Pair {head = h, base = b}
+        (c.total, c.paths) @?= (3, ["gone", "new", "same"]),
       testCase "non-UTF-8 counted, .git dropped, odd mode dropped" $ do
         let cf =
               mkCommitFiles

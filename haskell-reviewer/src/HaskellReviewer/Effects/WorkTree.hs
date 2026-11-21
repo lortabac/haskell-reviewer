@@ -8,6 +8,7 @@ module HaskellReviewer.Effects.WorkTree
     hashCap,
 
     -- * Internal (for tests)
+    stripPrefixLevels,
     Walker,
     withWalker,
     lookPath,
@@ -30,6 +31,7 @@ import Control.Exception
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Int (Int64)
 import Data.List (isPrefixOf)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NonEmpty
@@ -41,7 +43,9 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
 import Foreign.C.Types (CTime (..))
+import GHC.Clock (getMonotonicTimeNSec)
 import HaskellReviewer.Core.BlobId (blobId, emptyBlobId)
+import HaskellReviewer.Core.CommitFiles (OutsideRows (..), mkOutsideRows)
 import HaskellReviewer.Core.Eol
   ( AttrState (..),
     Attrs (..),
@@ -66,13 +70,17 @@ import HaskellReviewer.Core.FileList
     EntryKind (..),
     FileList (..),
     ListSource (FromGit),
+    fileListCap,
     mkFileList,
   )
 import HaskellReviewer.Core.Git
-  ( Exec (..),
+  ( BlobItem (..),
+    Exec (..),
     ObjectId (..),
     OtherEntry (..),
     RepoInfo (..),
+    TreeItem (..),
+    TreeSize (..),
     parseOthers,
   )
 import HaskellReviewer.Core.RelPath
@@ -113,14 +121,17 @@ import HaskellReviewer.Effects.FileSystem
 import HaskellReviewer.Effects.Git
   ( Git,
     LsFilesOutput (..),
+    atTop,
     checkAttr,
     coreConfig,
     gitIndexPath,
     lsFilesDebug,
+    renderGitError,
   )
 import HaskellReviewer.Effects.GitObjects (BlobBytes (..), ObjectReader, readBlob)
 import HaskellReviewer.Effects.Log (Logger, logVerbose)
 import HaskellReviewer.Effects.PosixAt (listDirFd, lstatAt, readLinkAt)
+import System.FilePath (takeDirectory)
 import System.IO (hClose)
 import System.Posix.Files.ByteString qualified as PosixFiles
 import System.Posix.IO.ByteString (OpenMode (ReadOnly), closeFd, fdToHandle, openFdAt)
@@ -138,7 +149,9 @@ the listing thread, after the URL. In order:
    it: the oldest. Before ls-files: a rewrite in between can only make
    more entries racy. If we can't stat it, unknown: every entry is
    racy.
-3. @ls-files --stage --debug@ and @--others@, at once.
+3. @ls-files --stage --debug@ and @--others@, at once. If ROOT has a
+   prefix, the same two again from the top, for the changes outside
+   ROOT (Note [Working tree outside ROOT]).
 4. lstat of every entry, walking down from ROOT with an fd per
    directory level ('Walker'): one openat per directory, never through
    a symlink. Then the pure check (Note [Stat check] in
@@ -180,7 +193,10 @@ data WorkTreeFiles = WorkTreeFiles
     -- read that changed, an index blob we couldn't read, an unmerged
     -- path whose stages git may read): pairing must not guess their
     -- clean bytes.
-    hashable :: Set RelPath
+    hashable :: Set RelPath,
+    -- | The paths outside ROOT, to compare with the base's rows (D-329).
+    -- Empty when ROOT is at the top. 'Nothing': not known, so no count.
+    outside :: Maybe OutsideRows
   }
 
 -- | Files bigger than this are not hashed: dirty, blob unknown. It
@@ -201,36 +217,46 @@ listWorkTree logger git info reader canon = do
   andThen (gitStep cfgOut >>= parsed parseCoreConfig) $ \cfg ->
     andThen (gitStep indexOut) $ \indexPath -> do
       mtime <- indexTime canon indexPath
+      let settings =
+            CheckSettings
+              { indexMtime = mtime,
+                execBit = cfg.fileMode,
+                symlinks = cfg.symlinks,
+                emptyBlob = emptyBlobId info.format
+              }
+      -- The count outside ROOT runs next to the rest.
+      (outside, inRoot) <-
+        concurrently
+          (outsideStep logger git reader info canon cfg settings)
+          (listInRoot cfg settings)
+      andThen (pure inRoot) $ \(checked, attrs, hashed) -> do
+        let wt = finish cfg checked attrs hashed outside
+        mapM_ forceOutside outside
+        _ <- evaluate (Map.size wt.files.entries)
+        mapM_ forceWorkFile (Map.elems wt.work)
+        _ <- evaluate (Map.foldl' (\() e -> e `seq` ()) () wt.diffEntries)
+        logVerbose logger $
+          "files: working tree: "
+            <> showText (Map.size wt.files.entries)
+            <> " entries, "
+            <> showText (Map.size hashed)
+            <> " hashed, "
+            <> showText (Map.size (Map.filter isDisk wt.work))
+            <> " read from disk"
+        pure (Right wt)
+  where
+    -- Steps 3 to 6, for ROOT.
+    listInRoot cfg settings = do
       out <- lsFilesDebug git
       andThen (gitStep out) $ \ls ->
         andThen (parsed parseDebugEntries (Right ls.staged)) $ \entries -> do
           let paths = parsePaths entries (parseOthers ls.others)
-              settings =
-                CheckSettings
-                  { indexMtime = mtime,
-                    execBit = cfg.fileMode,
-                    symlinks = cfg.symlinks,
-                    emptyBlob = emptyBlobId info.format
-                  }
           logSome (logVerbose logger) "files: skipped bad path " "bad paths" paths.bad
           logSome (logVerbose logger) "files: skipped " "unknown modes" paths.oddModes
           checked <- checkPaths canon settings paths
           andThen (attributes git (diskPaths checked)) $ \attrs -> do
             hashed <- hashFiles reader info cfg canon (hashJobs checked attrs)
-            let wt = finish cfg checked attrs hashed
-            _ <- evaluate (Map.size wt.files.entries)
-            mapM_ forceWorkFile (Map.elems wt.work)
-            _ <- evaluate (Map.foldl' (\() e -> e `seq` ()) () wt.diffEntries)
-            logVerbose logger $
-              "files: working tree: "
-                <> showText (Map.size wt.files.entries)
-                <> " entries, "
-                <> showText (Map.size hashed)
-                <> " hashed, "
-                <> showText (Map.size (Map.filter isDisk wt.work))
-                <> " read from disk"
-            pure (Right wt)
-  where
+            pure (Right (checked, attrs, hashed))
     gitStep = pure . either (Left . ListGitFailed) Right
     parsed f = pure . (>>= either (Left . ListBadGitOutput) Right . f)
     isDisk = \case
@@ -405,8 +431,9 @@ finish ::
   CheckedPaths ->
   Map RelPath Attrs ->
   Map RelPath (HashJob, WorkFile) ->
+  Maybe OutsideRows ->
   WorkTreeFiles
-finish cfg c attrs hashed =
+finish cfg c attrs hashed outside =
   WorkTreeFiles
     { files = list,
       work = work,
@@ -414,6 +441,7 @@ finish cfg c attrs hashed =
         Map.union
           (Map.mapMaybeWithKey diffEntry work)
           (Map.mapMaybe submodule list.entries),
+      outside = outside,
       hashable =
         Map.keysSet
           ( Map.filter
@@ -491,6 +519,245 @@ finish cfg c attrs hashed =
       IndexRegular _ -> True
       IndexSymlink -> True
       _ -> False
+
+-- * Outside ROOT
+
+{- Note [Working tree outside ROOT]
+
+When ROOT is in a subdir, the changes outside it are only counted (D-43,
+D-329). The same two ls-files calls run once more with cwd at the top of
+the work tree (ROOT minus the prefix levels), at the same time as the
+ones in ROOT (step 3 of Note [Working-tree listing]). Rows under the
+prefix are dropped. The rest are lstat'ed with a 'Walker' from the top
+and the same 'checkEntry' (at most 'fileListCap' + 1 tracked paths).
+
+The result is 'OutsideRows' like a commit side's, to be compared with
+the base's:
+
+- a clean entry: its index (mode, oid) row;
+- a Modified or Unhashed entry, and an untracked file: a dirty path;
+- a deleted entry: nothing, so it counts only if the base has the path;
+- a Candidate (racy, or the stat differs: all of them after a clone) is
+  hashed as in ROOT: check-attr from the top, the same clean step. Clean
+  by hash: an index row. Filtered, unsure or unreadable: dirty. At most
+  'outsideBudgetFiles' files and 'outsideBudgetBytes' bytes; the
+  Candidates past that are dirty, so the count may be too high (logged);
+- a tracked path that is not UTF-8: its index row. The walker only
+  takes UTF-8 segments, so an edit of such a file is missed.
+
+A failure of the top-level calls (a time limit, a bad output), or a ROOT
+that does not end with the prefix (a Unicode form, a case): not known,
+'Nothing', logged. It never fails the listing.
+
+The rows keep slices of the whole ls-files output alive for the session,
+as the commit side's do with ls-tree.
+-}
+
+-- | At most this many Candidates outside ROOT are hashed: 10,000.
+outsideBudgetFiles :: Int
+outsideBudgetFiles = 10_000
+
+-- | At most this many bytes of them (by lstat size): 64 MiB.
+outsideBudgetBytes :: Int64
+outsideBudgetBytes = 64 * 1024 * 1024
+
+-- | The top of the work tree: ROOT without as many levels as the
+-- prefix (like @libs/a/@) has. 'Nothing' if ROOT does not end with it.
+stripPrefixLevels :: ByteString -> CanonicalRoot -> Maybe CanonicalRoot
+stripPrefixLevels prefix canon
+  | BS.null prefix = Just canon
+  | not (("/" <> BS.init prefix) `BS.isSuffixOf` canon.bytes) = Nothing
+  | otherwise =
+      Just
+        CanonicalRoot
+          { path = iterate takeDirectory canon.path !! levels,
+            bytes = iterate parentOf canon.bytes !! levels
+          }
+  where
+    levels = length (BS.split 0x2f (BS.init prefix))
+    parentOf b = case BS.breakEnd (== 0x2f) b of
+      (d, _) | BS.length d > 1 -> BS.init d
+      _ -> "/"
+
+-- | What one tracked path outside ROOT is, as far as the count goes.
+data Standing = Same | Changed | Gone
+  deriving (Eq, Show)
+
+-- | The rows outside ROOT, if ROOT has a prefix: ls-files from the
+-- top, lstat, check-attr and hashing of the Candidates. 'Nothing': not
+-- known. Timed as a whole.
+outsideStep ::
+  Logger ->
+  Git ->
+  ObjectReader ->
+  RepoInfo ->
+  CanonicalRoot ->
+  CoreConfig ->
+  CheckSettings ->
+  IO (Maybe OutsideRows)
+outsideStep logger git reader info canon cfg settings
+  | BS.null info.prefix = pure (Just (mkOutsideRows False Map.empty Set.empty))
+  | otherwise = do
+      t0 <- getMonotonicTimeNSec
+      result <- run
+      t1 <- getMonotonicTimeNSec
+      case result of
+        Left why -> do
+          logVerbose logger ("files: outside ROOT not known: " <> why)
+          pure Nothing
+        Right (rows, left) -> do
+          logVerbose logger $
+            "files: outside ROOT: "
+              <> showText (Map.size rows.rows + Set.size rows.dirty)
+              <> " rows, "
+              <> showText left
+              <> " racy not hashed, "
+              <> showText ((t1 - t0) `div` 1_000_000)
+              <> " ms"
+          pure (Just rows)
+  where
+    run = case stripPrefixLevels info.prefix canon of
+      Nothing -> pure (Left "ROOT does not end with the prefix")
+      Just top ->
+        lsFilesDebug (atTop top.path git) >>= \case
+          Left e -> pure (Left (renderGitError e))
+          Right ls -> case parseDebugEntries ls.staged of
+            Left e -> pure (Left e)
+            Right entries -> countOutside git reader info cfg settings top entries ls
+    showText :: (Show a) => a -> Text
+    showText = Text.pack . show
+
+-- | Count the changes outside ROOT, and how many Candidates were left
+-- unhashed (counted as changed).
+countOutside ::
+  Git ->
+  ObjectReader ->
+  RepoInfo ->
+  CoreConfig ->
+  CheckSettings ->
+  CanonicalRoot ->
+  [IndexEntry] ->
+  LsFilesOutput ->
+  IO (Either Text (OutsideRows, Int))
+countOutside git reader info cfg settings top entries ls = do
+  looks <-
+    withWalker top $ \w ->
+      Map.traverseWithKey (\r _ -> lookPath w r) utf8
+  let checked =
+        Map.intersectionWith (\e l -> (e, l, checkEntry settings e l)) utf8 looks
+      racy =
+        [ (r, (e, st))
+        | (r, (e, LookFound st, Candidate)) <- Map.toList checked,
+          statKind st `elem` [StatRegular, StatSymlink]
+        ]
+      chosen = withinBudget racy
+  attrs <- attributes (atTop top.path git) (map fst chosen)
+  case attrs of
+    Left e -> pure (Left (renderListError e))
+    Right as -> do
+      hashed <-
+        hashFiles reader info cfg top $
+          Map.fromList
+            [ (r, HashJob {entry = e, verdict = Candidate, stat = st, attrs = a})
+            | (r, (e, st)) <- chosen,
+              Just a <- [Map.lookup r as]
+            ]
+      pure (Right (counted checked racy hashed))
+  where
+    renderListError = \case
+      ListGitFailed g -> renderGitError g
+      ListBadGitOutput t -> t
+      ListCrashed t -> t
+    counted checked racy hashed =
+      ( outsideFromStandings tooMany (standings checked hashed) untracked,
+        length racy - Map.size hashed
+      )
+    standing hashed r (_, _, v) = case v of
+      Deleted -> Gone
+      StatClean -> Same
+      Candidate -> case Map.lookup r hashed of
+        Just (_, FromIndex _) -> Same
+        _ -> Changed
+      _ -> Changed
+    standings checked hashed =
+      Map.fromList $
+        [ (relPathBytes r, (e, standing hashed r c))
+        | (r, c@(e, _, _)) <- Map.toList checked
+        ]
+          <> [(e.path, (e, Same)) | e <- odd']
+    outsideOf p = not (info.prefix `BS.isPrefixOf` p)
+    allTracked =
+      Map.fromList
+        [ (e.path, e)
+        | g <- NonEmpty.groupWith (.path) (filter (outsideOf . (.path)) entries),
+          let e = representative g
+        ]
+    tooMany = Map.size allTracked > fileListCap
+    -- Only the first paths can be in the result.
+    parsed =
+      [(parseRelPath p, e) | (p, e) <- Map.toList (Map.take (fileListCap + 1) allTracked)]
+    utf8 = Map.fromList [(r, e) | (Right r, e) <- parsed]
+    odd' = [e | (Left _, e) <- parsed]
+    untracked =
+      [ p
+      | o <- parseOthers ls.others,
+        let p = otherPath o,
+        outsideOf p,
+        Map.notMember p allTracked
+      ]
+    otherPath = \case
+      OtherFile p -> p
+      OtherRepo p -> p
+
+-- | The Candidates to hash: the first ones that fit the budget.
+withinBudget :: [(a, (IndexEntry, FullStat))] -> [(a, (IndexEntry, FullStat))]
+withinBudget = go (0 :: Int) 0
+  where
+    go _ _ [] = []
+    go n bytes (x@(_, (_, st)) : rest)
+      | n >= outsideBudgetFiles = []
+      -- Too big: counted as changed, and the next ones may fit.
+      | tooBig bytes st = go n bytes rest
+      | otherwise = x : go (n + 1) (bytes + st.size) rest
+    tooBig bytes st =
+      st.size > fromIntegral hashCap || bytes + st.size > outsideBudgetBytes
+
+-- | The rows from what each tracked path is, and the untracked files.
+-- The flag says the caller cut the tracked paths already.
+outsideFromStandings ::
+  Bool -> Map ByteString (IndexEntry, Standing) -> [ByteString] -> OutsideRows
+outsideFromStandings cut standings untracked =
+  mkOutsideRows cut rows (Set.fromList (changed <> map BS.copy untracked))
+  where
+    -- Copied, so the whole ls-files output is not kept alive.
+    rows = Map.mapKeysMonotonic BS.copy (Map.mapMaybe sameRow standings)
+    sameRow (e, s) = if s == Same then Just (indexItem e) else Nothing
+    changed = [BS.copy p | (p, (_, Changed)) <- Map.toList standings]
+
+-- | The row of a clean entry: the index's mode and blob.
+indexItem :: IndexEntry -> TreeItem
+indexItem e = case e.kind of
+  IndexRegular x -> ItemBlob x (blob e.oid)
+  IndexSymlink -> ItemSymlink (blob e.oid)
+  IndexGitlink -> ItemGitlink e.oid
+  IndexOther m -> ItemOther (BS.copy m)
+  where
+    blob o = BlobItem {oid = o, size = SizeNotListed}
+
+-- | Force the rows before the fill: request threads read them
+-- (Q-RTS-BLACKHOLE).
+forceOutside :: OutsideRows -> IO ()
+forceOutside o = do
+  _ <- evaluate o.truncated
+  _ <- evaluate (Set.size o.dirty)
+  () <$ evaluate (Map.foldl' (\() i -> forceItem i) () o.rows)
+  where
+    forceItem = \case
+      ItemBlob x b -> x `seq` oidOf b.oid
+      ItemSymlink b -> oidOf b.oid
+      ItemGitlink i -> oidOf i
+      ItemOther m -> m `seq` ()
+    oidOf (ObjectId i) = i `seq` ()
 
 -- * Helpers
 

@@ -123,6 +123,7 @@ tests =
                         format = Sha1,
                         entries = Map.empty,
                         hashable = Set.empty,
+                        outside = Nothing,
                         files =
                           Map.fromList
                             [ (rel "clean.hs", FromIndex o),

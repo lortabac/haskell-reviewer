@@ -50,7 +50,7 @@ import HaskellReviewer.Core.CommitFiles
   ( BlobRef (..),
     BlobSize (..),
     CommitFiles (..),
-    OutsideRows,
+    OutsideRows (..),
     commitLink,
     linkTargetCap,
     mkCommitFiles,
@@ -205,7 +205,9 @@ data WorkTreeSource = WorkTreeSource
     hashable :: Set RelPath,
     -- | How to read each file and symlink of the side's list: one
     -- entry each, none for submodules and nested repos.
-    files :: Map RelPath WorkFile
+    files :: Map RelPath WorkFile,
+    -- | The rows outside ROOT (D-329). 'Nothing': not known.
+    outside :: Maybe OutsideRows
   }
 
 -- | The files of one commit.
@@ -404,7 +406,8 @@ workTreeLister logger git info reader canon =
                   format = info.format,
                   entries = wt.diffEntries,
                   hashable = wt.hashable,
-                  files = wt.work
+                  files = wt.work,
+                  outside = wt.outside
                 }
         }
 

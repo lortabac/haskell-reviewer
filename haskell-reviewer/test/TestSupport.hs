@@ -74,7 +74,6 @@ import System.Process
     StdStream (CreatePipe, UseHandle),
     createProcess,
     proc,
-    readCreateProcessWithExitCode,
     waitForProcess,
   )
 import Test.Tasty.HUnit (Assertion, assertFailure)
@@ -107,32 +106,25 @@ isRootUser = (== 0) <$> getEffectiveUserID
 git :: FilePath -> [String] -> IO ()
 git dir args = void (gitOut dir args)
 
--- | Like 'git', and gives back stdout.
+-- | Like 'git', and gives back stdout. Read as bytes and decoded
+-- leniently: a path with a non-UTF-8 byte must not fail on the
+-- locale (macOS CI).
 gitOut :: FilePath -> [String] -> IO String
 gitOut dir args = do
-  path <- fromMaybe "/usr/bin:/bin" <$> lookupEnv "PATH"
-  let cp =
-        (proc "git" args)
-          { cwd = Just dir,
-            close_fds = True,
-            env =
-              Just
-                [ ("PATH", path),
-                  ("HOME", dir),
-                  ("GIT_CONFIG_NOSYSTEM", "1"),
-                  ("GIT_CONFIG_GLOBAL", "/dev/null"),
-                  ("GIT_AUTHOR_NAME", "Test"),
-                  ("GIT_AUTHOR_EMAIL", "test@example.com"),
-                  ("GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z"),
-                  ("GIT_COMMITTER_NAME", "Test"),
-                  ("GIT_COMMITTER_EMAIL", "test@example.com"),
-                  ("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z")
-                ]
-          }
-  (code, out, err) <- readCreateProcessWithExitCode cp ""
-  case code of
-    ExitSuccess -> pure out
-    ExitFailure _ -> assertFailure ("git " <> unwords args <> " failed: " <> err)
+  r <- gitBytesEnv setUpEnv dir args ""
+  case r.code of
+    ExitSuccess -> pure (decode r.out)
+    ExitFailure _ -> assertFailure ("git " <> unwords args <> " failed: " <> decode r.err)
+  where
+    decode = Text.unpack . Text.Encoding.decodeUtf8Lenient
+    setUpEnv =
+      [ ("GIT_AUTHOR_NAME", "Test"),
+        ("GIT_AUTHOR_EMAIL", "test@example.com"),
+        ("GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z"),
+        ("GIT_COMMITTER_NAME", "Test"),
+        ("GIT_COMMITTER_EMAIL", "test@example.com"),
+        ("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z")
+      ]
 
 -- | What 'gitBytes' gives.
 data GitRun = GitRun
@@ -154,10 +146,6 @@ gitBytesEnv extra dir args input = do
   let cp =
         (proc "git" args)
           { cwd = Just dir,
-            close_fds = True,
-            std_in = CreatePipe,
-            std_out = CreatePipe,
-            std_err = CreatePipe,
             env =
               Just $
                 [ ("PATH", path),
@@ -167,6 +155,12 @@ gitBytesEnv extra dir args input = do
                 ]
                   <> extra
           }
+  runBytes cp input
+
+-- | Run a process with raw bytes on stdin, stdout and stderr (the
+-- locale can't fail on a non-UTF-8 name).
+runBytes :: CreateProcess -> ByteString -> IO GitRun
+runBytes cp0 input =
   bracket (createProcess cp) cleanup $ \case
     (Just hIn, Just hOut, Just hErr, ph) ->
       withAsync (BS.hPut hIn input >> hClose hIn) $ \_ ->
@@ -175,8 +169,9 @@ gitBytesEnv extra dir args input = do
           err <- wait errA
           code <- waitForProcess ph
           pure GitRun {code = code, out = out, err = err}
-    _ -> assertFailure "gitBytes: no pipes"
+    _ -> assertFailure "runBytes: no pipes"
   where
+    cp = cp0 {close_fds = True, std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe}
     cleanup (i, o, e, ph) = do
       mapM_ (void . try @IOException . hClose) i
       mapM_ hClose o
@@ -223,10 +218,11 @@ fixtureRepo name args = do
           { close_fds = True,
             env = Just [("PATH", path)]
           }
-  (code, _, err) <- readCreateProcessWithExitCode cp ""
-  case code of
+  r <- runBytes cp ""
+  case r.code of
     ExitSuccess -> pure ()
-    ExitFailure _ -> assertFailure (name <> ".sh failed: " <> err)
+    ExitFailure _ ->
+      assertFailure (name <> ".sh failed: " <> Text.unpack (Text.Encoding.decodeUtf8Lenient r.err))
 
 -- * Checks
 

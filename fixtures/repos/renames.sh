@@ -21,6 +21,7 @@
 #   lim/r1..r3 -> lim/q1..q3          80% each, distinct basenames: R080,
 #                                     but none with a rename limit of 2
 #   other/x (edited), other/new (added), other/moved.hs -> pkg/moved.hs
+#   other/keep, other/del, other/mode.sh: unchanged between the commits
 #
 # With "worktree", also leaves the working tree dirty: pkg/wt/a.txt
 # moved to pkg/wt/b.txt (not added), pkg/exact/b.txt edited,
@@ -60,6 +61,9 @@ for i in 1 2 3; do lines "lim$i" 1 10 > "$p/lim/r$i.txt"; done
 lines wtaa 1 10 > "$p/wt/a.txt"
 lines othx 1 10 > "$d/other/x"
 lines othm 1 10 > "$d/other/moved.hs"
+lines othk 1 3 > "$d/other/keep"
+lines othd 1 3 > "$d/other/del"
+printf 'echo o\n' > "$d/other/mode.sh"
 g -C "$d" add -A
 sub=1234567890abcdef1234567890abcdef12345678
 if [ "${2:-sha1}" = sha256 ]; then
@@ -108,4 +112,8 @@ if [ "${3:-}" = worktree ]; then
   lines itaa 1 3 > "$p/ita.txt"
   g -C "$d" add -N pkg/ita.txt
   chmod +x "$p/copy/orig.txt"
+  printf 'more\n' >> "$d/other/x"
+  rm "$d/other/del"
+  chmod +x "$d/other/mode.sh"
+  lines othu 1 3 > "$d/other/untracked"
 fi

@@ -1364,7 +1364,10 @@ calls, all with the hardening below:
   no EOL rules; D-318).
 - Working-tree side (`--diff REV`): `rev-parse --git-path index`,
   `ls-files -z --stage --debug`, `ls-files -z --others
-  --exclude-standard`.
+  --exclude-standard`. When ROOT is below the top of the work tree, the
+  last two run once more with the top as cwd, at the same time (D-329),
+  to count the changes outside ROOT. Same hardening and time limit. A
+  failure there only makes that count unknown.
 - EOL rules: `check-attr -z --stdin text eol crlf filter ident
   working-tree-encoding`, `config -z --get-regexp
   '^(core\.(autocrlf|filemode|symlinks|ignorecase|trustctime|checkstat)|filter\.(unset|unspecified)\..*)$'`

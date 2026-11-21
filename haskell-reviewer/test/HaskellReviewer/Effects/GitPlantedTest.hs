@@ -5,10 +5,17 @@
 module HaskellReviewer.Effects.GitPlantedTest (tests) where
 
 import Control.Monad (forM, forM_, unless, when)
+import Data.ByteString.Char8 qualified as Char8
 import Data.List (isInfixOf, isPrefixOf)
 import Data.Map.Strict qualified as Map
+import Data.Set qualified as Set
 import Data.Text qualified as Text
-import HaskellReviewer.Core.CommitFiles (BlobRef (..), BlobSize (..), CommitFiles (..))
+import HaskellReviewer.Core.CommitFiles
+  ( BlobRef (..),
+    BlobSize (..),
+    CommitFiles (..),
+    OutsideRows (..),
+  )
 import HaskellReviewer.Core.Eol (Filtering (..))
 import HaskellReviewer.Core.FileList (FileList (..))
 import HaskellReviewer.Core.Git (ObjectId (..), RepoInfo (..))
@@ -163,7 +170,9 @@ safeCalls t = do
 -- partial clone.
 workTreeCalls :: FilePath -> Assertion
 workTreeCalls t = do
-  let roots = ["r1", "r2", "r3", "r4", "r2/sub", "fsd", "pc"]
+  let roots = ["r1", "r2", "r3", "r4", "r2/sub", "fsd", "pc"] <> inLib
+      -- ROOT with a prefix: the calls from the top run too.
+      inLib = ["r2/lib", "r4/lib", "fsd/lib"]
       gitDirOf r = t </> takeWhile (/= '/') r </> ".git"
   clearMarkers t
   writeFile (t </> "trace.json") ""
@@ -178,6 +187,16 @@ workTreeCalls t = do
     withObjectReader quiet defaultReaderSettings g $ \reader -> do
       wt <- ok =<< listWorkTree quiet g info reader canon
       assertBool (r <> ": files") (Map.size wt.files.entries >= 1)
+      when (r `elem` inLib) $ do
+        o <- maybe (assertFailure (r <> ": outside not known")) pure wt.outside
+        -- Hashed outside ROOT: clean ones are rows; filtered (we can't
+        -- run the filter) and edited ones are dirty.
+        let inRows f = Char8.pack f `Map.member` o.rows
+            isDirty f = Char8.pack f `Set.member` o.dirty
+        forM_ ["a.txt", "plain.hs"] $ \f ->
+          assertBool (r <> ": " <> f <> " in rows") (inRows f)
+        forM_ ["a.x", "a.bin", "b.txt", "untracked.hs"] $ \f ->
+          assertBool (r <> ": " <> f <> " dirty") (isDirty f)
       let source =
             WorkTreeEntries
               WorkTreeSource
@@ -186,6 +205,7 @@ workTreeCalls t = do
                   format = info.format,
                   entries = wt.diffEntries,
                   hashable = wt.hashable,
+                  outside = wt.outside,
                   files = wt.work
                 }
       -- Reads through the index blobs (cat-file) and from disk.
@@ -196,7 +216,7 @@ workTreeCalls t = do
       -- The racy and touched files are clean, unless filtered: we
       -- can't run the filter, so those are read from disk. b.txt is
       -- dirty.
-      unless (r `elem` ["r2/sub", "pc"]) $ do
+      unless (r `elem` ["r2/sub", "pc"] <> inLib) $ do
         let clean = [relPathText p | (p, FromIndex _) <- Map.toList wt.work]
             filtered =
               [ relPathText p
