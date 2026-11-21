@@ -21,7 +21,7 @@ import HaskellReviewer.Core.Project
   )
 import HaskellReviewer.Core.ProjectLoad (loadProjectConfig, resolveProject)
 import HaskellReviewer.Core.RelPath (RelPath)
-import HaskellReviewer.Effects.FileSystem (ReadError (..))
+import HaskellReviewer.Effects.FileSystem (ReadError (..), missingReason)
 import HaskellReviewer.Effects.Source (EntrySource (..), readSourceEntry)
 
 -- | Both phases in one go. @cliGhc@ is @--ghc@, if given: it wins over
@@ -56,3 +56,4 @@ readProjectFile source fl p = case source of
       Right _ -> Left NotAFile
       Left ReadGone -> Left Gone
       Left (ReadFailed e) -> Left (CantRead e)
+      Left (ReadMissing o) -> Left (CantRead (missingReason o))

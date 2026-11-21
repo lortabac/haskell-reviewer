@@ -19,6 +19,7 @@ module HaskellReviewer.Effects.FileSystem
 
     -- * Reading
     readEntry,
+    missingReason,
     readDiskEntry,
     DiskBytes (..),
     readDiskBytes,
@@ -406,7 +407,14 @@ data ReadError
     ReadGone
   | -- | Some other IO error, e.g. no permission.
     ReadFailed Text
+  | -- | A blob not in the local repo (partial clone). Only the diff
+    -- route tells it apart; the others answer as for 'ReadFailed'.
+    ReadMissing ObjectId
   deriving (Eq, Show)
+
+-- | What to log for 'ReadMissing'.
+missingReason :: ObjectId -> Text
+missingReason (ObjectId o) = "object " <> o <> " is not in the local repo"
 
 -- | Read one entry of the file list, as it is on disk now. See
 -- Note [File containment] in "HaskellReviewer.Core.RelPath".

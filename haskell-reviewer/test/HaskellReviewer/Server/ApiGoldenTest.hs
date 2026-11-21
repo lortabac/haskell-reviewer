@@ -6,7 +6,10 @@ module HaskellReviewer.Server.ApiGoldenTest (tests) where
 
 import ApiSupport
   ( ApiResult (..),
+    DiffFile (..),
     TestApi (..),
+    diffReady,
+    diffRouteApi,
     fixtureApi,
     gatedOn,
     getApi,
@@ -33,7 +36,15 @@ import Data.Text qualified as Text
 import HaskellReviewer.Core.CommitFiles (OutsideChanges (..))
 import HaskellReviewer.Core.Config (SidebarView (..), Theme (..), UiDefaults (..))
 import HaskellReviewer.Core.Eol (Filtering (..))
-import HaskellReviewer.Core.FileContent (FileNotes (..))
+import HaskellReviewer.Core.FileContent
+  ( FileContent (..),
+    FileNotes (..),
+    FileSize (..),
+    LinkInfo (..),
+    TooLargeInfo (..),
+    textLimit,
+  )
+import HaskellReviewer.Core.FileList (CommitId (..), EntryKind (..))
 import HaskellReviewer.Core.Git (ObjectId (..))
 import HaskellReviewer.Core.Markers (Marker (..), ModuleChange (..), SettingsChange (..))
 import HaskellReviewer.Core.ModuleModel
@@ -57,8 +68,10 @@ import HaskellReviewer.Core.ResolveWarmUp (resolveWarmUpIndex)
 import HaskellReviewer.Core.Sides (Side (..), Sides (..))
 import HaskellReviewer.Core.Similarity (Score (..), maxScore)
 import HaskellReviewer.Core.Xdg (XdgProblem (..))
+import HaskellReviewer.Effects.FileSystem (ReadError (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), newLogger)
 import HaskellReviewer.Server.CborJson (cborToJson, renderCborJsonError)
+import HaskellReviewer.Server.Diff (GuardedDiff (..))
 import HaskellReviewer.Server.Wire
   ( DiffEnd (..),
     DiffFiles (..),
@@ -138,6 +151,25 @@ cases =
     json "diff-files" (diffFiles commitsDiff),
     json "diff-files-worktree" (diffFiles workTreeDiff),
     json "diff-files-limit" (diffFiles limitDiff),
+    -- One file's diff: every status, side kind, diff kind and note, the
+    -- BOM and CRLF notes, ws=ignore.
+    cbor "diff-modified" (okDiff diffFixtureApi "src/A.hs" ""),
+    cbor "diff-renamed" (okDiff diffFixtureApi "new/R.hs" ""),
+    cbor "diff-added" (okDiff diffFixtureApi "added.txt" ""),
+    cbor "diff-removed" (okDiff diffFixtureApi "removed.txt" ""),
+    cbor "diff-unchanged" (okDiff diffFixtureApi "same.txt" ""),
+    cbor "diff-binary" (okDiff diffFixtureApi "logo.png" ""),
+    cbor "diff-too-large" (okDiff diffFixtureApi "big.csv" ""),
+    -- No pairing entry (as past the cut): same path, compared by kind.
+    cbor "diff-submodule" (okDiff diffFixtureApi "vendor/dep" ""),
+    cbor "diff-symlink" (okDiff diffFixtureApi "link" ""),
+    cbor "diff-type-changed" (okDiff diffFixtureApi "tc" ""),
+    cbor "diff-eol" (okDiff diffFixtureApi "eol.txt" ""),
+    cbor "diff-ws-ignore" (okDiff diffFixtureApi "ws.hs" "?ws=ignore"),
+    cbor "diff-too-slow" $
+      okDiff diffFixtureApi {lineDiff = \_ _ -> pure DiffTimedOut} "src/A.hs" "",
+    cbor "diff-not-local" (okDiff diffFixtureApi "remote.bin" ""),
+    cbor "diff-filtered" (okDiff diffFixtureApi "data.bin" ""),
     -- One per reason a module is text only, a parsed one and one after
     -- CPP.
     cbor "module-parsed" (okCbor projectApi (modulePath "Foo")),
@@ -240,7 +272,10 @@ cases =
 diffFiles :: DiffFiles -> IO LBS.ByteString
 diffFiles d =
   okJson
-    fixtureApi {diffFiles = Just (Right (encodeDiffFiles (Generation 1) d)), workers = 0}
+    fixtureApi
+      { diff = Just (Right (diffReady (encodeDiffFiles (Generation 1) d) [])),
+        workers = 0
+      }
     ["api", "diff-files"]
 
 -- | Commits: every status and note but filtered, outside ROOT.
@@ -327,6 +362,74 @@ relPath t =
 -- | A modified file with this note.
 modified :: Text -> Maybe ChangeNote -> Change
 modified p n = Modified ModifiedFile {path = relPath p, note = n}
+
+-- | Two sides for api/diff (Note [Diff view]): a file per golden.
+diffFixtureApi :: TestApi
+diffFixtureApi =
+  (diffRouteApi headFiles baseFiles changes)
+    { fileNotes = \snap p -> case snap.side of
+        HeadSide | p == relPath "data.bin" -> FileNotes {filtered = Filtered}
+        _ -> FileNotes {filtered = Unfiltered}
+    }
+  where
+    headFiles =
+      [ text "src/A.hs" "module A where\n\na = 2\nb = 3\n",
+        text "new/R.hs" "module R where\nr = 2\n",
+        text "added.txt" "one\ntwo\n",
+        text "same.txt" "same\n",
+        file "logo.png" EntryFile (Right (Binary (FileSize 300))),
+        file "big.csv" EntryFile (Right tooLarge),
+        file "vendor/dep" EntryNestedRepo (Right NestedRepo),
+        link "link" "../new",
+        link "tc" "elsewhere",
+        text "eol.txt" "\xFEFF\&a\nb\nc\n",
+        text "ws.hs" "x = 1\n",
+        file "remote.bin" EntryFile (Left (ReadMissing (hex 'e'))),
+        text "data.bin" "big data\n"
+      ]
+    baseFiles =
+      [ text "src/A.hs" "module A where\n\na = 1\n",
+        text "old/R.hs" "module R where\nr = 1\n",
+        text "removed.txt" "gone\n",
+        text "same.txt" "same\n",
+        file "logo.png" EntryFile (Right (Binary (FileSize 200))),
+        text "big.csv" "a,b\n",
+        file "vendor/dep" (EntrySubmodule sub) (Right (Submodule sub)),
+        link "link" "../old",
+        text "tc" "one\ntwo\n",
+        text "eol.txt" "a\r\nb\r\n",
+        text "ws.hs" "\xFEFFx  =  1\n",
+        text "remote.bin" "r\n",
+        text "data.bin" "version https://git-lfs.github.com/spec/v1\n"
+      ]
+    changes =
+      [ Added (relPath "added.txt"),
+        modified "big.csv" Nothing,
+        modified "data.bin" Nothing,
+        modified "eol.txt" Nothing,
+        modified "link" Nothing,
+        modified "logo.png" Nothing,
+        Renamed (renamed "old/R.hs" "new/R.hs" (Score 36000) MatrixStep ExecChanged),
+        modified "remote.bin" Nothing,
+        Removed (relPath "removed.txt"),
+        modified "src/A.hs" Nothing,
+        modified "tc" (Just TypeChanged),
+        modified "ws.hs" Nothing
+      ]
+    text p t = file p EntryFile (Right (TextContent t))
+    file p k r = DiffFile {path = p, kind = k, answer = r}
+    sub = CommitId (Text.replicate 40 "c")
+    link p t =
+      file p EntrySymlink (Right (Link LinkInfo {target = t, resolved = Nothing}))
+    tooLarge = TooLarge TooLargeInfo {size = FileSize 2_000_000, limit = textLimit}
+
+-- | GET api/diff/<path…> with this query: a 200 with CBOR.
+okDiff :: TestApi -> Text -> ByteString -> IO LBS.ByteString
+okDiff api p query = do
+  r <- getApiQuery api (["api", "diff"] <> Text.splitOn "/" p) query
+  r.status @?= 200
+  lookup "Content-Type" r.headers @?= Just "application/cbor"
+  pure r.body
 
 -- | A made-up SHA-1 id.
 hex :: Char -> ObjectId

@@ -59,6 +59,7 @@ library
     HaskellReviewer.Core.Cpp.Positions
     HaskellReviewer.Core.Cpp.Warning
     HaskellReviewer.Core.Decls
+    HaskellReviewer.Core.DiffTarget
     HaskellReviewer.Core.DocLinks
     HaskellReviewer.Core.Entities
     HaskellReviewer.Core.Eol
@@ -154,6 +155,7 @@ library
     HaskellReviewer.Server.Assets
     HaskellReviewer.Server.Cbor
     HaskellReviewer.Server.CborJson
+    HaskellReviewer.Server.Diff
     HaskellReviewer.Server.DiffFiles
     HaskellReviewer.Server.Events
     HaskellReviewer.Server.Listen
@@ -164,6 +166,7 @@ library
     HaskellReviewer.Server.Security
     HaskellReviewer.Server.TextSearch
     HaskellReviewer.Server.Wire
+    HaskellReviewer.Server.Wire.Diff
     HaskellReviewer.Server.Wire.Markdown
     HaskellReviewer.Server.Wire.Page
     HaskellReviewer.Server.Wire.RichText
@@ -273,6 +276,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.ChangedTest
     HaskellReviewer.Core.CodeTest
     HaskellReviewer.Core.CommitFilesTest
+    HaskellReviewer.Core.DiffTargetTest
     HaskellReviewer.Core.ConfigGoldenTest
     HaskellReviewer.Core.CppGoldenTest
     HaskellReviewer.Core.CppPropertyTest
@@ -350,6 +354,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Server.EventsTest
     HaskellReviewer.Server.ListenTest
     HaskellReviewer.Server.RouterTest
+    HaskellReviewer.Server.DiffTest
     HaskellReviewer.Server.SidesTest
     HaskellReviewer.Server.SourceTest
     HaskellReviewer.Server.TextSearchTest

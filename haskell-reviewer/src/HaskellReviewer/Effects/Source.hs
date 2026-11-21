@@ -141,6 +141,7 @@ import HaskellReviewer.Effects.Git
   )
 import HaskellReviewer.Effects.GitObjects
   ( BlobBytes (..),
+    ObjectError (..),
     ObjectReader,
     defaultReaderSettings,
     readBlob,
@@ -181,8 +182,10 @@ Commit reads, by the kind in the list:
 - a path with no blob is 'ReadGone';
 - a file is read up to the text limit + 1, then classified as on disk;
 - a symlink is read up to 'linkTargetCap' ('commitLink');
-- any object error is 'ReadFailed', so the routes answer 500 "cannot
-  read file". A blob missing from a partial clone too, for now.
+- a blob missing from a partial clone is 'ReadMissing': the diff route
+  shows it as "not local", the other routes answer 500 "cannot read
+  file" (D-331);
+- any other object error is 'ReadFailed': 500 "cannot read file".
 -}
 
 -- | Where a snapshot's files come from. See Note [Entry sources].
@@ -503,7 +506,8 @@ readWorkTreeEntry src p kind = case kind of
 
 -- | Read a file or symlink from its blob: a file up to the text limit
 -- + 1, then classified as on disk; a symlink up to 'linkTargetCap'
--- ('commitLink'). Any object error is 'ReadFailed'.
+-- ('commitLink'). A missing blob is 'ReadMissing', any other object
+-- error 'ReadFailed'.
 readBlobEntry ::
   ObjectReader -> RelPath -> EntryKind -> ObjectId -> IO (Either ReadError FileContent)
 readBlobEntry reader p kind oid = case kind of
@@ -513,6 +517,7 @@ readBlobEntry reader p kind oid = case kind of
     FileSize maxText = textLimit
     blob cap k =
       readBlob reader cap oid >>= \case
+        Left (ObjectMissing o) -> pure (Left (ReadMissing o))
         Left e -> pure (Left (ReadFailed (renderObjectError e)))
         Right b -> pure (Right (k b))
 
@@ -529,7 +534,7 @@ warmUpObjects = do
   case parseRelPath "p/link" of
     Right p -> () <$ evaluate (length (show (commitLink p (FileSize 4) "a.hs")))
     Left e -> ioError (userError ("warmUpObjects: " <> show e))
-  () <$ evaluate (length (show (ReadFailed "x")))
+  () <$ evaluate (length (show [ReadFailed "x", ReadMissing (ObjectId "0")]))
 
 -- | Build the shared values of commit listing (the ls-tree parser's
 -- literals, the path checks, the list builder) before two sides list at

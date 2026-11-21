@@ -13,6 +13,15 @@ import {
 } from "./files";
 import { changeNotes, decodeDiffFiles, statuses } from "./diffFiles";
 import {
+  bomChanges,
+  decodeDiffView,
+  diffKinds,
+  diffUrl,
+  ops,
+  sideKinds,
+  statuses as diffStatuses,
+} from "./diff";
+import {
   decodeModuleTree,
   moduleChanges,
   moduleRoles,
@@ -90,6 +99,21 @@ const decoders: Record<string, (value: unknown) => unknown> = {
   "diff-files": decodeDiffFiles,
   "diff-files-worktree": decodeDiffFiles,
   "diff-files-limit": decodeDiffFiles,
+  "diff-modified": decodeDiffView,
+  "diff-renamed": decodeDiffView,
+  "diff-added": decodeDiffView,
+  "diff-removed": decodeDiffView,
+  "diff-unchanged": decodeDiffView,
+  "diff-binary": decodeDiffView,
+  "diff-too-large": decodeDiffView,
+  "diff-submodule": decodeDiffView,
+  "diff-symlink": decodeDiffView,
+  "diff-type-changed": decodeDiffView,
+  "diff-eol": decodeDiffView,
+  "diff-ws-ignore": decodeDiffView,
+  "diff-too-slow": decodeDiffView,
+  "diff-not-local": decodeDiffView,
+  "diff-filtered": decodeDiffView,
   "module-parsed": decodeModulePage,
   "module-parse-error": decodeModulePage,
   "module-pragma-error": decodeModulePage,
@@ -134,7 +158,8 @@ const cborNames = Object.keys(decoders).filter(
     n.startsWith("file-") ||
     (n.startsWith("module-") && n !== "module-not-found") ||
     (n.startsWith("source-") && n !== "source-not-found") ||
-    n.startsWith("markdown-"),
+    n.startsWith("markdown-") ||
+    (n.startsWith("diff-") && !n.startsWith("diff-files")),
 );
 
 const sorted = (xs: Iterable<string>) => [...new Set(xs)].sort();
@@ -249,6 +274,64 @@ describe("API fixtures", () => {
       const paths = d.files.map((f) => f.path);
       expect(paths, "sorted by path").toEqual([...paths].sort());
     }
+  });
+
+  it("the diff view fixtures cover every value", () => {
+    const views = [...fixtures.keys()]
+      .filter((n) => n.startsWith("diff-") && !n.startsWith("diff-files"))
+      .map((n) => decodeDiffView(fixture(n)));
+    expect(sorted(views.map((v) => v.status))).toEqual(sorted(diffStatuses));
+    expect(sorted(views.flatMap((v) => (v.note ? [v.note] : [])))).toEqual(
+      sorted(changeNotes),
+    );
+    const sides = views.flatMap((v) => [v.base, v.head]);
+    expect(sorted(sides.map((s) => s.kind))).toEqual(sorted(sideKinds));
+    expect(sides.some((s) => s.kind === "submodule" && s.commit === null)).toBe(
+      true,
+    );
+    expect(sides.some((s) => s.kind === "submodule" && s.commit !== null)).toBe(
+      true,
+    );
+    const bodies = views.map((v) => v.diff);
+    expect(sorted(bodies.map((d) => d.kind))).toEqual(sorted(diffKinds));
+    const lines = bodies.flatMap((d) => (d.kind === "lines" ? [d] : []));
+    expect(sorted(lines.flatMap((d) => d.runs.map((r) => r[0])))).toEqual(
+      sorted(ops),
+    );
+    expect(sorted(lines.flatMap((d) => (d.bom ? [d.bom] : [])))).toEqual(
+      sorted(bomChanges),
+    );
+    expect(lines.some((d) => d.crlfLines > 0)).toBe(true);
+    expect(sorted(views.map((v) => String(v.ignoreWhitespace)))).toEqual([
+      "false",
+      "true",
+    ]);
+    expect(views.some((v) => v.similarity !== null)).toBe(true);
+  });
+
+  it("diff view: bad values are errors", () => {
+    const good = fixture("diff-modified") as Record<string, unknown>;
+    const diff = good.diff as Record<string, unknown>;
+    for (const bad of [
+      { ...good, status: "copied" },
+      { ...good, ignoreWhitespace: undefined },
+      { ...good, base: { kind: "dir" } },
+      { ...good, head: { kind: "binary" } },
+      { ...good, diff: { kind: "huge" } },
+      { ...good, diff: { ...diff, runs: [["equal", 0]] } },
+      { ...good, diff: { ...diff, runs: [["same", 1]] } },
+      { ...good, diff: { ...diff, runs: [["equal", 1, 2]] } },
+      { ...good, diff: { ...diff, bom: "both" } },
+    ]) {
+      expect(() => decodeDiffView(bad)).toThrow(DecodeError);
+    }
+  });
+
+  it("diff URL: each segment encoded, ws only when ignored", () => {
+    expect(diffUrl("src/A.hs", false)).toBe("/api/diff/src/A.hs");
+    expect(diffUrl("a b/#?%.hs", true)).toBe(
+      "/api/diff/a%20b/%23%3F%25.hs?ws=ignore",
+    );
   });
 
   it("diff files: bad values are errors", () => {

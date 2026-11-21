@@ -1,0 +1,1 @@
+{"generation":1,"path":"big.csv","oldPath":null,"status":"modified","similarity":null,"note":null,"ignoreWhitespace":false,"base":{"kind":"text"},"head":{"kind":"too-large","size":2000000,"limit":1048576},"diff":{"kind":"not-text"}}

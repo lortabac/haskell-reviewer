@@ -9,7 +9,7 @@ import Data.ByteString (ByteString)
 import Data.Map.Strict qualified as Map
 import Data.Set qualified as Set
 import Data.Text qualified as Text
-import HaskellReviewer.Core.CommitFiles (linkTargetCap)
+import HaskellReviewer.Core.CommitFiles (BlobRef (..), linkTargetCap)
 import HaskellReviewer.Core.Eol (CleanEol (..), Filtering (..))
 import HaskellReviewer.Core.FileContent
   ( FileContent (..),
@@ -32,7 +32,7 @@ import HaskellReviewer.Core.Root (Root (..))
 import HaskellReviewer.Core.Sides (Side (..), Sides (..))
 import HaskellReviewer.Core.WorkTree (DiskFile (..), WorkFile (..))
 import HaskellReviewer.Effects.FileSystem (ReadError (..), canonicalRoot)
-import HaskellReviewer.Effects.Git (Git, Listing (..), repoInfo, resolveCommit)
+import HaskellReviewer.Effects.Git (Git (..), Listing (..), repoInfo, resolveCommit)
 import HaskellReviewer.Effects.GitObjects
   ( ObjectReader,
     defaultReaderSettings,
@@ -40,7 +40,8 @@ import HaskellReviewer.Effects.GitObjects
   )
 import HaskellReviewer.Effects.Log (LogLevel (..), Logger, newLogger)
 import HaskellReviewer.Effects.Source
-  ( EntrySource (..),
+  ( CommitSource (..),
+    EntrySource (..),
     Listed (..),
     Lister (..),
     WorkTreeSource (..),
@@ -68,7 +69,14 @@ import System.FilePath ((</>))
 import System.IO.Temp (createTempDirectory, getCanonicalTemporaryDirectory)
 import Test.Tasty (TestTree, testGroup, withResource)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
-import TestSupport (fixtureRepo, git, gitOut, realGitAt, withCanonicalTemp)
+import TestSupport
+  ( fixtureRepo,
+    git,
+    gitOut,
+    realGitAt,
+    withCanonicalTemp,
+    writeScript,
+  )
 
 -- | Commit reads. No parse here.
 tests :: TestTree
@@ -93,6 +101,29 @@ tests =
             pure l.source
           readSourceEntry source (rel "a.hs") EntryFile
             >>= (@?= Left (ReadFailed "the object reader is stopped")),
+        testCase "commit reads: a blob not in the repo is ReadMissing (D-331)" $ do
+          r <- get
+          g <- realGitAt r.home (r.sha1 </> "proj")
+          let gone = ObjectId (Text.replicate 40 "e")
+          withObjectReader quiet defaultReaderSettings g $ \reader -> do
+            l <- headListed g reader
+            src <- withBlob (rel "a.hs") gone l.source
+            readSourceEntry src (rel "a.hs") EntryFile >>= (@?= Left (ReadMissing gone)),
+        testCase "commit reads: git 2.44.1's promisor death is ReadMissing" $
+          withCanonicalTemp $ \tmp -> do
+            r <- get
+            real <- realGitAt r.home (r.sha1 </> "proj")
+            let missing = replicate 40 'd'
+            exe <- writeScript tmp "git" (dyingCatFile real.exe missing)
+            let g = real {exe = exe}
+                gone = ObjectId (Text.pack missing)
+            withObjectReader quiet defaultReaderSettings g $ \reader -> do
+              l <- headListed g reader
+              src <- withBlob (rel "a.hs") gone l.source
+              readSourceEntry src (rel "a.hs") EntryFile >>= (@?= Left (ReadMissing gone))
+              -- The reader starts again for the next read.
+              readSourceEntry src (rel "empty.txt") EntryFile
+                >>= (@?= Right (TextContent "")),
         testCase "commit reads: a project path that is a submodule is gone" $ do
           r <- get
           g <- realGitAt r.home (r.sha1 </> "proj")
@@ -325,6 +356,32 @@ makeRepos name = do
   fixtureRepo name [r.sha256, "sha256"]
   Dir.createDirectory r.home
   pure r
+
+-- | The source, with this blob for one path.
+withBlob :: RelPath -> ObjectId -> EntrySource -> IO EntrySource
+withBlob p o = \case
+  CommitEntries c ->
+    let swap b = BlobRef {oid = o, size = b.size}
+     in pure (CommitEntries c {blobs = Map.adjust swap p c.blobs})
+  _ -> assertFailure "not a commit source"
+
+-- | A git whose cat-file dies on one id, as git 2.44.1 does on a blob
+-- missing from a partial clone. The rest goes to the real git.
+dyingCatFile :: FilePath -> String -> [String]
+dyingCatFile real missing =
+  [ "case \" $* \" in",
+    "  *' cat-file '*)",
+    "    while read -r cmd oid; do",
+    "      if [ \"$oid\" = " <> missing <> " ]; then",
+    "        echo \"fatal: could not fetch $oid from promisor remote\" >&2",
+    "        exit 128",
+    "      fi",
+    "      printf '%s %s\\n' \"$cmd\" \"$oid\"",
+    "    done | '" <> real <> "' \"$@\"",
+    "    exit ;;",
+    "esac",
+    "exec '" <> real <> "' \"$@\""
+  ]
 
 rel :: ByteString -> RelPath
 rel p = either (error . show) id (parseRelPath p)

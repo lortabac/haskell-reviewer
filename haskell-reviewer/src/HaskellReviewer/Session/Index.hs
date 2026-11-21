@@ -103,7 +103,7 @@ import HaskellReviewer.Core.Parser (ParseSettings)
 import HaskellReviewer.Core.Project (GhcVersion)
 import HaskellReviewer.Core.References (OccKeys, occKeys)
 import HaskellReviewer.Core.RelPath (RelPath, relPathText)
-import HaskellReviewer.Effects.FileSystem (ReadError (..))
+import HaskellReviewer.Effects.FileSystem (ReadError (..), missingReason)
 import HaskellReviewer.Effects.Log (Logger, exceptionMessage, logInfo, logVerbose)
 
 {- Note [Indexing]
@@ -809,15 +809,8 @@ indexOne c reading =
     work =
       deps.readModule path >>= \case
         Left ReadGone -> pure (Broke SourceGone)
-        Left (ReadFailed why) -> do
-          quietly . logInfo deps.logger $
-            "haskell-reviewer: "
-              <> deps.label
-              <> "cannot read "
-              <> relPathText path
-              <> ": "
-              <> why
-          pure (Broke (SourceUnreadable why))
+        Left (ReadFailed why) -> unreadable why
+        Left (ReadMissing o) -> unreadable (missingReason o)
         Right (TextContent t)
           | FileSize (Text.Foreign.lengthWord8 t) > bigFileSize,
             not reading.holdsBig ->
@@ -839,6 +832,15 @@ indexOne c reading =
         Right (TooLarge info) -> pure (Done (IndexedTooLarge info) Nothing)
         -- A link, a submodule: no longer a file.
         Right _ -> pure (Broke SourceGone)
+    unreadable why = do
+      quietly . logInfo deps.logger $
+        "haskell-reviewer: "
+          <> deps.label
+          <> "cannot read "
+          <> relPathText path
+          <> ": "
+          <> why
+      pure (Broke (SourceUnreadable why))
 
 -- | Fill the slot, count it, add its names, update the cache, all at
 -- once. Logs the progress at each tenth.

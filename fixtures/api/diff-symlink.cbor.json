@@ -1,0 +1,1 @@
+{"generation":1,"path":"link","oldPath":null,"status":"modified","similarity":null,"note":null,"ignoreWhitespace":false,"base":{"kind":"symlink","target":"../old"},"head":{"kind":"symlink","target":"../new"},"diff":{"kind":"lines","runs":[["delete",1],["insert",1]],"crlfLines":0,"bom":null}}

@@ -978,7 +978,7 @@ diffTests =
             (_, err) <- stopServer server sigTERM
             assertContains "diff: light..feature\n" err
             length (filter ("indexing: done" `isPrefixOf`) (lines err)) @?= 1,
-        testCase "api/diff-files: a rename with its score; 405" $ do
+        testCase "api/diff-files and api/diff: a rename with its score; 405" $ do
           t <- get
           let root = t </> "renames" </> "pkg"
           withServer id [root, "--diff", "HEAD~1..HEAD"] $ \server -> do
@@ -998,7 +998,21 @@ diffTests =
                 path = tokenPath server <> "api/diff-files"
             post <-
               rawHttp server.port (requestBytes "POST" (goodHost server) path origin)
-            post.status @?= 405,
+            post.status @?= 405
+            -- api/diff: CBOR for a changed file, 405 for POST.
+            d <- getPath server "api/diff/sim60/new.txt"
+            d.status @?= 200
+            lookup "content-type" d.headers @?= Just "application/cbor"
+            dump <-
+              either
+                (assertFailure . Text.unpack . renderCborJsonError)
+                (pure . LChar8.unpack)
+                (cborToJson (LBS.fromStrict d.body))
+            assertContains "\"runs\":[[\"equal\",6],[\"delete\",4],[\"insert\",4]]" dump
+            let diffPath = tokenPath server <> "api/diff/sim60/new.txt"
+            postDiff <-
+              rawHttp server.port (requestBytes "POST" (goodHost server) diffPath origin)
+            postDiff.status @?= 405,
         testCase "BASE...HEAD: base is the merge base" $ do
           t <- get
           let root = t </> "repo" </> "pkg"

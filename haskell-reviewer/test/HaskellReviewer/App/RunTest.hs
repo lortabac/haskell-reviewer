@@ -772,6 +772,16 @@ diffTests =
             view "file" "base" ["data.bin"] >>= has "\"filtered\":false"
             view "source" "base" ["data.bin"] >>= has "\"filtered\":false"
             view "file" "head" ["src", "B.hs"] >>= has "\"filtered\":false"
+            -- api/diff: modified, untracked, filtered, unchanged.
+            let diffAt p = do
+                  r <- getSidePath app ("diff" : p)
+                  (p, r.status) @?= (p, 200)
+                  either (assertFailure . show) (pure . LBS.toStrict) (cborToJson r.body)
+            diffAt ["src", "A.hs"]
+              >>= has "\"status\":\"modified\",\"similarity\":null,\"note\":null"
+            diffAt ["src", "New.hs"] >>= has "\"status\":\"added\""
+            diffAt ["data.bin"] >>= has "\"note\":\"filtered\""
+            diffAt ["src", "B.hs"] >>= has "\"status\":\"unchanged\""
             newOnBase <- getSidePath app ["file", "base", "src", "New.hs"]
             newOnBase.status @?= 404
             t <- getSide app "files" "tree"
@@ -1046,6 +1056,20 @@ renamesTests =
               none = "\"change\":null,\"settingsChanged\":false"
           assertBool (show t) (none `BS.isInfixOf` t)
           assertBool (show t) (not ("\"change\":\"" `BS.isInfixOf` t)),
+      goldenVsString "api/diff: one file per kind of change" (golden "diff") $ do
+        (_, diffs) <- runRenamesWith [] "HEAD~1..HEAD" id $ \app -> do
+          let get p = getSidePath app ("diff" : Text.splitOn "/" p)
+          renamedFrom <- get "exact/a.txt"
+          renamedTo <- get "exact/b.txt"
+          renamedFrom.body @?= renamedTo.body
+          forM_ ["../other/x", "other/x", "nope.txt"] $ \p -> do
+            r <- get p
+            (p, r.status) @?= (p, 404)
+          mapM
+            (\p -> (,) p <$> get p)
+            ["exact/b.txt", "sim60/new.txt", "ln/c", "tc/f", "sub/m2", "mode/x.sh"]
+        dumps <- mapM dump diffs
+        pure ("{" <> LBS.intercalate ",\n" dumps <> "}\n"),
       testCase "module trees: loose modules by path, added and removed" $ do
         r <- runRenames [] "HEAD~1..HEAD" id
         let has needle tree =
@@ -1055,6 +1079,10 @@ renamesTests =
     ]
   where
     golden n = "../fixtures/repos/renames." <> n <> ".json"
+    dump (p, r) = do
+      (p, r.status, lookup "Content-Type" r.headers) @?= (p, 200, Just "application/cbor")
+      j <- either (assertFailure . show) pure (cborToJson r.body)
+      pure ("\"" <> LBS.fromStrict (Text.Encoding.encodeUtf8 p) <> "\":" <> j)
     limitTwo d = d {pairFiles = pairListed defaultSettings {renameLimit = RenameLimit 2}}
     crashing d = d {pairFiles = \_ -> ioError (userError "boom")}
 
@@ -1072,7 +1100,12 @@ data RenamesRun = RenamesRun
 
 -- | @renames.sh@ with these extra args, served with @--diff@ at pkg/.
 runRenames :: [String] -> String -> (Deps -> Deps) -> IO RenamesRun
-runRenames extra diff tweak = withCanonicalTemp $ \tmp -> do
+runRenames extra diff tweak = fst <$> runRenamesWith extra diff tweak (\_ -> pure ())
+
+-- | Like 'runRenames', with more requests first.
+runRenamesWith ::
+  [String] -> String -> (Deps -> Deps) -> (Application -> IO a) -> IO (RenamesRun, a)
+runRenamesWith extra diff tweak more = withCanonicalTemp $ \tmp -> do
   let repo = tmp </> "repo"
   fixtureRepo "renames" (repo : extra)
   Dir.createDirectory (tmp </> "home")
@@ -1087,12 +1120,13 @@ runRenames extra diff tweak = withCanonicalTemp $ \tmp -> do
       args = [repo </> "pkg", "--idle-exit", "0", "--verbose", "--diff", diff]
       args' = args <> ["--trace-file", "t.jsonl"]
   withRunningProbe args' change $ \fake app -> do
+    extraResult <- more app
     r <- getSidePath app ["diff-files"]
     h <- getSide app "modules" "head"
     b <- getSide app "modules" "base"
     out <- readIORef fake.console
     names <- map (.name) <$> readIORef fake.spans
-    pure
+    pure . (,extraResult) $
       RenamesRun
         { status = r.status,
           contentType = lookup "Content-Type" r.headers,
@@ -1454,6 +1488,7 @@ newFake = do
             -- No real parse here: see Note [Shared values in tests] in
             -- HaskellReviewer.Core.PackageGlobTest.
             warmUp = [],
+            diffWarmUp = pure (),
             readEntry = \_ _ _ -> pure (Right (TextContent "module A where\n")),
             parse = \_ _ -> pure textOnly,
             pairFiles = pairListed defaultSettings,

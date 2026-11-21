@@ -6,6 +6,9 @@ module ApiSupport
     treeSnapshot,
     withSnapshot,
     diffApi,
+    diffReady,
+    DiffFile (..),
+    diffRouteApi,
     browseOnly,
     fixtureApi,
     projectApi,
@@ -67,6 +70,7 @@ import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
 import HaskellReviewer.Core.Address (Port (..), Token, tokenFromBytes, tokenText)
 import HaskellReviewer.Core.Config (builtinDefaults)
+import HaskellReviewer.Core.DiffTarget (changeIndex)
 import HaskellReviewer.Core.FileContent
   ( FileContent (..),
     FileNotes (..),
@@ -83,6 +87,7 @@ import HaskellReviewer.Core.FileList
     ListSource (..),
   )
 import HaskellReviewer.Core.Lang (Langs, noLangs)
+import HaskellReviewer.Core.LineDiff (Whitespace)
 import HaskellReviewer.Core.ModuleModel
   ( ModuleParse (..),
     TextOnlyReason (..),
@@ -119,6 +124,7 @@ import HaskellReviewer.Core.RelPath
     relPathText,
     resolveLinkTarget,
   )
+import HaskellReviewer.Core.Renames (Change)
 import HaskellReviewer.Core.Root (CanonicalRoot (..))
 import HaskellReviewer.Core.Sides (Pair (..), Side (..), Sides (..), lookupSide)
 import HaskellReviewer.Core.Xdg (XdgProblem (..))
@@ -130,10 +136,16 @@ import HaskellReviewer.Effects.Source (EntrySource (..))
 import HaskellReviewer.Server.Api (FilesApi (..))
 import HaskellReviewer.Server.Api qualified as Api (newSnapshot)
 import HaskellReviewer.Server.CborJson (cborToJson)
+import HaskellReviewer.Server.Diff
+  ( DiffRoutes (..),
+    GuardedDiff,
+    diffTimeLimit,
+    guardedLineDiff,
+  )
 import HaskellReviewer.Server.Events (EventStream (..))
 import HaskellReviewer.Server.Router (Routes (..), application)
 import HaskellReviewer.Session.Clients (newClients)
-import HaskellReviewer.Session.Diff (DiffProblem, fillDiff, newDiffSlot)
+import HaskellReviewer.Session.Diff (DiffProblem, DiffReady (..), fillDiff, newDiffSlot)
 import HaskellReviewer.Session.Index (IndexDeps (..), IndexJob (..), runWorkers)
 import HaskellReviewer.Session.Prefs (PrefsStore (..), newPrefsStore)
 import HaskellReviewer.Session.Snapshot (Snapshot (files, index, side), newSessionShare)
@@ -173,8 +185,11 @@ data TestApi = TestApi
     -- | The preferences store, made for each request. By default in
     -- memory, with the built-in defaults.
     prefs :: IO PrefsStore,
-    -- | What api/diff-files answers. 'Nothing': browse mode.
-    diffFiles :: Maybe (Either DiffProblem LBS.ByteString)
+    -- | What the diff slot holds (api/diff-files, api/diff).
+    -- 'Nothing': browse mode.
+    diff :: Maybe (Either DiffProblem DiffReady),
+    -- | The diff route's line diff. By default as in production.
+    lineDiff :: Whitespace -> Pair Text -> IO GuardedDiff
   }
 
 -- | The tree snapshot of a browse-mode api.
@@ -202,6 +217,38 @@ diffApi headApi baseApi =
     }
   where
     onSide s get = fmap (\snap -> snap {side = s}) <$> get
+
+-- | A filled diff slot: this api/diff-files body, these changes.
+diffReady :: LBS.ByteString -> [Change] -> DiffReady
+diffReady body cs = DiffReady {body = body, changes = changeIndex cs}
+
+-- | One file of a side, for 'diffRouteApi': its path, kind and what a
+-- read gives.
+data DiffFile = DiffFile
+  { path :: ByteString,
+    kind :: EntryKind,
+    answer :: Either ReadError FileContent
+  }
+
+-- | A diff session with these head files, base files and changes (the
+-- pairing). No project, no workers. api/diff-files answers "{}".
+diffRouteApi :: [DiffFile] -> [DiffFile] -> [Change] -> TestApi
+diffRouteApi headFiles baseFiles cs =
+  (diffApi (onSide headFiles) (onSide baseFiles))
+    { readEntry = \snap p _ ->
+        let files = case snap.side of
+              BaseSide -> baseFiles
+              _ -> headFiles
+         in pure $ case [f.answer | f <- files, Just p == relPathFromBytes f.path] of
+              r : _ -> r
+              [] -> Left ReadGone,
+      workers = 0,
+      diff = Just (Right (diffReady "{}" cs))
+    }
+  where
+    onSide files =
+      let fl = fileList [(f.path, f.kind) | f <- files]
+       in apiFor (newSnapshot fixtureRoot fl noProject)
 
 -- | The file routes' lookup for a browse session with this snapshot.
 browseOnly ::
@@ -485,7 +532,8 @@ apiFor snap =
       workers = 1,
       prefs =
         newPrefsStore silent builtinDefaults (Left HomeUnset),
-      diffFiles = Nothing
+      diff = Nothing,
+      lineDiff = guardedLineDiff diffTimeLimit
     }
 
 silent :: Logger
@@ -1192,10 +1240,10 @@ sendApiQuery ::
 sendApiQuery method headers reqBody query api path = do
   listed <- sequence api.sides
   prefsStore <- api.prefs
-  diffSlot <- forM api.diffFiles $ \body -> do
+  diffRoutes <- forM api.diff $ \ready -> do
     slot <- newDiffSlot
-    _ <- fillDiff slot body
-    pure slot
+    _ <- fillDiff slot ready
+    pure DiffRoutes {slot = slot, lineDiff = api.lineDiff}
   clients <- newClients
   let events =
         EventStream
@@ -1214,7 +1262,7 @@ sendApiQuery method headers reqBody query api path = do
             logger = api.logger
           }
       routes =
-        Routes {events = events, files = files, prefs = prefsStore, diff = diffSlot}
+        Routes {events = events, files = files, prefs = prefsStore, diff = diffRoutes}
       app = application (Port 8080) apiToken routes
       call = do
         r <-
