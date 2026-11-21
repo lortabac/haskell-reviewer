@@ -15,6 +15,7 @@ export default class Point extends Base {
 
 async function f(_a, $b) {
   const s = "a \"quoted\" \\ string";
+  const url = "http://x /* not a comment";
   let t = 'it\'s';
   var u = `two
 lines ${s + 1}`;

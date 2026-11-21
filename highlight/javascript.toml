@@ -1,7 +1,10 @@
 # JavaScript. Format: SPEC §5.6. TypeScript has its own file.
 # Not handled:
-# - regex literals: a quote inside /…/ starts a string.
-# - ${…} in a template string: all literal.
+# - regex literals: a quote, // or /* inside /…/ starts a string or a
+#   comment (/* can run to the end of the file).
+# - ${…} in a template string: all literal; a backtick inside one ends
+#   the string.
+# - x.catch, x.delete, …: a keyword after a dot is still coloured.
 # - operators: plain (they can't be words).
 # - the dot in 1.5: plain (with . in word-chars, this.x is one word).
 # .jsx is left out: an apostrophe in JSX text starts a string.
@@ -37,6 +40,7 @@ keyword = [
   "export", "extends", "finally", "for", "function", "if", "implements",
   "import", "in", "instanceof", "interface", "let", "new", "of", "package",
   "private", "protected", "public", "return", "static", "super", "switch",
-  "this", "throw", "try", "typeof", "var", "void", "while", "with", "yield",
+  "this", "throw", "try", "typeof", "using", "var", "void", "while", "with",
+  "yield",
 ]
 literal = ["true", "false", "null", "undefined", "NaN", "Infinity"]
