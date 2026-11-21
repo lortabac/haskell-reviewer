@@ -17,12 +17,14 @@ describe("docs URLs", () => {
     "a#b/C d.hs",
     "x%y",
   ])("round trip: %s", (ref) => {
-    expect(refFromPathname("/tok" + docsHref(ref))).toBe(ref);
+    expect(refFromPathname("/tok" + docsHref("tree", ref), "tree")).toBe(ref);
   });
 
   it("keeps the ref as typed: escaped or not", () => {
-    expect(refFromPathname("/tok/docs/tree/pkg:lib:Foo")).toBe("pkg:lib:Foo");
-    expect(refFromPathname("/tok/docs/tree/pkg%3Alib%3AFoo")).toBe(
+    expect(refFromPathname("/tok/docs/tree/pkg:lib:Foo", "tree")).toBe(
+      "pkg:lib:Foo",
+    );
+    expect(refFromPathname("/tok/docs/tree/pkg%3Alib%3AFoo", "tree")).toBe(
       "pkg:lib:Foo",
     );
   });
@@ -39,14 +41,14 @@ describe("docs URLs", () => {
     "/tok/docs/tree/a//b",
     "/tok/docs/tree/%E0",
   ])("rejects %s", (pathname) => {
-    expect(refFromPathname(pathname)).toBeUndefined();
+    expect(refFromPathname(pathname, "tree")).toBeUndefined();
   });
 
   it("module API URL", () => {
-    expect(apiModuleUrl("pkg:lib:Foo")).toBe(
+    expect(apiModuleUrl("tree", "pkg:lib:Foo")).toBe(
       "/api/module/tree/pkg%3Alib%3AFoo",
     );
-    expect(apiModuleUrl("scripts/x y.hs")).toBe(
+    expect(apiModuleUrl("tree", "scripts/x y.hs")).toBe(
       "/api/module/tree/scripts/x%20y.hs",
     );
   });
@@ -88,7 +90,10 @@ describe("queryFromUrl", () => {
     ["/tok/docs/tree/%E0", "%E0"],
     ["/tok/src/tree/a/b.hs", "a/b.hs"],
     ["/tok/changes", ""],
-    ["/tok/docs/head/X", ""],
+    // Any side, even one the session doesn't have.
+    ["/tok/docs/head/X", "X"],
+    ["/tok/refs/nope/R.S", "R.S"],
+    ["/tok/docs", ""],
   ])("%s", (pathname, q) => {
     expect(queryFromUrl(pathname)).toBe(q);
   });

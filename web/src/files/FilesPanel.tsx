@@ -7,25 +7,36 @@ import {
   Show,
   Switch,
 } from "solid-js";
-import { getJson } from "../api/client";
+import { getJson, type Result } from "../api/client";
 import { decodeFileList, type FileList } from "../api/files";
+import { usePageSide } from "../session";
+import type { Side } from "../sides";
 import { FileTree } from "./FileTree";
-import { hrefFor, pathFromPathname, withBase } from "./paths";
+import { apiFilesUrl, hrefFor, pathFromPathname, withBase } from "./paths";
 import { buildTree } from "./tree";
 
-// The Files view of the sidebar: the file list, as a tree. Loaded once.
+// The Files view of the sidebar: the file list of the page's side, as a
+// tree. Loaded once per side: the last list of each side is kept, so
+// going back to a side is instant (D-332).
 export function FilesPanel(): JSX.Element {
-  const [list] = createResource(() =>
-    getJson("/api/files/tree", decodeFileList),
-  );
+  const side = usePageSide();
+  const lists = new Map<Side, Result<FileList>>();
+  const [list] = createResource(side, async (s) => {
+    const got = lists.get(s) ?? (await getJson(apiFilesUrl(s), decodeFileList));
+    if (got.kind === "ok") lists.set(s, got);
+    return { side: s, got };
+  });
   const location = useLocation();
-  const current = createMemo(() => pathFromPathname(location.pathname));
+  const current = createMemo(() => pathFromPathname(location.pathname, side()));
   // "/<token>", from the router.
   const base = useResolvedPath(() => "/");
-  const href = (path: string): string => withBase(base(), hrefFor(path));
+  const href = (path: string): string =>
+    withBase(base(), hrefFor(side(), path));
+  // Only the page's side: never the last side's list while loading.
   const ok = (): FileList | undefined => {
     const r = list();
-    return r?.kind === "ok" ? r.value : undefined;
+    // Safety net: createResource already drops late answers.
+    return r?.side === side() && r.got.kind === "ok" ? r.got.value : undefined;
   };
   const tree = createMemo(() => {
     const l = ok();

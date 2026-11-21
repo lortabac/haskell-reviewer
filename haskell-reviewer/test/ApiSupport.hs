@@ -144,6 +144,7 @@ import HaskellReviewer.Server.Diff
   )
 import HaskellReviewer.Server.Events (EventStream (..))
 import HaskellReviewer.Server.Router (Routes (..), application)
+import HaskellReviewer.Server.Wire (SessionInfo (..), encodeSession)
 import HaskellReviewer.Session.Clients (newClients)
 import HaskellReviewer.Session.Diff (DiffProblem, DiffReady (..), fillDiff, newDiffSlot)
 import HaskellReviewer.Session.Index (IndexDeps (..), IndexJob (..), runWorkers)
@@ -189,7 +190,9 @@ data TestApi = TestApi
     -- 'Nothing': browse mode.
     diff :: Maybe (Either DiffProblem DiffReady),
     -- | The diff route's line diff. By default as in production.
-    lineDiff :: Whitespace -> Pair Text -> IO GuardedDiff
+    lineDiff :: Whitespace -> Pair Text -> IO GuardedDiff,
+    -- | What api/session says. Browse by default.
+    session :: SessionInfo
   }
 
 -- | The tree snapshot of a browse-mode api.
@@ -533,7 +536,8 @@ apiFor snap =
       prefs =
         newPrefsStore silent builtinDefaults (Left HomeUnset),
       diff = Nothing,
-      lineDiff = guardedLineDiff diffTimeLimit
+      lineDiff = guardedLineDiff diffTimeLimit,
+      session = BrowseSession
     }
 
 silent :: Logger
@@ -1262,7 +1266,13 @@ sendApiQuery method headers reqBody query api path = do
             logger = api.logger
           }
       routes =
-        Routes {events = events, files = files, prefs = prefsStore, diff = diffRoutes}
+        Routes
+          { events = events,
+            files = files,
+            prefs = prefsStore,
+            diff = diffRoutes,
+            session = encodeSession api.session
+          }
       app = application (Port 8080) apiToken routes
       call = do
         r <-

@@ -3,6 +3,7 @@ import { getCbor } from "../api/client";
 import { decodeSourceView, type LexedSource, sameLexed } from "../api/source";
 import { createRefetchLoop } from "../events/refetchLoop";
 import { apiSourceUrl } from "../files/paths";
+import { usePageSide } from "../session";
 
 // Highlighting, at the same time as the text. Never waited for: the
 // text shows plain first (the server can take a while when indexing).
@@ -22,10 +23,13 @@ export function createSource(
   // below hides those).
   onAnswer?: (s: LexedSource) => void,
 ): () => LexedSource | undefined {
+  const side = usePageSide();
   const [latest, setLatest] = createSignal<LexedSource>();
   const fetchSource = createRefetchLoop(
     (signal) =>
-      getCbor(apiSourceUrl(untrack(path)), decodeSourceView, { signal }),
+      getCbor(apiSourceUrl(side(), untrack(path)), decodeSourceView, {
+        signal,
+      }),
     (r) => {
       if (r.kind !== "ok") return undefined;
       const s = r.value;

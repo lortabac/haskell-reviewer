@@ -85,6 +85,40 @@ const styleBans = [
   },
 ];
 
+// Page and API URLs with a side are built only by the URL modules,
+// which take the side first (D-332): a link can't drop or change the
+// page's side by accident.
+const sideUrl =
+  "/^\\/(docs|src|md|refs|search|api\\/(files|file|modules|module|source|markdown|indexing|search|refs|text-search))(\\/|$)/";
+const urlBans = [
+  {
+    selector: `Literal[value=${sideUrl}]`,
+    message: "Build side URLs with the URL helpers (files/paths.ts, …).",
+  },
+  {
+    selector: `TemplateElement[value.raw=${sideUrl}]`,
+    message: "Build side URLs with the URL helpers (files/paths.ts, …).",
+  },
+];
+
+// Where side URLs may be written by hand: the URL modules, the routes,
+// and tests.
+const urlModules = [
+  "src/App.tsx",
+  "src/session.ts",
+  "src/files/paths.ts",
+  "src/docs/urls.ts",
+  "src/refs/urls.ts",
+  "src/textsearch/urls.ts",
+  "src/api/module.ts",
+  "src/api/search.ts",
+  "src/api/refs.ts",
+  "src/api/textSearch.ts",
+  "src/**/*.test.{ts,tsx}",
+  "test/**",
+  "e2e/**",
+];
+
 export default tseslint.config(
   { ignores: ["dist/", "test-results/", "playwright-report/", "blob-report/"] },
   js.configs.recommended,
@@ -126,8 +160,12 @@ export default tseslint.config(
       "no-implied-eval": "error",
       "no-new-func": "error",
       "no-script-url": "error",
-      "no-restricted-syntax": ["error", ...banned, ...styleBans],
+      "no-restricted-syntax": ["error", ...banned, ...styleBans, ...urlBans],
     },
+  },
+  {
+    files: urlModules,
+    rules: { "no-restricted-syntax": ["error", ...banned, ...styleBans] },
   },
   {
     files: ["src/ui/cssom.ts"],

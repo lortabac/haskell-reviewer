@@ -310,7 +310,12 @@ back/forward, new tabs and copy-paste between tabs work. Shape:
 /<token>/search/<side>?q=<text>
 ```
 
-`<side>` is `head` / `base` in diff mode and `tree` in browse mode.
+`<side>` is `head` / `base` in diff mode and `tree` in browse mode. Links
+keep the page's side (§5.1). A side the session doesn't have shows "not
+found in this snapshot", with one link to the same page on the default
+side; the page itself fetches nothing, and the sidebar and search use the
+default side. Pages with no side (Home, not found) use the default side:
+`head` in diff mode, `tree` in browse mode (D-332).
 `<module>` uses the identity rules of §2.3. `<decl>` is
 `<namespace>:<name>`, where the namespace is `type`, `class`, `con`,
 `field`, `val`, `pat` or `inst`. This tells the type `Foo` apart from the
@@ -588,7 +593,9 @@ constructors, fields and class methods). A query like `Data.Map.insert` or
 `M.insert` also matches the name in modules that match the qualifier. Lower
 case matches either case; an upper case letter makes it case-sensitive.
 Exact names come first (D-206). There is no search by type
-(D-14). Selecting a result opens it in the docs view. In diff mode, results are taken from the head side by default.
+(D-14). Selecting a result opens it in the docs view. In diff mode, search,
+find references and text search use the page's side, and head on pages
+with no side (D-332).
 
 The box is in the header on every page, and the same box (prefilled) is what
 the "not found" and missing-declaration notices offer. It is a keyboard-usable
@@ -1815,7 +1822,12 @@ a framework would cost more than it saves.
   false in browse mode). Every response
   carries its snapshot generation id, and the client caches by
   *(generation, resource)*. Preferences (`api/prefs`) are the exception:
-  they don't belong to a snapshot, so they have no generation (D-197). A
+  they don't belong to a snapshot, so they have no generation (D-197).
+  So is `GET api/session` (JSON, D-332): the mode and, in diff mode,
+  the revisions: the `--diff` text (empty ends as `HEAD`), each side's
+  label and full commit hash (null for the working tree) and, for
+  `...`, the number of merge bases. It is fixed for the process. The
+  client waits for it before the first render. A
   module or source file that doesn't exist is a 404 with a small JSON
   body (D-166, D-265);
   other errors are plain text.
@@ -1832,7 +1844,9 @@ a framework would cost more than it saves.
   - Events: indexing progress (`indexing`, the same JSON as
     `GET api/indexing/<side>`, with a `side` field; at most one per side
     per 100 ms, always the latest state, D-315), generation changes, LLM
-    stream updates, notices.
+    stream updates, notices. The client keeps the latest `indexing` of
+    each side; a page follows its own side, the header shows the sum
+    (D-333).
   - Fallback: without SharedWorker, each tab opens its own stream, and a
     notice warns about the limit.
 - **Liveness**: a browser is connected while its SSE stream is open. The

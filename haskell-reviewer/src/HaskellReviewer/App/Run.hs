@@ -106,11 +106,8 @@ import HaskellReviewer.Core.Renames
     warmUpRenames,
   )
 import HaskellReviewer.Core.Revspec
-  ( CommitsInfo (..),
-    DiffInfo (..),
-    Range (..),
+  ( DiffInfo (..),
     Revspec,
-    WorkTreeInfo (..),
     diffInfoLines,
   )
 import HaskellReviewer.Core.Root (Root (..))
@@ -206,9 +203,11 @@ import HaskellReviewer.Server.Router (Routes (..), application, warmUpGzip)
 import HaskellReviewer.Server.Search (warmUpSearch)
 import HaskellReviewer.Server.TextSearch (warmUpTextSearch)
 import HaskellReviewer.Server.Wire
-  ( DiffEnd (..),
-    DiffFiles (..),
+  ( DiffFiles (..),
+    SessionInfo (..),
+    diffEnds,
     encodeDiffFiles,
+    encodeSession,
   )
 import HaskellReviewer.Server.Wire.Page (warmUpPages)
 import HaskellReviewer.Server.Wire.Source (warmUpSource)
@@ -655,6 +654,8 @@ serveSides deps logger opts root defaults langs listers tracer shutdown t0 w0 = 
           let sides = sessionSides session
           slots <- strictSides ((.slot) <$> sides)
           diffSlot <- forcedMaybe (sessionDiffSlot session)
+          let sessionBody = encodeSession (sessionInfo session)
+          _ <- evaluate (LBS.length sessionBody)
           share <- newSessionShare
           -- Filled by ready: the listing starts after the URL line.
           start <- newEmptyMVar
@@ -692,7 +693,13 @@ serveSides deps logger opts root defaults langs listers tracer shutdown t0 w0 = 
                 (\s -> DiffRoutes {slot = s, lineDiff = guardedLineDiff diffTimeLimit})
                   <$> diffSlot
               routes =
-                Routes {events = events, files = files, prefs = prefs, diff = diffRoutes}
+                Routes
+                  { events = events,
+                    files = files,
+                    prefs = prefs,
+                    diff = diffRoutes,
+                    session = sessionBody
+                  }
               app = application listener.port token routes
               waitStop = do
                 why <- case opts.idleExit of
@@ -777,6 +784,12 @@ sessionDiffSlot :: SessionWork -> Maybe DiffSlot
 sessionDiffSlot = \case
   BrowseWork _ -> Nothing
   DiffModeWork d _ -> Just d.slot
+
+-- | What api/session says.
+sessionInfo :: SessionWork -> SessionInfo
+sessionInfo = \case
+  BrowseWork _ -> BrowseSession
+  DiffModeWork d _ -> DiffSession d.info
 
 -- | The same sides, with no thunk left in the structure: request
 -- threads read it (Q-RTS-BLACKHOLE). Not the values' insides.
@@ -1152,17 +1165,7 @@ pairSides deps logger done diff = case (lookup HeadSide ready, lookup BaseSide r
       CommitEntries c -> Just c.outside
       WorkTreeEntries w -> w.outside
       _ -> Nothing
-    ends = case diff.info of
-      CommitsDiff ci ->
-        Pair
-          { head = DiffEnd {label = ci.range.head, commit = Just ci.sides.head},
-            base = DiffEnd {label = ci.range.base, commit = Just ci.sides.base}
-          }
-      WorkTreeDiff wi ->
-        Pair
-          { head = DiffEnd {label = "working tree", commit = Nothing},
-            base = DiffEnd {label = wi.rev, commit = Just wi.base}
-          }
+    ends = diffEnds diff.info
     forceMarkers :: Map ModuleId Marker -> ()
     forceMarkers = Map.foldl' (\() m -> m.change `seq` m.settingsChange `seq` ()) ()
     pairingLine p =

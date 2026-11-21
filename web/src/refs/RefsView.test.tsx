@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Indexing } from "../api/events";
 import { fixture, stubFetch } from "../../test/fixtures";
 import { mountAppAt, unmountApp } from "../../test/mount";
+import { diffSession } from "../../test/sessions";
 import { clearRefsCache } from "./RefsView";
 
 const api = "/tok/api/refs/tree?module=R.Shape&decl=val%3Aarea";
@@ -253,6 +254,55 @@ describe("RefsView", () => {
       expect(m2.querySelector(".refs-group")).not.toBeNull(),
     );
     expect(fetchMock.mock.calls.some((c) => c[0] === api)).toBe(false);
+  });
+});
+
+describe("RefsView, per side", () => {
+  it("a cached answer of another side is not used (D-332)", async () => {
+    const routes = (side: string) => ({
+      [`/tok/api/files/${side}`]: [200, fixture("files")] as [number, unknown],
+      [`/tok/api/modules/${side}`]: [200, fixture("modules")] as [
+        number,
+        unknown,
+      ],
+      [`/tok/api/refs/${side}?module=R.Shape&decl=val%3Aarea`]: [
+        200,
+        fixture("refs"),
+      ] as [number, unknown],
+    });
+    stubFetch({ ...routes("head"), ...routes("base") });
+    const m1 = mountAppAt(
+      "/tok/refs/head/R.Shape?decl=val%3Aarea",
+      undefined,
+      undefined,
+      null,
+      diffSession,
+    ).querySelector("main")!;
+    await vi.waitFor(() =>
+      expect(m1.querySelector(".refs-group")).not.toBeNull(),
+    );
+    unmountApp();
+    const fetchMock = stubFetch({ ...routes("head"), ...routes("base") });
+    // The same generation, on base: still a miss.
+    const [ix] = createSignal<Indexing>({ ...at(1, 2), side: "base" });
+    // eslint-disable-next-line solid/reactivity -- read by the page
+    const m2 = mountAppAt(
+      "/tok/refs/base/R.Shape?decl=val%3Aarea",
+      undefined,
+      ix,
+      null,
+      diffSession,
+    ).querySelector("main")!;
+    await vi.waitFor(() =>
+      expect(m2.querySelector(".refs-group")).not.toBeNull(),
+    );
+    const asked = fetchMock.mock.calls.map((c) => String(c[0] as string));
+    expect(asked).toContain(
+      "/tok/api/refs/base?module=R.Shape&decl=val%3Aarea",
+    );
+    for (const a of m2.querySelectorAll("a[href^='/tok/']")) {
+      expect(a.getAttribute("href")).toMatch(/^\/tok\/(docs|src|refs)\/base\//);
+    }
   });
 });
 

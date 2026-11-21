@@ -1,4 +1,4 @@
-// The docs view: /<token>/docs/tree/<ref…>[#<decl>] (SPEC §4.1, §4.2).
+// The docs view: /<token>/docs/<side>/<ref…>[#<decl>] (SPEC §4.1, §4.2).
 import { useLocation, useNavigate, useResolvedPath } from "@solidjs/router";
 import {
   createEffect,
@@ -25,6 +25,7 @@ import {
   type TextOnlyModule,
 } from "../api/module";
 import { hrefFor, lineHref, withBase } from "../files/paths";
+import { usePageSide } from "../session";
 import { pageLinkInfos } from "../source/links";
 import {
   currentItem,
@@ -80,8 +81,9 @@ import {
 const noSource = "No source for this module.";
 
 export function DocsView(): JSX.Element {
+  const side = usePageSide();
   const location = useLocation();
-  const ref = () => refFromPathname(location.pathname);
+  const ref = () => refFromPathname(location.pathname, side());
   return (
     <Show when={ref()} keyed fallback={<NotFound />}>
       {(r) => <DocsPage moduleRef={r} />}
@@ -92,6 +94,7 @@ export function DocsView(): JSX.Element {
 // One module, by its ref as typed in the URL (kept, D-182): a hash
 // change doesn't refetch.
 function DocsPage(props: { moduleRef: string }): JSX.Element {
+  const side = usePageSide();
   // Read before the old page goes away.
   const fromMain = focusInMain();
   // The body: a partial page skips a refetch with the same bytes
@@ -102,7 +105,7 @@ function DocsPage(props: { moduleRef: string }): JSX.Element {
   const [res] = createResource(
     () => props.moduleRef,
     (r) =>
-      getCbor(apiModuleUrl(r), decodeModulePage, {
+      getCbor(apiModuleUrl(side(), r), decodeModulePage, {
         raw: (b) => {
           bytes = b;
           return undefined;
@@ -129,12 +132,12 @@ function DocsPage(props: { moduleRef: string }): JSX.Element {
   const modules = useModules();
   useViewLinks({
     current: "docs",
-    docs: () => docsHref(props.moduleRef),
+    docs: () => docsHref(side(), props.moduleRef),
     source: () => {
       const p = page();
       const path =
         p === undefined ? modules.byRef().get(props.moduleRef)?.path : p.path;
-      return path == null ? undefined : hrefFor(path);
+      return path == null ? undefined : hrefFor(side(), path);
     },
   });
   // A link in main took us here: put focus on the new heading, as the
@@ -190,17 +193,19 @@ function DocsPage(props: { moduleRef: string }): JSX.Element {
 function useSourceHref(
   page: () => Page,
 ): () => ((line: number) => string) | undefined {
+  const side = usePageSide();
   const base = useResolvedPath(() => "/");
   return () => {
     const path = page().path;
     return path === null
       ? undefined
-      : (line: number) => withBase(base(), lineHref(path, line));
+      : (line: number) => withBase(base(), lineHref(side(), path, line));
   };
 }
 
 // Package, component and source file.
 function Meta(props: { page: Page }): JSX.Element {
+  const side = usePageSide();
   const base = useResolvedPath(() => "/");
   const pkg = () => {
     const p = props.page.package;
@@ -216,7 +221,7 @@ function Meta(props: { page: Page }): JSX.Element {
     if (path !== null) {
       out.push(
         <>
-          <a href={withBase(base(), hrefFor(path))}>{path}</a>
+          <a href={withBase(base(), hrefFor(side(), path))}>{path}</a>
           <CopyButton text={() => path} label={`Copy path ${path}`} />
         </>,
       );
@@ -331,6 +336,7 @@ function ModulePage(props: {
   // The page's body, for the refetch. Call once, when mounting.
   takeBytes: () => Uint8Array | undefined;
 }): JSX.Element {
+  const side = usePageSide();
   const location = useLocation();
   const navigate = useNavigate();
   const prefs = usePrefs();
@@ -352,6 +358,7 @@ function ModulePage(props: {
   // Links out of the module, for code tokens and doc names.
   const outerInfos = createMemo(() =>
     pageLinkInfos(
+      side(),
       { ref: props.page.ref, typedRef: props.typedRef },
       live?.targets() ?? props.parsed.targets,
       base(),
@@ -362,9 +369,9 @@ function ModulePage(props: {
       const id = ix().idOfHandle(n);
       return id === undefined
         ? undefined
-        : withBase(base(), docsHref(props.typedRef, id));
+        : withBase(base(), docsHref(side(), props.typedRef, id));
     },
-    module: (ref, anchor) => withBase(base(), docsHref(ref, anchor)),
+    module: (ref, anchor) => withBase(base(), docsHref(side(), ref, anchor)),
     outer: (k) => untrack(outerInfos)[k - 1],
     live: live !== undefined,
     token: (t) => live?.token(t) ?? t,
@@ -456,10 +463,10 @@ function ModulePage(props: {
   // screen.
   useViewLinks({
     current: "docs",
-    docs: () => docsHref(props.typedRef),
+    docs: () => docsHref(side(), props.typedRef),
     source: () => {
       const path = props.page.path;
-      return path === null ? undefined : hrefFor(path);
+      return path === null ? undefined : hrefFor(side(), path);
     },
     at: (to) => {
       const path = props.page.path;
@@ -475,8 +482,8 @@ function ModulePage(props: {
           ? firstCodeLine(d.source as SourcePart[])
           : undefined;
       return line === undefined
-        ? { href: hrefFor(path) }
-        : { href: lineHref(path, line), state: { codeJump: true } };
+        ? { href: hrefFor(side(), path) }
+        : { href: lineHref(side(), path, line), state: { codeJump: true } };
     },
   });
   const hidden = createMemo(() => hiddenCount(props.parsed));
@@ -502,7 +509,7 @@ function ModulePage(props: {
       const id = d.name === null ? undefined : ix().idOfHandle(d.n);
       return id === undefined || id.startsWith("inst:")
         ? undefined
-        : withBase(base(), refsHref(props.page.ref, id));
+        : withBase(base(), refsHref(side(), props.page.ref, id));
     },
     wantSource: source.want,
     highlight: source.highlight,
@@ -584,7 +591,7 @@ function ModulePage(props: {
         names.get(raw) ??
         (unescaped === undefined ? undefined : names.get(unescaped));
       if (found !== undefined) {
-        navigate(docsHref(props.typedRef, ix().idOf(found)), {
+        navigate(docsHref(side(), props.typedRef, ix().idOf(found)), {
           replace: true,
           scroll: false,
         });

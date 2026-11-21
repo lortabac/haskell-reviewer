@@ -1,4 +1,5 @@
 // Payloads of the event stream (SPEC §11.6.2).
+import { sides, type Side } from "../sides";
 import { DecodeError, field, nat, object, oneOf } from "./decode";
 
 // The hello event: an empty object for now.
@@ -18,11 +19,6 @@ export function parseEventData(data: unknown): unknown {
     throw new DecodeError("$", "JSON");
   }
 }
-
-// The sides of a session: tree in browse mode, base and head in diff
-// mode.
-export const sides = ["tree", "base", "head"] as const;
-export type Side = (typeof sides)[number];
 
 // The indexing event, and GET api/indexing/<side>: how far indexing is
 // on one side. Done when ready + failed === total.

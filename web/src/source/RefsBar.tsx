@@ -12,6 +12,7 @@ import {
 } from "solid-js";
 import type { Target } from "../api/source";
 import { refsHref } from "../refs/urls";
+import { usePageSide } from "../session";
 import type { CodeApi, FindHits } from "./CodeView";
 import { nearest, step } from "./find";
 import type { Highlight } from "./highlight";
@@ -49,6 +50,7 @@ export interface RefsHandle {
 }
 
 export function RefsBar(props: RefsBarProps): JSX.Element {
+  const side = usePageSide();
   const barId = createUniqueId();
   const navigate = useNavigate();
   let next: HTMLButtonElement | undefined;
@@ -156,7 +158,7 @@ export function RefsBar(props: RefsBarProps): JSX.Element {
     closeQuietly();
     switch (t.kind) {
       case "decl":
-        navigate(refsHref(t.ref, t.id));
+        navigate(refsHref(side(), t.ref, t.id));
         return;
       case "local": {
         const h = props.hl();

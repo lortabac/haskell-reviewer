@@ -4,7 +4,7 @@ import { textQueryFromLocation, textSearchHref } from "./urls";
 describe("text search urls", () => {
   it("round trip, + and spaces", () => {
     for (const q of ["main", "a+b", ' a "b ', "ü%", "&q=x"]) {
-      const href = textSearchHref(q);
+      const href = textSearchHref("tree", q);
       expect(textQueryFromLocation(href.slice(href.indexOf("?")))).toBe(q);
     }
   });

@@ -53,6 +53,7 @@ import {
 } from "./module";
 import { decodeMarkdownPage } from "./markdown";
 import { decodePrefs, sidebarViews, themes } from "./prefs";
+import { decodeSession } from "./session";
 import { decodeRefs, decodeRefsNotFound, refKinds, refsUrl } from "./refs";
 import {
   decodeSearch,
@@ -150,6 +151,10 @@ const decoders: Record<string, (value: unknown) => unknown> = {
   "source-not-found": decodeSourceNotFound,
   "text-search": decodeTextSearch,
   "text-search-capped": decodeTextSearch,
+  "session-browse": decodeSession,
+  "session-diff": decodeSession,
+  "session-three-dot": decodeSession,
+  "session-worktree": decodeSession,
 };
 
 // The fixtures that are CBOR (D-51), with a JSON dump next to them.
@@ -870,6 +875,35 @@ describe("decoders reject bad shapes", () => {
     }
   });
 
+  it("session: the fixtures, and bad payloads", () => {
+    expect(decodeSession(fixture("session-browse"))).toEqual({
+      mode: "browse",
+    });
+    const three = decodeSession(fixture("session-three-dot"));
+    expect(three.mode === "diff" && three.mergeBases).toBe(2);
+    const work = decodeSession(fixture("session-worktree"));
+    expect(work.mode === "diff" && work.head).toEqual({
+      label: "working tree",
+      commit: null,
+    });
+    const good = fixture("session-diff") as Record<string, unknown>;
+    for (const bad of [
+      null,
+      {},
+      { mode: "browser" },
+      { ...good, spec: undefined },
+      { ...good, base: { label: "main", commit: null } },
+      { ...good, base: { label: "main" } },
+      { ...good, head: { label: "x" } },
+      { ...good, mergeBases: 0 },
+      { ...good, mergeBases: undefined },
+    ]) {
+      expect(() => decodeSession(bad), JSON.stringify(bad)).toThrow(
+        DecodeError,
+      );
+    }
+  });
+
   it("prefs", () => {
     const good = {
       theme: "dark",
@@ -933,10 +967,10 @@ describe("decoders reject bad shapes", () => {
   });
 
   it("search URL: everything encoded, + and spaces too", () => {
-    expect(searchUrl("<+> a&b=c#")).toBe(
+    expect(searchUrl("tree", "<+> a&b=c#")).toBe(
       "/api/search/tree?q=%3C%2B%3E%20a%26b%3Dc%23",
     );
-    expect(searchUrl("Data.Map.insert")).toBe(
+    expect(searchUrl("tree", "Data.Map.insert")).toBe(
       "/api/search/tree?q=Data.Map.insert",
     );
   });
@@ -994,10 +1028,10 @@ describe("decoders reject bad shapes", () => {
   });
 
   it("refs URL: both params encoded, + too", () => {
-    expect(refsUrl("R.Shape", "val:<+>")).toBe(
+    expect(refsUrl("tree", "R.Shape", "val:<+>")).toBe(
       "/api/refs/tree?module=R.Shape&decl=val%3A%3C%2B%3E",
     );
-    expect(refsUrl("p:lib:A", "field:T.f")).toBe(
+    expect(refsUrl("tree", "p:lib:A", "field:T.f")).toBe(
       "/api/refs/tree?module=p%3Alib%3AA&decl=field%3AT.f",
     );
   });
@@ -1044,10 +1078,10 @@ describe("decoders reject bad shapes", () => {
   });
 
   it("text search URL: q encoded, + and spaces too; limit if given", () => {
-    expect(textSearchUrl('a "b+c')).toBe(
+    expect(textSearchUrl("tree", 'a "b+c')).toBe(
       "/api/text-search/tree?q=a%20%22b%2Bc",
     );
-    expect(textSearchUrl("where", 8)).toBe(
+    expect(textSearchUrl("tree", "where", 8)).toBe(
       "/api/text-search/tree?q=where&limit=8",
     );
   });

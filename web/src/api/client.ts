@@ -8,7 +8,7 @@ export type Result<T> =
   | { kind: "error"; message: string };
 
 // GET a JSON API route and decode it. path is relative to the token,
-// like "/api/files/tree". Never throws. signal: abort the fetch (e.g. a
+// like "/api/files/<side>". Never throws. signal: abort the fetch (e.g. a
 // newer search makes an older one moot); an aborted fetch just comes
 // back as an "error" result, so callers that pass a signal must also
 // drop stale answers themselves (a sequence number, or the echoed

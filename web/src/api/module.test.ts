@@ -46,16 +46,18 @@ describe("findDecl", () => {
 
 describe("docsHref", () => {
   it("percent-encodes the ref by segment and the anchor whole", () => {
-    expect(docsHref("Data.Map")).toBe("/docs/tree/Data.Map");
-    expect(docsHref("scripts/build-docs.hs", "v:x")).toBe(
+    expect(docsHref("tree", "Data.Map")).toBe("/docs/tree/Data.Map");
+    expect(docsHref("tree", "scripts/build-docs.hs", "v:x")).toBe(
       "/docs/tree/scripts/build-docs.hs#v%3Ax",
     );
-    expect(docsHref("a#b/C d.hs")).toBe("/docs/tree/a%23b/C%20d.hs");
-    expect(docsHref("A", "inst:Show:Maybe a")).toBe(
+    expect(docsHref("tree", "a#b/C d.hs")).toBe("/docs/tree/a%23b/C%20d.hs");
+    expect(docsHref("tree", "A", "inst:Show:Maybe a")).toBe(
       "/docs/tree/A#inst%3AShow%3AMaybe%20a",
     );
-    expect(docsHref("A", "#%/?")).toBe("/docs/tree/A#%23%25%2F%3F");
-    expect(docsHref("A", "val:é→")).toBe("/docs/tree/A#val%3A%C3%A9%E2%86%92");
+    expect(docsHref("tree", "A", "#%/?")).toBe("/docs/tree/A#%23%25%2F%3F");
+    expect(docsHref("tree", "A", "val:é→")).toBe(
+      "/docs/tree/A#val%3A%C3%A9%E2%86%92",
+    );
   });
 });
 

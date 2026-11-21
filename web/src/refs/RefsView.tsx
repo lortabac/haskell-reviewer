@@ -1,4 +1,4 @@
-// The references page: /<token>/refs/tree/<module>?decl=<id> (T12).
+// The references page: /<token>/refs/<side>/<module>?decl=<id> (T12).
 // Results in groups by module, a snippet each, a link to the line.
 // While the answer is partial it is asked again (D-286); the list
 // keeps its rows (keys), so focus stays where it is.
@@ -39,6 +39,7 @@ import {
 import { useModules } from "../modules/store";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
+import { usePageSide } from "../session";
 import { plainPieces } from "../source/display";
 import { reasonText } from "../source/hover";
 import { createDelay, focusInMain, focusLost } from "../ui/focus";
@@ -71,9 +72,10 @@ function followedKey(state: unknown): string | undefined {
 }
 
 export function RefsView(): JSX.Element {
+  const side = usePageSide();
   const location = useLocation();
   const req = createMemo(
-    () => refsFromLocation(location.pathname, location.search),
+    () => refsFromLocation(side(), location.pathname, location.search),
     undefined,
     { equals: (a, b) => a?.module === b?.module && a?.decl === b?.decl },
   );
@@ -97,12 +99,14 @@ const declWords: Record<string, string> = {
 type State = "loading" | "not-found" | "error" | "ok";
 
 function RefsPage(props: { module: string; decl: string }): JSX.Element {
+  const side = usePageSide();
   // Read before the old page goes away.
   const fromMain = focusInMain();
   /* eslint-disable solid/reactivity -- the page is made for these */
   const { module, decl } = props;
   /* eslint-enable solid/reactivity */
-  const pageKey = `${module}\0${decl}`;
+  // The side too: the generation is shared by both sides (D-332).
+  const pageKey = `${side()}\0${module}\0${decl}`;
   // Set when we come back to this entry (Back, Forward, reload).
   const location = useLocation();
   const followed = followedKey(untrack(() => location.state));
@@ -146,7 +150,7 @@ function RefsPage(props: { module: string; decl: string }): JSX.Element {
 
   // A cached answer, if it is for the snapshot we are in.
   const cached = cache.get(pageKey);
-  const gen = indexing.indexing()?.generation;
+  const gen = indexing.of(side())?.generation;
   const useCached = cached !== undefined && cached.generation === gen;
   if (useCached) {
     cache.delete(pageKey);
@@ -155,7 +159,7 @@ function RefsPage(props: { module: string; decl: string }): JSX.Element {
     setSaid(summary(cached));
   }
   const fetchNow = createRefetchLoop(
-    (signal) => getJson(refsUrl(module, decl), decodeRefs, { signal }),
+    (signal) => getJson(refsUrl(side(), module, decl), decodeRefs, { signal }),
     (r) => {
       if (r.kind === "not-found") {
         if (state() !== "ok") setState("not-found");
@@ -194,16 +198,16 @@ function RefsPage(props: { module: string; decl: string }): JSX.Element {
   };
   useViewLinks({
     current: "refs",
-    docs: () => docsHref(module, decl),
+    docs: () => docsHref(side(), module, decl),
     source: () => {
       const path = modules.byRef().get(module)?.path ?? binding()?.path;
-      return path == null ? undefined : hrefFor(path);
+      return path == null ? undefined : hrefFor(side(), path);
     },
     at: (to) => {
       const b = binding();
       if (to !== "source" || b === undefined) return undefined;
       return {
-        href: lineHref(b.path, b.item.span[0]),
+        href: lineHref(side(), b.path, b.item.span[0]),
         state: { codeJump: true, cp: b.item.span[1] },
       };
     },
@@ -271,7 +275,7 @@ function RefsPage(props: { module: string; decl: string }): JSX.Element {
           <h1 ref={(el) => (h1 = el)} class="refs-title" tabindex="-1">
             References to <code>{name}</code>
             <Show when={word}> ({word})</Show> in{" "}
-            <A href={docsHref(module, decl)}>
+            <A href={docsHref(side(), module, decl)}>
               {treeName() ?? meta()?.home ?? module}
             </A>
           </h1>
@@ -317,6 +321,7 @@ function RefsPage(props: { module: string; decl: string }): JSX.Element {
 }
 
 function GroupView(props: { g: Group; home: string }): JSX.Element {
+  const side = usePageSide();
   const id = createUniqueId();
   return (
     <section class="refs-group" aria-labelledby={id}>
@@ -326,7 +331,7 @@ function GroupView(props: { g: Group; home: string }): JSX.Element {
           label={`Copy module name ${props.g.module}`}
         />
         <h2 id={id} class="refs-group-head">
-          <A href={docsHref(props.g.ref)} data-copy={props.g.module}>
+          <A href={docsHref(side(), props.g.ref)} data-copy={props.g.module}>
             {props.g.module}
           </A>
           <Show when={props.g.ref === props.home}>
@@ -338,7 +343,7 @@ function GroupView(props: { g: Group; home: string }): JSX.Element {
         <Show when={props.g.path}>
           {(p) => (
             <>
-              <A href={hrefFor(p())} data-copy={p()}>
+              <A href={hrefFor(side(), p())} data-copy={p()}>
                 {p()}
               </A>
               <CopyButton text={p} label={`Copy path ${p()}`} />
@@ -377,6 +382,7 @@ function Snippet(props: { r: Item }): JSX.Element {
 }
 
 function ItemView(props: { r: Item; path: string | null }): JSX.Element {
+  const side = usePageSide();
   const label = () => (
     <>
       <span class="refs-line">
@@ -391,7 +397,7 @@ function ItemView(props: { r: Item; path: string | null }): JSX.Element {
       <Show when={props.path} fallback={label()}>
         {(p) => (
           <A
-            href={lineHref(p(), props.r.span[0])}
+            href={lineHref(side(), p(), props.r.span[0])}
             state={{ codeJump: true, cp: props.r.span[1] }}
             data-ref-key={props.r.key}
             data-copy={locationText(p(), props.r.span[0])}

@@ -1,5 +1,6 @@
 // GET api/refs/<side>?module=&decl=: the references to one declaration
 // (D-294). Shape: see encodeRefs in HaskellReviewer.Server.Wire.
+import type { Side } from "../sides";
 import {
   DecodeError,
   array,
@@ -102,9 +103,9 @@ export function decodeRefsNotFound(value: unknown): RefsNotFound {
 }
 
 // The route for a declaration, relative to the token, for getJson.
-export function refsUrl(moduleRef: string, decl: string): string {
+export function refsUrl(side: Side, moduleRef: string, decl: string): string {
   return (
-    `/api/refs/tree?module=${encodeURIComponent(moduleRef)}` +
+    `/api/refs/${side}?module=${encodeURIComponent(moduleRef)}` +
     `&decl=${encodeURIComponent(decl)}`
   );
 }

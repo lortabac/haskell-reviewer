@@ -4,14 +4,17 @@
 // context); a few mount the whole app to check the NotFound page
 // actually uses it (placement="page").
 import { Route, Router } from "@solidjs/router";
-import { createSignal } from "solid-js";
+import { type Accessor, createSignal } from "solid-js";
 import { render } from "solid-js/web";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cborFixture, fixture, stubFetch } from "../../test/fixtures";
+import { singleIndexing } from "../../test/indexing";
 import { mountAppAt, unmountApp } from "../../test/mount";
 import type { Indexing } from "../api/events";
 import type { Search } from "../api/search";
 import { IndexingContext } from "../events/indexing";
+import { SideContext } from "../session";
+import type { Side } from "../sides";
 import { SearchBox } from "./SearchBox";
 
 let dispose: (() => void) | undefined;
@@ -19,6 +22,7 @@ let dispose: (() => void) | undefined;
 function mount(
   props: { initialQuery?: string; placement: "header" | "page" },
   path = "/tok/x",
+  side: Accessor<Side> = () => "tree",
 ): { root: HTMLElement; setIndexing: (i: Indexing | undefined) => void } {
   window.history.replaceState(null, "", path);
   const root = document.createElement("div");
@@ -29,10 +33,12 @@ function mount(
       <Router
         base="/tok"
         root={(p) => (
-          <IndexingContext.Provider value={{ indexing }}>
-            <SearchBox {...props} />
-            {p.children}
-          </IndexingContext.Provider>
+          <SideContext.Provider value={side}>
+            <IndexingContext.Provider value={singleIndexing(indexing)}>
+              <SearchBox {...props} />
+              {p.children}
+            </IndexingContext.Provider>
+          </SideContext.Provider>
         )}
       >
         <Route path="*" component={() => <></>} />
@@ -1527,5 +1533,68 @@ describe("SearchBox — text mode, review round 1", () => {
     expect(
       root.querySelector("[role=search]")?.getAttribute("aria-label"),
     ).toBe("Search modules and names, or text in double quotes");
+  });
+});
+
+describe("SearchBox — sides (G15, D-332)", () => {
+  const fetched = (): string[] =>
+    vi.mocked(fetch).mock.calls.map(([u]) => urlOf(u));
+
+  it("asks the page's side; hits link to it; a side change asks again", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn(echoModule));
+    const [side, setSide] = createSignal<Side>("head");
+    // eslint-disable-next-line solid/reactivity -- read by the box
+    const { root } = mount({ placement: "header" }, "/tok/x", side);
+    type(root, "Map");
+    await vi.advanceTimersByTimeAsync(120);
+    expect(fetched()).toEqual(["/tok/api/search/head?q=Map"]);
+    expect(options(root)[0]?.getAttribute("href")).toBe("/tok/docs/head/Map");
+    expect(allOptions(root).at(-1)?.getAttribute("href")).toBe(
+      "/tok/search/head?q=Map",
+    );
+    setSide("base");
+    // At once, no debounce; nothing of head's answer meanwhile.
+    expect(options(root)).toEqual([]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetched().at(-1)).toBe("/tok/api/search/base?q=Map");
+    expect(options(root)[0]?.getAttribute("href")).toBe("/tok/docs/base/Map");
+  });
+
+  it("text hits keep the side", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((req: RequestInfo | URL) => {
+        const u = urlOf(req);
+        const q = decodeURIComponent(
+          (u.split("q=")[1] ?? "").split("&")[0] ?? "",
+        );
+        const t = fixture("text-search") as Record<string, unknown>;
+        return Promise.resolve(jsonResponse(200, { ...t, query: q }));
+      }),
+    );
+    const { root } = mount({ placement: "header" }, "/tok/x", () => "base");
+    type(root, '"main"');
+    await vi.advanceTimersByTimeAsync(120);
+    expect(fetched()).toEqual(["/tok/api/text-search/base?q=main&limit=8"]);
+    const hrefs = allOptions(root).map((a) => a.getAttribute("href") ?? "");
+    expect(hrefs.length).toBeGreaterThan(1);
+    for (const h of hrefs) expect(h).toMatch(/^\/tok\/(src|search)\/base[/?]/);
+  });
+
+  it("a page with no side in diff mode searches head", async () => {
+    vi.stubGlobal("fetch", vi.fn(echoModule));
+    const root = mountAppAt("/tok", undefined, undefined, null, {
+      mode: "diff",
+      spec: "a..b",
+      base: { label: "a", commit: "1" },
+      head: { label: "b", commit: "2" },
+      mergeBases: null,
+    });
+    type(root.querySelector(".frame-header") ?? root, "Map");
+    await vi.waitFor(() => {
+      expect(fetched()).toContain("/tok/api/search/head?q=Map");
+    });
   });
 });

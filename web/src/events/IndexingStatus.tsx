@@ -32,14 +32,14 @@ export function IndexingStatus(): JSX.Element {
   const ended = (): boolean => conn.status() === "ended";
 
   const done = createMemo(() => {
-    const ix = idx.indexing();
+    const ix = idx.summed();
     return ix !== undefined && ix.ready + ix.failed >= ix.total;
   });
   // A memo, not a plain function: it only changes value at the start
   // and the end of a run, so a progress tick partway through never
   // restarts the delay below (createDelay's effect tracks whatever it
   // reads, and a memo only notifies when its own value changes).
-  const loading = createMemo(() => idx.indexing() !== undefined && !done());
+  const loading = createMemo(() => idx.summed() !== undefined && !done());
   const slow = createDelay(loading, 1000);
 
   // The generation that got far enough to show the "n of total" line,
@@ -50,7 +50,7 @@ export function IndexingStatus(): JSX.Element {
   let shownGeneration: number | undefined;
   let announcedGeneration: number | undefined;
   createEffect(() => {
-    if (slow()) shownGeneration = idx.indexing()?.generation;
+    if (slow()) shownGeneration = idx.summed()?.generation;
   });
 
   // Once done, a persistent line whenever something failed (human
@@ -58,14 +58,14 @@ export function IndexingStatus(): JSX.Element {
   // second, so a small project's failures are never silently hidden
   // (C2: this used to require shownGeneration too).
   const persistent = createMemo(() => {
-    const ix = idx.indexing();
+    const ix = idx.summed();
     if (ix === undefined || !done() || ended()) return false;
     return ix.failed > 0;
   });
 
   const text = (): string => {
     if (ended()) return "";
-    const ix = idx.indexing();
+    const ix = idx.summed();
     if (ix === undefined) return "";
     if (loading()) {
       if (!slow()) return "";
@@ -88,7 +88,7 @@ export function IndexingStatus(): JSX.Element {
     if (loading()) setAnnounced("");
   });
   createEffect(() => {
-    const ix = idx.indexing();
+    const ix = idx.summed();
     if (ix === undefined || !done() || ended()) return;
     if (shownGeneration !== ix.generation) return; // never shown: say nothing
     if (announcedGeneration === ix.generation) return; // said already

@@ -459,3 +459,18 @@ export async function makeLongPathProject(): Promise<Project> {
     remove: () => rm(root, { recursive: true, force: true }),
   };
 }
+
+// fixtures/repos/sides.sh, shared with the Haskell tests: two commits.
+// Base (HEAD~1): A (imports B, doc "One.") and B. Head: A changed
+// (imports C, doc "Two.", a = c + 1), B gone, C added.
+export async function makeSidesProject(): Promise<Project> {
+  const root = await mkdtemp(join(tmpdir(), "hr-e2e-sides-"));
+  const script = join(import.meta.dirname, "../../../fixtures/repos/sides.sh");
+  execFileSync("/bin/sh", [script, root], {
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  return {
+    root,
+    remove: () => rm(root, { recursive: true, force: true }),
+  };
+}

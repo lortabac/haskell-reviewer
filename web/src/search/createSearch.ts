@@ -6,6 +6,7 @@ import { getJson } from "../api/client";
 import { decodeSearch, searchUrl, type SearchResult } from "../api/search";
 import { IndexingContext } from "../events/indexing";
 import { refetchStep } from "../events/partialRefetch";
+import { usePageSide } from "../session";
 import { createFetch } from "./createFetch";
 
 export { debounceMs } from "./createFetch";
@@ -17,7 +18,7 @@ export interface SearchState {
   partial: () => boolean;
   loading: () => boolean;
   // "Search failed." territory (SearchBox): a 4xx/5xx, a network
-  // error, or (in practice never, side `tree` always exists) 404.
+  // error, or (in practice never: the page's side exists) 404.
   error: () => string | undefined;
   // The query results/matches/partial actually answer, the moment they
   // settle; undefined before the first answer. SearchBox uses this
@@ -45,9 +46,12 @@ export function createSearch(
   visible: () => boolean,
 ): SearchState {
   const indexingCtx = useContext(IndexingContext);
+  // The page's side, or the default one on pages with none (G15).
+  const side = usePageSide();
   const f = createFetch(
     query,
-    (q, signal) => getJson(searchUrl(q), decodeSearch, { signal }),
+    side,
+    (q, s, signal) => getJson(searchUrl(s, q), decodeSearch, { signal }),
     (v) => v.query,
   );
   // A memo: a new answer that is still partial must not count as a
@@ -62,7 +66,7 @@ export function createSearch(
   // as done. The snapshot is the answer's (Search.generation): an
   // event for another one is not about this answer.
   createEffect(() => {
-    const progress = indexingCtx.indexing();
+    const progress = indexingCtx.of(side());
     if (progress === undefined || !partial() || !visible()) return;
     const snapshot = untrack(f.value)?.generation;
     const step = refetchStep(progress, snapshot, f.lastFetchAt(), Date.now());

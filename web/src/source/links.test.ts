@@ -13,7 +13,7 @@ import {
 
 const view = { path: "src/A.hs", ref: "A" };
 const one = (t: Target): LinkInfo => {
-  const [info] = linkInfos(view, [t], "/tok");
+  const [info] = linkInfos("tree", view, [t], "/tok");
   if (info === undefined) throw new Error("no info");
   return info;
 };
@@ -117,10 +117,10 @@ describe("linkInfos", () => {
   });
 
   it("base / and none: no double slash", () => {
-    expect(linkInfos(view, [["local", 1, 1]], "/")[0]?.href).toBe(
+    expect(linkInfos("tree", view, [["local", 1, 1]], "/")[0]?.href).toBe(
       "/src/tree/src/A.hs#L1",
     );
-    expect(linkInfos(view, [["local", 1, 1]], undefined)[0]?.href).toBe(
+    expect(linkInfos("tree", view, [["local", 1, 1]], undefined)[0]?.href).toBe(
       "/src/tree/src/A.hs#L1",
     );
   });
@@ -167,7 +167,7 @@ describe("jumpOf", () => {
 
 describe("pageLinkInfos", () => {
   const page = { ref: "A", typedRef: "A.Typed" };
-  const infos = (...t: Target[]) => pageLinkInfos(page, t, "/tok");
+  const infos = (...t: Target[]) => pageLinkInfos("tree", page, t, "/tok");
 
   it("a declaration: its docs; this module as typed in the URL", () => {
     const [here, other] = infos(

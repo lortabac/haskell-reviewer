@@ -8,8 +8,11 @@ describe("refs urls", () => {
       ["a b/c#d", "val:<+>"],
       ["M", "inst:Show:Maybe a+b?"],
     ] as const) {
-      const [path, query] = refsHref(m, d).split("?") as [string, string];
-      expect(refsFromLocation("/tok" + path, "?" + query)).toEqual({
+      const [path, query] = refsHref("tree", m, d).split("?") as [
+        string,
+        string,
+      ];
+      expect(refsFromLocation("tree", "/tok" + path, "?" + query)).toEqual({
         module: m,
         decl: d,
       });
@@ -17,15 +20,24 @@ describe("refs urls", () => {
   });
 
   it("needs a decl and a good path", () => {
-    expect(refsFromLocation("/tok/refs/tree/M", "")).toBeUndefined();
-    expect(refsFromLocation("/tok/refs/tree/M", "?decl=")).toBeUndefined();
-    expect(refsFromLocation("/tok/refs/tree", "?decl=x")).toBeUndefined();
-    expect(refsFromLocation("/tok/refs/tree/../M", "?decl=x")).toBeUndefined();
-    expect(refsFromLocation("/tok/docs/tree/M", "?decl=x")).toBeUndefined();
+    expect(refsFromLocation("tree", "/tok/refs/tree/M", "")).toBeUndefined();
+    expect(
+      refsFromLocation("tree", "/tok/refs/tree/M", "?decl="),
+    ).toBeUndefined();
+    expect(
+      refsFromLocation("tree", "/tok/refs/tree", "?decl=x"),
+    ).toBeUndefined();
+    expect(
+      refsFromLocation("tree", "/tok/refs/tree/../M", "?decl=x"),
+    ).toBeUndefined();
+    expect(
+      refsFromLocation("tree", "/tok/docs/tree/M", "?decl=x"),
+    ).toBeUndefined();
   });
 
   it("a raw + stays +, %2B works, the first decl counts", () => {
-    const at = (q: string) => refsFromLocation("/tok/refs/tree/M", q)?.decl;
+    const at = (q: string) =>
+      refsFromLocation("tree", "/tok/refs/tree/M", q)?.decl;
     expect(at("?decl=a+b")).toBe("a+b");
     expect(at("?decl=a%2Bb")).toBe("a+b");
     expect(at("?x=1&decl=v%3Af&decl=g")).toBe("v:f");

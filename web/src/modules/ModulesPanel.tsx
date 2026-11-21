@@ -3,6 +3,7 @@ import { createMemo, type JSX, Match, Show, Switch } from "solid-js";
 import { hrefFor, pathFromPathname, withBase } from "../files/paths";
 import { docsHref } from "../api/module";
 import { refFromPathname } from "../docs/urls";
+import { usePageSide } from "../session";
 import { type Current, ModuleTree } from "./ModuleTree";
 import { useModules } from "./store";
 
@@ -10,15 +11,16 @@ import { useModules } from "./store";
 export function ModulesPanel(): JSX.Element {
   const modules = useModules();
   const location = useLocation();
+  const side = usePageSide();
   const current = createMemo((): Current | undefined => {
-    const path = pathFromPathname(location.pathname);
+    const path = pathFromPathname(location.pathname, side());
     if (path !== undefined) return { kind: "path", path };
-    const ref = refFromPathname(location.pathname);
+    const ref = refFromPathname(location.pathname, side());
     return ref === undefined ? undefined : { kind: "ref", ref };
   });
   const base = useResolvedPath(() => "/");
-  const docs = (ref: string): string => withBase(base(), docsHref(ref));
-  const src = (path: string): string => withBase(base(), hrefFor(path));
+  const docs = (ref: string): string => withBase(base(), docsHref(side(), ref));
+  const src = (path: string): string => withBase(base(), hrefFor(side(), path));
   const empty = () => {
     const t = modules.ok();
     return (
@@ -30,7 +32,7 @@ export function ModulesPanel(): JSX.Element {
   };
   return (
     <Switch>
-      <Match when={modules.tree.loading}>
+      <Match when={modules.loading()}>
         <p>Loading modules…</p>
       </Match>
       <Match when={modules.ok()}>
