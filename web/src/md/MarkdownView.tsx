@@ -1,4 +1,4 @@
-// A Markdown file, rendered: /<token>/md/tree/<path>[#<anchor>] (SPEC
+// A Markdown file, rendered: /<token>/md/<side>/<path>[#<anchor>] (SPEC
 // §4.2, D-328). The docs view of a Markdown file; Source is its file
 // view.
 import { useLocation, useResolvedPath } from "@solidjs/router";
@@ -31,11 +31,13 @@ import {
 import { useCopyLocation, useViewLinks } from "../keys/KeysProvider";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
+import { usePageSide } from "../session";
 import { createDelay, focusInMain, focusLost } from "../ui/focus";
 
 export function MarkdownView(): JSX.Element {
+  const side = usePageSide();
   const location = useLocation();
-  const path = createMemo(() => mdPathFromPathname(location.pathname));
+  const path = createMemo(() => mdPathFromPathname(location.pathname, side()));
   return (
     <Show
       when={(() => {
@@ -51,12 +53,13 @@ export function MarkdownView(): JSX.Element {
 }
 
 function MarkdownPageView(props: { path: string }): JSX.Element {
+  const side = usePageSide();
   // Read before the old page goes away.
   const fromMain = focusInMain();
   const base = useResolvedPath(() => "/");
   const [res] = createResource(
     () => props.path,
-    (p) => getCbor(apiMarkdownUrl(p), decodeMarkdownPage),
+    (p) => getCbor(apiMarkdownUrl(side(), p), decodeMarkdownPage),
   );
   const slow = createDelay(() => res.loading, 300);
   // Only the result for this path, never a stale one.
@@ -67,8 +70,8 @@ function MarkdownPageView(props: { path: string }): JSX.Element {
   };
   useViewLinks({
     current: "docs",
-    docs: () => mdHref(props.path),
-    source: () => hrefFor(props.path),
+    docs: () => mdHref(side(), props.path),
+    source: () => hrefFor(side(), props.path),
   });
   // No lines here: the path.
   useCopyLocation(() => props.path);
@@ -106,7 +109,9 @@ function MarkdownPageView(props: { path: string }): JSX.Element {
                 {p.kind === "not-text"
                   ? "This file is not text, so it can't be shown rendered."
                   : "This file took too long to render."}{" "}
-                <a href={withBase(base(), hrefFor(props.path))}>See the file</a>
+                <a href={withBase(base(), hrefFor(side(), props.path))}>
+                  See the file
+                </a>
                 .
               </p>
             )
@@ -124,6 +129,7 @@ function MarkdownPageView(props: { path: string }): JSX.Element {
 // and focused. Again on a hash change, and on a click on a link to the
 // anchor already in the URL (the router ignores those).
 function Rendered(props: { path: string; doc: Doc }): JSX.Element {
+  const side = usePageSide();
   const location = useLocation();
   const base = useResolvedPath(() => "/");
   const links: Links = {
@@ -138,11 +144,11 @@ function Rendered(props: { path: string; doc: Doc }): JSX.Element {
       withBase(
         base(),
         isMarkdownPath(p)
-          ? mdHref(p, fragment)
-          : hrefFor(p) +
+          ? mdHref(side(), p, fragment)
+          : hrefFor(side(), p) +
               (fragment === null ? "" : "#" + encodeURIComponent(fragment)),
       ),
-    anchor: (a) => withBase(base(), mdHref(props.path, a)),
+    anchor: (a) => withBase(base(), mdHref(side(), props.path, a)),
   };
   const go = (hash: string): void => {
     if (hash.length < 2) return;

@@ -126,6 +126,42 @@ describe("createHub", () => {
     ]);
   });
 
+  it("keeps the latest event of each side; a late listener gets both", () => {
+    const hub = createHub("/tok/api/events", FakeSource);
+    const ev = (side: string, ready: number) =>
+      JSON.stringify({ generation: 1, side, total: 3, ready, failed: 0 });
+    only().indexing(ev("head", 1));
+    only().indexing(ev("base", 1));
+    // A base event doesn't replace head's.
+    only().indexing(ev("base", 3));
+    only().indexing(ev("head", 2));
+    const late = listener();
+    hub.add(late);
+    expect(late.got).toEqual([
+      { type: "status", status: "connecting" },
+      {
+        type: "indexing",
+        indexing: {
+          generation: 1,
+          side: "head",
+          total: 3,
+          ready: 2,
+          failed: 0,
+        },
+      },
+      {
+        type: "indexing",
+        indexing: {
+          generation: 1,
+          side: "base",
+          total: 3,
+          ready: 3,
+          failed: 0,
+        },
+      },
+    ]);
+  });
+
   it("an indexing event with bad data is not passed on", () => {
     const hub = createHub("/tok/api/events", FakeSource);
     const a = listener();

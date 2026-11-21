@@ -65,7 +65,15 @@ import HaskellReviewer.Core.Renames
     RenamedFile (..),
   )
 import HaskellReviewer.Core.ResolveWarmUp (resolveWarmUpIndex)
-import HaskellReviewer.Core.Sides (Side (..), Sides (..))
+import HaskellReviewer.Core.Revspec
+  ( BaseFrom (..),
+    CommitsInfo (..),
+    DiffInfo (..),
+    Range (..),
+    RangeForm (..),
+    WorkTreeInfo (..),
+  )
+import HaskellReviewer.Core.Sides (Pair (..), Side (..), Sides (..))
 import HaskellReviewer.Core.Similarity (Score (..), maxScore)
 import HaskellReviewer.Core.Xdg (XdgProblem (..))
 import HaskellReviewer.Effects.FileSystem (ReadError (..))
@@ -75,6 +83,7 @@ import HaskellReviewer.Server.Diff (GuardedDiff (..))
 import HaskellReviewer.Server.Wire
   ( DiffEnd (..),
     DiffFiles (..),
+    SessionInfo (..),
     encodeDiffFiles,
     encodeIndexing,
     encodeModuleTree,
@@ -194,6 +203,13 @@ cases =
       okCbor (gatedOn "s/src/A.hs" gate) {workers = 2} (modulePath "C"),
     json "module-not-found" (notFoundJson projectApi (modulePath "Nope")),
     json "prefs-defaults" (okJson fixtureApi ["api", "prefs"]),
+    -- The mode and revisions: browse, two dots, three dots with two
+    -- merge bases, against the working tree.
+    json "session-browse" (okJson fixtureApi ["api", "session"]),
+    json "session-diff" (sessionOf (commits TwoDot BaseTyped)),
+    json "session-three-dot" (sessionOf (commits ThreeDot (MergeBase 2))),
+    json "session-worktree" $
+      sessionOf (WorkTreeDiff WorkTreeInfo {rev = "HEAD~1", base = hex 'c'}),
     -- The source view: linked, CPP, partial (an import that never gets
     -- parsed), text only, plain, not found, and the warm-up's covering
     -- view (every value).
@@ -267,6 +283,20 @@ cases =
       projectApi
         { parse = \_ _ -> pure (TextOnly (textOnlyModule r []))
         }
+
+-- | GET api/session in diff mode.
+sessionOf :: DiffInfo -> IO LBS.ByteString
+sessionOf info = okJson fixtureApi {session = DiffSession info} ["api", "session"]
+
+-- | main and feature, as commits.
+commits :: RangeForm -> BaseFrom -> DiffInfo
+commits form from =
+  CommitsDiff
+    CommitsInfo
+      { range = Range {form = form, base = "main", head = "feature"},
+        sides = Pair {base = hex 'a', head = hex 'b'},
+        baseFrom = from
+      }
 
 -- | GET api/diff-files with this body in the slot.
 diffFiles :: DiffFiles -> IO LBS.ByteString

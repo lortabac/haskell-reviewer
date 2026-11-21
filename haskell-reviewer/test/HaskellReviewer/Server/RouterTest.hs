@@ -22,6 +22,7 @@ import HaskellReviewer.Server.Api (FilesApi (..))
 import HaskellReviewer.Server.Events (EventStream (..))
 import HaskellReviewer.Server.Router (Routes (..), application, compressible)
 import HaskellReviewer.Server.Security (addSecurityHeaders, contentSecurityPolicy)
+import HaskellReviewer.Server.Wire (SessionInfo (..), encodeSession)
 import HaskellReviewer.Session.Clients (newClients)
 import Network.HTTP.Types (Header, Status (..), hContentType, status500)
 import Network.Wai
@@ -86,6 +87,18 @@ tests =
               assertNoStore r.headers
           )
           [[tokenText token, "src", "x"], [tokenText token, "assets", name]],
+      testCase "api/session: GET and HEAD 200 JSON, POST 405" $ do
+        r <- get [tokenText token, "api", "session"]
+        r.status @?= 200
+        lookup hContentType r.headers @?= Just "application/json"
+        r.body @?= "{\"mode\":\"browse\"}"
+        h <- call (request "HEAD" goodHost [tokenText token, "api", "session"])
+        h.status @?= 200
+        p <- call (request "POST" goodHost [tokenText token, "api", "session"])
+        p.status @?= 405
+        lookup "Allow" p.headers @?= Just "GET, HEAD"
+        x <- get [tokenText token, "api", "session", "x"]
+        x.status @?= 404,
       testCase "bad Host: 403 even with the right token" $
         mapM_
           ( \host -> do
@@ -291,7 +304,13 @@ call req = do
             logger = newLogger LevelInfo (\_ -> pure ())
           }
       routes =
-        Routes {events = events, files = noFiles, prefs = fixedPrefs, diff = Nothing}
+        Routes
+          { events = events,
+            files = noFiles,
+            prefs = fixedPrefs,
+            diff = Nothing,
+            session = encodeSession BrowseSession
+          }
   saved <- newIORef Nothing
   ResponseReceived <-
     application port token routes req $ \resp -> do

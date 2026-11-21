@@ -1,6 +1,7 @@
 // GET api/text-search/<side>?q=&limit=: the lines of the text files
 // that have the text (D-307). Shape: see encodeTextSearch in
 // HaskellReviewer.Server.Wire.
+import type { Side } from "../sides";
 import {
   DecodeError,
   array,
@@ -111,7 +112,7 @@ export function decodeTextSearch(value: unknown, path = "$"): TextSearch {
 
 // The route for a query, relative to the token, for getJson. No limit:
 // the server's (1000).
-export function textSearchUrl(q: string, limit?: number): string {
-  const url = `/api/text-search/tree?q=${encodeURIComponent(q)}`;
+export function textSearchUrl(side: Side, q: string, limit?: number): string {
+  const url = `/api/text-search/${side}?q=${encodeURIComponent(q)}`;
   return limit === undefined ? url : `${url}&limit=${limit}`;
 }

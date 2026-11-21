@@ -3,7 +3,8 @@ import { render } from "solid-js/web";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Indexing } from "../api/events";
 import { ConnectionContext } from "./ConnectionNotice";
-import { IndexingContext } from "./indexing";
+import { singleIndexing } from "../../test/indexing";
+import { createIndexingState, IndexingContext, sumIndexing } from "./indexing";
 import { IndexingStatus } from "./IndexingStatus";
 import type { Status } from "./protocol";
 
@@ -16,12 +17,14 @@ function mount(): {
 } {
   const [indexing, setIndexing] = createSignal<Indexing | undefined>();
   const [status, setStatus] = createSignal<Status>("open");
+  // eslint-disable-next-line solid/reactivity -- read by the status
+  const state = singleIndexing(indexing);
   const root = document.createElement("div");
   document.body.append(root);
   dispose = render(
     () => (
       <ConnectionContext.Provider value={{ status, fallback: () => false }}>
-        <IndexingContext.Provider value={{ indexing }}>
+        <IndexingContext.Provider value={state}>
           <IndexingStatus />
         </IndexingContext.Provider>
       </ConnectionContext.Provider>
@@ -323,5 +326,71 @@ describe("IndexingStatus", () => {
     dispose = render(() => <IndexingStatus />, root);
     expect(visible(root)).toBe("");
     expect(live(root).textContent).toBe("");
+  });
+});
+
+describe("IndexingStatus, two sides (D-333)", () => {
+  function mountSides(): {
+    root: HTMLElement;
+    set: (ix: Indexing) => void;
+  } {
+    const ix = createIndexingState();
+    const root = document.createElement("div");
+    document.body.append(root);
+    dispose = render(
+      () => (
+        <ConnectionContext.Provider
+          value={{ status: () => "open", fallback: () => false }}
+        >
+          <IndexingContext.Provider value={ix.state}>
+            <IndexingStatus />
+          </IndexingContext.Provider>
+        </ConnectionContext.Provider>
+      ),
+      root,
+    );
+    return { root, set: ix.set };
+  }
+  const at = (
+    side: "base" | "head",
+    total: number,
+    ready: number,
+    failed = 0,
+  ): Indexing => ({ generation: 1, side, total, ready, failed });
+
+  it("sums the sides seen", async () => {
+    const { root, set } = mountSides();
+    set(at("head", 10, 3));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(visible(root)).toBe("Indexing 3 of 10 modules");
+    set(at("base", 6, 1, 1));
+    expect(visible(root)).toBe("Indexing 5 of 16 modules (1 failed)");
+  });
+
+  it("done only when every side seen is", async () => {
+    const { root, set } = mountSides();
+    set(at("head", 10, 3));
+    set(at("base", 6, 1));
+    await vi.advanceTimersByTimeAsync(1000);
+    set(at("base", 6, 6));
+    expect(visible(root)).toBe("Indexing 9 of 16 modules");
+    expect(live(root).textContent).toBe("");
+    set(at("head", 10, 10));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(visible(root)).toBe("");
+    expect(live(root).textContent).toBe("Indexing done.");
+  });
+
+  it("one side seen: that side alone", () => {
+    expect(sumIndexing([])).toBeUndefined();
+    expect(sumIndexing([at("head", 4, 4)])).toEqual({
+      generation: 1,
+      total: 4,
+      ready: 4,
+      failed: 0,
+    });
+    expect(
+      sumIndexing([at("head", 4, 4), { ...at("base", 2, 1), generation: 3 }]),
+    ).toEqual({ generation: 3, total: 6, ready: 5, failed: 0 });
   });
 });

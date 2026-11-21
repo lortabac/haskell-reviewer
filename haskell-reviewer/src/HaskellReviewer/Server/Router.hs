@@ -25,6 +25,7 @@ import HaskellReviewer.Server.Api
     fileApp,
     filesApp,
     indexingApp,
+    json,
     markdownApp,
     moduleApp,
     modulesApp,
@@ -119,6 +120,9 @@ Paths below are what the router sees, after the token.
   base against head, as CBOR (Note [Diff route] in
   "HaskellReviewer.Server.Diff"); same methods and mode check, a bad ws
   is a plain 400, a path on neither side a 404 with a JSON body.
+- api/session: the mode and, in diff mode, the revisions, as JSON
+  (D-332, encodeSession in "HaskellReviewer.Server.Wire"). Fixed for
+  the process. GET and HEAD only (405 otherwise).
 - api/prefs: the UI preferences, as JSON. GET, and POST with an
   application/json body (Note [Prefs route] in
   "HaskellReviewer.Server.Prefs"); 405 otherwise, HEAD too.
@@ -159,7 +163,10 @@ data Routes = Routes
     files :: FilesApi,
     prefs :: PrefsStore,
     -- | The pairing and the line diff, in diff mode only.
-    diff :: Maybe DiffRoutes
+    diff :: Maybe DiffRoutes,
+    -- | The api/session body. Built and forced once, before serving
+    -- (Q-RTS-BLACKHOLE).
+    session :: LBS.ByteString
   }
 
 -- | The whole app. Paths are relative to the token: the router never
@@ -241,6 +248,7 @@ router shell routes req respond = case req.pathInfo of
   ["api", "diff-files"] -> diffFilesApp ((.slot) <$> routes.diff) req respond
   "api" : "diff" : path -> diffApp routes.files routes.diff path req respond
   ["api", "prefs"] -> prefsApp routes.prefs req respond
+  ["api", "session"] -> getOnly (json routes.session)
   _ -> respond notFound
   where
     getOnly r

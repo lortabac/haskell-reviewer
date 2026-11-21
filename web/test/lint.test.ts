@@ -72,6 +72,23 @@ const banned: [string, string][] = [
     "no-restricted-syntax",
   ],
   ["document.body.attributeStyleMap.clear();", "no-restricted-syntax"],
+  // Side URLs only from the URL helpers (D-332).
+  ['export const u = "/docs/tree/A";', "no-restricted-syntax"],
+  ["export const u = (s: string) => `/src/${s}/a.hs`;", "no-restricted-syntax"],
+  ['export const u = "/search/head?q=x";', "no-restricted-syntax"],
+  ['export const u = "/api/modules/tree";', "no-restricted-syntax"],
+  [
+    "export const u = (s: string) => `/api/text-search/${s}?q=x`;",
+    "no-restricted-syntax",
+  ],
+  [
+    "export const A = () => <a href='/refs/base/A'>x</a>;",
+    "no-restricted-syntax",
+  ],
+  [
+    "export const u = (b: string) => `${b}/md/tree/README.md`;",
+    "no-restricted-syntax",
+  ],
 ];
 
 const clean = "export const A = () => <div class='x'>{'text'}</div>;\n";

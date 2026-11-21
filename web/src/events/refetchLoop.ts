@@ -8,6 +8,7 @@ import {
   untrack,
   useContext,
 } from "solid-js";
+import { usePageSide } from "../session";
 import { IndexingContext } from "./indexing";
 import { refetchStep } from "./partialRefetch";
 
@@ -27,6 +28,8 @@ export function createRefetchLoop<R>(
   first?: Answered,
 ): () => void {
   const indexing = useContext(IndexingContext);
+  // The page's side only: a base "done" must not stop a head page.
+  const side = usePageSide();
   // Bumped on each fetch: a late answer of an earlier one is dropped.
   let seq = 0;
   let ac: AbortController | undefined;
@@ -62,7 +65,7 @@ export function createRefetchLoop<R>(
     ac?.abort();
   });
   createEffect(() => {
-    const p = indexing.indexing();
+    const p = indexing.of(side());
     if (p === undefined || !partial() || stopped) return;
     const step = refetchStep(p, answerGen, lastAt, Date.now());
     if (step === "due") fetchNow();

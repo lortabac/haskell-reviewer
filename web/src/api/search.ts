@@ -1,5 +1,6 @@
 // GET api/search/<side>?q=: modules and names that match (D-207).
 // Shape: see encodeSearch in HaskellReviewer.Server.Wire.
+import type { Side } from "../sides";
 import {
   DecodeError,
   array,
@@ -98,6 +99,6 @@ export function decodeSearch(value: unknown, path = "$"): Search {
 }
 
 // The route for a query, relative to the token, for getJson.
-export function searchUrl(q: string): string {
-  return `/api/search/tree?q=${encodeURIComponent(q)}`;
+export function searchUrl(side: Side, q: string): string {
+  return `/api/search/${side}?q=${encodeURIComponent(q)}`;
 }

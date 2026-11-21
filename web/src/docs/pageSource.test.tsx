@@ -3,6 +3,7 @@ import type { Indexing } from "../api/events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cbor, cborFixture, fixture, stubFetch } from "../../test/fixtures";
 import { mountAppAt, unmountApp } from "../../test/mount";
+import { diffSession } from "../../test/sessions";
 import { clearSourceCache, lastLine } from "./pageSource";
 
 // The Page fixture: area, perimeter on line 38, "area _ = 0" on 39.
@@ -155,6 +156,45 @@ describe("inline source", () => {
     const again = await toggle(second.main, "of area");
     await vi.waitFor(() => expect(again.querySelector("a")).not.toBeNull());
     expect(calls(second.mock)).toBe(0);
+  });
+});
+
+describe("inline source, per side", () => {
+  it("the same generation on another side is a miss (D-332)", async () => {
+    const mock = stubFetch({});
+    for (const side of ["head", "base"]) {
+      mock.mockClear();
+      stubFetch({
+        [`/tok/api/files/${side}`]: [200, fixture("files")],
+        [`/tok/api/modules/${side}`]: [200, fixture("modules")],
+        [`/tok/api/module/${side}/Page`]: [200, cborFixture("module-page")],
+        [`/tok/api/source/${side}/Page.hs`]: [200, cbor(lexed())],
+      });
+      const main = mountAppAt(
+        `/tok/docs/${side}/Page`,
+        undefined,
+        undefined,
+        null,
+        diffSession,
+      ).querySelector("main")!;
+      await vi.waitFor(() =>
+        expect(main.querySelector(".decl")).not.toBeNull(),
+      );
+      const src = await toggle(main, "of area");
+      await vi.waitFor(() => expect(src.querySelector("a")).not.toBeNull());
+      // Links stay on the side.
+      for (const a of src.querySelectorAll("a[href^='/tok/']")) {
+        expect(a.getAttribute("href")).toMatch(
+          new RegExp(`^/tok/(docs|src)/${side}/`),
+        );
+      }
+      const asked = vi
+        .mocked(fetch)
+        .mock.calls.map((c) => String(c[0] as string))
+        .filter((u) => u.includes("/api/source/"));
+      expect(asked).toEqual([`/tok/api/source/${side}/Page.hs`]);
+      unmountApp();
+    }
   });
 });
 

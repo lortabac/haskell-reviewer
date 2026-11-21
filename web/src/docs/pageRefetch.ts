@@ -13,6 +13,7 @@ import {
   type PageTarget,
 } from "../api/module";
 import { createRefetchLoop } from "../events/refetchLoop";
+import { usePageSide } from "../session";
 import { type NameInline, type Overlay, relink } from "./relink";
 import { apiModuleUrl } from "./urls";
 
@@ -32,6 +33,7 @@ export function createPageRefetch(
   firstBytes: Uint8Array | undefined,
   around: { before: () => void; after: () => void },
 ): PageLinks {
+  const side = usePageSide();
   const links = new Map<object, CodeToken | NameInline>();
   let now: Overlay = {
     partial: first.partial,
@@ -48,14 +50,18 @@ export function createPageRefetch(
   let reading: Uint8Array | undefined;
   createRefetchLoop(
     (signal) =>
-      getCbor<ModulePage | "same">(apiModuleUrl(typedRef), decodeModulePage, {
-        signal,
-        raw: (b) => {
-          if (last !== undefined && sameBytes(b, last)) return "same";
-          reading = b;
-          return undefined;
+      getCbor<ModulePage | "same">(
+        apiModuleUrl(side(), typedRef),
+        decodeModulePage,
+        {
+          signal,
+          raw: (b) => {
+            if (last !== undefined && sameBytes(b, last)) return "same";
+            reading = b;
+            return undefined;
+          },
         },
-      }),
+      ),
     (r) => {
       // Never kept past here: one big body is enough.
       const body = reading;

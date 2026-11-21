@@ -1,35 +1,33 @@
 import { Route, Router, type RouteSectionProps } from "@solidjs/router";
-import type { JSX } from "solid-js";
+import { type JSX, untrack } from "solid-js";
 import { basePath } from "./base";
-import { defaultPrefs, type Prefs } from "./api/prefs";
+import type { Prefs } from "./api/prefs";
+import { browseSession, type Session } from "./api/session";
 import { DocsView } from "./docs/DocsView";
 import { FileView } from "./files/FileView";
-import { MarkdownView } from "./md/MarkdownView";
-import { Frame } from "./Frame";
 import { Home } from "./Home";
-import { RefsView } from "./refs/RefsView";
-import { TextSearchView } from "./textsearch/TextSearchView";
-import { ProjectNotices } from "./modules/ProjectNotices";
-import { ModulesProvider } from "./modules/store";
-import { CopyLocation } from "./copy/CopyLocation";
-import { KeysProvider, KeysStatus } from "./keys/KeysProvider";
-import { ShortcutsButton } from "./keys/ShortcutsButton";
-import { ViewSwitch } from "./keys/ViewSwitch";
+import { MarkdownView } from "./md/MarkdownView";
 import { NotFound } from "./NotFound";
-import { PrefsProvider, PrefsStatus } from "./prefs/store";
-import { ThemeSwitch } from "./prefs/ThemeSwitch";
-import { SearchBox } from "./search/SearchBox";
-import { Sidebar } from "./Sidebar";
+import { RefsView } from "./refs/RefsView";
+import { Root } from "./Root";
+import { SessionContext } from "./session";
+import { TextSearchView } from "./textsearch/TextSearchView";
 
+// The routes, and nothing else: the one place outside the URL modules
+// that writes side URLs by hand (eslint.config.js).
+//
 // initialPrefs: main.tsx's GET api/prefs, resolved before render (so
 // the theme is right from the first paint). Tests that mount App
 // directly get the built-in defaults instead, with no fetch.
 // pendingPrefs: that same GET, not raced against the 500 ms fallback
 // (C3): when it resolves, it fills in whatever keys the user hasn't
 // touched yet.
+// session: main.tsx's GET api/session, awaited before render. Browse
+// mode by default, for tests.
 export function App(props: {
   initialPrefs?: Prefs;
   pendingPrefs?: Promise<Prefs>;
+  session?: Session;
 }): JSX.Element {
   const root = (p: RouteSectionProps) => (
     <Root
@@ -38,51 +36,19 @@ export function App(props: {
       pendingPrefs={props.pendingPrefs}
     />
   );
+  // Fixed for the process: read once.
+  const session = untrack(() => props.session) ?? browseSession;
   return (
-    <Router base={basePath(window.location.pathname)} root={root}>
-      <Route path="/" component={Home} />
-      <Route path="/docs/tree/*ref" component={DocsView} />
-      <Route path="/refs/tree/*ref" component={RefsView} />
-      <Route path="/src/tree/*path" component={FileView} />
-      <Route path="/md/tree/*path" component={MarkdownView} />
-      <Route path="/search/tree" component={TextSearchView} />
-      <Route path="*" component={NotFound} />
-    </Router>
-  );
-}
-
-function Root(
-  props: RouteSectionProps & {
-    initialPrefs?: Prefs;
-    pendingPrefs?: Promise<Prefs>;
-  },
-): JSX.Element {
-  return (
-    <PrefsProvider
-      initial={props.initialPrefs ?? defaultPrefs}
-      pending={props.pendingPrefs}
-    >
-      <ModulesProvider>
-        <KeysProvider>
-          <Frame
-            sidebar={<Sidebar />}
-            notices={<ProjectNotices />}
-            views={<ViewSwitch />}
-            search={<SearchBox placement="header" />}
-            controls={
-              <>
-                <CopyLocation />
-                <ThemeSwitch />
-                <ShortcutsButton />
-                <PrefsStatus />
-                <KeysStatus />
-              </>
-            }
-          >
-            {props.children}
-          </Frame>
-        </KeysProvider>
-      </ModulesProvider>
-    </PrefsProvider>
+    <SessionContext.Provider value={session}>
+      <Router base={basePath(window.location.pathname)} root={root}>
+        <Route path="/" component={Home} />
+        <Route path="/docs/:side/*ref" component={DocsView} />
+        <Route path="/refs/:side/*ref" component={RefsView} />
+        <Route path="/src/:side/*path" component={FileView} />
+        <Route path="/md/:side/*path" component={MarkdownView} />
+        <Route path="/search/:side" component={TextSearchView} />
+        <Route path="*" component={NotFound} />
+      </Router>
+    </SessionContext.Provider>
   );
 }

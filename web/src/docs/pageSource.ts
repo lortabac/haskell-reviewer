@@ -6,10 +6,12 @@ import { createMemo, createSignal } from "solid-js";
 import { expandRuns, type LexedSource } from "../api/source";
 import { createSource } from "../source/createSource";
 import { type Highlight, highlightOf } from "../source/highlight";
+import { usePageSide } from "../session";
 import { pageLinkInfos } from "../source/links";
 
 // The last lexed answers (complete ones), so a page seen again doesn't
-// ask again. Newest last.
+// ask again. Newest last. Keyed by side too: the generation is shared
+// by both sides (D-332).
 const keep = 4;
 const cache = new Map<string, LexedSource>();
 
@@ -63,8 +65,10 @@ export function createPageSource(page: {
   base: () => string | undefined;
 }): PageSource {
   const [wanted, setWanted] = createSignal(false);
+  // Fixed per mount: Root mounts the page again on a side change.
+  const side = usePageSide()();
   const path = page.path;
-  const key = `${page.generation}\0${path}`;
+  const key = `${side}\0${page.generation}\0${path}`;
   const fresh = createSource(
     () => path ?? "",
     () => page.generation,
@@ -78,7 +82,7 @@ export function createPageSource(page: {
     if (!wanted() || path === null) return undefined;
     const s = fresh() ?? cacheGet(key);
     if (s === undefined) return undefined;
-    const links = pageLinkInfos(page, s.targets, page.base());
+    const links = pageLinkInfos(side, page, s.targets, page.base());
     return highlightOf(s, lastLine(s), links);
   });
   return { want: () => setWanted(true), highlight };

@@ -34,6 +34,7 @@ import { location as locationText, targetCopyText } from "../copy/names";
 import { usePrefs } from "../prefs/store";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
+import { usePageSide } from "../session";
 import {
   type CodeApi,
   CodeView,
@@ -64,10 +65,11 @@ import {
   withBase,
 } from "./paths";
 
-// The file view: /<token>/src/tree/<path>.
+// The file view: /<token>/src/<side>/<path>.
 export function FileView(): JSX.Element {
+  const side = usePageSide();
   const location = useLocation();
-  const path = createMemo(() => pathFromPathname(location.pathname));
+  const path = createMemo(() => pathFromPathname(location.pathname, side()));
   return (
     <Show when={path()} keyed fallback={<NotFound />}>
       {(p) => <FilePage path={p} />}
@@ -76,11 +78,12 @@ export function FileView(): JSX.Element {
 }
 
 function FilePage(props: { path: string }): JSX.Element {
+  const side = usePageSide();
   // Read before the old page goes away.
   const fromMain = focusInMain();
   const [file] = createResource(
     () => props.path,
-    (p) => getCbor(apiFileUrl(p), decodeFileView),
+    (p) => getCbor(apiFileUrl(side(), p), decodeFileView),
   );
   const slow = createDelay(() => file.loading, 300);
   // Generated or preprocessed: say why there's only text. Needs the
@@ -115,11 +118,11 @@ function FilePage(props: { path: string }): JSX.Element {
     current: "source",
     docs: () => {
       // A Markdown file's docs: the file, rendered.
-      if (isMarkdownPath(props.path)) return mdHref(props.path);
+      if (isMarkdownPath(props.path)) return mdHref(side(), props.path);
       const r = moduleRef();
-      return r === undefined ? undefined : docsHref(r);
+      return r === undefined ? undefined : docsHref(side(), r);
     },
-    source: () => hrefFor(props.path),
+    source: () => hrefFor(side(), props.path),
     at: (to) => (to === "docs" ? docsAt?.() : undefined),
   });
   // A link in main (like a symlink target) took us here: its page is
@@ -211,13 +214,14 @@ function Symlink(props: {
   target: string;
   resolved: string | null;
 }): JSX.Element {
+  const side = usePageSide();
   const base = useResolvedPath(() => "/");
   return (
     <p>
       Symbolic link to{" "}
       <Show when={props.resolved} fallback={<code>{props.target}</code>}>
         {(r) => (
-          <a href={withBase(base(), hrefFor(r()))}>
+          <a href={withBase(base(), hrefFor(side(), r()))}>
             <code>{props.target}</code>
           </a>
         )}
@@ -236,6 +240,7 @@ function FileText(props: {
   source: LexedSource | undefined;
   setDocsAt?: (f: (() => ViewTarget | undefined) | undefined) => void;
 }): JSX.Element {
+  const side = usePageSide();
   const location = useLocation();
   const base = useResolvedPath(() => "/");
   const index = createMemo(() => lineIndex(props.text));
@@ -243,13 +248,14 @@ function FileText(props: {
     const s = props.source;
     if (s === undefined) return undefined;
     const links = linkInfos(
+      side(),
       { path: props.path, ref: s.ref },
       s.targets,
       base(),
     );
     return highlightOf(s, index().count, links);
   });
-  const line = (n: number) => withBase(base(), lineHref(props.path, n));
+  const line = (n: number) => withBase(base(), lineHref(side(), props.path, n));
   // The outline, if it has entries.
   const outline = () => {
     const o = hl()?.outline;
@@ -257,7 +263,9 @@ function FileText(props: {
   };
   const docs = (id: string): string | undefined => {
     const ref = props.source?.ref ?? null;
-    return ref === null ? undefined : withBase(base(), docsHref(ref, id));
+    return ref === null
+      ? undefined
+      : withBase(base(), docsHref(side(), ref, id));
   };
   // New functions when the highlight comes: the rows redraw.
   const renderLine = createMemo(() => {
@@ -533,7 +541,7 @@ function FileText(props: {
     const a = api;
     if (ref === null || a === undefined) return undefined;
     const e = declAtLine(outline() ?? [], a.cursor().line);
-    return { href: docsHref(ref, e?.[1] ?? null) };
+    return { href: docsHref(side(), ref, e?.[1] ?? null) };
   });
   onCleanup(() => props.setDocsAt?.(undefined));
   let wrap!: HTMLDivElement;

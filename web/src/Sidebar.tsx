@@ -17,7 +17,7 @@ export function Sidebar(): JSX.Element {
   const view = createMemo<View>(() => {
     const choice = prefs.sidebar();
     if (choice !== "auto") return choice;
-    return modules.tree.loading || modules.hasModules() ? "modules" : "files";
+    return modules.loading() || modules.hasModules() ? "modules" : "files";
   });
   let modulesPanel: HTMLDivElement | undefined;
   let filesPanel: HTMLDivElement | undefined;

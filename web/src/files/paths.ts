@@ -1,18 +1,22 @@
 // File paths in URLs. Each segment is encoded on its own, so "/" stays a
 // separator and "#", "?" and "%" in names stay part of the name.
+//
+// Every URL helper takes the side first, with no default (D-332): a
+// link never changes side by accident.
+import type { Side } from "../sides";
 
 export function encodePath(path: string): string {
   return path.split("/").map(encodeURIComponent).join("/");
 }
 
 // The file view URL, relative to the token.
-export function hrefFor(path: string): string {
-  return "/src/tree/" + encodePath(path);
+export function hrefFor(side: Side, path: string): string {
+  return `/src/${side}/` + encodePath(path);
 }
 
 // The file view URL at a line, relative to the token.
-export function lineHref(path: string, line: number): string {
-  return hrefFor(path) + "#L" + String(line);
+export function lineHref(side: Side, path: string, line: number): string {
+  return hrefFor(side, path) + "#L" + String(line);
 }
 
 // A Markdown file: it has a rendered view (as the server's
@@ -22,27 +26,36 @@ export function isMarkdownPath(path: string): boolean {
 }
 
 // The rendered view of a Markdown file, relative to the token.
-export function mdHref(path: string, fragment: string | null = null): string {
+export function mdHref(
+  side: Side,
+  path: string,
+  fragment: string | null = null,
+): string {
   return (
-    "/md/tree/" +
+    `/md/${side}/` +
     encodePath(path) +
     (fragment === null ? "" : "#" + encodeURIComponent(fragment))
   );
 }
 
 // The Markdown API URL, relative to the token.
-export function apiMarkdownUrl(path: string): string {
-  return "/api/markdown/tree/" + encodePath(path);
+export function apiMarkdownUrl(side: Side, path: string): string {
+  return `/api/markdown/${side}/` + encodePath(path);
 }
 
 // The file API URL, relative to the token.
-export function apiFileUrl(path: string): string {
-  return "/api/file/tree/" + encodePath(path);
+export function apiFileUrl(side: Side, path: string): string {
+  return `/api/file/${side}/` + encodePath(path);
 }
 
 // The source view API URL (highlighting, links), relative to the token.
-export function apiSourceUrl(path: string): string {
-  return "/api/source/tree/" + encodePath(path);
+export function apiSourceUrl(side: Side, path: string): string {
+  return `/api/source/${side}/` + encodePath(path);
+}
+
+// The file list API URL, relative to the token.
+export function apiFilesUrl(side: Side): string {
+  return `/api/files/${side}`;
 }
 
 // The decoded segments of "/<token>/<prefix…>/<rest…>" after prefix.
@@ -73,16 +86,23 @@ export function segmentsAfter(
   return segments;
 }
 
-// The file path in a full pathname "/<token>/src/tree/<path>". Undefined
-// if it is not a file view URL or the path is bad (segmentsAfter).
-export function pathFromPathname(pathname: string): string | undefined {
-  return segmentsAfter(pathname, ["src", "tree"])?.join("/");
+// The file path in a full pathname "/<token>/src/<side>/<path>".
+// Undefined if it is not a file view URL on that side or the path is
+// bad (segmentsAfter).
+export function pathFromPathname(
+  pathname: string,
+  side: Side,
+): string | undefined {
+  return segmentsAfter(pathname, ["src", side])?.join("/");
 }
 
-// The file path in a full pathname "/<token>/md/tree/<path>", as
+// The file path in a full pathname "/<token>/md/<side>/<path>", as
 // pathFromPathname.
-export function mdPathFromPathname(pathname: string): string | undefined {
-  return segmentsAfter(pathname, ["md", "tree"])?.join("/");
+export function mdPathFromPathname(
+  pathname: string,
+  side: Side,
+): string | undefined {
+  return segmentsAfter(pathname, ["md", side])?.join("/");
 }
 
 // Lines to mark, from a hash like "#L3" or "#L3-L7". Undefined for

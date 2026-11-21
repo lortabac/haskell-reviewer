@@ -1,16 +1,25 @@
-// Docs view URLs: /<token>/docs/tree/<ref…>[#<decl>] (SPEC §4.1).
+// Docs view URLs: /<token>/docs/<side>/<ref…>[#<decl>] (SPEC §4.1).
 import { encodePath, segmentsAfter } from "../files/paths";
+import type { Side } from "../sides";
 
 // The module ref in a full pathname, as typed. Loose modules' refs are
 // paths, so the segments are joined with "/". Undefined if it is not a
 // docs URL or a segment is bad (segmentsAfter).
-export function refFromPathname(pathname: string): string | undefined {
-  return segmentsAfter(pathname, ["docs", "tree"])?.join("/");
+export function refFromPathname(
+  pathname: string,
+  side: Side,
+): string | undefined {
+  return segmentsAfter(pathname, ["docs", side])?.join("/");
 }
 
 // The module page API URL, relative to the token.
-export function apiModuleUrl(ref: string): string {
-  return "/api/module/tree/" + encodePath(ref);
+export function apiModuleUrl(side: Side, ref: string): string {
+  return `/api/module/${side}/` + encodePath(ref);
+}
+
+// The module tree API URL, relative to the token.
+export function apiModulesUrl(side: Side): string {
+  return `/api/modules/${side}`;
 }
 
 // The anchor in a hash: null for none, "bad" for broken percent
@@ -26,11 +35,16 @@ export function anchorFromHash(hash: string): string | null | { bad: true } {
 }
 
 // What to put in the search box of a "not found" page: the module ref
-// of a docs URL, the path of a file URL, else nothing. Lenient: bad
-// encoding stays as typed.
+// of a docs URL, the path of a file URL, else nothing. Any side
+// segment, even one the session doesn't have. Lenient: bad encoding
+// stays as typed.
 export function queryFromUrl(pathname: string): string {
   const [, , view, side, ...rest] = pathname.split("/");
-  if ((view !== "docs" && view !== "src" && view !== "refs") || side !== "tree")
+  if (
+    (view !== "docs" && view !== "src" && view !== "refs") ||
+    side === undefined ||
+    side === ""
+  )
     return "";
   return rest
     .filter((s) => s !== "")

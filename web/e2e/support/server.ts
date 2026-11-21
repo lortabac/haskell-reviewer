@@ -46,10 +46,20 @@ export interface ServerOpts {
   root: string;
   configHome: string;
   stateHome: string;
+  // --diff <diff>: diff mode.
+  diff?: string;
 }
 
 export async function startServer(opts: ServerOpts): Promise<Server> {
-  const args = ["--no-open", "--verbose", "--idle-exit", "1", opts.root];
+  const diff = opts.diff === undefined ? [] : ["--diff", opts.diff];
+  const args = [
+    "--no-open",
+    "--verbose",
+    "--idle-exit",
+    "1",
+    ...diff,
+    opts.root,
+  ];
   const child = spawn(exePath(), args, {
     stdio: ["ignore", "ignore", "pipe"],
     env: {

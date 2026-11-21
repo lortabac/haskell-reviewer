@@ -66,17 +66,18 @@ afterEach(() => {
 // answers (the last one again when they run out).
 async function openWith(
   answers: ([number, unknown] | (() => Promise<Response>))[],
+  side: "tree" | "head" = "tree",
 ) {
   const others = stubFetch({
-    "/tok/api/files/tree": [200, fixture("files")],
-    "/tok/api/modules/tree": [200, fixture("modules")],
+    [`/tok/api/files/${side}`]: [200, fixture("files")],
+    [`/tok/api/modules/${side}`]: [200, fixture("modules")],
   }).getMockImplementation()!;
   let calls = 0;
   const signals: (AbortSignal | undefined)[] = [];
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-      if (input !== "/tok/api/module/tree/Page") return others(input);
+      if (input !== `/tok/api/module/${side}/Page`) return others(input);
       signals.push(init?.signal ?? undefined);
       calls++;
       const a = answers[Math.min(calls - 1, answers.length - 1)]!;
@@ -92,9 +93,13 @@ async function openWith(
   );
   const [ix, setIx] = createSignal<Indexing>();
   // eslint-disable-next-line solid/reactivity -- read by the page
-  const main = mountAppAt("/tok/docs/tree/Page", undefined, ix).querySelector(
-    "main",
-  );
+  const main = mountAppAt(
+    `/tok/docs/${side}/Page`,
+    undefined,
+    ix,
+    null,
+    side === "tree" ? undefined : diffSession,
+  ).querySelector("main");
   if (main === null) throw new Error("no main");
   await vi.waitFor(() => expect(main.querySelector(".decl")).not.toBeNull());
   return { main, calls: () => calls, signals, setIx };
@@ -125,7 +130,30 @@ const circleDouble = (main: HTMLElement): HTMLElement => {
   return t;
 };
 
+const diffSession = {
+  mode: "diff",
+  spec: "a..b",
+  base: { label: "a", commit: "1" },
+  head: { label: "b", commit: "2" },
+  mergeBases: null,
+} as const;
+
 describe("docs page refetch while partial", () => {
+  it("a head page: base events neither refetch nor stop it (D-333)", async () => {
+    const { calls, setIx } = await openWith([[200, raw()]], "head");
+    now = 5000;
+    // Done, and a newer snapshot, on base: not this page's.
+    setIx({ ...at(1, 2), side: "base" });
+    await settle();
+    setIx({ ...at(2, 1), side: "base" });
+    await settle();
+    expect(calls()).toBe(1);
+    // Head's progress: asks again.
+    now = 7000;
+    setIx({ ...at(1, 1), side: "head" });
+    await vi.waitFor(() => expect(calls()).toBe(2));
+  });
+
   it("not partial: no refetch", async () => {
     const { calls, setIx } = await openWith([
       [200, raw((r) => (r.partial = false))],

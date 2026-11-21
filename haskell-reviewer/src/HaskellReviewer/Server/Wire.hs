@@ -9,12 +9,15 @@ module HaskellReviewer.Server.Wire
     DiffFiles (..),
     DiffEnd (..),
     RefsMissing (..),
+    SessionInfo (..),
 
     -- * Bodies
     encodeFileList,
     encodeFileView,
     encodeModuleTree,
     encodeDiffFiles,
+    encodeSession,
+    diffEnds,
     encodeModuleNotFound,
     encodeFileNotFound,
     encodeIndexing,
@@ -111,13 +114,22 @@ import HaskellReviewer.Core.Renames
     Pairing (..),
     RenamedFile (..),
   )
+import HaskellReviewer.Core.Revspec
+  ( BaseFrom (..),
+    CommitsInfo (..),
+    DiffInfo (..),
+    Range (..),
+    Revspec (..),
+    WorkTreeInfo (..),
+    renderRevspec,
+  )
 import HaskellReviewer.Core.Search
   ( Hit (..),
     Indexing (..),
     ModuleCandidate (..),
     SearchResult (..),
   )
-import HaskellReviewer.Core.Sides (Side, sideName)
+import HaskellReviewer.Core.Sides (Pair (..), Side, sideName)
 import HaskellReviewer.Core.Similarity (scorePercent)
 import HaskellReviewer.Core.Span (Col (..), Line (..), Span (..))
 import HaskellReviewer.Core.TextSearch
@@ -341,6 +353,65 @@ data DiffEnd = DiffEnd
     commit :: Maybe ObjectId
   }
 
+-- | The session's mode, for GET api\/session.
+data SessionInfo
+  = BrowseSession
+  | DiffSession DiffInfo
+
+-- | GET api\/session (D-332). No generation: it never changes.
+--
+-- > {"mode":"browse"}
+-- > {"mode":"diff","spec":"main...feature",
+-- >  "base":{"label":"main","commit":"<hex>"},
+-- >  "head":{"label":"feature","commit":"<hex>"|null},
+-- >  "mergeBases":null|2}
+--
+-- Labels as in api\/diff-files ('diffEnds'). spec is 'renderRevspec':
+-- as typed, an empty end shown as HEAD. mergeBases only for @...@: how
+-- many there are (base is the first).
+encodeSession :: SessionInfo -> LBS.ByteString
+encodeSession = \case
+  BrowseSession ->
+    Encoding.encodingToLazyByteString (Aeson.pairs ("mode" .= ("browse" :: Text)))
+  DiffSession info ->
+    let ends = diffEnds info
+        (spec, mergeBases) = case info of
+          CommitsDiff ci ->
+            ( renderRevspec (RangeSpec ci.range),
+              case ci.baseFrom of
+                BaseTyped -> Nothing
+                MergeBase n -> Just n
+            )
+          WorkTreeDiff wi -> (renderRevspec (AgainstWorkTree wi.rev), Nothing)
+     in Encoding.encodingToLazyByteString . Aeson.pairs $
+          ("mode" .= ("diff" :: Text))
+            <> ("spec" .= spec)
+            <> Encoding.pair "base" (diffEnd ends.base)
+            <> Encoding.pair "head" (diffEnd ends.head)
+            <> ("mergeBases" .= (mergeBases :: Maybe Int))
+
+-- | Each side's label and commit (D-325): the revisions as typed. For
+-- @...@ base's commit is the merge base; for @REV@ head is the
+-- "working tree", with no commit.
+diffEnds :: DiffInfo -> Pair DiffEnd
+diffEnds = \case
+  CommitsDiff ci ->
+    Pair
+      { base = DiffEnd {label = ci.range.base, commit = Just ci.sides.base},
+        head = DiffEnd {label = ci.range.head, commit = Just ci.sides.head}
+      }
+  WorkTreeDiff wi ->
+    Pair
+      { base = DiffEnd {label = wi.rev, commit = Just wi.base},
+        head = DiffEnd {label = "working tree", commit = Nothing}
+      }
+
+-- | One end: @{"label":"main","commit":"<hex>"|null}@.
+diffEnd :: DiffEnd -> Aeson.Encoding
+diffEnd e =
+  Aeson.pairs $
+    ("label" .= e.label) <> ("commit" .= fmap (\(ObjectId o) -> o) e.commit)
+
 -- | GET api\/diff-files (D-325):
 --
 -- > {"generation":1,
@@ -359,16 +430,13 @@ encodeDiffFiles :: Generation -> DiffFiles -> LBS.ByteString
 encodeDiffFiles (Generation g) d =
   Encoding.encodingToLazyByteString . Aeson.pairs $
     ("generation" .= g)
-      <> Encoding.pair "base" (end d.base)
-      <> Encoding.pair "head" (end d.head)
+      <> Encoding.pair "base" (diffEnd d.base)
+      <> Encoding.pair "head" (diffEnd d.head)
       <> Encoding.pair "files" (Encoding.list file d.pairing.changes)
       <> Encoding.pair "outside" (maybe Encoding.null_ outside d.outside)
       <> ("renameLimitHit" .= (d.pairing.limit /= WithinLimits))
       <> ("truncated" .= d.truncated)
   where
-    end e =
-      Aeson.pairs $
-        ("label" .= e.label) <> ("commit" .= fmap (\(ObjectId o) -> o) e.commit)
     file = \case
       Added p -> notRenamed p "added" Nothing
       Removed p -> notRenamed p "removed" Nothing

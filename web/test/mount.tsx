@@ -4,6 +4,8 @@ import type { Indexing } from "../src/api/events";
 import type { Prefs } from "../src/api/prefs";
 import { App } from "../src/App";
 import { IndexingContext } from "../src/events/indexing";
+import type { Session } from "../src/api/session";
+import { singleIndexing } from "./indexing";
 
 let dispose: (() => void) | undefined;
 
@@ -17,14 +19,16 @@ export function mountAppAt(
   indexing: Accessor<Indexing | undefined> = () => undefined,
   // The history entry's state, as a page left it.
   state: unknown = null,
+  // Browse mode unless given.
+  session?: Session,
 ): HTMLElement {
   window.history.replaceState(state, "", path);
   const root = document.createElement("div");
   document.body.append(root);
   dispose = render(
     () => (
-      <IndexingContext.Provider value={{ indexing }}>
-        <App initialPrefs={initialPrefs} />
+      <IndexingContext.Provider value={singleIndexing(indexing)}>
+        <App initialPrefs={initialPrefs} session={session} />
       </IndexingContext.Provider>
     ),
     root,

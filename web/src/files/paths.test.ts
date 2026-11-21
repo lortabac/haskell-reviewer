@@ -21,16 +21,16 @@ describe("file paths in URLs", () => {
     "emoji/😀.hs",
     "a+b/c&d=e;f:g@h.hs",
   ])("round trip: %s", (path) => {
-    const href = hrefFor(path);
+    const href = hrefFor("tree", path);
     expect(href.startsWith("/src/tree/")).toBe(true);
     expect(href).not.toMatch(/[#? ]/);
-    expect(pathFromPathname("/tok" + href)).toBe(path);
+    expect(pathFromPathname("/tok" + href, "tree")).toBe(path);
   });
 
   it("encodes each segment, keeps the slashes", () => {
-    expect(hrefFor("a b/c#d")).toBe("/src/tree/a%20b/c%23d");
-    expect(apiFileUrl("x/%y")).toBe("/api/file/tree/x/%25y");
-    expect(apiSourceUrl("x/%y")).toBe("/api/source/tree/x/%25y");
+    expect(hrefFor("tree", "a b/c#d")).toBe("/src/tree/a%20b/c%23d");
+    expect(apiFileUrl("tree", "x/%y")).toBe("/api/file/tree/x/%25y");
+    expect(apiSourceUrl("tree", "x/%y")).toBe("/api/source/tree/x/%25y");
   });
 
   it.each([
@@ -51,7 +51,7 @@ describe("file paths in URLs", () => {
     "/tok/src/tree/%E0",
     "/tok/src/tree/%",
   ])("rejects %s", (pathname) => {
-    expect(pathFromPathname(pathname)).toBeUndefined();
+    expect(pathFromPathname(pathname, "tree")).toBeUndefined();
   });
 });
 
@@ -115,6 +115,6 @@ describe("line hashes", () => {
   });
 
   it("lineHref", () => {
-    expect(lineHref("a b/c.hs", 12)).toBe("/src/tree/a%20b/c.hs#L12");
+    expect(lineHref("tree", "a b/c.hs", 12)).toBe("/src/tree/a%20b/c.hs#L12");
   });
 });

@@ -3,6 +3,7 @@
 import { docsHref } from "../api/module";
 import type { ExternalTarget, Target } from "../api/source";
 import { hrefFor, lineHref, withBase } from "../files/paths";
+import type { Side } from "../sides";
 import { utf16Cols } from "./columns";
 import type { Seg } from "./highlight";
 
@@ -46,8 +47,10 @@ function externalInfo(t: ExternalTarget): LinkInfo {
   };
 }
 
-// One per target, by index (link word − 1). base: the router base.
+// One per target, by index (link word − 1). side: the page's; links
+// stay on it. base: the router base.
 export function linkInfos(
+  side: Side,
   view: ViewPlace,
   targets: readonly Target[],
   base: string | undefined,
@@ -57,7 +60,7 @@ export function linkInfos(
     switch (t[0]) {
       case "local":
         return {
-          href: app(lineHref(view.path, t[1])),
+          href: app(lineHref(side, view.path, t[1])),
           about: `bound at line ${t[1]}`,
           guess: false,
           external: false,
@@ -68,7 +71,7 @@ export function linkInfos(
         const guess = reasons.length > 0;
         if (def) {
           return {
-            href: app(docsHref(ref, id)),
+            href: app(docsHref(side, ref, id)),
             about: "documentation",
             guess,
             external: false,
@@ -76,7 +79,9 @@ export function linkInfos(
           };
         }
         return {
-          href: app(line === null ? hrefFor(path) : lineHref(path, line)),
+          href: app(
+            line === null ? hrefFor(side, path) : lineHref(side, path, line),
+          ),
           about:
             line === null
               ? `defined in ${path}`
@@ -89,7 +94,7 @@ export function linkInfos(
       case "module": {
         const [, ref, path, reasons] = t;
         return {
-          href: app(path === null ? docsHref(ref) : hrefFor(path)),
+          href: app(path === null ? docsHref(side, ref) : hrefFor(side, path)),
           about: `module ${ref}`,
           guess: reasons.length > 0,
           external: false,
@@ -107,6 +112,7 @@ export function linkInfos(
 // declaration goes to its docs, a local has no link (no line anchors
 // on a docs page). One per target, by index.
 export function pageLinkInfos(
+  side: Side,
   page: { ref: string; typedRef: string },
   targets: readonly Target[],
   base: string | undefined,
@@ -120,7 +126,7 @@ export function pageLinkInfos(
         const [, ref, , , id, reasons] = t;
         const same = ref === page.ref;
         return {
-          href: app(docsHref(same ? page.typedRef : ref, id)),
+          href: app(docsHref(side, same ? page.typedRef : ref, id)),
           about: same ? "documentation" : `documentation in ${ref}`,
           guess: reasons.length > 0,
           external: false,
@@ -130,7 +136,7 @@ export function pageLinkInfos(
       case "module": {
         const [, ref, , reasons] = t;
         return {
-          href: app(docsHref(ref)),
+          href: app(docsHref(side, ref)),
           about: `module ${ref}`,
           guess: reasons.length > 0,
           external: false,

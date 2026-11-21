@@ -1,4 +1,4 @@
-// The text search page: /<token>/search/tree?q=<text> (D-310). The
+// The text search page: /<token>/search/<side>?q=<text> (D-310). The
 // lines that have the text, in groups by file, a link to each line.
 import { A, useLocation } from "@solidjs/router";
 import {
@@ -29,6 +29,7 @@ import { useCopyLocation } from "../keys/KeysProvider";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
 import { textTooLong, textTooLongText } from "../search/query";
+import { usePageSide } from "../session";
 import { createDelay } from "../ui/focus";
 import {
   groupHits,
@@ -67,6 +68,7 @@ export function TextSearchView(): JSX.Element {
 }
 
 function TextSearchPage(props: { q: string }): JSX.Element {
+  const side = usePageSide();
   const location = useLocation();
   // Set when we come back to this entry (Back, Forward, reload).
   const followed = followedKey(untrack(() => location.state));
@@ -74,7 +76,7 @@ function TextSearchPage(props: { q: string }): JSX.Element {
   const long = textTooLong(untrack(() => props.q));
   const [answer] = createResource(
     () => (long ? undefined : props.q),
-    (q) => getJson(textSearchUrl(q), decodeTextSearch),
+    (q) => getJson(textSearchUrl(side(), q), decodeTextSearch),
   );
   const result = () => (answer.state === "ready" ? answer() : undefined);
   const value = () => {
@@ -178,6 +180,7 @@ function TextSearchPage(props: { q: string }): JSX.Element {
 }
 
 function GroupView(props: { g: HitGroup }): JSX.Element {
+  const side = usePageSide();
   const id = createUniqueId();
   const n = () => props.g.hits.length;
   return (
@@ -188,7 +191,7 @@ function GroupView(props: { g: HitGroup }): JSX.Element {
           label={`Copy path ${props.g.path}`}
         />
         <h2 id={id} class="refs-group-head text-search-path">
-          <A href={hrefFor(props.g.path)} data-copy={props.g.path}>
+          <A href={hrefFor(side(), props.g.path)} data-copy={props.g.path}>
             {props.g.path}
           </A>
         </h2>
@@ -206,10 +209,11 @@ function GroupView(props: { g: HitGroup }): JSX.Element {
 }
 
 function HitView(props: { h: TextHit }): JSX.Element {
+  const side = usePageSide();
   return (
     <li class="refs-item">
       <A
-        href={lineHref(props.h.path, props.h.line)}
+        href={lineHref(side(), props.h.path, props.h.line)}
         state={hitState(props.h)}
         data-hit-key={hitKey(props.h)}
         data-copy={locationText(props.h.path, props.h.line)}

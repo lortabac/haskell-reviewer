@@ -601,6 +601,9 @@ filesTests =
             noBase.status @?= 404
             noHead <- getPath server "api/indexing/head"
             noHead.status @?= 404
+            session <- getPath server "api/session"
+            session.status @?= 200
+            session.body @?= "{\"mode\":\"browse\"}"
             let req =
                   "GET "
                     <> Char8.pack (tokenPath server)
@@ -953,6 +956,14 @@ diffTests =
             assertBool baseBody (not ("src/New.hs" `isInfixOf` baseBody))
             noTree <- getPath server "api/modules/tree"
             noTree.status @?= 404
+            session <- getPath server "api/session"
+            full <- gitOut root ["rev-parse", "HEAD"]
+            Char8.unpack session.body
+              @?= "{\"mode\":\"diff\",\"spec\":\"HEAD\",\"base\":{\"label\":\"HEAD\",\
+                  \\"commit\":\""
+                <> takeWhile (/= '\n') full
+                <> "\"},\"head\":{\"label\":\"working tree\",\"commit\":null},\
+                   \\"mergeBases\":null}"
             (_, err) <- stopServer server sigTERM
             assertContains "diff: HEAD (against the working tree)\n" err
             assertContains "head: working tree\n" err
@@ -1030,6 +1041,14 @@ diffTests =
                   <> "\"}"
               )
               (Char8.unpack diff.body)
+            session <- getPath server "api/session"
+            Char8.unpack session.body
+              @?= "{\"mode\":\"diff\",\"spec\":\"main...feature\",\
+                  \\"base\":{\"label\":\"main\",\"commit\":\""
+                <> mergeBase
+                <> "\"},\"head\":{\"label\":\"feature\",\"commit\":\""
+                <> feature
+                <> "\"},\"mergeBases\":1}"
             base <- getPath server "api/files/base"
             let body = Char8.unpack base.body
             assertContains "\"path\":\"src/G.hs\"" body

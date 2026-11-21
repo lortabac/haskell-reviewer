@@ -1,12 +1,12 @@
-// The module tree, loaded once and shared by the sidebar, the project
-// notices, the file view and the search box.
+// The module tree of the page's side, loaded once per side and shared
+// by the sidebar, the project notices, the file view and the search
+// box.
 import {
   createContext,
   createMemo,
   createResource,
   type JSX,
   type ParentProps,
-  type Resource,
   useContext,
 } from "solid-js";
 import { getJson, type Result } from "../api/client";
@@ -15,6 +15,9 @@ import {
   type ModuleSource,
   type ModuleTree,
 } from "../api/modules";
+import { apiModulesUrl } from "../docs/urls";
+import { usePageSide } from "../session";
+import type { Side } from "../sides";
 
 // Keys of the disclosure groups in the module tree.
 // JSON, since paths and component names can hold ":".
@@ -125,7 +128,9 @@ export function moduleNames(tree: ModuleTree): ModuleName[] {
 }
 
 export interface Modules {
-  tree: Resource<Result<ModuleTree>>;
+  // The answer for the page's side; undefined while loading.
+  tree: () => Result<ModuleTree> | undefined;
+  loading: () => boolean;
   // The tree once loaded, else undefined (loading or failed).
   ok: () => ModuleTree | undefined;
   bySource: () => ReadonlyMap<string, SourceInfo>;
@@ -137,10 +142,23 @@ export interface Modules {
 
 const ModulesContext = createContext<Modules>();
 
+// The module tree of the page's side. The last tree of each side is
+// kept, so going back to a side is instant (D-332).
 export function ModulesProvider(props: ParentProps): JSX.Element {
-  const [tree] = createResource(() =>
-    getJson("/api/modules/tree", decodeModuleTree),
-  );
+  const side = usePageSide();
+  const trees = new Map<Side, Result<ModuleTree>>();
+  const [answer] = createResource(side, async (s) => {
+    const got =
+      trees.get(s) ?? (await getJson(apiModulesUrl(s), decodeModuleTree));
+    if (got.kind === "ok") trees.set(s, got);
+    return { side: s, got };
+  });
+  // Only the page's side: never the last side's tree while loading.
+  const tree = (): Result<ModuleTree> | undefined => {
+    const r = answer();
+    // Safety net: createResource already drops late answers.
+    return r?.side === side() ? r.got : undefined;
+  };
   const ok = createMemo(() => {
     const r = tree();
     return r?.kind === "ok" ? r.value : undefined;
@@ -166,7 +184,15 @@ export function ModulesProvider(props: ParentProps): JSX.Element {
         t.other.some((o) => o.kind === "module"))
     );
   });
-  const value: Modules = { tree, ok, bySource, byRef, names, hasModules };
+  const value: Modules = {
+    tree,
+    loading: () => answer.loading || tree() === undefined,
+    ok,
+    bySource,
+    byRef,
+    names,
+    hasModules,
+  };
   return (
     <ModulesContext.Provider value={value}>
       {props.children}

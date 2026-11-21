@@ -16,6 +16,7 @@ import {
   makeHlProject,
   makeLinksProject,
   makeProject,
+  makeSidesProject,
   type Project,
 } from "./project";
 import { type Proxy, startProxy } from "./proxy";
@@ -86,6 +87,7 @@ interface TestFixtures {
     root?: string;
     configHome?: string;
     stateHome?: string;
+    diff?: string;
   }) => Promise<Server>;
   xdg: { configHome: string; stateHome: string };
   startProxy: (backend: number) => Promise<Proxy>;
@@ -98,6 +100,7 @@ interface WorkerFixtures {
   docsProject: Project;
   hlProject: Project;
   linksProject: Project;
+  sidesProject: Project;
 }
 
 export const test = base.extend<TestFixtures, WorkerFixtures>({
@@ -151,6 +154,16 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     { scope: "worker" },
   ],
 
+  sidesProject: [
+    // eslint-disable-next-line no-empty-pattern
+    async ({}, use) => {
+      const p = await makeSidesProject();
+      await use(p);
+      await p.remove();
+    },
+    { scope: "worker" },
+  ],
+
   // eslint-disable-next-line no-empty-pattern
   xdg: async ({}, use) => {
     const dir = await mkdtemp(join(tmpdir(), "hr-e2e-xdg-"));
@@ -168,6 +181,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
         root: opts?.root ?? project.root,
         configHome: opts?.configHome ?? xdg.configHome,
         stateHome: opts?.stateHome ?? xdg.stateHome,
+        diff: opts?.diff,
       });
       servers.push(s);
       return s;

@@ -1,5 +1,6 @@
 // One module's page (CBOR). Shape: see Note [Module page] in
 // HaskellReviewer.Server.Wire.Page.
+import type { Side } from "../sides";
 import { type Code, decodeCode } from "./code";
 import {
   array,
@@ -1152,9 +1153,13 @@ export function findDecl(
 // declaration or Haddock anchor if given. Both percent-encoded: refs
 // are paths for loose modules, anchors can hold "#", "%", spaces, any
 // character (an instance head).
-export function docsHref(ref: string, anchor: string | null = null): string {
+export function docsHref(
+  side: Side,
+  ref: string,
+  anchor: string | null = null,
+): string {
   return (
-    "/docs/tree/" +
+    `/docs/${side}/` +
     encodePath(ref) +
     (anchor === null ? "" : "#" + encodeURIComponent(anchor))
   );

@@ -36,7 +36,7 @@ import HaskellReviewer.Server.Api (FilesApi (..))
 import HaskellReviewer.Server.Events (EventStream (..), keepAliveFrame, renderEvent)
 import HaskellReviewer.Server.Router (Routes (..), application)
 import HaskellReviewer.Server.Security (contentSecurityPolicy)
-import HaskellReviewer.Server.Wire (encodeIndexing)
+import HaskellReviewer.Server.Wire (SessionInfo (..), encodeIndexing, encodeSession)
 import HaskellReviewer.Session.Clients (EventId (..), newClients, openCount)
 import HaskellReviewer.Session.Index (Progress (..))
 import HaskellReviewer.Session.Snapshot (Generation (..), IndexingState (..))
@@ -469,7 +469,8 @@ routesFor events =
             logger = newLogger LevelInfo (\_ -> pure ())
           },
       prefs = fixedPrefs,
-      diff = Nothing
+      diff = Nothing,
+      session = encodeSession BrowseSession
     }
 
 -- | No indexing event ever.

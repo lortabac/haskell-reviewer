@@ -1,10 +1,12 @@
-// Refs page URLs: /<token>/refs/tree/<module ref…>?decl=<id> (SPEC §4.1).
+// Refs page URLs: /<token>/refs/<side>/<module ref…>?decl=<id> (SPEC
+// §4.1).
 import { encodePath, segmentsAfter } from "../files/paths";
+import type { Side } from "../sides";
 
 // Relative to the token. The id goes in the query, not the hash: the
 // server never sees a hash, and the page is not a place in a document.
-export function refsHref(moduleRef: string, decl: string): string {
-  return `/refs/tree/${encodePath(moduleRef)}?decl=${encodeURIComponent(decl)}`;
+export function refsHref(side: Side, moduleRef: string, decl: string): string {
+  return `/refs/${side}/${encodePath(moduleRef)}?decl=${encodeURIComponent(decl)}`;
 }
 
 // The first value of a query parameter, percent-decoded by hand: a raw
@@ -35,10 +37,11 @@ export function param(search: string, name: string): string | undefined {
 // What a location asks for; undefined if the path is bad or there is no
 // decl.
 export function refsFromLocation(
+  side: Side,
   pathname: string,
   search: string,
 ): { module: string; decl: string } | undefined {
-  const segs = segmentsAfter(pathname, ["refs", "tree"]);
+  const segs = segmentsAfter(pathname, ["refs", side]);
   if (segs === undefined) return undefined;
   const decl = param(search, "decl");
   if (decl === undefined || decl === "") return undefined;

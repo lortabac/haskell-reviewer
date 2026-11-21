@@ -29,6 +29,8 @@ import {
 import { IndexingContext } from "../events/indexing";
 import { lineHref, withBase } from "../files/paths";
 import { dispatchReselectAnchor } from "../reselectAnchor";
+import { usePageSide } from "../session";
+import type { Side } from "../sides";
 import { hitKey, hitState } from "../textsearch/snippet";
 import { SnippetText } from "../textsearch/SnippetText";
 import { textSearchHref } from "../textsearch/urls";
@@ -75,8 +77,10 @@ function moduleLabel(r: SearchResult): string | undefined {
   return r.module;
 }
 
-function resultHref(r: SearchResult): string {
-  return r.kind === "module" ? docsHref(r.ref) : docsHref(r.ref, r.anchor);
+function resultHref(side: Side, r: SearchResult): string {
+  return r.kind === "module"
+    ? docsHref(side, r.ref)
+    : docsHref(side, r.ref, r.anchor);
 }
 
 // A stable key for a result, kept across a partial refresh (D-209):
@@ -93,15 +97,15 @@ type Option =
   | { kind: "hit"; key: string; h: TextHit }
   | { kind: "all"; key: string; text: string; total: number };
 
-function optionHref(o: Option): string {
+function optionHref(side: Side, o: Option): string {
   switch (o.kind) {
     case "name":
-      return resultHref(o.r);
+      return resultHref(side, o.r);
     case "text":
     case "all":
-      return textSearchHref(o.text);
+      return textSearchHref(side, o.text);
     case "hit":
-      return lineHref(o.h.path, o.h.line);
+      return lineHref(side, o.h.path, o.h.line);
   }
 }
 
@@ -152,6 +156,8 @@ export function SearchBox(props: {
   const navigate = useNavigate();
   const location = useLocation();
   const indexingCtx = useContext(IndexingContext);
+  // The page's side, or the default one on pages with none (G15).
+  const side = usePageSide();
   const isHeader = (): boolean => props.placement === "header";
   const id = createUniqueId();
   const listboxId = `${id}-listbox`;
@@ -184,8 +190,9 @@ export function SearchBox(props: {
   };
   const text = createFetch(
     textQuery,
-    (q, signal) =>
-      getJson(textSearchUrl(q, textRows), decodeTextSearch, { signal }),
+    side,
+    (q, s, signal) =>
+      getJson(textSearchUrl(s, q, textRows), decodeTextSearch, { signal }),
     (v) => v.query,
   );
 
@@ -371,7 +378,8 @@ export function SearchBox(props: {
 
   // The full href (with the token base), for comparing against the
   // current URL.
-  const fullHref = (o: Option): string => withBase(base(), optionHref(o));
+  const fullHref = (o: Option): string =>
+    withBase(base(), optionHref(side(), o));
 
   // The result resolves to the page already showing: the router
   // ignores a link to its own URL (same as any in-page link), so
@@ -407,10 +415,10 @@ export function SearchBox(props: {
     }
     closePopup();
     if (o.kind === "hit") {
-      navigate(optionHref(o), { state: hitState(o.h) });
+      navigate(optionHref(side(), o), { state: hitState(o.h) });
       return;
     }
-    if (!reselectIfHere(fullHref(o))) navigate(optionHref(o));
+    if (!reselectIfHere(fullHref(o))) navigate(optionHref(side(), o));
   };
 
   // Mouse: the native click (and the router's interception of it)
@@ -518,7 +526,7 @@ export function SearchBox(props: {
             choose(active);
           } else {
             closePopup();
-            navigate(textSearchHref(m.text));
+            navigate(textSearchHref(side(), m.text));
           }
           return;
         }
@@ -550,7 +558,7 @@ export function SearchBox(props: {
   };
 
   const indexingSuffix = (): string => {
-    const ix = indexingCtx.indexing();
+    const ix = indexingCtx.of(side());
     if (ix === undefined) return "";
     // Done, but the search's own refetch hasn't landed yet: "(n of n)"
     // next to "still indexing" would be self-contradictory (C10).
