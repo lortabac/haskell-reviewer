@@ -74,7 +74,11 @@ langCases =
   [ -- Every kind of run, a tab, astral chars, a string with no end.
     ("scheme-basic.scm", "scheme.toml"),
     -- A BOM, CRLF, a lone CR at the end.
-    ("scheme-crlf.scm", "scheme.toml")
+    ("scheme-crlf.scm", "scheme.toml"),
+    -- Hashbang, the three string kinds, numbers, `this.x`.
+    ("javascript-basic.js", "javascript.toml"),
+    -- TS keywords and types.
+    ("typescript-basic.ts", "typescript.toml")
   ]
 
 fixtureDir :: FilePath
