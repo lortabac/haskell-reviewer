@@ -6,7 +6,12 @@ where
 
 import HaskellReviewer.Server.Api (json, serverError)
 import HaskellReviewer.Server.Security (methodNotAllowed, notFound)
-import HaskellReviewer.Session.Diff (DiffProblem (..), DiffSlot, awaitDiff)
+import HaskellReviewer.Session.Diff
+  ( DiffProblem (..),
+    DiffReady (..),
+    DiffSlot,
+    awaitDiff,
+  )
 import Network.HTTP.Types (methodGet)
 import Network.Wai (Application, Request (..))
 
@@ -17,7 +22,7 @@ diffFilesApp slot req respond
   | req.requestMethod /= methodGet = respond (methodNotAllowed "GET")
   | Just s <- slot =
       awaitDiff s >>= \case
-        Right body -> respond (json body)
+        Right ready -> respond (json ready.body)
         Left DiffNotListed -> respond (serverError "cannot list files")
         Left (DiffNotPaired _) -> respond (serverError "cannot pair files")
   | otherwise = respond notFound

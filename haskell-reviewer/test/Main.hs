@@ -29,6 +29,7 @@ import HaskellReviewer.Core.CppGoldenTest qualified
 import HaskellReviewer.Core.CppTest qualified
 import HaskellReviewer.Core.DeclsGoldenTest qualified
 import HaskellReviewer.Core.DeclsTest qualified
+import HaskellReviewer.Core.DiffTargetTest qualified
 import HaskellReviewer.Core.DocLinksTest qualified
 import HaskellReviewer.Core.EolTest qualified
 import HaskellReviewer.Core.FileListTest qualified
@@ -102,6 +103,7 @@ import HaskellReviewer.Server.ApiGoldenTest qualified
 import HaskellReviewer.Server.ApiTest qualified
 import HaskellReviewer.Server.AssetsTest qualified
 import HaskellReviewer.Server.CborTest qualified
+import HaskellReviewer.Server.DiffTest qualified
 import HaskellReviewer.Server.EventsTest qualified
 import HaskellReviewer.Server.ListenTest qualified
 import HaskellReviewer.Server.PageLinksTest qualified
@@ -206,6 +208,7 @@ main = do
               HaskellReviewer.Session.PrefsTest.tests
             ],
         HaskellReviewer.Core.CommitFilesTest.tests,
+        HaskellReviewer.Core.DiffTargetTest.tests,
         HaskellReviewer.Core.FileListTest.tests,
         HaskellReviewer.Core.GitTest.tests,
         HaskellReviewer.Core.IndexQueueTest.tests,
@@ -226,6 +229,7 @@ main = do
             [ HaskellReviewer.Core.LineDiffGoldenTest.tests,
               HaskellReviewer.Core.LineDiffOracleTest.tests,
               HaskellReviewer.Core.LineDiffTest.tests,
+              HaskellReviewer.Server.DiffTest.timeLimitTests,
               after AllFinish "/LineDiff all/ && !/LineDiff timing/" $
                 HaskellReviewer.Core.LineDiffTest.timingTests
             ],
@@ -321,6 +325,7 @@ main = do
                       HaskellReviewer.Server.ApiTest.tests,
                       HaskellReviewer.Server.RefsTest.tests,
                       HaskellReviewer.Server.SidesTest.tests,
+                      HaskellReviewer.Server.DiffTest.tests,
                       HaskellReviewer.Server.SourceTest.tests,
                       HaskellReviewer.Server.TextSearchTest.tests,
                       HaskellReviewer.Effects.SourceTest.parsingTests

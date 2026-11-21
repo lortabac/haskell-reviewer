@@ -31,6 +31,7 @@ import HaskellReviewer.Server.Api
     sourceApp,
   )
 import HaskellReviewer.Server.Assets (Asset (..), lookupAsset, shellFor)
+import HaskellReviewer.Server.Diff (DiffRoutes (..), diffApp)
 import HaskellReviewer.Server.DiffFiles (diffFilesApp)
 import HaskellReviewer.Server.Events (EventStream, eventsApp)
 import HaskellReviewer.Server.Prefs (prefsApp)
@@ -43,7 +44,6 @@ import HaskellReviewer.Server.Security
     withSecurityHeaders,
   )
 import HaskellReviewer.Server.TextSearch (textSearchApp)
-import HaskellReviewer.Session.Diff (DiffSlot)
 import HaskellReviewer.Session.Prefs (PrefsStore)
 import Network.HTTP.Types
   ( Header,
@@ -115,7 +115,10 @@ Paths below are what the router sees, after the token.
   params are a plain 400.
 - api/diff-files: the changed files of a diff session, as JSON
   (D-325). GET only (405 otherwise, HEAD too), then a plain 404 in
-  browse mode.
+  browse mode. api/diff/<path…>[?ws=ignore]: one file's line diff,
+  base against head, as CBOR (Note [Diff route] in
+  "HaskellReviewer.Server.Diff"); same methods and mode check, a bad ws
+  is a plain 400, a path on neither side a 404 with a JSON body.
 - api/prefs: the UI preferences, as JSON. GET, and POST with an
   application/json body (Note [Prefs route] in
   "HaskellReviewer.Server.Prefs"); 405 otherwise, HEAD too.
@@ -155,8 +158,8 @@ data Routes = Routes
   { events :: EventStream,
     files :: FilesApi,
     prefs :: PrefsStore,
-    -- | The pairing, in diff mode only.
-    diff :: Maybe DiffSlot
+    -- | The pairing and the line diff, in diff mode only.
+    diff :: Maybe DiffRoutes
   }
 
 -- | The whole app. Paths are relative to the token: the router never
@@ -235,7 +238,8 @@ router shell routes req respond = case req.pathInfo of
   ["api", "search", side] -> searchApp routes.files side req respond
   ["api", "refs", side] -> refsApp routes.files side req respond
   ["api", "text-search", side] -> textSearchApp routes.files side req respond
-  ["api", "diff-files"] -> diffFilesApp routes.diff req respond
+  ["api", "diff-files"] -> diffFilesApp ((.slot) <$> routes.diff) req respond
+  "api" : "diff" : path -> diffApp routes.files routes.diff path req respond
   ["api", "prefs"] -> prefsApp routes.prefs req respond
   _ -> respond notFound
   where

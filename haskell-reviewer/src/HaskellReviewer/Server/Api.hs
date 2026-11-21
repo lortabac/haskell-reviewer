@@ -21,7 +21,10 @@ module HaskellReviewer.Server.Api
 
     -- * Responses
     json,
+    jsonWith,
+    cbor,
     serverError,
+    readFailed,
 
     -- * Internal, for tests
     cborWarmUp,
@@ -74,7 +77,7 @@ import HaskellReviewer.Core.Resolve (ModuleState (..), ParsedInput (..), isParti
 import HaskellReviewer.Core.Search (forceCandidates, moduleCandidates)
 import HaskellReviewer.Core.Sides (Side, parseSide, sideName, sideTag)
 import HaskellReviewer.Core.SourceLinks (LinksInput, linksInput, pageLinks, sourceLinks)
-import HaskellReviewer.Effects.FileSystem (ListError, ReadError (..))
+import HaskellReviewer.Effects.FileSystem (ListError, ReadError (..), missingReason)
 import HaskellReviewer.Effects.Log (Logger, logInfo)
 import HaskellReviewer.Effects.Parser (markdownGuarded)
 import HaskellReviewer.Effects.Source (EntrySource, sharedBlob)
@@ -306,6 +309,8 @@ fileApp api side segs req respond
             api.readEntry snap path kind >>= \case
               Left ReadGone -> respond notFound
               Left (ReadFailed why) -> respond =<< readFailed api snap path why
+              Left (ReadMissing o) ->
+                respond =<< readFailed api snap path (missingReason o)
               Right content ->
                 respond . cbor $
                   encodeFileView
@@ -505,6 +510,8 @@ withText api snap path gone respond k = case Map.lookup path snap.files.entries 
     api.readEntry snap path kind >>= \case
       Left ReadGone -> gone
       Left (ReadFailed why) -> respond =<< readFailed api snap path why
+      -- Not local: as a read error here (D-331).
+      Left (ReadMissing o) -> respond =<< readFailed api snap path (missingReason o)
       Right (TextContent t) -> k (Just t)
       Right _ -> k Nothing
 

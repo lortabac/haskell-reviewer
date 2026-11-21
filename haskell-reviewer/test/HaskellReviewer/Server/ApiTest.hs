@@ -6,6 +6,7 @@ import ApiSupport
     RequestBody (..),
     TestApi (..),
     cborValue,
+    diffReady,
     fixtureApi,
     getApi,
     getApiQuery,
@@ -63,7 +64,7 @@ tests :: TestTree
 tests =
   testGroup "Api" $
     [ testCase "diff-files: 405 first, 404 in browse mode, 500s, 200" $ do
-        let with d = fixtureApi {diffFiles = d, workers = 0}
+        let with d = fixtureApi {diff = fmap (`diffReady` []) <$> d, workers = 0}
             call method d = do
               r <- requestApi method (with d) ["api", "diff-files"]
               pure (r.status, r.body)

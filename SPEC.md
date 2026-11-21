@@ -472,6 +472,10 @@ Available in diff mode only. It shows the textual diff file by file.
 - **Find in file** (`f`, or a toolbar button) searches the whole file on
   both sides, as in §4.4.
 - Option to ignore whitespace-only changes (as git's `-w`).
+- **Notes** instead of lines (D-331): binary (a → b bytes), too large,
+  submodule (a → b commits), a blob not in a partial clone, and "diff
+  too slow" (over the 2 s limit, §11.4.7). Line endings changed and BOM
+  added or removed are notes next to the lines.
 
 ### 4.6 Expanded (semantic) diff view
 
@@ -1649,7 +1653,16 @@ path.
   ("line endings changed"), and a BOM added or removed.
 - **Ignore whitespace** re-runs the diff as git's `-w`: lines are compared
   without git's whitespace (space, tab, CR, LF). This also ignores the
-  final newline.
+  final newline. The file's status stays what pairing says: a
+  whitespace-only edit is still modified, with only equal lines.
+- **Time limit**: one file's diff stops after 2 s and the diff view
+  says "diff too slow" (D-331). Normal files take a few ms; hostile
+  input (1 MiB of short, repeated lines) can take over 10 s.
+- **Which texts**: a file's text, a symlink's target (one line), and
+  an empty text for the side without the file, so an added or removed
+  file is all inserted or all deleted. Binary, too large, submodules
+  and blobs missing from a partial clone are not diffed: the view says
+  what each side is.
 
 #### 11.4.8 Semantic diff
 
@@ -1786,7 +1799,18 @@ a framework would cost more than it saves.
   removed, modified, renamed), a note (type-changed, mode-changed,
   filtered), the two sides' labels and commits, the changes outside
   ROOT (count, first 100 paths; null when not known), whether the
-  rename limit was hit and whether a side's list was cut at the cap; a plain 404 in browse mode. Every module of
+  rename limit was hit and whether a side's list was cut at the cap; a plain 404 in browse mode.
+  `GET api/diff/<path…>[?ws=ignore]` (CBOR, D-331) gives one file's
+  line diff, base against head; the path may be the head or the base
+  path (the base path for a removed file or a rename's source). It has
+  the same path, old path, similarity, status (plus unchanged) and note
+  as `api/diff-files`, whether whitespace was ignored, what each side
+  is (absent, text, binary, too large, symlink, submodule, not local)
+  and the diff: runs of equal, deleted and inserted lines with the
+  CRLF and BOM notes, or too slow, or not text. The texts stay on
+  `api/file` and `api/source`. A path on neither side is a 404 with
+  the source route's JSON body; a bad `ws` is a plain 400; a plain 404
+  in browse mode. Every module of
   `api/modules/<side>` has `change` and `settingsChanged` (null and
   false in browse mode). Every response
   carries its snapshot generation id, and the client caches by

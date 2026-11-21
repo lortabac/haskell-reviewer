@@ -63,6 +63,7 @@ import HaskellReviewer.Core.Address
 import HaskellReviewer.Core.Changed (ModuleKey, changedModules, moduleKeys)
 import HaskellReviewer.Core.CommitFiles (outsideChanges)
 import HaskellReviewer.Core.Config (UiDefaults)
+import HaskellReviewer.Core.DiffTarget (ChangeIndex, changeIndex, forceChangeIndex)
 import HaskellReviewer.Core.Eol (Filtering (..))
 import HaskellReviewer.Core.FileContent (FileContent, FileNotes (..))
 import HaskellReviewer.Core.FileList
@@ -182,6 +183,12 @@ import HaskellReviewer.Effects.Trace
     renderTraceFileError,
   )
 import HaskellReviewer.Server.Api (FilesApi (..), newSnapshot, warmUpSideNames)
+import HaskellReviewer.Server.Diff
+  ( DiffRoutes (..),
+    diffTimeLimit,
+    guardedLineDiff,
+    warmUpDiff,
+  )
 import HaskellReviewer.Server.Events
   ( EventStream (..),
     indexingGap,
@@ -206,7 +213,13 @@ import HaskellReviewer.Server.Wire
 import HaskellReviewer.Server.Wire.Page (warmUpPages)
 import HaskellReviewer.Server.Wire.Source (warmUpSource)
 import HaskellReviewer.Session.Clients (newClients, waitIdle)
-import HaskellReviewer.Session.Diff (DiffProblem (..), DiffSlot, fillDiff, newDiffSlot)
+import HaskellReviewer.Session.Diff
+  ( DiffProblem (..),
+    DiffReady (..),
+    DiffSlot,
+    fillDiff,
+    newDiffSlot,
+  )
 import HaskellReviewer.Session.Index
   ( IndexDeps (..),
     IndexFailure (..),
@@ -405,6 +418,9 @@ data Deps = Deps
       Platform ->
       Maybe GhcVersion ->
       IO Project,
+    -- | Build the shared values of the diff route ('warmUpDiff'), in
+    -- diff mode, before its slot is filled. About 50 ms: tests skip it.
+    diffWarmUp :: IO (),
     -- | Build the shared values of the parser, of resolution and of the
     -- page encoder. Each one runs even if one before it throws.
     -- See Note [Forced snapshot] in "HaskellReviewer.Server.Api".
@@ -463,6 +479,7 @@ newRealDeps spawnSetup = do
             warmUpRefs,
             Lang.warmUpLangs
           ],
+        diffWarmUp = warmUpDiff,
         readEntry = readSourceEntry,
         parse = Parser.parseGuarded,
         pairFiles = pairListed defaultSettings,
@@ -671,8 +688,11 @@ serveSides deps logger opts root defaults langs listers tracer shutdown t0 w0 = 
                     langs = langs,
                     logger = logger
                   }
+              diffRoutes =
+                (\s -> DiffRoutes {slot = s, lineDiff = guardedLineDiff diffTimeLimit})
+                  <$> diffSlot
               routes =
-                Routes {events = events, files = files, prefs = prefs, diff = diffSlot}
+                Routes {events = events, files = files, prefs = prefs, diff = diffRoutes}
               app = application listener.port token routes
               waitStop = do
                 why <- case opts.idleExit of
@@ -870,6 +890,10 @@ runListing deps logger tracer share session cliGhc = do
     -- snapshot] in "HaskellReviewer.Server.Api".
     unless (null built) (runWarmUp deps logger)
     t3 <- deps.clock.monotonic
+    -- The diff route's shared values, before its slot is filled.
+    diffWarmUp <- case session of
+      DiffModeWork _ _ -> Just <$> timedWarmUp
+      BrowseWork _ -> pure Nothing
     forM_ done $ \d -> do
       -- No thunk goes in a slot (Q-RTS-BLACKHOLE).
       v <- forcedEither (slotValue d.result)
@@ -896,6 +920,8 @@ runListing deps logger tracer share session cliGhc = do
       SideNotListed e _ -> reportError d.work.side e
       SideCrashed msg -> reportError d.work.side (ListCrashed msg)
     unless (null built) (reportWarmUp (elapsed t2 t3))
+    forM_ diffWarmUp $ \(Nanoseconds ns) ->
+      logVerbose logger ("diff warm-up: " <> showText (ns `div` 1_000) <> " us")
     case paired of
       PairedOk o -> do
         tracer.record (pairingSpan o.timing)
@@ -927,13 +953,25 @@ runListing deps logger tracer share session cliGhc = do
       SideNotListed e _ -> Left e
       SideCrashed msg -> Left (ListCrashed msg)
     diffBody = \case
-      PairedOk o -> Right o.body
+      PairedOk o -> Right DiffReady {body = o.body, changes = o.changes}
       PairFailed problem _ -> Left problem
       PairNotRun -> Left DiffNotListed
     markersOf paired side = case paired of
       PairedOk o | Just m <- onSide side o.markers -> m
       _ -> Map.empty
     pairingSpan t = Span {name = "pairing", start = t.start, duration = t.duration}
+    -- A crash only logs a line, as 'runWarmUp'.
+    timedWarmUp = do
+      t0 <- deps.clock.monotonic
+      try @SomeException deps.diffWarmUp >>= \case
+        Right () -> pure ()
+        Left e
+          | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
+          | otherwise ->
+              logInfo logger $
+                "haskell-reviewer: diff warm-up failed: " <> exceptionMessage e
+      t1 <- deps.clock.monotonic
+      pure (elapsed t0 t1)
     timed what side t =
       Span {name = spanName what side, start = t.start, duration = t.duration}
     reportError side e =
@@ -1034,6 +1072,8 @@ data Paired
 data PairOutput = PairOutput
   { -- | The body of api/diff-files.
     body :: LBS.ByteString,
+    -- | For api/diff/<path…>.
+    changes :: ChangeIndex,
     markers :: Pair (Map ModuleId Marker),
     timing :: Timing,
     -- | For --verbose, after the fill.
@@ -1060,6 +1100,7 @@ pairSides deps logger done diff = case (lookup HeadSide ready, lookup BaseSide r
         pure . PairedOk $
           PairOutput
             { body = o.body,
+              changes = o.changes,
               markers = o.markers,
               timing = timing,
               report = pairingLine o.pairing <> " in " <> ms
@@ -1100,11 +1141,13 @@ pairSides deps logger done diff = case (lookup HeadSide ready, lookup BaseSide r
               }
           body = encodeDiffFiles firstGeneration files
       _ <- evaluate (LBS.length body)
+      changes <- evaluate (changeIndex p.changes)
+      _ <- evaluate (forceChangeIndex changes)
       let facts s = moduleFacts s.keys s.modules
           markers = moduleMarkers p (facts <$> sides)
       _ <- evaluate (forceMarkers markers.head)
       _ <- evaluate (forceMarkers markers.base)
-      pure Encoded {pairing = p, body = body, markers = markers}
+      pure Encoded {pairing = p, body = body, changes = changes, markers = markers}
     sideOutside = \case
       CommitEntries c -> Just c.outside
       WorkTreeEntries w -> w.outside
@@ -1137,6 +1180,7 @@ pairSides deps logger done diff = case (lookup HeadSide ready, lookup BaseSide r
 data Encoded = Encoded
   { pairing :: Pairing,
     body :: LBS.ByteString,
+    changes :: ChangeIndex,
     markers :: Pair (Map ModuleId Marker)
   }
 
