@@ -1,0 +1,52 @@
+# TypeScript. Format: SPEC §5.6. Same as javascript.toml, plus TS
+# keywords and built-in types (kept apart so `type` or `string` isn't
+# coloured in JS).
+# Not handled:
+# - regex literals: a quote inside /…/ starts a string.
+# - ${…} in a template string: all literal.
+# - operators: plain (they can't be words).
+# - the dot in 1.5: plain (with . in word-chars, this.x is one word).
+# .tsx is left out: an apostrophe in JSX text starts a string.
+
+extensions = ["ts", "mts", "cts"]
+word-chars = "$_"
+line-comments = ["//", "#!"]
+numbers = true
+
+[[block-comments]]
+open = "/*"
+close = "*/"
+
+[[strings]]
+open = "\""
+close = "\""
+escape = "\\"
+
+[[strings]]
+open = "'"
+close = "'"
+escape = "\\"
+
+[[strings]]
+open = "`"
+close = "`"
+escape = "\\"
+
+[words]
+keyword = [
+  "as", "async", "await", "break", "case", "catch", "class", "const",
+  "continue", "debugger", "default", "delete", "do", "else", "enum",
+  "export", "extends", "finally", "for", "function", "if", "implements",
+  "import", "in", "instanceof", "interface", "let", "new", "of", "package",
+  "private", "protected", "public", "return", "static", "super", "switch",
+  "this", "throw", "try", "typeof", "var", "void", "while", "with", "yield",
+  # TS only.
+  "abstract", "accessor", "asserts", "declare", "global", "infer", "is",
+  "keyof", "module", "namespace", "override", "readonly", "satisfies",
+  "type", "unique",
+]
+typeCon = [
+  "any", "bigint", "boolean", "never", "number", "object", "string",
+  "symbol", "unknown",
+]
+literal = ["true", "false", "null", "undefined", "NaN", "Infinity"]

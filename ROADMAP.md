@@ -288,7 +288,7 @@ nicer than a web diff, because every line links into the right snapshot.
 - Markdown files in browse mode: highlighted source, rendered docs view
   (§4.2, §5.6; D-327, D-328). Added during M3.
 - Other languages highlighted from rule files in the user config (§5.6;
-  D-330). Scheme only for now; more languages later. Added during M3.
+  D-330, D-334). Scheme, JavaScript, TypeScript. Added during M3.
 - Header shows revisions; copy buttons give full hashes (§5.7).
 - Keys: `n p ] [ u 3`. Diff URLs (§4.1).
 - Reload (§5.2): a new snapshot generation swapped in atomically (D-60),
