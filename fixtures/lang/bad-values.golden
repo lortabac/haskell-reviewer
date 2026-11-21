@@ -1,0 +1,22 @@
+extensions: ok
+word-chars: 
+line-comments: #
+numbers: false
+block-comment: (* *)
+word: k keyword
+== warnings
+x.toml:1:21: extensions: bad extension ""
+x.toml:1:25: extensions: bad extension "a.b"
+x.toml:1:32: extensions: bad extension "a/b"
+x.toml:1:39: extensions: bad extension "a b"
+x.toml:2:14: word-chars: a space or control character
+x.toml:3:18: line-comments: an empty delimiter
+x.toml:3:22: line-comments: a delimiter with a space or control character
+x.toml:5:12: block-comments.open: an empty delimiter
+x.toml:6:3: block-comments.close: missing
+x.toml:10:41: strings.escape: expected one character
+x.toml:11:25: strings.close: a delimiter with a space or control character
+x.toml:12:39: strings.escape: expected one character
+x.toml:16:12: words.keyword: an empty word
+x.toml:17:1: words.nope: unknown class, expected keyword, typeCon, variable, operator, literal, comment or pragma
+x.toml:18:1: words.cppExcluded: unknown class, expected keyword, typeCon, variable, operator, literal, comment or pragma

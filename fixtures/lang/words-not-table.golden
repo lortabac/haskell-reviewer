@@ -1,0 +1,6 @@
+extensions: ok
+word-chars: 
+line-comments: 
+numbers: false
+== warnings
+x.toml:2:9: words: expected a table, got an array

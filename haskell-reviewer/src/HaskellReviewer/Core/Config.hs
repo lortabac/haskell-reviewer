@@ -15,6 +15,12 @@ module HaskellReviewer.Core.Config
     parseConfig,
     renderConfigWarning,
 
+    -- * TOML, for other config files
+    Warn,
+    walkToml,
+    typeName,
+    quoted,
+
     -- * Names
     themeName,
     themeFromName,
@@ -125,17 +131,24 @@ builtinDefaults =
 -- | The defaults from a config file, and its problems. See Note
 -- [Config file].
 parseConfig :: Text -> ParsedConfig
-parseConfig input = case parseRawToml text of
-  Left (Located pos msg) ->
-    ParsedConfig builtinDefaults [warning (pos, Text.pack msg <> "; file ignored")]
+parseConfig = uncurry ParsedConfig . walkToml builtinDefaults walk
+  where
+    walk (MkTable top) = Map.foldlWithKey' topKey (builtinDefaults, []) top
+
+-- | A problem and where it is, before we fix the column.
+type Warn = (Position, Text)
+
+-- | Parse TOML and walk its top table. The walk gives a value and its
+-- warnings, in any order. A syntax error or a key set twice: the
+-- default, and one warning. See Note [Config file].
+walkToml :: a -> (Table' Position -> (a, [Warn])) -> Text -> (a, [ConfigWarning])
+walkToml def walk input = case parseRawToml text of
+  Left (Located pos msg) -> (def, [warning (pos, Text.pack msg <> "; file ignored")])
   Right exprs -> case semantics exprs of
-    Left err ->
-      ParsedConfig
-        builtinDefaults
-        [warning (err.errorAnn, semanticMessage err <> "; file ignored")]
-    Right (MkTable top) ->
-      let (d, ws) = Map.foldlWithKey' topKey (builtinDefaults, []) top
-       in ParsedConfig d (map warning (sortOn (posIndex . fst) ws))
+    Left err -> (def, [warning (err.errorAnn, semanticMessage err <> "; file ignored")])
+    Right top ->
+      let (x, ws) = walk top
+       in (x, map warning (sortOn (posIndex . fst) ws))
   where
     -- Editors on Windows may add one.
     text = fromMaybe input (Text.stripPrefix "\xFEFF" input)
@@ -195,7 +208,7 @@ sidebarFromName = \case
 -- * Internal
 
 -- | The defaults so far, and the warnings, in no order.
-type Acc = (UiDefaults, [(Position, Text)])
+type Acc = (UiDefaults, [Warn])
 
 topKey :: Acc -> Text -> (Position, Value' Position) -> Acc
 topKey acc key (keyPos, value) = case (key, value) of
@@ -239,6 +252,7 @@ escapeControls = Text.concatMap $ \ch ->
     then "\\x" <> Text.justifyRight 2 '0' (Text.pack (showHex (ord ch) ""))
     else Text.singleton ch
 
+-- | In double quotes, for messages.
 quoted :: Text -> Text
 quoted t = "\"" <> t <> "\""
 

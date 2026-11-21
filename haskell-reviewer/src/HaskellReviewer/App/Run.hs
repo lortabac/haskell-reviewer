@@ -71,6 +71,7 @@ import HaskellReviewer.Core.FileList
     ListSource (..),
     fileListCap,
   )
+import HaskellReviewer.Core.Lang (Langs)
 import HaskellReviewer.Core.Markers (Marker (..), moduleFacts, moduleMarkers)
 import HaskellReviewer.Core.ModuleModel (ModuleParse (..))
 import HaskellReviewer.Core.Modules
@@ -139,6 +140,7 @@ import HaskellReviewer.Effects.FileSystem
     renderRootError,
   )
 import HaskellReviewer.Effects.FileSystem qualified as FileSystem
+import HaskellReviewer.Effects.Lang qualified as Lang
 import HaskellReviewer.Effects.Log
   ( LogLevel,
     Logger,
@@ -385,6 +387,10 @@ data Deps = Deps
     -- | Read config.toml, log its problems, give back the UI defaults.
     -- Never fails. See Note [Config file] in "HaskellReviewer.Core.Config".
     loadConfig :: Logger -> IO UiDefaults,
+    -- | Read the highlighting rules, log their problems. Never fails,
+    -- and the result is fully built. See Note [Language rules] in
+    -- "HaskellReviewer.Core.Lang".
+    loadLangs :: Logger -> IO Langs,
     -- | Where ui.json is. See Note [Saving preferences] in
     -- "HaskellReviewer.Session.Prefs".
     prefsPath :: IO (Either XdgProblem FilePath),
@@ -443,11 +449,20 @@ newRealDeps spawnSetup = do
         loadConfig = \logger -> do
           env <- getEnvironment
           Config.loadConfig logger (`lookup` env),
+        loadLangs = \logger -> do
+          env <- getEnvironment
+          Lang.loadLangs logger (`lookup` env),
         prefsPath = (\env -> prefsFile (`lookup` env)) <$> getEnvironment,
         probeFiles = Source.probeFiles,
         readProject = Session.Project.readProject,
         warmUp =
-          [Parser.warmUpParser, warmUpResolve, warmUpPages, warmUpSource, warmUpRefs],
+          [ Parser.warmUpParser,
+            warmUpResolve,
+            warmUpPages,
+            warmUpSource,
+            warmUpRefs,
+            Lang.warmUpLangs
+          ],
         readEntry = readSourceEntry,
         parse = Parser.parseGuarded,
         pairFiles = pairListed defaultSettings,
@@ -533,11 +548,12 @@ startUp deps args = do
               -- On this thread, before warp: see Note [Startup work]. A
               -- bad config is never an exit.
               defaults <- evaluate =<< deps.loadConfig logger
+              langs <- evaluate =<< deps.loadLangs logger
               probed <- deps.probeFiles logger root opts.diff
               case probed of
                 Left e -> startupFailed deps (BadProbe e) `finally` tracer.close
                 Right probe ->
-                  serve deps logger opts root defaults probe tracer shutdown t0 w0
+                  serve deps logger opts root defaults langs probe tracer shutdown t0 w0
                     `finally` tracer.close
 
 -- | Listen, print the URL, serve until a signal. In diff mode the
@@ -549,13 +565,14 @@ serve ::
   Options ->
   Root ->
   UiDefaults ->
+  Langs ->
   Probe ->
   Tracer ->
   Shutdown ->
   MonotonicTime ->
   UTCTime ->
   IO ExitCode
-serve deps logger opts root defaults probe tracer shutdown t0 w0 = case probe of
+serve deps logger opts root defaults langs probe tracer shutdown t0 w0 = case probe of
   BrowseProbe l -> go (BrowseListers l)
   DiffProbe info with -> do
     -- Built here, on this thread, before warp (Q-RTS-BLACKHOLE).
@@ -564,7 +581,8 @@ serve deps logger opts root defaults probe tracer shutdown t0 w0 = case probe of
     mapM_ (logVerbose logger) ls
     with (go . DiffListers info)
   where
-    go listers = serveSides deps logger opts root defaults listers tracer shutdown t0 w0
+    go listers =
+      serveSides deps logger opts root defaults langs listers tracer shutdown t0 w0
 
 -- | The listers of a session, by mode.
 data Listers
@@ -579,13 +597,14 @@ serveSides ::
   Options ->
   Root ->
   UiDefaults ->
+  Langs ->
   Listers ->
   Tracer ->
   Shutdown ->
   MonotonicTime ->
   UTCTime ->
   IO ExitCode
-serveSides deps logger opts root defaults listers tracer shutdown t0 w0 = do
+serveSides deps logger opts root defaults langs listers tracer shutdown t0 w0 = do
   stoppedEarly <- shutdown.stopped
   if stoppedEarly
     then pure ExitSuccess
@@ -649,6 +668,7 @@ serveSides deps logger opts root defaults listers tracer shutdown t0 w0 = do
                   { snapshotOn = \s -> awaitSnapshot . (.slot) <$> lookupSide s sides,
                     readEntry = \snap -> deps.readEntry snap.source,
                     fileNotes = \snap -> fileNotes snap.source,
+                    langs = langs,
                     logger = logger
                   }
               routes =

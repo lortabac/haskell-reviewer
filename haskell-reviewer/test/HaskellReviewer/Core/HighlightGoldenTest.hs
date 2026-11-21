@@ -18,6 +18,7 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
 import HaskellReviewer.Core.Highlight (DisplayClass, Run (..), highlightModule, runList)
+import HaskellReviewer.Core.LangGoldenTest (langCases)
 import HaskellReviewer.Core.Markdown (MarkdownEnv (..), parseMarkdown)
 import HaskellReviewer.Core.Modules (Literate (..))
 import HaskellReviewer.Core.Parser (ParseSettings (..), defaultParseSettings)
@@ -135,11 +136,14 @@ dump c = do
   r <- parseGuarded c.settings text
   pure (LBS.fromStrict (Text.Encoding.encodeUtf8 (dumpHighlight text r)))
 
--- | Fail if a fixture or golden file has no case.
+-- | Fail if a fixture or golden file has no case. The files scanned
+-- with language rules are LangGoldenTest's.
 noStale :: IO ()
 noStale = do
   files <- Dir.listDirectory fixtureDir
   sort [dropExtension f | f <- files, takeExtension f == ".golden"]
-    @?= sort (map (.golden) cases <> map dropExtension markdownCases)
+    @?= sort (map (.golden) cases <> map dropExtension (markdownCases <> others))
   sort [f | f <- files, takeExtension f /= ".golden"]
-    @?= sort (nub (map (.file) cases) <> markdownCases)
+    @?= sort (nub (map (.file) cases) <> markdownCases <> others)
+  where
+    others = map fst langCases

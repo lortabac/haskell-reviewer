@@ -1,0 +1,3 @@
+ignored
+== warnings
+x.toml:2:1: key "extensions" is set twice; file ignored

@@ -1,0 +1,5 @@
+extensions: x
+word-chars: 
+line-comments: 
+numbers: false
+== warnings

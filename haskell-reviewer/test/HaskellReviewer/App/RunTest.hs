@@ -44,6 +44,7 @@ import HaskellReviewer.Core.FileList
     mkFileList,
   )
 import HaskellReviewer.Core.Git (GitVersion (..), History (..), ObjectId (..))
+import HaskellReviewer.Core.Lang (noLangs)
 import HaskellReviewer.Core.ModuleModel
   ( ModuleParse (..),
     TextOnlyReason (..),
@@ -1443,6 +1444,7 @@ newFake = do
             newToken = pure fakeToken,
             listen = \_ _ -> pure (Right listener),
             loadConfig = \_ -> pure builtinDefaults,
+            loadLangs = \_ -> pure noLangs,
             -- In memory: never the real ui.json.
             prefsPath = pure (Left HomeUnset),
             -- Never done: no line or span from the listing.

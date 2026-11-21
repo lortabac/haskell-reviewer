@@ -2,7 +2,7 @@
 -- A header line, the warnings, then one line per run:
 -- @line:col-line:col class "text"@, with only the first line of a run's
 -- text.
-module HighlightDump (dumpHighlight, dumpMarkdown) where
+module HighlightDump (dumpHighlight, dumpMarkdown, dumpLang, className) where
 
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -51,6 +51,11 @@ dumpHighlight text p =
 -- | The runs of a Markdown file (BOM included, as on disk).
 dumpMarkdown :: Text -> Markdown -> Text
 dumpMarkdown text m = Text.unlines ("markdown" : dumpRuns text m.runs)
+
+-- | The runs of a file scanned with language rules (BOM included, as
+-- on disk).
+dumpLang :: Text -> [Run] -> Text
+dumpLang text runs = Text.unlines ("lang" : dumpRuns text runs)
 
 -- | One line per run.
 dumpRuns :: Text -> [Run] -> [Text]

@@ -1,0 +1,11 @@
+extensions: ok
+word-chars: 
+line-comments: 
+numbers: false
+block-comment: a b
+string: a b
+== warnings
+x.toml:2:1: unknown key "colour"
+x.toml:7:1: unknown key "block-comments.depth"
+x.toml:12:1: unknown key "strings.multiline"
+x.toml:14:2: unknown table [other]

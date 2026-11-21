@@ -1,0 +1,17 @@
+extensions: scm ss
+word-chars: !#-?
+line-comments: ; //
+numbers: true
+block-comment: #| |# nested
+block-comment: /* */
+string: " " escape \
+string: ' '
+word: #lang pragma
+word: #t literal
+word: - operator
+word: T typeCon
+word: define keyword
+word: if keyword
+word: rem comment
+word: v variable
+== warnings

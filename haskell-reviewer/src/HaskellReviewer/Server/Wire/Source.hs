@@ -9,6 +9,7 @@ module HaskellReviewer.Server.Wire.Source
     -- * Building
     parsedSource,
     textOnlySource,
+    langSource,
 
     -- * Bodies
     encodeSource,
@@ -38,6 +39,7 @@ import HaskellReviewer.Core.Highlight
     linkedRunList,
     linkedRunsFromList,
   )
+import HaskellReviewer.Core.Lang (Lang, scanLang)
 import HaskellReviewer.Core.LineRegions
   ( LineKind (..),
     LineRegion (..),
@@ -187,6 +189,18 @@ parsedSource m links =
       targets = links.targets,
       outline = links.outline
     }
+
+-- | A file in a language with rules (Note [Language rules] in
+-- "HaskellReviewer.Core.Lang"): its runs, no links.
+langSource :: Lang -> Text -> SourceBody
+langSource lang text =
+  LexedBody
+    LexedSource
+      { runs = linkedRunsFromList [(r, 0) | r <- scanLang lang text],
+        regions = [],
+        targets = [],
+        outline = []
+      }
 
 -- | A text-only module: its tokens, if it lexed, and its regions. No
 -- links. Plain when there is neither.

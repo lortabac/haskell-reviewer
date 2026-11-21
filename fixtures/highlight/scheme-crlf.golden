@@ -1,0 +1,11 @@
+lang
+1:1-1:15 comment "; BOM and CRLF"
+2:2-2:8 keyword "define"
+2:11-3:3 literal "\"a"…
+3:5-3:10 comment "; end"
+4:1-5:3 comment "#| open"…
+5:5-5:7 keyword "if"
+5:8-5:10 literal "#f"
+5:11-5:12 literal "1"
+5:13-5:14 literal "2"
+6:1-6:7 comment "; last"

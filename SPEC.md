@@ -746,8 +746,42 @@ keep the column (D-284).
   Markdown files are highlighted too, with the same classes (D-327):
   headings keyword, code literal, markers (list, quote, fence, rule,
   table delimiter row) operator, links typeCon, HTML comment; `haskell` /
-  `hs` code blocks get GHC's tokens, with no links. Other non-Haskell
-  files (`.cabal`, `.yaml`, …) are always plain text.
+  `hs` code blocks get GHC's tokens, with no links.
+- **Other languages** are coloured from rule files, with the same
+  classes and no links (D-330). Nothing about a language is in the
+  code. One TOML file per language, in
+  `$XDG_CONFIG_HOME/haskell-reviewer/highlight/*.toml` (§7); `make
+  install` copies the ones we ship (§11.8), and users add their own.
+  A file is matched by its extension, any case. Haskell and Markdown
+  files never use the rules. A file with no rules is plain text.
+
+  ```toml
+  extensions = ["scm", "ss"]         # needed; no dot
+  word-chars = "!$%&*/:<=>?^_~+-.#"  # in words, on top of letters and digits
+  line-comments = [";"]
+  numbers = true                     # a word that starts with a digit: literal
+
+  [[block-comments]]
+  open = "#|"
+  close = "|#"
+  nested = true                      # default false
+
+  [[strings]]
+  open = "\""
+  close = "\""
+  escape = "\\"                      # one character; optional
+
+  [words]                            # class = words
+  keyword = ["define", "lambda"]
+  literal = ["#t", "#f"]
+  ```
+
+  The file is read once, left to right. At each place: a block comment,
+  else a line comment, else a string, else a word. Comments are
+  *comment*, strings are *literal*. `[words]` keys are `keyword`,
+  `typeCon`, `variable`, `operator`, `literal`, `comment`, `pragma`; a
+  word in no list is plain. A comment or string with no end goes to the
+  end of the file. There are no regular expressions: scanning is linear.
 - Each class has its own theme colour, checked ≥ 4.5:1 in both themes on
   every background code shows on, selection too (D-280). CPP-excluded
   lines are greyed and also get a dashed bar and a label; directives use
@@ -1034,6 +1068,13 @@ as not configured (§8), with the reason.
   `theme`, `exported-only`, `sidebar`, `single-key-shortcuts`; D-199,
   D-297). A bad file is never fatal:
   each problem is a warning on stderr with line and column.
+- Highlighting rules for other languages are next to it, in
+  `highlight/*.toml` (§5.6, D-330). They are read once at start, in name
+  order, with the same limits as `config.toml` (regular files, UTF-8,
+  64 KiB) and the same kind of warnings: a bad key is ignored, and a file
+  with a syntax error or no extension is ignored. If two files name the
+  same extension, the first one keeps it. Other files in the dir are not
+  read. The tool never writes there.
 - UI choices made in the page and "remembered across sessions" (theme
   override, diff layout, "exported only", single-key shortcuts) are stored
   by the tool in `$XDG_STATE_HOME/haskell-reviewer/ui.json` (D-68, D-200;
@@ -1840,7 +1881,11 @@ a framework would cost more than it saves.
 - **Source only in v1.** There is no Hackage release and there are no
   prebuilt binaries. Installation:
   - `make install` builds and installs the main binary. It needs only GHC
-    and `cabal`, since the frontend bundle is committed.
+    and `cabal`, since the frontend bundle is committed. It also copies
+    the highlighting rules we ship (`highlight/*.toml`, §5.6) to the user
+    config (`CONFDIR`, default `$XDG_CONFIG_HOME/haskell-reviewer`). A
+    file already there that differs is kept as `<name>.toml.bak`; put
+    your own rules in files with other names.
   - `make install-hie GHC=ghc-9.10` builds the companion with that GHC and
     installs it as `haskell-reviewer-hie-9.10`. `--version` and the header
     hint (§7.1) print the exact command for a missing companion.
