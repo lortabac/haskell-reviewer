@@ -24,6 +24,7 @@ module HaskellReviewer.Core.Lang
 where
 
 import Data.Char (isAlphaNum, isControl, isDigit, isSpace)
+import Data.Containers.ListUtils (nubOrd)
 import Data.Either (partitionEithers)
 import Data.List (find)
 import Data.Map.Strict (Map)
@@ -66,6 +67,8 @@ install` copies the files we ship (highlight/ in the repo).
   close = "\""
   escape = "\\"                    # one character; optional
 
+  char-prefixes = ["#\\"]          # #\a, #\space, #\": literal
+
   [words]                          # class = words
   keyword = ["define", "lambda"]
   literal = ["#t", "#f"]
@@ -74,15 +77,22 @@ The classes are the SPEC §5.6 ones: keyword, typeCon, variable,
 operator, literal, comment, pragma. Comments are comment, strings are
 literal. A word in no list stays plain.
 
-'scanLang' reads the text once, left to right. At each place it tries,
-in this order: a block comment, a line comment, a string, a word. A
-comment or string with no end goes to the end of the file. Runs can
-span lines; the client cuts them.
+'scanLang' reads the text once, left to right. Outside a word it
+tries, in this order: a block comment, a line comment, a string, a
+character, a word. A word is letters, digits and word-chars, as long as
+it goes: nothing starts inside it, and a word of [words] made of other
+characters never matches. A character is its prefix, one more
+character, and the word characters after it if that one was a word
+character. A comment or string with no end goes to the end of the
+file. Runs can span lines; the client cuts them.
 
 Problems are warnings, as for config.toml (Note [Config file] in
-"HaskellReviewer.Core.Config"): a bad key is ignored, and a file with no
-usable extension is ignored. A delimiter can't be empty or have a
-space in it.
+"HaskellReviewer.Core.Config"): a bad key or entry is left out, and a
+file with no usable extension is ignored. A delimiter can't be empty or
+have a space in it.
+
+The time is linear in the text, times the number of delimiters. Rule
+files are the user's own, so we set no limit.
 -}
 
 -- * Rules
@@ -96,6 +106,8 @@ data Lang = Lang
     lineComments :: [Text],
     blockComments :: [BlockComment],
     strings :: [StringRule],
+    -- | What starts a character literal.
+    charPrefixes :: [Text],
     numbers :: Bool,
     wordClasses :: Map Text DisplayClass
   }
@@ -143,6 +155,7 @@ emptyLang =
       lineComments = [],
       blockComments = [],
       strings = [],
+      charPrefixes = [],
       numbers = False,
       wordClasses = Map.empty
     }
@@ -185,7 +198,7 @@ forceLangs :: Langs -> ()
 forceLangs (Langs m) = Map.foldl' (\() l -> one l) () m
   where
     one l =
-      sum (map Text.length (l.extensions <> l.lineComments)) `seq`
+      sum (map Text.length (l.extensions <> l.lineComments <> l.charPrefixes)) `seq`
         foldr seq () l.blockComments `seq`
           foldr seq () l.strings `seq`
             Set.size l.wordChars `seq`
@@ -206,13 +219,14 @@ scanLang l = go (Pos 1 1) . noLastCr . stripBom
     blocks = [b | b <- l.blockComments, full b.open, full b.close]
     lines' = filter full l.lineComments
     strs = [s | s <- l.strings, full s.open, full s.close]
+    chars = filter full l.charPrefixes
     -- Only these characters can start a comment or a string.
     starts =
       Set.fromList . map Text.Unsafe.unsafeHead $
-        map (.open) blocks <> lines' <> map (.open) strs
+        map (.open) blocks <> lines' <> map (.open) strs <> chars
     isWord c = isAlphaNum c || Set.member c l.wordChars
 
-    go p t = case Text.uncons t of
+    go !p t = case Text.uncons t of
       Nothing -> []
       Just (c, rest)
         | Set.member c starts, Just (cls, after) <- delimited t -> emit p t after cls
@@ -239,7 +253,17 @@ scanLang l = go (Pos 1 1) . noLastCr . stripBom
           Just (CommentClass, lineEnd (dropLen d t))
       | Just s <- find (\s -> s.open `Text.isPrefixOf` t) strs =
           Just (LiteralClass, stringEnd s (dropLen s.open t))
+      | Just d <- find (`Text.isPrefixOf` t) chars =
+          Just (LiteralClass, charEnd (dropLen d t))
       | otherwise = Nothing
+
+    -- One character, and the rest of its name (#\space). A line end
+    -- is not taken.
+    charEnd t = case Text.uncons t of
+      Just (c, after)
+        | isWord c -> Text.dropWhile isWord after
+        | c /= '\n' && c /= '\r' -> after
+      _ -> t
 
     -- The line end stays out, and the \r of a CRLF.
     lineEnd t =
@@ -303,7 +327,7 @@ type Acc = (Lang, [Warn])
 langKey :: Acc -> Text -> (Position, Value' Position) -> Acc
 langKey (l, ws) key (keyPos, value) = case key of
   "extensions" ->
-    let (xs, w) = listOf key extension value in (l {extensions = xs}, w <> ws)
+    let (xs, w) = listOf key extension value in (l {extensions = nubOrd xs}, w <> ws)
   "word-chars" -> case value of
     Text' pos t
       | Text.any spaceLike t ->
@@ -312,6 +336,8 @@ langKey (l, ws) key (keyPos, value) = case key of
     _ -> (l, wrongType key "a string" value : ws)
   "line-comments" ->
     let (xs, w) = listOf key delimiter value in (l {lineComments = xs}, w <> ws)
+  "char-prefixes" ->
+    let (xs, w) = listOf key delimiter value in (l {charPrefixes = xs}, w <> ws)
   "numbers" -> case value of
     Bool' _ b -> (l {numbers = b}, ws)
     _ -> (l, wrongType key "a boolean" value : ws)

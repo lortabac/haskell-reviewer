@@ -1,6 +1,7 @@
 extensions: scm ss
 word-chars: !#-?
 line-comments: ; //
+char-prefixes: #\ ?
 numbers: true
 block-comment: #| |# nested
 block-comment: /* */

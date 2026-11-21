@@ -752,8 +752,9 @@ keep the column (D-284).
   code. One TOML file per language, in
   `$XDG_CONFIG_HOME/haskell-reviewer/highlight/*.toml` (§7); `make
   install` copies the ones we ship (§11.8), and users add their own.
-  A file is matched by its extension, any case. Haskell and Markdown
-  files never use the rules. A file with no rules is plain text.
+  A file is matched by its extension, any case. Haskell modules and
+  Markdown files never use the rules. A file with no rules is plain
+  text.
 
   ```toml
   extensions = ["scm", "ss"]         # needed; no dot
@@ -771,17 +772,26 @@ keep the column (D-284).
   close = "\""
   escape = "\\"                      # one character; optional
 
+  char-prefixes = ["#\\"]            # #\a, #\space, #\": literal
+
   [words]                            # class = words
   keyword = ["define", "lambda"]
   literal = ["#t", "#f"]
   ```
 
-  The file is read once, left to right. At each place: a block comment,
-  else a line comment, else a string, else a word. Comments are
-  *comment*, strings are *literal*. `[words]` keys are `keyword`,
-  `typeCon`, `variable`, `operator`, `literal`, `comment`, `pragma`; a
-  word in no list is plain. A comment or string with no end goes to the
-  end of the file. There are no regular expressions: scanning is linear.
+  The file is read once, left to right. Outside a word: a block comment,
+  else a line comment, else a string, else a character, else a word.
+  Comments are *comment*; strings and characters are *literal*. A word
+  is letters, digits and `word-chars`, as long as it goes: nothing
+  starts inside a word, and a `[words]` entry with other characters
+  never matches. A character is its prefix, one more character, and the
+  rest of the word if that one was a word character. `[words]` keys are
+  `keyword`, `typeCon`, `variable`, `operator`, `literal`, `comment`,
+  `pragma`; a word in no list is plain. A comment or string with no end
+  goes to the end of the file. There are no regular expressions:
+  scanning is linear in the text.
+  Modules of the project never use the rules, whatever their extension:
+  generated and preprocessed ones (`.x`, `.hsc`, …) stay plain (D-231).
 - Each class has its own theme colour, checked ≥ 4.5:1 in both themes on
   every background code shows on, selection too (D-280). CPP-excluded
   lines are greyed and also get a dashed bar and a label; directives use
@@ -1884,8 +1894,9 @@ a framework would cost more than it saves.
     and `cabal`, since the frontend bundle is committed. It also copies
     the highlighting rules we ship (`highlight/*.toml`, §5.6) to the user
     config (`CONFDIR`, default `$XDG_CONFIG_HOME/haskell-reviewer`). A
-    file already there that differs is kept as `<name>.toml.bak`; put
-    your own rules in files with other names.
+    file already there that differs is kept as `<name>.toml.bak` (`.bak2`,
+    … if taken: a backup is never overwritten); put your own rules in
+    files with other names.
   - `make install-hie GHC=ghc-9.10` builds the companion with that GHC and
     installs it as `haskell-reviewer-hie-9.10`. `--version` and the header
     hint (§7.1) print the exact command for a missing companion.

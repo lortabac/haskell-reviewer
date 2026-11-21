@@ -2,6 +2,7 @@ extensions = ["scm", ".SS"]
 word-chars = "-?!#"
 line-comments = [";", "//"]
 numbers = true
+char-prefixes = ["#\\", "?"]
 
 [[block-comments]]
 open = "#|"

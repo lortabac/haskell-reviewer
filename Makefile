@@ -1,8 +1,9 @@
 CABAL ?= cabal
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
-# Where the user config is (SPEC §7).
-CONFDIR ?= $(or $(XDG_CONFIG_HOME),$(HOME)/.config)/haskell-reviewer
+# Where the user config is (SPEC §7). A relative XDG_CONFIG_HOME doesn't
+# count, as in the tool.
+CONFDIR ?= $(if $(filter /%,$(XDG_CONFIG_HOME)),$(XDG_CONFIG_HOME),$(HOME)/.config)/haskell-reviewer
 BENCH_RUNS ?= 10
 BENCH_PROJECTS ?=
 BENCH_JSON ?=
@@ -116,14 +117,18 @@ e2e: build
 #
 # Also copies the highlighting rules (highlight/*.toml, SPEC §5.6) to
 # the user config. A file that is already there and differs is kept as
-# <name>.toml.bak first.
+# <name>.toml.bak first (.bak2, .bak3, ... if that one exists: no backup
+# is ever overwritten).
 install: build
 	install -d "$(BINDIR)"
 	install -m 0755 "$$($(CABAL) list-bin exe:haskell-reviewer)" "$(BINDIR)/haskell-reviewer"
 	install -d "$(CONFDIR)/highlight"
 	for f in highlight/*.toml; do \
 	  to="$(CONFDIR)/$$f"; \
-	  if [ -e "$$to" ] && ! cmp -s "$$f" "$$to"; then mv "$$to" "$$to.bak"; fi; \
+	  if [ -e "$$to" ] && ! cmp -s "$$f" "$$to"; then \
+	    n=; while [ -e "$$to.bak$$n" ]; do n=$$(( $${n:-1} + 1 )); done; \
+	    mv "$$to" "$$to.bak$$n" || exit 1; \
+	  fi; \
 	  install -m 0644 "$$f" "$$to" || exit 1; \
 	done
 

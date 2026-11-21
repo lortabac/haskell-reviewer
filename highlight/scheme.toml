@@ -1,10 +1,12 @@
 # Scheme (R7RS). Format: SPEC §5.6.
-# Not coloured: characters (#\a) and datum comments (#;).
+# Not handled: datum comments (#;) and |symbols| (a ; or " inside one
+# starts a comment or a string).
 
 extensions = ["scm", "ss", "sld", "sls", "sps"]
 word-chars = "!$%&*/:<=>?^_~+-.@#"
 line-comments = [";"]
 numbers = true
+char-prefixes = ["#\\"]
 
 [[block-comments]]
 open = "#|"

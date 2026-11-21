@@ -90,12 +90,12 @@ warmUpLangs = forM_ samples $ \t -> do
   let p = parseLang t
   void (evaluate (sum (map size p.warnings)))
   forM_ p.lang $ \l ->
-    void (evaluate (length (scanLang l "#| a #| b |# |# ; c\r\n(define x \"s\\\"\" 12 #t)\n\"")))
+    void (evaluate (length (scanLang l "#| a #| b |# |# ; c\r\n(define #\\a x \"s\\\"\" 12 #t)\n\"")))
   where
     size w = Text.length w.message
     samples =
       [ "extensions = [\"scm\", \".SS\"]\nword-chars = \"-#\"\nline-comments = [\";\"]\n\
-        \numbers = true\n[[block-comments]]\nopen = \"#|\"\nclose = \"|#\"\nnested = true\n\
+        \numbers = true\nchar-prefixes = [\"#\\\\\"]\n[[block-comments]]\nopen = \"#|\"\nclose = \"|#\"\nnested = true\n\
         \[[strings]]\nopen = \"\\\"\"\nclose = \"\\\"\"\nescape = \"\\\\\"\n\
         \[words]\nkeyword = [\"define\"]\ntypeCon = []\nvariable = []\noperator = []\n\
         \literal = [\"#t\"]\ncomment = []\npragma = []\n",

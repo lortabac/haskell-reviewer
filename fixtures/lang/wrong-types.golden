@@ -1,15 +1,17 @@
 extensions: ok
 word-chars: 
 line-comments: 
+char-prefixes: 
 numbers: false
 == warnings
 x.toml:1:21: extensions: expected a string, got an integer
 x.toml:2:14: word-chars: expected a string, got an integer
 x.toml:3:17: line-comments: expected an array, got a string
 x.toml:4:11: numbers: expected a boolean, got a string
-x.toml:5:19: block-comments: expected a table, got an integer
-x.toml:5:31: block-comments.open: expected a string, got an integer
-x.toml:5:56: block-comments.nested: expected a boolean, got a string
-x.toml:6:11: strings: expected an array of tables, got a table
-x.toml:9:11: words.keyword: expected an array, got a string
-x.toml:10:12: words.literal: expected a string, got a boolean
+x.toml:5:17: char-prefixes: expected an array, got a string
+x.toml:6:19: block-comments: expected a table, got an integer
+x.toml:6:31: block-comments.open: expected a string, got an integer
+x.toml:6:56: block-comments.nested: expected a boolean, got a string
+x.toml:7:11: strings: expected an array of tables, got a table
+x.toml:10:11: words.keyword: expected an array, got a string
+x.toml:11:12: words.literal: expected a string, got a boolean

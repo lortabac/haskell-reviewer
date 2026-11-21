@@ -1,1 +1,2 @@
-extensions = ["x"]
+# The same extension three times: once.
+extensions = ["x", ".X", "x"]

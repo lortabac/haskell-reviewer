@@ -11,5 +11,8 @@ lines")
         (list 'sym #\a -1 +inf.0 é y z))))
 
 (λ (😀) "astral 😀" 😀) ; after astral
+;; Characters: a quote or a semicolon starts nothing.
+(list #\" #\; #\space #\x41 #\( 'a) (if #\a
+"s")
 (define-syntax my-or (syntax-rules () ((_ a ...) (or a ...))))
 "no end

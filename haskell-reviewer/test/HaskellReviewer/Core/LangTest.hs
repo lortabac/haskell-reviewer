@@ -53,8 +53,20 @@ tests =
           @?= [Run (Span (Line 1) (Col 3) (Line 2) (Col 2)) LiteralClass]
         scanLang lisp "#| a\n"
           @?= [Run (Span (Line 1) (Col 1) (Line 2) (Col 1)) CommentClass],
-      testCase "a comment starts inside a word, a word char doesn't hide it" $
-        texts lisp "ab;c #|d|#" @?= [(";c #|d|#", CommentClass)],
+      testCase "a comment starts after a word, not inside one" $ do
+        texts lisp "ab;c" @?= [(";c", CommentClass)]
+        -- # is a word character here.
+        texts lisp "ab#|d|#" @?= [],
+      testCase "characters: the prefix, one character, the rest of a name" $ do
+        let l = lisp {charPrefixes = ["#\\"]}
+        texts l "#\\\" #\\; #\\space #\\( x #\\\n\"s\""
+          @?= [ ("#\\\"", LiteralClass),
+                ("#\\;", LiteralClass),
+                ("#\\space", LiteralClass),
+                ("#\\(", LiteralClass),
+                ("#\\", LiteralClass),
+                ("\"s\"", LiteralClass)
+              ],
       testCase "numbers off: digits are plain" $
         scanLang lisp {numbers = False} "12 3" @?= [],
       testCase "CRLF and a last CR stay out of a line comment" $
@@ -69,7 +81,8 @@ tests =
               lisp
                 { lineComments = [""],
                   blockComments = [BlockComment "" "x" False, BlockComment "x" "" False],
-                  strings = [StringRule "" "" Nothing]
+                  strings = [StringRule "" "" Nothing],
+                  charPrefixes = [""]
                 }
         scanLang l "ab x" @?= [],
       testCase "langFor: by extension, any case" $ do
@@ -101,6 +114,7 @@ lisp =
       lineComments = [";"],
       blockComments = [BlockComment "#|" "|#" True],
       strings = [StringRule "\"" "\"" (Just '\\')],
+      charPrefixes = [],
       numbers = True,
       wordClasses =
         Map.fromList [("define", KeywordClass), ("if", KeywordClass), ("#t", LiteralClass)]
@@ -130,6 +144,7 @@ genLang char = do
   lineComments <- some delim
   blockComments <- some (BlockComment <$> delim <*> delim <*> Gen.bool)
   strings <- some (StringRule <$> delim <*> delim <*> Gen.maybe genChar)
+  charPrefixes <- some delim
   numbers <- Gen.bool
   ws <- some ((,) <$> Gen.text (Range.linear 1 2) genChar <*> Gen.enumBounded)
   pure
@@ -139,6 +154,7 @@ genLang char = do
         lineComments = lineComments,
         blockComments = blockComments,
         strings = strings,
+        charPrefixes = charPrefixes,
         numbers = numbers,
         wordClasses = Map.fromList ws
       }

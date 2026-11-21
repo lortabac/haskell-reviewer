@@ -1,6 +1,7 @@
 extensions: x
 word-chars: 
 line-comments: 
+char-prefixes: 
 numbers: false
 == warnings
 x.toml:2:11: numbers: expected a boolean, got an integer

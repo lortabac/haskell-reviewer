@@ -361,6 +361,7 @@ langTests =
           lineComments = [],
           blockComments = [],
           strings = [],
+          charPrefixes = [],
           numbers = False,
           wordClasses = Map.fromList [("notes", KeywordClass)]
         }

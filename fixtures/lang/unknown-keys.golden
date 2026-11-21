@@ -1,6 +1,7 @@
 extensions: ok
 word-chars: 
 line-comments: 
+char-prefixes: 
 numbers: false
 block-comment: a b
 string: a b

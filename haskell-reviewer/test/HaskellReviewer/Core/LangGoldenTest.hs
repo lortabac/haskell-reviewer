@@ -102,6 +102,7 @@ dump f = do
       [ "extensions: " <> Text.unwords l.extensions,
         "word-chars: " <> Text.pack (Set.toList l.wordChars),
         "line-comments: " <> Text.unwords l.lineComments,
+        "char-prefixes: " <> Text.unwords l.charPrefixes,
         "numbers: " <> if l.numbers then "true" else "false"
       ]
         <> map block l.blockComments

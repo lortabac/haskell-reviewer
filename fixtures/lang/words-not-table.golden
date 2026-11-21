@@ -1,6 +1,7 @@
 extensions: ok
 word-chars: 
 line-comments: 
+char-prefixes: 
 numbers: false
 == warnings
 x.toml:2:9: words: expected a table, got an array

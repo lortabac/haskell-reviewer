@@ -1,6 +1,7 @@
 extensions = ["ok", "", "a.b", "a/b", "a b"]
 word-chars = "a b"
 line-comments = ["", "a b", "#"]
+char-prefixes = ["", "ok"]
 block-comments = [
   { open = "", close = "*/" },
   { open = "/*" },
