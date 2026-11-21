@@ -1,0 +1,15 @@
+extensions = ["ok"]
+colour = "red"
+
+[[block-comments]]
+open = "a"
+close = "b"
+depth = 2
+
+[[strings]]
+open = "a"
+close = "b"
+multiline = true
+
+[other]
+x = 1

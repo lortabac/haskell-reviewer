@@ -1,7 +1,7 @@
 // @vitest-environment node
 // Server and client agree on columns: every run of every
-// fixtures/highlight golden (written by HighlightGoldenTest.hs), cut
-// with our helpers, gives the golden's text. Goldens show the first
+// fixtures/highlight golden (written by HighlightGoldenTest.hs and
+// LangGoldenTest.hs), cut with our helpers, gives the golden's text. Goldens show the first
 // line of each run, as Haskell's show.
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -81,9 +81,9 @@ const cases = files
   .filter((f) => f.endsWith(".golden"))
   .map((g) => {
     const base = g.replace(/\.golden$/, "");
-    const src = files.find(
-      (f) => f === `${base}.hs` || f === `${base}.lhs` || f === `${base}.md`,
-    );
+    const src = ["hs", "lhs", "md", "scm"]
+      .map((ext) => `${base}.${ext}`)
+      .find((f) => files.includes(f));
     if (src === undefined) throw new Error(`no source for ${g}`);
     return [g, src] as const;
   });

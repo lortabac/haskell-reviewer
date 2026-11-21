@@ -8,6 +8,7 @@ module HaskellReviewer.Core.Xdg
     -- * Paths
     xdgDir,
     configFile,
+    highlightDir,
     prefsFile,
     renderXdgProblem,
   )
@@ -63,6 +64,11 @@ xdgDir which env = case env var of
 -- | @haskell-reviewer/config.toml@ in the config dir.
 configFile :: (String -> Maybe String) -> Either XdgProblem FilePath
 configFile env = (</> "haskell-reviewer" </> "config.toml") <$> xdgDir XdgConfig env
+
+-- | @haskell-reviewer/highlight@ in the config dir: the highlighting
+-- rules. See Note [Language rules] in "HaskellReviewer.Core.Lang".
+highlightDir :: (String -> Maybe String) -> Either XdgProblem FilePath
+highlightDir env = (</> "haskell-reviewer" </> "highlight") <$> xdgDir XdgConfig env
 
 -- | @haskell-reviewer/ui.json@ in the state dir.
 prefsFile :: (String -> Maybe String) -> Either XdgProblem FilePath

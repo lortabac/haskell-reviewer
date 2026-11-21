@@ -14,6 +14,7 @@ import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
 import HaskellReviewer.Core.Address (Port (..), Token, tokenFromBytes, tokenText)
 import HaskellReviewer.Core.FileContent (unfiltered)
+import HaskellReviewer.Core.Lang (noLangs)
 import HaskellReviewer.Effects.Clock (Microseconds (..))
 import HaskellReviewer.Effects.FileSystem (ListError (..), ReadError (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), newLogger)
@@ -307,6 +308,7 @@ noFiles =
     { snapshotOn = browseOnly (pure (Left (ListCrashed "no files here"))),
       readEntry = \_ _ _ -> pure (Left ReadGone),
       fileNotes = \_ _ -> unfiltered,
+      langs = noLangs,
       logger = newLogger LevelInfo (\_ -> pure ())
     }
 

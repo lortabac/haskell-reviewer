@@ -82,6 +82,7 @@ import HaskellReviewer.Core.FileList
     FileList (..),
     ListSource (..),
   )
+import HaskellReviewer.Core.Lang (Langs, noLangs)
 import HaskellReviewer.Core.ModuleModel
   ( ModuleParse (..),
     TextOnlyReason (..),
@@ -163,6 +164,8 @@ data TestApi = TestApi
     parse :: ParseSettings -> Text -> IO ModuleParse,
     -- | For read errors.
     logger :: Logger,
+    -- | Rules for other languages. None by default.
+    langs :: Langs,
     -- | Parse workers that run while a request does. With 0 nothing is
     -- read in the background (and a request for a module we parse
     -- waits for ever).
@@ -478,6 +481,7 @@ apiFor snap =
       fileNotes = \_ _ -> unfiltered,
       parse = parseGuarded,
       logger = newLogger LevelInfo (\_ -> pure ()),
+      langs = noLangs,
       workers = 1,
       prefs =
         newPrefsStore silent builtinDefaults (Left HomeUnset),
@@ -1206,6 +1210,7 @@ sendApiQuery method headers reqBody query api path = do
           { snapshotOn = \side -> pure <$> lookupSide side listed,
             readEntry = api.readEntry,
             fileNotes = api.fileNotes,
+            langs = api.langs,
             logger = api.logger
           }
       routes =

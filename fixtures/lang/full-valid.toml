@@ -1,0 +1,32 @@
+extensions = ["scm", ".SS"]
+word-chars = "-?!#"
+line-comments = [";", "//"]
+numbers = true
+char-prefixes = ["#\\", "?"]
+
+[[block-comments]]
+open = "#|"
+close = "|#"
+nested = true
+
+[[block-comments]]
+open = "/*"
+close = "*/"
+
+[[strings]]
+open = "\""
+close = "\""
+escape = "\\"
+
+[[strings]]
+open = "'"
+close = "'"
+
+[words]
+keyword = ["define", "if"]
+typeCon = ["T"]
+variable = ["v"]
+operator = ["-"]
+literal = ["#t"]
+comment = ["rem"]
+pragma = ["#lang"]

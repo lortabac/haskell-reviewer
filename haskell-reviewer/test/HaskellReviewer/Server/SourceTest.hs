@@ -30,13 +30,15 @@ import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString.Lazy qualified as LBS
 import Data.Containers.ListUtils (nubOrd)
 import Data.List (sort)
+import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
 import HaskellReviewer.Core.Eol (Filtering (..))
 import HaskellReviewer.Core.FileContent (FileContent (..), FileNotes (..), LinkInfo (..))
-import HaskellReviewer.Core.Highlight (DisplayClass, linkedRunWidth)
+import HaskellReviewer.Core.Highlight (DisplayClass (..), linkedRunWidth)
+import HaskellReviewer.Core.Lang (Lang (..), buildLangs)
 import HaskellReviewer.Core.ModuleModel
   ( ParseError (..),
     TextOnlyReason (..),
@@ -79,7 +81,8 @@ tests =
         coverage,
       testCase "text only: lexed if it has tokens or regions, else plain" textOnlyCase,
       testGroup "route" routeTests,
-      testGroup "markdown" markdownTests
+      testGroup "markdown" markdownTests,
+      testGroup "other languages" langTests
     ]
 
 -- * Warm-up
@@ -327,6 +330,41 @@ routeTests =
         void (within (wait c))
       atomically (requestCount snap.index) >>= (@?= 0)
   ]
+
+-- * Other languages
+
+langTests :: [TestTree]
+langTests =
+  [ testCase "an extension with rules: lexed, no links" $ do
+      v <- okSource sourceApi {langs = txtRules} "s/notes.txt"
+      str (field "highlight" v) @?= "lexed"
+      arr (field "targets" v) @?= []
+      -- "notes": line 1, keyword (class 0), no link.
+      map int (arr (field "runs" v)) @?= [1, 1, 0, 6, 0, 0],
+    testCase "no rules: plain" $ do
+      v <- okSource sourceApi "s/notes.txt"
+      str (field "highlight" v) @?= "plain",
+    testCase "Haskell and Markdown don't use the rules" $ do
+      let (rules, _) = buildLangs [((), txt {extensions = ["hs", "md"]})]
+      a <- okSource sourceApi {langs = rules} "s/README.md"
+      -- The heading, as without rules.
+      take linkedRunWidth (map int (arr (field "runs" a))) @?= [1, 1, 0, 9, 0, 0]
+      b <- okSource sourceApi {langs = rules} "s/src/A.hs"
+      (arr (field "targets" b) /= []) @?= True
+  ]
+  where
+    txtRules = fst (buildLangs [((), txt)])
+    txt =
+      Lang
+        { extensions = ["txt"],
+          wordChars = Set.empty,
+          lineComments = [],
+          blockComments = [],
+          strings = [],
+          charPrefixes = [],
+          numbers = False,
+          wordClasses = Map.fromList [("notes", KeywordClass)]
+        }
 
 -- * Markdown
 

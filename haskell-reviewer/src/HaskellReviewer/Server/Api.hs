@@ -50,6 +50,7 @@ import HaskellReviewer.Core.FileContent
     unfiltered,
   )
 import HaskellReviewer.Core.FileList (CommitId (..), EntryKind (..), FileList (..))
+import HaskellReviewer.Core.Lang (Langs, langFor)
 import HaskellReviewer.Core.Markdown (MarkdownEnv (..), isMarkdownPath)
 import HaskellReviewer.Core.Markers (Marker)
 import HaskellReviewer.Core.Modules
@@ -101,6 +102,7 @@ import HaskellReviewer.Server.Wire.Source
   ( SourceBody (..),
     SourceView (..),
     encodeSource,
+    langSource,
     parsedSource,
     textOnlySource,
   )
@@ -147,6 +149,8 @@ data FilesApi = FilesApi
     -- | What the snapshot's source says about a file (@filtered@).
     -- Production: 'HaskellReviewer.Effects.Source.fileNotes'.
     fileNotes :: Snapshot -> RelPath -> FileNotes,
+    -- | The highlighting rules for other languages.
+    langs :: Langs,
     -- | For read errors.
     logger :: Logger
   }
@@ -385,8 +389,9 @@ moduleApp api side segs req respond
 -- The module at that path ('moduleAtPath'): if we parse it, we wait
 -- for its slot and its imports, as for the page, then resolve it and
 -- link its tokens. Text only: highlighted, no links. A Markdown file
--- is read and highlighted ("HaskellReviewer.Core.Markdown"). Anything
--- else is plain, and nothing is read.
+-- is read and highlighted ("HaskellReviewer.Core.Markdown"), and so is
+-- a file whose extension has rules ("HaskellReviewer.Core.Lang").
+-- Anything else is plain, and nothing is read.
 --
 -- A path not in the list (a @%2F@ in a segment too), or a file gone, is
 -- a 404 with a JSON body ('encodeFileNotFound'). A bad side is a plain
@@ -421,6 +426,11 @@ sourceApp api side segs req respond
         | isMarkdownPath path ->
             withMarkdown api snap path (respond (missing snap)) respond $ \md ->
               view snap (viewOf snap path Nothing False (markdownSource md))
+        | Just lang <- langFor api.langs path ->
+            withText api snap path (respond (missing snap)) respond $ \t ->
+              -- Lazy: scanned when the body is built, inside the request.
+              let body = maybe PlainBody (langSource lang) t
+               in view snap (viewOf snap path Nothing False body)
         | otherwise -> view snap (plain snap path Nothing)
       Just i -> case (.source) <$> findModule snap.modules i of
         Just (HaskellSource _) -> do
@@ -472,17 +482,31 @@ withMarkdown ::
   (Response -> IO ResponseReceived) ->
   (MarkdownAnswer -> IO ResponseReceived) ->
   IO ResponseReceived
-withMarkdown api snap path gone respond k = case Map.lookup path snap.files.entries of
+withMarkdown api snap path gone respond k =
+  withText api snap path gone respond $ \case
+    Just t -> k . maybe MarkdownTooSlow MarkdownDoc =<< markdownGuarded env t
+    Nothing -> k MarkdownNotText
+  where
+    env = MarkdownEnv {path = path, exists = (`Map.member` snap.files.entries)}
+
+-- | Read a file of the list: its text, or 'Nothing' if it isn't text.
+-- Gone: the first action. A read error: its 500.
+withText ::
+  FilesApi ->
+  Snapshot ->
+  RelPath ->
+  IO ResponseReceived ->
+  (Response -> IO ResponseReceived) ->
+  (Maybe Text -> IO ResponseReceived) ->
+  IO ResponseReceived
+withText api snap path gone respond k = case Map.lookup path snap.files.entries of
   Nothing -> gone
   Just kind ->
     api.readEntry snap path kind >>= \case
       Left ReadGone -> gone
       Left (ReadFailed why) -> respond =<< readFailed api snap path why
-      Right (TextContent t) ->
-        k . maybe MarkdownTooSlow MarkdownDoc =<< markdownGuarded env t
-      Right _ -> k MarkdownNotText
-  where
-    env = MarkdownEnv {path = path, exists = (`Map.member` snap.files.entries)}
+      Right (TextContent t) -> k (Just t)
+      Right _ -> k Nothing
 
 -- | Build and force a CBOR body inside 'withRequest'. No slot waits in
 -- here (Note [Indexing] in "HaskellReviewer.Session.Index").

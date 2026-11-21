@@ -70,6 +70,7 @@ library
     HaskellReviewer.Core.ImportScope
     HaskellReviewer.Core.Git
     HaskellReviewer.Core.IndexQueue
+    HaskellReviewer.Core.Lang
     HaskellReviewer.Core.LineDiff
     HaskellReviewer.Core.LineDiff.Compact
     HaskellReviewer.Core.LineDiff.Env
@@ -126,6 +127,7 @@ library
     HaskellReviewer.Effects.Git
     HaskellReviewer.Effects.GitObjects
     HaskellReviewer.Effects.Helper
+    HaskellReviewer.Effects.Lang
     HaskellReviewer.Effects.Log
     HaskellReviewer.Effects.Pairing
     HaskellReviewer.Effects.Parser
@@ -286,6 +288,8 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Core.HighlightTest
     HaskellReviewer.Core.IndexQueueTest
     HaskellReviewer.Core.InstanceKeyTest
+    HaskellReviewer.Core.LangGoldenTest
+    HaskellReviewer.Core.LangTest
     HaskellReviewer.Core.LineDiffGoldenTest
     HaskellReviewer.Core.LineDiffOracleTest
     HaskellReviewer.Core.LineDiffTest
@@ -329,6 +333,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Effects.GitPlantedTest
     HaskellReviewer.Effects.GitTest
     HaskellReviewer.Effects.HelperTest
+    HaskellReviewer.Effects.LangTest
     HaskellReviewer.Effects.LogTest
     HaskellReviewer.Effects.RevisionsTest
     HaskellReviewer.Effects.SourceTest

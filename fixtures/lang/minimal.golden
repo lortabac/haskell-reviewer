@@ -1,0 +1,6 @@
+extensions: x
+word-chars: 
+line-comments: 
+char-prefixes: 
+numbers: false
+== warnings

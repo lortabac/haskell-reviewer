@@ -38,6 +38,8 @@ import HaskellReviewer.Core.HighlightGoldenTest qualified
 import HaskellReviewer.Core.HighlightTest qualified
 import HaskellReviewer.Core.IndexQueueTest qualified
 import HaskellReviewer.Core.InstanceKeyTest qualified
+import HaskellReviewer.Core.LangGoldenTest qualified
+import HaskellReviewer.Core.LangTest qualified
 import HaskellReviewer.Core.LineDiff (warmUpLineDiff)
 import HaskellReviewer.Core.LineDiffGoldenTest qualified
 import HaskellReviewer.Core.LineDiffOracleTest qualified
@@ -84,6 +86,8 @@ import HaskellReviewer.Effects.GitObjectsTest qualified
 import HaskellReviewer.Effects.GitPlantedTest qualified
 import HaskellReviewer.Effects.GitTest qualified
 import HaskellReviewer.Effects.HelperTest qualified
+import HaskellReviewer.Effects.Lang (warmUpLangs)
+import HaskellReviewer.Effects.LangTest qualified
 import HaskellReviewer.Effects.LogTest qualified
 import HaskellReviewer.Effects.Parser (warmUpParser)
 import HaskellReviewer.Effects.RevisionsTest qualified
@@ -189,12 +193,16 @@ main = do
         HaskellReviewer.Core.ChangedTest.tests,
         -- toml-parser's and aeson's shared values, built before the
         -- tests use them in parallel (Q-RTS-BLACKHOLE).
-        withResource (warmUpConfig >> warmUpPrefs) (const (pure ())) $ \_ ->
+        withResource (warmUpConfig >> warmUpPrefs >> warmUpLangs) (const (pure ())) $ \_ ->
           testGroup
             "Settings"
             [ HaskellReviewer.Core.ConfigGoldenTest.tests,
+              HaskellReviewer.Core.LangGoldenTest.tests,
+              HaskellReviewer.Core.LangTest.tests,
+              HaskellReviewer.Core.LangTest.linearTests,
               HaskellReviewer.Core.PrefsTest.tests,
               HaskellReviewer.Effects.ConfigTest.tests,
+              HaskellReviewer.Effects.LangTest.tests,
               HaskellReviewer.Session.PrefsTest.tests
             ],
         HaskellReviewer.Core.CommitFilesTest.tests,

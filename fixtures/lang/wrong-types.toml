@@ -1,0 +1,11 @@
+extensions = ["ok", 1]
+word-chars = 1
+line-comments = "#"
+numbers = "yes"
+char-prefixes = "x"
+block-comments = [1, { open = 1, close = "b", nested = "no" }]
+strings = { open = "a", close = "b" }
+
+[words]
+keyword = "if"
+literal = [true]

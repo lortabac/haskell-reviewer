@@ -1,0 +1,19 @@
+extensions = ["ok", "", "a.b", "a/b", "a b"]
+word-chars = "a b"
+line-comments = ["", "a b", "#"]
+char-prefixes = ["", "ok"]
+block-comments = [
+  { open = "", close = "*/" },
+  { open = "/*" },
+  { open = "(*", close = "*)" },
+]
+strings = [
+  { open = "\"", close = "\"", escape = "ab" },
+  { open = "'", close = "\n" },
+  { open = "`", close = "`", escape = "" },
+]
+
+[words]
+keyword = ["", "k"]
+nope = ["x"]
+cppExcluded = ["y"]
