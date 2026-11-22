@@ -1,6 +1,7 @@
 // Back goes to where a link was followed (D-339). Before the source
 // view leaves, the cursor's line gets its own history entry:
-// `#L<line>`, the column in the state.
+// `#L<line>`, the column in the state. The docs page: its declaration
+// (D-340).
 
 export interface Origin {
   // UTF-16, from 0.
@@ -23,23 +24,32 @@ export function saveOrigin(
   marked: number | undefined,
   to?: string,
 ): void {
-  const l = window.location;
-  const url = `${l.pathname}${l.search}#L${line}`;
-  const h = window.history;
-  const state = h.state as Record<string, unknown> | null;
-  // The link goes to this very line: its own entry does it.
-  if (to === l.origin + url) return;
-  // The hash too: the router's marks lag after our push.
-  if (
+  const here =
     marked === line ||
-    l.hash === `#L${line}` ||
-    (marked === undefined && l.hash === "" && line === 1)
-  ) {
-    // This entry lands there already: keep the column.
-    h.replaceState({ ...state, origin: { col } }, "");
+    (marked === undefined && window.location.hash === "" && line === 1);
+  pushOrigin(`#L${line}`, { origin: { col } }, to, here);
+}
+
+// An entry for hash on this page, before a link leaves it (D-339,
+// D-340). here: this entry lands there already, so no new entry, only
+// state goes in it. to: where the link goes (a full URL), if known.
+export function pushOrigin(
+  hash: string,
+  state: Record<string, unknown>,
+  to?: string,
+  here = false,
+): void {
+  const l = window.location;
+  const url = `${l.pathname}${l.search}${hash}`;
+  const h = window.history;
+  // The link goes there: its own entry does it.
+  if (to === l.origin + url) return;
+  // The hash too: the router lags after our push.
+  if (here || l.hash === hash) {
+    h.replaceState({ ...(h.state as object | null), ...state }, "");
     return;
   }
-  h.pushState({ origin: { col } }, "", url);
+  h.pushState(state, "", url);
   // As the router stamps its own entries (it reads this on popstate).
-  h.replaceState({ ...h.state, _depth: h.length - 1 }, "");
+  h.replaceState({ ...(h.state as object), _depth: h.length - 1 }, "");
 }

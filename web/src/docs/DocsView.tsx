@@ -41,6 +41,7 @@ import {
 } from "../keys/KeysProvider";
 import { copyText } from "../copy/clipboard";
 import { lastFocus } from "../copy/lastFocus";
+import { pushOrigin } from "../source/origin";
 import { CopyButton } from "../copy/CopyButton";
 import { location as locationText } from "../copy/names";
 import { declCopyText, declLine } from "./copyText";
@@ -437,7 +438,13 @@ function ModulePage(props: {
       if (item === undefined) return "No declaration here.";
       const link = ownOf<HTMLElement>(item, "a.decl-refs, a.subdecl-refs")[0];
       if (link === undefined) return "No references for this one.";
-      link.click();
+      // Picked from the scroll, not focus: Back has nothing to keep.
+      noSave = !item.contains(document.activeElement);
+      try {
+        link.click();
+      } finally {
+        noSave = false;
+      }
       return true;
     },
     source: () => {
@@ -452,6 +459,37 @@ function ModulePage(props: {
   });
   // Copy location: the declaration with focus, else the file.
   const focus = lastFocus(rootEl, "li.subdecl, section.decl");
+  // Before we leave by refs, source or 2: Back comes to the top-level
+  // declaration (D-340). The focused one only, no guess from the
+  // scroll.
+  const declFocus = lastFocus(rootEl, "section.decl");
+  // g r with no focus in a declaration: no entry.
+  let noSave = false;
+  const topSection = (el: Element): HTMLElement | undefined => {
+    const r = rootEl();
+    if (r === undefined) return undefined;
+    let sec = el.closest<HTMLElement>("section.decl");
+    for (;;) {
+      const up = sec?.parentElement?.closest<HTMLElement>("section.decl");
+      if (up == null || !r.contains(up)) break;
+      sec = up;
+    }
+    return sec !== null && r.contains(sec) ? sec : undefined;
+  };
+  const saveDecl = (el: Element, to?: string): void => {
+    if (noSave) return;
+    const sec = topSection(el);
+    if (sec === undefined) return;
+    const id = ix().idOfHandle(Number(sec.dataset.handle));
+    if (id === undefined) return;
+    // The URL is at this declaration already, maybe at an item in it,
+    // or spelt another way: keep that entry.
+    const cur = anchorFromHash(location.hash);
+    const d = typeof cur === "string" ? ix().byId.get(cur) : undefined;
+    const curEl = d === undefined ? undefined : elementOf(d);
+    const here = curEl !== undefined && topSection(curEl) === sec;
+    pushOrigin("#" + encodeURIComponent(id), {}, to, here);
+  };
   useCopyLocation(() => {
     const path = props.page.path;
     if (path === null) return { say: noSource };
@@ -472,7 +510,9 @@ function ModulePage(props: {
       const path = props.page.path;
       const r = rootEl();
       if (to !== "source" || path === null) return undefined;
-      const sec = r === undefined ? undefined : currentSection(r);
+      // The one leave saves first (focus in the header: the last one).
+      const sec =
+        declFocus.get() ?? (r === undefined ? undefined : currentSection(r));
       const d =
         sec === undefined
           ? undefined
@@ -484,6 +524,10 @@ function ModulePage(props: {
       return line === undefined
         ? { href: hrefFor(side(), path) }
         : { href: lineHref(side(), path, line), state: { codeJump: true } };
+    },
+    leave: () => {
+      const sec = declFocus.get();
+      if (sec !== undefined) saveDecl(sec);
     },
   });
   const hidden = createMemo(() => hiddenCount(props.parsed));
@@ -652,10 +696,11 @@ function ModulePage(props: {
         : null;
     if (a === null || a.target !== "") return;
     const url = new URL(a.href, window.location.href);
-    if (
-      url.origin !== window.location.origin ||
-      url.pathname !== window.location.pathname
-    ) {
+    if (url.origin !== window.location.origin) return;
+    if (url.pathname !== window.location.pathname) {
+      if (a.matches("a.decl-goto, a.decl-refs, a.subdecl-refs")) {
+        saveDecl(a, url.href);
+      }
       return;
     }
     a.setAttribute("noscroll", "");

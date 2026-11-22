@@ -1,4 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi,
+} from "vitest";
 import { cbor, cborFixture, fixture, stubFetch } from "../../test/fixtures";
 import { mountAppAt, unmountApp } from "../../test/mount";
 
@@ -1091,5 +1099,211 @@ describe("docs view errors", () => {
     await vi.waitFor(() => {
       expect(main?.textContent).toBe("FooLoading…");
     });
+  });
+});
+
+// Back comes to the top-level declaration a link left from (D-340).
+describe("DocsView, Back to the declaration", () => {
+  const outer = (el: Element): HTMLElement => {
+    let s = el.closest<HTMLElement>("section.decl")!;
+    for (;;) {
+      const up = s.parentElement?.closest<HTMLElement>("section.decl");
+      if (up == null) return s;
+      s = up;
+    }
+  };
+  const press = (key: string) =>
+    document.activeElement!.dispatchEvent(
+      new KeyboardEvent("keydown", { key, code: key, bubbles: true }),
+    );
+
+  it("go to source, then Back: the declaration, focused", async () => {
+    const main = await page();
+    const a = decl(main, "area").querySelector<HTMLElement>("a.decl-goto")!;
+    a.focus();
+    const len = window.history.length;
+    a.click();
+    await vi.waitFor(() =>
+      expect(window.location.pathname).toBe("/tok/src/tree/Page.hs"),
+    );
+    expect(window.history.length).toBe(len + 2);
+    window.history.back();
+    await vi.waitFor(() => {
+      flushFrames();
+      expect(window.location.pathname + window.location.hash).toBe(
+        "/tok/docs/tree/Page#val%3Aarea",
+      );
+      expect(document.activeElement).toBe(decl(main, "area"));
+    });
+  });
+
+  it("a nested item's references: its top-level declaration", async () => {
+    const main = await page();
+    const sub = main.querySelector<HTMLAnchorElement>(".subdecl-refs")!;
+    const top = outer(sub);
+    expect(top).toBe(decl(main, "data Shape"));
+    sub.click();
+    await vi.waitFor(() =>
+      expect(window.location.pathname).toBe("/tok/refs/tree/Page"),
+    );
+    window.history.back();
+    await vi.waitFor(() => {
+      flushFrames();
+      expect(window.location.hash).toBe("#type%3AShape");
+      expect(document.activeElement).toBe(decl(main, "data Shape"));
+    });
+  });
+
+  it("the URL is at the declaration already: no new entry", async () => {
+    const main = await open("Page", 200, cborFixture("module-page"), {
+      hash: "#val%3Aarea",
+    });
+    const len = window.history.length;
+    decl(main, "area").querySelector<HTMLElement>("a.decl-refs")!.click();
+    await vi.waitFor(() =>
+      expect(window.location.pathname).toBe("/tok/refs/tree/Page"),
+    );
+    expect(window.history.length).toBe(len + 1);
+  });
+
+  it("an instance in its type's list: the type", async () => {
+    const main = await page();
+    const list = instances(decl(main, "data Shape"));
+    openDetails(list);
+    const a = decl(list, "deriving Show").querySelector<HTMLElement>(
+      "a.decl-goto",
+    );
+    expect(a).not.toBeNull();
+    a!.click();
+    await vi.waitFor(() =>
+      expect(window.location.pathname).toBe("/tok/src/tree/Page.hs"),
+    );
+    window.history.back();
+    await vi.waitFor(() => {
+      flushFrames();
+      expect(window.location.hash).toBe("#type%3AShape");
+      expect(document.activeElement).toBe(decl(main, "data Shape"));
+    });
+  });
+
+  it.each([
+    ["#val:area", "area"],
+    ["#con%3ACircle", "data Shape"],
+  ])(
+    "the URL at %s (raw, or an item in it): no new entry",
+    async (hash, head) => {
+      const main = await open("Page", 200, cborFixture("module-page"), {
+        hash,
+      });
+      flushFrames();
+      const len = window.history.length;
+      decl(main, head).querySelector<HTMLElement>("a.decl-refs")!.click();
+      await vi.waitFor(() =>
+        expect(window.location.pathname).toBe("/tok/refs/tree/Page"),
+      );
+      expect(window.history.length).toBe(len + 1);
+    },
+  );
+
+  it("the header switch: the declaration focused before", async () => {
+    const main = await page();
+    decl(main, "area").focus();
+    const link = [
+      ...document.querySelectorAll<HTMLAnchorElement>(".view-switch a"),
+    ].find((a) => a.textContent === "Source")!;
+    link.focus();
+    const len = window.history.length;
+    link.click();
+    await vi.waitFor(() =>
+      expect(window.location.pathname).toBe("/tok/src/tree/Page.hs"),
+    );
+    // The source opens at that declaration too.
+    expect(window.location.hash).toBe("#L38");
+    expect(window.history.length).toBe(len + 2);
+    window.history.back();
+    await vi.waitFor(() => {
+      flushFrames();
+      expect(window.location.hash).toBe("#val%3Aarea");
+    });
+  });
+
+  it("g r with focus in a declaration saves it", async () => {
+    const main = await page();
+    decl(main, "area").focus();
+    const len = window.history.length;
+    press("g");
+    press("r");
+    await vi.waitFor(() =>
+      expect(window.location.pathname).toBe("/tok/refs/tree/Page"),
+    );
+    expect(window.history.length).toBe(len + 2);
+    window.history.back();
+    await vi.waitFor(() => {
+      flushFrames();
+      expect(window.location.hash).toBe("#val%3Aarea");
+    });
+  });
+
+  it("g r with no focus in a declaration: no entry", async () => {
+    await page();
+    // The first one on screen is the one g r picks.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(0, 0, 100, 100),
+    );
+    (document.activeElement as HTMLElement | null)?.blur();
+    const len = window.history.length;
+    press("g");
+    press("r");
+    await vi.waitFor(() =>
+      expect(window.location.pathname).toBe("/tok/refs/tree/Page"),
+    );
+    expect(window.history.length).toBe(len + 1);
+  });
+
+  it("a ctrl-click: no entry", async () => {
+    const main = await page();
+    const stop = (e: Event) => e.preventDefault();
+    window.addEventListener("click", stop);
+    onTestFinished(() => window.removeEventListener("click", stop));
+    const len = window.history.length;
+    decl(main, "area")
+      .querySelector("a.decl-refs")!
+      .dispatchEvent(
+        new MouseEvent("click", {
+          bubbles: true,
+          cancelable: true,
+          ctrlKey: true,
+        }),
+      );
+    expect(window.history.length).toBe(len);
+    expect(window.location.hash).toBe("");
+  });
+
+  it("2 with focus in a declaration: Back comes to it", async () => {
+    const main = await page();
+    decl(main, "area").querySelector<HTMLElement>("a.decl-goto")!.focus();
+    const len = window.history.length;
+    press("2");
+    await vi.waitFor(() =>
+      expect(window.location.pathname).toBe("/tok/src/tree/Page.hs"),
+    );
+    expect(window.history.length).toBe(len + 2);
+    window.history.back();
+    await vi.waitFor(() => {
+      flushFrames();
+      expect(window.location.hash).toBe("#val%3Aarea");
+      expect(document.activeElement).toBe(decl(main, "area"));
+    });
+  });
+
+  it("2 with no focus in a declaration: no entry", async () => {
+    await page();
+    (document.activeElement as HTMLElement | null)?.blur();
+    const len = window.history.length;
+    press("2");
+    await vi.waitFor(() =>
+      expect(window.location.pathname).toBe("/tok/src/tree/Page.hs"),
+    );
+    expect(window.history.length).toBe(len + 1);
   });
 });
