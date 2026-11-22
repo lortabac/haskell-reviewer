@@ -191,9 +191,16 @@ test("cross-module go to definition: click, Back, Enter", async ({
     row(page, 5).evaluate((r) => r.contains(document.activeElement));
   await expect.poll(onLine5).toBe(true);
   await expect(cell(page, lineOf(linksTypesHs, "area (Circle"))).toBeAttached();
+  // Back: the line we clicked on (D-339), the link focused again.
+  await page.goBack();
+  await expect(page).toHaveURL(server.base + mainUrl + `#L${n}`);
+  await expect(area).toBeFocused();
+  await expect(row(page, n)).toBeInViewport();
+  // Back again: where we came in.
   await page.goBack();
   await expect(page).toHaveURL(server.base + mainUrl);
-  await expect(area).toBeVisible();
+  await page.goForward();
+  await expect(page).toHaveURL(server.base + mainUrl + `#L${n}`);
   // By keyboard: the link, Enter.
   await area.focus();
   await page.keyboard.press("Enter");
@@ -222,6 +229,15 @@ test("a definition links to its docs, a binder to nothing, a use to its binder",
   await expect(cell(page, 16)).toBeFocused();
   // The page didn't jump to the top: the view is on screen.
   await expect(row(page, 16)).toBeInViewport();
+  // Back: the line we clicked on (D-339), then where we came in.
+  await page.goBack();
+  await expect(page).toHaveURL(server.base + mainUrl + `#L${n}`);
+  await expect(go).toBeFocused();
+  await page.goBack();
+  await expect(page).toHaveURL(server.base + mainUrl);
+  await page.goForward();
+  await page.goForward();
+  await expect(page).toHaveURL(server.base + mainUrl + "#L16");
   const total = cell(page, n).getByRole("link", {
     name: "total, documentation",
   });

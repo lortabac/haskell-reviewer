@@ -709,6 +709,10 @@ are off (D-297, D-298).
 In the source view, ←/→ move between the links of the line and ↑/↓
 keep the column (D-284).
 
+Following a link from the source view (a link in the code, `g d`,
+References, `1`/`2`) first adds the cursor's line to the history, so
+Back comes to it (D-339).
+
 ### 5.4 Accessibility
 
 (D-29) Target: **WCAG 2.1 level AA**.

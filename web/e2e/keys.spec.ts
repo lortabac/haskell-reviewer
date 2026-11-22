@@ -224,8 +224,9 @@ test("source: j k by outline, f finds, g d follows, g r opens the refs page", as
   await page.keyboard.press("g");
   await page.keyboard.press("d");
   await expect(page).toHaveURL(/src\/tree\/Links\/Types\.hs#L\d+$/);
+  // Back: the line g d was pressed on (D-339).
   await page.goBack();
-  await expect(page).toHaveURL(server.base + mainUrl);
+  await expect(page).toHaveURL(server.base + mainUrl + `#L${n}`);
   await openSource(page, server.base);
   await keyTo(page, n, "area");
   await page.keyboard.press("g");
@@ -280,6 +281,30 @@ test("source: Esc closes the hover card first, then the find bar", async ({
   // 1: the docs of the module.
   await page.keyboard.press("1");
   await expect(page).toHaveURL(/docs\/tree\/Links\.Main#/);
+});
+
+test("source: Back after 1 or References comes to the cursor (D-339)", async ({
+  page,
+  startServer,
+  linksProject,
+}) => {
+  const server = await startServer({ root: linksProject.root });
+  await openSource(page, server.base);
+  const n = line("    go ys");
+  const area = await keyTo(page, n, "area");
+  await page.keyboard.press("1");
+  await expect(page).toHaveURL(/docs\/tree\/Links\.Main#/);
+  await page.goBack();
+  await expect(page).toHaveURL(server.base + mainUrl + `#L${n}`);
+  await expect(area).toBeFocused();
+  // Already on the line the URL marks: no new entry.
+  await page.getByRole("button", { name: /^References/ }).click();
+  await expect(page).toHaveURL(/refs\/tree\/Links\.Types\?decl=/);
+  await page.goBack();
+  await expect(page).toHaveURL(server.base + mainUrl + `#L${n}`);
+  await expect(area).toBeFocused();
+  await page.goBack();
+  await expect(page).toHaveURL(server.base + mainUrl);
 });
 
 test("source: Esc ends Ctrl+A at once, a copy right after gets nothing", async ({

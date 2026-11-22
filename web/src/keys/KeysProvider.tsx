@@ -43,6 +43,8 @@ export interface ViewLinks {
   // Where 1 / 2 and the header links go: the same place in the other
   // view. Undefined: docs() / source().
   at?: (to: "docs" | "source") => ViewTarget | undefined;
+  // Called right before goView leaves this page.
+  leave?: () => void;
 }
 
 // What Copy location copies: a text, or words to say instead.
@@ -148,6 +150,7 @@ export function KeysProvider(props: ParentProps): JSX.Element {
       say(missingWords[to]);
       return;
     }
+    l.leave?.();
     navigate(t.href, { state: t.state });
   };
 
