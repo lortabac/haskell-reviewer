@@ -1,6 +1,6 @@
 // The changed files of a diff session (api/diff-files), fetched once
-// and shared: the sidebar now, Home and the header later. Browse mode:
-// no fetch, nothing loading.
+// and shared by the sidebar, Home and the header. Browse mode: no
+// fetch, nothing loading.
 import {
   createContext,
   createMemo,
@@ -18,6 +18,13 @@ import { usePageSide, useSession } from "../session";
 // With "changed only" on, sidebar groups open by default up to this
 // many rows (D-337).
 export const openAllUpTo = 500;
+
+// The notes on api/diff-files, in the sidebar and on Home.
+export const loadingText = "Loading changes…";
+export const failedText =
+  "Couldn't load the changes. See the terminal for details.";
+export const truncatedText =
+  "A side has over 100,000 files: changes past that point aren't shown.";
 
 export interface DiffFilesApi {
   // Once loaded, else undefined.
@@ -84,12 +91,10 @@ export function DiffFilesNotes(props: { loading: boolean }): JSX.Element {
   return (
     <>
       <Show when={props.loading && diff.loading()}>
-        <p class="tree-note">Loading changes…</p>
+        <p class="tree-note">{loadingText}</p>
       </Show>
       <Show when={diff.failed()}>
-        <p class="tree-note">
-          Couldn't load the changes. See the terminal for details.
-        </p>
+        <p class="tree-note">{failedText}</p>
       </Show>
     </>
   );

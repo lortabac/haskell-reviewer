@@ -295,6 +295,10 @@ The UI has a fixed **frame** and one **main view** at a time.
     tree head is "head: working tree", with no hash. Side pages also
     show the current side ("Viewing: head"). Browse mode shows none of
     this. Long labels are cut, the full text in a tip.
+  - Changed files outside ROOT, diff mode only (D-338): "3 outside
+    ROOT" ("100+" when the count was cut), a link to Home, with the
+    first 10 paths in a tip. Hidden when there are none or the count
+    isn't known (working tree).
 - **Sidebar**: the module tree, grouped by package and component. In diff
   mode every module carries a change marker (added / removed / modified /
   renamed, and "settings changed" for its parse settings or role; from
@@ -315,6 +319,13 @@ The UI has a fixed **frame** and one **main view** at a time.
     marker are hidden. Groups open by default when 500 entries or
     fewer remain. If the changes can't be loaded (pairing failed),
     nothing is filtered and a note says so. Browse mode has no box.
+- **Home**, diff mode (D-338): the revisions as text, the changed files
+  and modules counted by status, the rename-limit and truncated notes,
+  the changed files (sign, path, "from <old> (n%)" for renames; the
+  first 1000, then "Show all"), and the changed files outside ROOT.
+  Module counts match the sidebar's markers and ghosts. File links go to
+  the source view until the diff view exists; a removed file links to
+  base and says "(on base)". Browse mode: just the hint.
 - **LLM panel** (§6): a collapsible right-hand panel.
 
 All views are **URL-addressable** (D-27). URLs are readable and semantic,

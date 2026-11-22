@@ -127,6 +127,18 @@ a {
   overflow-wrap: anywhere;
 }
 
+/* Changed files outside ROOT (D-338). The tip is a list of paths, one
+   per line, its height capped. */
+.outside-count {
+  white-space: nowrap;
+}
+
+.frame-header .outside-count[data-tip]::after {
+  white-space: pre-line;
+  max-height: 50vh;
+  overflow: hidden;
+}
+
 /* The theme switch: like the sidebar's toggle, bold + border + inset
    for the pressed one, not colour alone. */
 .theme-switch {
