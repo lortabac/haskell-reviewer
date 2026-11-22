@@ -1,9 +1,9 @@
 // The UI preferences (theme, exported only, sidebar view, single-key
-// shortcuts): kept in a
-// signal each, changed optimistically, saved with api/prefs (D-197,
-// D-203). The first GET happens in main.tsx, before render (so the
-// theme is right from the first paint); this provider only takes that
-// value and keeps it in sync with the server from then on.
+// shortcuts, changed only): kept in a signal each, changed
+// optimistically, saved with api/prefs (D-197, D-203). The first GET
+// happens in main.tsx, before render (so the theme is right from the
+// first paint); this provider only takes that value and keeps it in
+// sync with the server from then on.
 import {
   type Accessor,
   createContext,
@@ -33,17 +33,20 @@ export interface PrefsApi {
   setSidebar: (v: SidebarView) => void;
   singleKeyShortcuts: Accessor<boolean>;
   setSingleKeyShortcuts: (v: boolean) => void;
+  changedOnly: Accessor<boolean>;
+  setChangedOnly: (v: boolean) => void;
   // A save failed: a polite status for the header's live region. Clears
   // once every key's latest save has succeeded.
   status: Accessor<string | undefined>;
 }
 
-type Key = "theme" | "exportedOnly" | "sidebar" | "singleKeyShortcuts";
+type Key = keyof Prefs;
 const keys: readonly Key[] = [
   "theme",
   "exportedOnly",
   "sidebar",
   "singleKeyShortcuts",
+  "changedOnly",
 ];
 
 const PrefsContext = createContext<PrefsApi>();
@@ -64,6 +67,9 @@ export function PrefsProvider(
   const [sidebar, setSidebarSignal] = createSignal(props.initial.sidebar);
   const [singleKeyShortcuts, setShortcutsSignal] = createSignal(
     props.initial.singleKeyShortcuts,
+  );
+  const [changedOnly, setChangedOnlySignal] = createSignal(
+    props.initial.changedOnly,
   );
   const [status, setStatusSignal] = createSignal<string>();
 
@@ -100,6 +106,7 @@ export function PrefsProvider(
     exportedOnly: false,
     sidebar: false,
     singleKeyShortcuts: false,
+    changedOnly: false,
   };
   // A plain promise, read once (not a reactive value): no effect
   // needed, but onMount gives eslint-plugin-solid the "one-time" scope
@@ -110,6 +117,7 @@ export function PrefsProvider(
       if (!touched.exportedOnly) setExportedOnlySignal(p.exportedOnly);
       if (!touched.sidebar) setSidebarSignal(p.sidebar);
       if (!touched.singleKeyShortcuts) setShortcutsSignal(p.singleKeyShortcuts);
+      if (!touched.changedOnly) setChangedOnlySignal(p.changedOnly);
     });
   });
 
@@ -125,12 +133,14 @@ export function PrefsProvider(
     exportedOnly: 0,
     sidebar: 0,
     singleKeyShortcuts: 0,
+    changedOnly: 0,
   };
   const failed: Record<Key, boolean> = {
     theme: false,
     exportedOnly: false,
     sidebar: false,
     singleKeyShortcuts: false,
+    changedOnly: false,
   };
   const updateStatus = (): void => {
     setStatus(
@@ -193,6 +203,13 @@ export function PrefsProvider(
       touched.singleKeyShortcuts = true;
       setShortcutsSignal(v);
       save("singleKeyShortcuts", { singleKeyShortcuts: v });
+    },
+    changedOnly,
+    setChangedOnly: (v) => {
+      if (v === changedOnly()) return;
+      touched.changedOnly = true;
+      setChangedOnlySignal(v);
+      save("changedOnly", { changedOnly: v });
     },
     status,
   };

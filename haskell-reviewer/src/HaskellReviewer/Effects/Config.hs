@@ -94,9 +94,10 @@ warmUpConfig =
   mapM_
     (\t -> let p = parseConfig t in void (evaluate (sum (map size p.warnings))))
     [ "[ui]\ntheme = \"dark\"\nexported-only = true\nsidebar = \"files\"\n\
-      \single-key-shortcuts = false\nx = 1\n[ui.y]\n[llm]\nz = 2\n",
+      \single-key-shortcuts = false\nchanged-only = true\n\
+      \x = 1\n[ui.y]\n[llm]\nz = 2\n",
       "[ui]\ntheme = 1\nsidebar = \"nope\"\nexported-only = \"x\"\n\
-      \single-key-shortcuts = 1\n",
+      \single-key-shortcuts = 1\nchanged-only = \"x\"\n",
       "ui = 1\n",
       "[ui]\ntheme = \"a\"\ntheme = \"b\"\n",
       "[ui]\ntheme = \x01\n",

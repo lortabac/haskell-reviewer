@@ -37,20 +37,26 @@ tests =
                 { theme = ThemeDark,
                   exportedOnly = True,
                   sidebar = SidebarFiles,
-                  singleKeyShortcuts = True
+                  singleKeyShortcuts = True,
+                  changedOnly = False
                 }
             configOff =
               UiDefaults
                 { theme = ThemeDark,
                   exportedOnly = True,
                   sidebar = SidebarFiles,
-                  singleKeyShortcuts = False
+                  singleKeyShortcuts = False,
+                  changedOnly = True
                 }
         effective builtinDefaults noPrefs @?= eff ThemeSystem False SidebarAuto
         effective configOff noPrefs
-          @?= shortcutsEff False (eff ThemeDark True SidebarFiles)
-        effective configOff (withShortcuts (Just True) noPrefs)
+          @?= changedEff True (shortcutsEff False (eff ThemeDark True SidebarFiles))
+        effective
+          configOff
+          (withChangedOnly (Just False) (withShortcuts (Just True) noPrefs))
           @?= eff ThemeDark True SidebarFiles
+        effective config (withChangedOnly (Just True) noPrefs)
+          @?= changedEff True (eff ThemeDark True SidebarFiles)
         effective config (withShortcuts (Just False) noPrefs)
           @?= shortcutsEff False (eff ThemeDark True SidebarFiles)
         effective config noPrefs @?= eff ThemeDark True SidebarFiles
@@ -72,7 +78,11 @@ tests =
         patchPrefs p2 @?= prefsOf (Just ThemeSystem) (Just True) (Just SidebarAuto)
         p3 <- decoded "{\"singleKeyShortcuts\":false}"
         patchPrefs p3 @?= withShortcuts (Just False) noPrefs
-        patchKeys p3 @?= ["singleKeyShortcuts"],
+        patchKeys p3 @?= ["singleKeyShortcuts"]
+        p4 <- decoded "{\"changedOnly\":true,\"theme\":\"dark\"}"
+        patchPrefs p4
+          @?= withChangedOnly (Just True) (prefsOf (Just ThemeDark) Nothing Nothing)
+        patchKeys p4 @?= ["theme", "changedOnly"],
       testCase "decodePatch: bad ones, with a reason" $
         mapM_
           ( \(body, why) ->
@@ -94,7 +104,9 @@ tests =
             ("{\"sidebar\":[]}", badSidebar),
             ("{\"singleKeyShortcuts\":\"off\"}", badShortcuts),
             ("{\"singleKeyShortcuts\":null}", badShortcuts),
-            ("{\"singleKeyShortcuts\":0}", badShortcuts)
+            ("{\"singleKeyShortcuts\":0}", badShortcuts),
+            ("{\"changedOnly\":\"yes\"}", "changedOnly: expected true or false"),
+            ("{\"changedOnly\":[]}", "changedOnly: expected true or false")
           ],
       testCase "ui.json: unknown keys and values we don't understand are kept" $
         decodePrefsFile
@@ -165,9 +177,10 @@ goldens =
         ( "full",
           PrefsFile
             { prefs =
-                withShortcuts
-                  (Just False)
-                  (prefsOf (Just ThemeLight) (Just False) (Just SidebarModules)),
+                withChangedOnly (Just True) $
+                  withShortcuts
+                    (Just False)
+                    (prefsOf (Just ThemeLight) (Just False) (Just SidebarModules)),
               others =
                 KeyMap.fromList
                   [("zz", Aeson.Bool True), ("aa", Aeson.String "x"), ("mm", Aeson.Null)]
@@ -200,6 +213,7 @@ genFile = do
   exportedOnly <- Gen.maybe Gen.bool
   sidebar <- Gen.maybe (Gen.element [SidebarAuto, SidebarModules, SidebarFiles])
   shortcuts <- Gen.maybe Gen.bool
+  changed <- Gen.maybe Gen.bool
   others <- Gen.list (Range.linear 0 5) ((,) <$> genKey <*> genValue)
   pure
     PrefsFile
@@ -208,7 +222,8 @@ genFile = do
             { theme = theme,
               exportedOnly = exportedOnly,
               sidebar = sidebar,
-              singleKeyShortcuts = shortcuts
+              singleKeyShortcuts = shortcuts,
+              changedOnly = changed
             },
         others = KeyMap.fromList [(Key.fromText k, v) | (k, v) <- others]
       }
@@ -216,8 +231,16 @@ genFile = do
     genKey :: Gen Text
     genKey =
       Gen.filter
-        (`notElem` ["version", "theme", "exportedOnly", "sidebar", "singleKeyShortcuts"])
+        (`notElem` ours)
         (Gen.text (Range.linear 0 8) Gen.unicode)
+    ours =
+      [ "version",
+        "theme",
+        "exportedOnly",
+        "sidebar",
+        "singleKeyShortcuts",
+        "changedOnly"
+      ]
     genValue =
       Gen.choice
         [ pure Aeson.Null,
@@ -251,10 +274,16 @@ badShortcuts = "singleKeyShortcuts: expected true or false"
 nums :: [Maybe Int]
 nums = [Just 1, Nothing]
 
--- | Shortcuts on, the default.
+-- | Shortcuts on and changed only off, the defaults.
 eff :: Theme -> Bool -> SidebarView -> Effective
 eff t e s =
-  Effective {theme = t, exportedOnly = e, sidebar = s, singleKeyShortcuts = True}
+  Effective
+    { theme = t,
+      exportedOnly = e,
+      sidebar = s,
+      singleKeyShortcuts = True,
+      changedOnly = False
+    }
 
 shortcutsEff :: Bool -> Effective -> Effective
 shortcutsEff k e =
@@ -262,14 +291,31 @@ shortcutsEff k e =
     { theme = e.theme,
       exportedOnly = e.exportedOnly,
       sidebar = e.sidebar,
-      singleKeyShortcuts = k
+      singleKeyShortcuts = k,
+      changedOnly = e.changedOnly
     }
 
--- | Prefs with these keys, shortcuts not set. Record updates would be
+changedEff :: Bool -> Effective -> Effective
+changedEff c e =
+  Effective
+    { theme = e.theme,
+      exportedOnly = e.exportedOnly,
+      sidebar = e.sidebar,
+      singleKeyShortcuts = e.singleKeyShortcuts,
+      changedOnly = c
+    }
+
+-- | Prefs with these keys, shortcuts and changed only not set. Record updates would be
 -- ambiguous here.
 prefsOf :: Maybe Theme -> Maybe Bool -> Maybe SidebarView -> Prefs
 prefsOf t e s =
-  Prefs {theme = t, exportedOnly = e, sidebar = s, singleKeyShortcuts = Nothing}
+  Prefs
+    { theme = t,
+      exportedOnly = e,
+      sidebar = s,
+      singleKeyShortcuts = Nothing,
+      changedOnly = Nothing
+    }
 
 withShortcuts :: Maybe Bool -> Prefs -> Prefs
 withShortcuts k p =
@@ -277,5 +323,16 @@ withShortcuts k p =
     { theme = p.theme,
       exportedOnly = p.exportedOnly,
       sidebar = p.sidebar,
-      singleKeyShortcuts = k
+      singleKeyShortcuts = k,
+      changedOnly = p.changedOnly
+    }
+
+withChangedOnly :: Maybe Bool -> Prefs -> Prefs
+withChangedOnly c p =
+  Prefs
+    { theme = p.theme,
+      exportedOnly = p.exportedOnly,
+      sidebar = p.sidebar,
+      singleKeyShortcuts = p.singleKeyShortcuts,
+      changedOnly = c
     }

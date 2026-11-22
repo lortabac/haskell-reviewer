@@ -85,7 +85,8 @@ data Prefs = Prefs
   { theme :: !(Maybe Theme),
     exportedOnly :: !(Maybe Bool),
     sidebar :: !(Maybe SidebarView),
-    singleKeyShortcuts :: !(Maybe Bool)
+    singleKeyShortcuts :: !(Maybe Bool),
+    changedOnly :: !(Maybe Bool)
   }
   deriving (Eq, Show)
 
@@ -101,7 +102,8 @@ data Effective = Effective
   { theme :: !Theme,
     exportedOnly :: !Bool,
     sidebar :: !SidebarView,
-    singleKeyShortcuts :: !Bool
+    singleKeyShortcuts :: !Bool,
+    changedOnly :: !Bool
   }
   deriving (Eq, Show)
 
@@ -165,7 +167,8 @@ noPrefs =
     { theme = Nothing,
       exportedOnly = Nothing,
       sidebar = Nothing,
-      singleKeyShortcuts = Nothing
+      singleKeyShortcuts = Nothing,
+      changedOnly = Nothing
     }
 
 -- | No ui.json yet.
@@ -179,7 +182,8 @@ effective d p =
     { theme = fromMaybe d.theme p.theme,
       exportedOnly = fromMaybe d.exportedOnly p.exportedOnly,
       sidebar = fromMaybe d.sidebar p.sidebar,
-      singleKeyShortcuts = fromMaybe d.singleKeyShortcuts p.singleKeyShortcuts
+      singleKeyShortcuts = fromMaybe d.singleKeyShortcuts p.singleKeyShortcuts,
+      changedOnly = fromMaybe d.changedOnly p.changedOnly
     }
 
 -- | The keys of the patch win.
@@ -193,7 +197,8 @@ overridePrefs new old =
     { theme = orElse new.theme old.theme,
       exportedOnly = orElse new.exportedOnly old.exportedOnly,
       sidebar = orElse new.sidebar old.sidebar,
-      singleKeyShortcuts = orElse new.singleKeyShortcuts old.singleKeyShortcuts
+      singleKeyShortcuts = orElse new.singleKeyShortcuts old.singleKeyShortcuts,
+      changedOnly = orElse new.changedOnly old.changedOnly
     }
   where
     orElse a b = maybe b Just a
@@ -214,6 +219,7 @@ patchKeys (PrefsPatch new) =
     <> ["exportedOnly" | Just _ <- [new.exportedOnly]]
     <> ["sidebar" | Just _ <- [new.sidebar]]
     <> ["singleKeyShortcuts" | Just _ <- [new.singleKeyShortcuts]]
+    <> ["changedOnly" | Just _ <- [new.changedOnly]]
 
 -- | The keys a patch sets.
 patchPrefs :: PrefsPatch -> Prefs
@@ -252,6 +258,7 @@ encodePrefsFile file =
         mempty
         (Encoding.pair "singleKeyShortcuts" . Encoding.bool)
         p.singleKeyShortcuts
+      <> maybe mempty (Encoding.pair "changedOnly" . Encoding.bool) p.changedOnly
       <> foldMap
         (\(k, v) -> Encoding.pair k (Aeson.toEncoding v))
         (KeyMap.toAscList file.others)
@@ -306,6 +313,7 @@ readKey key v = case key of
   "exportedOnly" -> Just (bool setExportedOnly)
   "sidebar" -> Just (enum sidebarFromName ["auto", "modules", "files"] setSidebar)
   "singleKeyShortcuts" -> Just (bool setSingleKeyShortcuts)
+  "changedOnly" -> Just (bool setChangedOnly)
   _ -> Nothing
   where
     bool :: (Bool -> Prefs -> Prefs) -> Either BadValue (Prefs -> Prefs)
@@ -335,7 +343,8 @@ setTheme x =
       { theme = Just x,
         exportedOnly = Nothing,
         sidebar = Nothing,
-        singleKeyShortcuts = Nothing
+        singleKeyShortcuts = Nothing,
+        changedOnly = Nothing
       }
 
 setExportedOnly :: Bool -> Prefs -> Prefs
@@ -345,7 +354,8 @@ setExportedOnly x =
       { theme = Nothing,
         exportedOnly = Just x,
         sidebar = Nothing,
-        singleKeyShortcuts = Nothing
+        singleKeyShortcuts = Nothing,
+        changedOnly = Nothing
       }
 
 setSidebar :: SidebarView -> Prefs -> Prefs
@@ -355,7 +365,8 @@ setSidebar x =
       { theme = Nothing,
         exportedOnly = Nothing,
         sidebar = Just x,
-        singleKeyShortcuts = Nothing
+        singleKeyShortcuts = Nothing,
+        changedOnly = Nothing
       }
 
 setSingleKeyShortcuts :: Bool -> Prefs -> Prefs
@@ -365,7 +376,19 @@ setSingleKeyShortcuts x =
       { theme = Nothing,
         exportedOnly = Nothing,
         sidebar = Nothing,
-        singleKeyShortcuts = Just x
+        singleKeyShortcuts = Just x,
+        changedOnly = Nothing
+      }
+
+setChangedOnly :: Bool -> Prefs -> Prefs
+setChangedOnly x =
+  overridePrefs
+    Prefs
+      { theme = Nothing,
+        exportedOnly = Nothing,
+        sidebar = Nothing,
+        singleKeyShortcuts = Nothing,
+        changedOnly = Just x
       }
 
 quoted :: Text -> Text

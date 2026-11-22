@@ -1,4 +1,5 @@
 import type { Entry } from "../api/files";
+import type { Side } from "../sides";
 
 export interface DirNode {
   name: string;
@@ -8,9 +9,20 @@ export interface DirNode {
   files: FileNode[];
 }
 
+// A path that is only on the other side of a diff: a link there
+// (D-337).
+export interface GhostEntry {
+  path: string;
+  kind: "ghost";
+  // The side it is on.
+  side: Side;
+}
+
+export type TreeEntry = Entry | GhostEntry;
+
 export interface FileNode {
   name: string;
-  entry: Entry;
+  entry: TreeEntry;
 }
 
 // Code point order, like the server. JS "<" goes by UTF-16 code units,
@@ -30,7 +42,7 @@ export function compareCodePoints(a: string, b: string): number {
 
 // The folder tree of a flat list. Folders first, then files, each in
 // code point order.
-export function buildTree(entries: readonly Entry[]): DirNode {
+export function buildTree(entries: readonly TreeEntry[]): DirNode {
   const root: DirNode = { name: "", path: "", dirs: [], files: [] };
   const dirs = new Map<string, DirNode>([["", root]]);
   for (const entry of entries) {
@@ -54,6 +66,11 @@ export function buildTree(entries: readonly Entry[]): DirNode {
     node.files.sort((a, b) => compareCodePoints(a.name, b.name));
   }
   return root;
+}
+
+// No files at all.
+export function isEmptyTree(root: DirNode): boolean {
+  return root.dirs.length === 0 && root.files.length === 0;
 }
 
 // The folders that hold path: "a/b/c" -> ["a", "a/b"].

@@ -276,7 +276,8 @@ cases =
           { theme = ThemeDark,
             exportedOnly = True,
             sidebar = SidebarModules,
-            singleKeyShortcuts = False
+            singleKeyShortcuts = False,
+            changedOnly = True
           }
         (Left HomeUnset)
     answering r =

@@ -454,6 +454,7 @@ describe("API fixtures", () => {
       exportedOnly: false,
       sidebar: "auto",
       singleKeyShortcuts: true,
+      changedOnly: false,
     });
     // Every key off its default.
     const other = decodePrefs(fixture("prefs"));
@@ -461,6 +462,7 @@ describe("API fixtures", () => {
     expect(other.exportedOnly).toBe(true);
     expect(other.sidebar).not.toBe("auto");
     expect(other.singleKeyShortcuts).toBe(false);
+    expect(other.changedOnly).toBe(true);
     expect(themes).toContain(other.theme);
     expect(sidebarViews).toContain(other.sidebar);
   });
@@ -910,6 +912,7 @@ describe("decoders reject bad shapes", () => {
       exportedOnly: true,
       sidebar: "files",
       singleKeyShortcuts: false,
+      changedOnly: true,
     };
     expect(decodePrefs(good)).toEqual(good);
     for (const bad of [
@@ -922,6 +925,8 @@ describe("decoders reject bad shapes", () => {
       { ...good, sidebar: null },
       { ...good, singleKeyShortcuts: undefined },
       { ...good, singleKeyShortcuts: "false" },
+      { ...good, changedOnly: undefined },
+      { ...good, changedOnly: 1 },
     ]) {
       expect(() => decodePrefs(bad), JSON.stringify(bad)).toThrow(DecodeError);
     }

@@ -58,6 +58,7 @@ has one table:
   exported-only = false
   sidebar = "auto"        # auto, modules or files
   single-key-shortcuts = true
+  changed-only = false    # diff mode: only changed entries in the sidebar
 
 These are defaults: what the user picks in the page (ui.json) wins.
 
@@ -98,7 +99,9 @@ data UiDefaults = UiDefaults
     exportedOnly :: !Bool,
     sidebar :: !SidebarView,
     -- | Single-key shortcuts (@j@, @/@) on. SPEC §5.3, D-45.
-    singleKeyShortcuts :: !Bool
+    singleKeyShortcuts :: !Bool,
+    -- | Diff mode: the sidebar shows only changed entries. D-336.
+    changedOnly :: !Bool
   }
   deriving (Eq, Show)
 
@@ -125,7 +128,8 @@ builtinDefaults =
     { theme = ThemeSystem,
       exportedOnly = False,
       sidebar = SidebarAuto,
-      singleKeyShortcuts = True
+      singleKeyShortcuts = True,
+      changedOnly = False
     }
 
 -- | The defaults from a config file, and its problems. See Note
@@ -223,6 +227,7 @@ uiKey acc@(d, ws) key (keyPos, value) = case key of
   "sidebar" -> enum sidebarFromName "auto, modules or files" (\s -> d {sidebar = s})
   "exported-only" -> bool (\b -> d {exportedOnly = b})
   "single-key-shortcuts" -> bool (\b -> d {singleKeyShortcuts = b})
+  "changed-only" -> bool (\b -> d {changedOnly = b})
   _ -> case value of
     Table' _ _ -> warn acc keyPos ("unknown table [ui." <> key <> "]")
     _ -> warn acc keyPos ("unknown key " <> quoted ("ui." <> key))

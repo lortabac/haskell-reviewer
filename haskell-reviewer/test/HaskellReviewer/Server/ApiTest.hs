@@ -575,19 +575,25 @@ prefsTests =
         lookup "Content-Type" r.headers @?= Just "application/json"
         r.body
           @?= "{\"theme\":\"dark\",\"exportedOnly\":false,\"sidebar\":\"auto\",\
-              \\"singleKeyShortcuts\":true}"
+              \\"singleKeyShortcuts\":true,\"changedOnly\":false}"
         r2 <- post api "{\"sidebar\":\"files\",\"exportedOnly\":true}"
         r2.body
           @?= "{\"theme\":\"dark\",\"exportedOnly\":true,\"sidebar\":\"files\",\
-              \\"singleKeyShortcuts\":true}"
+              \\"singleKeyShortcuts\":true,\"changedOnly\":false}"
         g <- getApi api prefsPath
         g.body @?= r2.body
         r3 <- post api "{\"singleKeyShortcuts\":false}"
         r3.body
           @?= "{\"theme\":\"dark\",\"exportedOnly\":true,\"sidebar\":\"files\",\
-              \\"singleKeyShortcuts\":false}"
+              \\"singleKeyShortcuts\":false,\"changedOnly\":false}"
         g3 <- getApi api prefsPath
-        g3.body @?= r3.body,
+        g3.body @?= r3.body
+        r4 <- post api "{\"changedOnly\":true}"
+        r4.body
+          @?= "{\"theme\":\"dark\",\"exportedOnly\":true,\"sidebar\":\"files\",\
+              \\"singleKeyShortcuts\":false,\"changedOnly\":true}"
+        g4 <- getApi api prefsPath
+        g4.body @?= r4.body,
       testCase "POST: bad bodies are 400, with the reason" $ do
         api <- withStore
         mapM_
@@ -607,7 +613,8 @@ prefsTests =
             ("{\"exportedOnly\":\"yes\"}", "exportedOnly: expected true or false"),
             ( "{\"singleKeyShortcuts\":\"off\"}",
               "singleKeyShortcuts: expected true or false"
-            )
+            ),
+            ("{\"changedOnly\":null}", "changedOnly: expected true or false")
           ]
         getApi api prefsPath >>= \r -> r.body @?= defaults,
       testCase "POST: not application/json is 415" $ do
@@ -698,7 +705,7 @@ prefsTests =
               r.status @?= 200
               r.body
                 @?= "{\"theme\":\"dark\",\"exportedOnly\":false,\"sidebar\":\"auto\",\
-                    \\"singleKeyShortcuts\":true}"
+                    \\"singleKeyShortcuts\":true,\"changedOnly\":false}"
               g <- getApi api prefsPath
               g.body @?= r.body
     ]
@@ -710,7 +717,7 @@ prefsTests =
     post api body = sendApi "POST" jsonHeaders (Sized body) api prefsPath
     defaults =
       "{\"theme\":\"system\",\"exportedOnly\":false,\"sidebar\":\"auto\",\
-      \\"singleKeyShortcuts\":true}"
+      \\"singleKeyShortcuts\":true,\"changedOnly\":false}"
     -- One store for all the requests of a test.
     withStore = do
       let silent = newLogger LevelInfo (\_ -> pure ())

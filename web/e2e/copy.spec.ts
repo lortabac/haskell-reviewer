@@ -383,6 +383,10 @@ test("nothing to copy: home page, and focus in the sidebar", async ({
   await expect(status(page)).toHaveText(/^Nothing to copy here\./);
   expect(await written(page)).toEqual([]);
   await page.goto(page.url().replace(/docs\/tree\/Shapes.*/, ""));
+  // The app renders once api/session answers: keys before that are lost.
+  await expect(
+    page.getByRole("heading", { name: "Home", level: 1 }),
+  ).toBeVisible();
   await page.keyboard.press("y");
   await expect(status(page)).toHaveText(/^Nothing to copy here\./);
   expect(await written(page)).toEqual([]);

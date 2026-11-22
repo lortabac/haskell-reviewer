@@ -65,6 +65,10 @@ function prefsSaved(page: Page): Promise<unknown> {
 
 test("/ focuses the search box; keys type there", async ({ page, server }) => {
   await page.goto(server.base);
+  // The app renders once api/session answers: keys before that are lost.
+  await expect(
+    page.getByRole("heading", { name: "Home", level: 1 }),
+  ).toBeVisible();
   await page.keyboard.press("/");
   await expect(search(page)).toBeFocused();
   await page.keyboard.type("j?");

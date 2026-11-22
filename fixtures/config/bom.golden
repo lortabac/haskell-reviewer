@@ -2,4 +2,5 @@ theme: light
 exported-only: false
 sidebar: auto
 single-key-shortcuts: true
+changed-only: false
 == warnings

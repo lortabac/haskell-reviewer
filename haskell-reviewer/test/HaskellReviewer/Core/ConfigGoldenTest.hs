@@ -68,6 +68,7 @@ dump f = do
       "exported-only: " <> bool d.exportedOnly,
       "sidebar: " <> sidebarName d.sidebar,
       "single-key-shortcuts: " <> bool d.singleKeyShortcuts,
+      "changed-only: " <> bool d.changedOnly,
       "== warnings"
     ]
       <> map (renderConfigWarning "config.toml") parsed.warnings

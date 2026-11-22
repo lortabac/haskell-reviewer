@@ -4,6 +4,7 @@ import { createMemo, type JSX, type ParentProps, Show } from "solid-js";
 import { defaultPrefs, type Prefs } from "./api/prefs";
 import { defaultSide, sessionSides } from "./api/session";
 import { CopyLocation } from "./copy/CopyLocation";
+import { DiffFilesProvider } from "./diff/store";
 import { Frame } from "./Frame";
 import { RevisionInfo } from "./header/RevisionInfo";
 import { KeysProvider, KeysStatus } from "./keys/KeysProvider";
@@ -64,41 +65,43 @@ export function Root(
         initial={props.initialPrefs ?? defaultPrefs}
         pending={props.pendingPrefs}
       >
-        <ModulesProvider>
-          <KeysProvider>
-            <Frame
-              sidebar={<Sidebar />}
-              revisions={<RevisionInfo current={current()} />}
-              notices={<ProjectNotices />}
-              views={<ViewSwitch />}
-              search={<SearchBox placement="header" />}
-              controls={
-                <>
-                  <CopyLocation />
-                  <ThemeSwitch />
-                  <ShortcutsButton />
-                  <PrefsStatus />
-                  <KeysStatus />
-                </>
-              }
-            >
-              <Show
-                when={wrongSide()}
-                fallback={
-                  // Keyed: a side change (an edited URL) mounts the page
-                  // again. The router keeps route components when only
-                  // params change, so their resources would keep the old
-                  // side. Reading props.children here builds new routes.
-                  <Show when={side()} keyed>
-                    {(s) => <Keyed on={s}>{props.children}</Keyed>}
-                  </Show>
+        <DiffFilesProvider>
+          <ModulesProvider>
+            <KeysProvider>
+              <Frame
+                sidebar={<Sidebar />}
+                revisions={<RevisionInfo current={current()} />}
+                notices={<ProjectNotices />}
+                views={<ViewSwitch />}
+                search={<SearchBox placement="header" />}
+                controls={
+                  <>
+                    <CopyLocation />
+                    <ThemeSwitch />
+                    <ShortcutsButton />
+                    <PrefsStatus />
+                    <KeysStatus />
+                  </>
                 }
               >
-                {(typed) => <WrongSide side={typed()} />}
-              </Show>
-            </Frame>
-          </KeysProvider>
-        </ModulesProvider>
+                <Show
+                  when={wrongSide()}
+                  fallback={
+                    // Keyed: a side change (an edited URL) mounts the page
+                    // again. The router keeps route components when only
+                    // params change, so their resources would keep the old
+                    // side. Reading props.children here builds new routes.
+                    <Show when={side()} keyed>
+                      {(s) => <Keyed on={s}>{props.children}</Keyed>}
+                    </Show>
+                  }
+                >
+                  {(typed) => <WrongSide side={typed()} />}
+                </Show>
+              </Frame>
+            </KeysProvider>
+          </ModulesProvider>
+        </DiffFilesProvider>
       </PrefsProvider>
     </SideContext.Provider>
   );

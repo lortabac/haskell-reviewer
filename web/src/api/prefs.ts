@@ -14,6 +14,8 @@ export type Prefs = {
   sidebar: SidebarView;
   // Keys like j and / (SPEC §5.3, D-45).
   singleKeyShortcuts: boolean;
+  // Diff mode: the sidebar shows only changed entries (D-336).
+  changedOnly: boolean;
 };
 
 // Before the first GET answers (or if it's slow or fails): same as the
@@ -23,6 +25,7 @@ export const defaultPrefs: Prefs = {
   exportedOnly: false,
   sidebar: "auto",
   singleKeyShortcuts: true,
+  changedOnly: false,
 };
 
 export function decodePrefs(value: unknown, path = "$"): Prefs {
@@ -32,5 +35,6 @@ export function decodePrefs(value: unknown, path = "$"): Prefs {
     exportedOnly: field(o, "exportedOnly", path, bool),
     sidebar: field(o, "sidebar", path, oneOf(sidebarViews)),
     singleKeyShortcuts: field(o, "singleKeyShortcuts", path, bool),
+    changedOnly: field(o, "changedOnly", path, bool),
   };
 }

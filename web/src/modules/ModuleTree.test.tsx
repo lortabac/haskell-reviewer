@@ -6,6 +6,7 @@ import { mountAppAt, unmountApp } from "../../test/mount";
 import { decodeModuleTree, type ModuleTree as Tree } from "../api/modules";
 import { type Current, ModuleTree } from "./ModuleTree";
 import { indexRefs, indexSources } from "./store";
+import { unionModules } from "./union";
 
 // Mounts the app with a module tree, and waits for the tree.
 async function panel(name: string, at = "/tok"): Promise<HTMLElement> {
@@ -57,12 +58,13 @@ function mountTree(tree: Tree, start?: Current | string): HTMLElement {
   dispose = render(
     () => (
       <ModuleTree
-        tree={tree}
+        view={unionModules(tree, undefined, "tree")}
+        side="tree"
         bySource={bySource}
         byRef={byRef}
         current={current()}
-        docsHref={(r) => `/tok/docs/tree/${r}`}
-        srcHref={(p) => `/tok/src/tree/${p}`}
+        docsHref={(s, r) => `/tok/docs/${s}/${r}`}
+        srcHref={(s, p) => `/tok/src/${s}/${p}`}
       />
     ),
     root,
