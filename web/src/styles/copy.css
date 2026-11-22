@@ -51,6 +51,11 @@
   margin-left: 0;
 }
 
+/* A header revision item: the item has the gap. */
+.rev-item > .copy-button {
+  margin-left: 0;
+}
+
 /* A tree row: the link and the button on one line. */
 .tree-row {
   display: flex;

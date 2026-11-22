@@ -1,5 +1,5 @@
 import { render } from "solid-js/web";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Frame } from "./Frame";
 
 let dispose: (() => void) | undefined;
@@ -15,6 +15,8 @@ function mount(): HTMLElement {
 }
 
 afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   dispose?.();
   document.body.replaceChildren();
 });
@@ -83,5 +85,28 @@ describe("Frame", () => {
     if (!(first instanceof HTMLElement)) throw new Error("no skip link");
     first.click();
     expect(document.activeElement).toBe(root.querySelector("main"));
+  });
+
+  it("--header-height follows the header's real height", () => {
+    const observers: (() => void)[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(cb: () => void) {
+          observers.push(cb);
+        }
+        observe(): void {}
+        disconnect(): void {}
+      },
+    );
+    const root = mount();
+    const header = root.querySelector("header");
+    if (header === null) throw new Error("no header");
+    vi.spyOn(header, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(0, 0, 300, 120),
+    );
+    for (const cb of observers) cb();
+    const frame = root.querySelector<HTMLElement>(".frame");
+    expect(frame?.getAttribute("style")).toContain("--header-height: 120px");
   });
 });

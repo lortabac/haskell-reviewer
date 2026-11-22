@@ -13,6 +13,7 @@ import { join } from "node:path";
 import {
   makeCabalProject,
   makeDocsProject,
+  makeEditsProject,
   makeHlProject,
   makeLinksProject,
   makeProject,
@@ -101,6 +102,7 @@ interface WorkerFixtures {
   hlProject: Project;
   linksProject: Project;
   sidesProject: Project;
+  editsProject: Project;
 }
 
 export const test = base.extend<TestFixtures, WorkerFixtures>({
@@ -158,6 +160,16 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     // eslint-disable-next-line no-empty-pattern
     async ({}, use) => {
       const p = await makeSidesProject();
+      await use(p);
+      await p.remove();
+    },
+    { scope: "worker" },
+  ],
+
+  editsProject: [
+    // eslint-disable-next-line no-empty-pattern
+    async ({}, use) => {
+      const p = await makeEditsProject();
       await use(p);
       await p.remove();
     },

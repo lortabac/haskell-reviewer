@@ -75,6 +75,12 @@
   overflow-wrap: anywhere;
 }
 
+/* A one-line note about the file (a git filter applies). */
+.file-note {
+  margin: 0 0 var(--space-2);
+  color: var(--color-muted);
+}
+
 /* The outline under the source view: collapsed, for the keyboard
    (the gutter markers are mouse only). Under, so it never moves the
    view when it comes. */
