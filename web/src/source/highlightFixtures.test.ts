@@ -4,7 +4,7 @@
 // LangGoldenTest.hs), cut with our helpers, gives the golden's text. Goldens show the first
 // line of each run, as Haskell's show.
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, parse } from "node:path";
 import { describe, expect, it } from "vitest";
 import { displayClasses, packRuns, type Run } from "../api/source";
 import { utf16Cols } from "./columns";
@@ -81,10 +81,11 @@ const cases = files
   .filter((f) => f.endsWith(".golden"))
   .map((g) => {
     const base = g.replace(/\.golden$/, "");
-    const src = ["hs", "lhs", "md", "scm"]
-      .map((ext) => `${base}.${ext}`)
-      .find((f) => files.includes(f));
-    if (src === undefined) throw new Error(`no source for ${g}`);
+    // The source: same name, any other extension (one per golden).
+    const srcs = files.filter((f) => f !== g && parse(f).name === base);
+    const [src] = srcs;
+    if (src === undefined || srcs.length > 1)
+      throw new Error(`want one source for ${g}, got ${srcs.join(", ")}`);
     return [g, src] as const;
   });
 
