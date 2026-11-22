@@ -13,6 +13,7 @@ import { installTips } from "./ui/tips";
 import "./styles/tokens.css";
 import "./styles/frame.css";
 import "./styles/files.css";
+import "./styles/home.css";
 import "./styles/code.css";
 import "./styles/modules.css";
 import "./styles/docs.css";

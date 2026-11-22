@@ -1,11 +1,14 @@
-// The revisions in the header (SPEC §4.1, §5.7, D-335). Diff mode
-// only: browse mode shows nothing. Short hashes are 7 hex; the copy
+// The revisions in the header (SPEC §4.1, §5.7, D-335), then the count
+// of changed files outside ROOT (D-338). Diff mode only: browse mode
+// shows nothing. Short hashes are 7 hex; the copy
 // buttons copy the full hash.
 import { type JSX, onCleanup, Show } from "solid-js";
 import type { SessionEnd } from "../api/session";
 import { CopyButton } from "../copy/CopyButton";
 import { useSession } from "../session";
 import type { Side } from "../sides";
+import { OutsideCount } from "./OutsideCount";
+import { mergeBaseCount, mergeBaseText, shortHash } from "./revText";
 
 // current: the page's side, on pages with a side in the URL.
 export function RevisionInfo(props: { current?: Side }): JSX.Element {
@@ -30,6 +33,7 @@ export function RevisionInfo(props: { current?: Side }): JSX.Element {
               </span>
             )}
           </Show>
+          <OutsideCount />
         </div>
       )}
     </Show>
@@ -43,10 +47,7 @@ function Base(props: {
   headLabel: string;
   mergeBases: number | null;
 }): JSX.Element {
-  const many = () => {
-    const n = props.mergeBases;
-    return n !== null && n > 1 ? n : undefined;
-  };
+  const many = () => mergeBaseCount(props.mergeBases);
   return (
     <span class="rev-item">
       <span class="rev-key">base:</span>{" "}
@@ -58,7 +59,7 @@ function Base(props: {
         <span
           class="rev-merge-base"
           tabindex="0"
-          data-tip={`merge base of ${props.base.label} and ${props.headLabel}`}
+          data-tip={mergeBaseText(props.base.label, props.headLabel)}
         >
           merge base
           <span class="sr-only">
@@ -71,7 +72,7 @@ function Base(props: {
         {(n) => (
           <>
             {" "}
-            <span class="rev-count">(1 of {n()})</span>
+            <span class="rev-count">({n()})</span>
           </>
         )}
       </Show>
@@ -99,7 +100,7 @@ function Head(props: { end: SessionEnd<string | null> }): JSX.Element {
 function Hash(props: { side: Side; commit: string }): JSX.Element {
   return (
     <>
-      <code class="rev-hash">{props.commit.slice(0, 7)}</code>{" "}
+      <code class="rev-hash">{shortHash(props.commit)}</code>{" "}
       <CopyButton
         text={() => props.commit}
         label={`Copy ${props.side} commit hash`}

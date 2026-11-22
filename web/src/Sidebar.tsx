@@ -1,5 +1,5 @@
 import { createEffect, createMemo, type JSX, on, Show } from "solid-js";
-import { useDiffFiles } from "./diff/store";
+import { truncatedText, useDiffFiles } from "./diff/store";
 import { FilesPanel } from "./files/FilesPanel";
 import { ModulesPanel } from "./modules/ModulesPanel";
 import { useModules } from "./modules/store";
@@ -67,9 +67,7 @@ export function Sidebar(): JSX.Element {
         </label>
         <ChangeLegend />
         <Show when={prefs.changedOnly() && diffFiles.files()?.truncated}>
-          <p class="tree-note">
-            A side has over 100,000 files: changes past that point aren't shown.
-          </p>
+          <p class="tree-note">{truncatedText}</p>
         </Show>
       </Show>
       <div

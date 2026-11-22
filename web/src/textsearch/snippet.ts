@@ -1,6 +1,7 @@
 // Text search hits in pieces and groups, and their words. Pure.
 import type { TextHit, TextSearch } from "../api/textSearch";
 import { utf16Cols } from "../source/columns";
+import { plural } from "../ui/format";
 
 export interface TextSnippet {
   // The start of the line is not shown: show "…".
@@ -80,9 +81,6 @@ export function groupHits(results: readonly TextHit[]): HitGroup[] {
 }
 
 const count = (n: number): string => n.toLocaleString("en-US");
-
-const plural = (n: number, one: string, many: string): string =>
-  `${count(n)} ${n === 1 ? one : many}`;
 
 // "12 matching lines in 3 files." or, past the cap, "Showing the first
 // 1,000 of 4,145 matching lines."

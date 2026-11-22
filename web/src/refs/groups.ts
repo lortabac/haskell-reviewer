@@ -1,5 +1,6 @@
 // Refs in groups and words. Pure.
 import type { Ref, Refs } from "../api/refs";
+import { plural } from "../ui/format";
 
 // A ref with a key that holds still while the list is asked again.
 export type Item = Ref & { key: string };
@@ -34,9 +35,6 @@ export function groupRefs(results: readonly Ref[]): Group[] {
   }
   return out;
 }
-
-const plural = (n: number, one: string, many: string) =>
-  `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
 
 // "10 references in 3 modules." or, past the cap, "Showing the first
 // 1,000 of 4,145 references."

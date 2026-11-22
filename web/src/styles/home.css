@@ -1,0 +1,46 @@
+/* Home in diff mode (D-338). Paths and labels can be long: they wrap
+   anywhere, so a narrow window never scrolls sideways. */
+.home-revisions {
+  overflow-wrap: anywhere;
+}
+
+.home-note {
+  color: var(--color-muted);
+}
+
+.home-files,
+.home-outside ul {
+  margin: 0 0 var(--space-2);
+  padding-left: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+
+.home-files li,
+.home-outside li {
+  margin: 0 0 var(--space-1);
+}
+
+/* The sign in a fixed column. */
+.home-files .change-sign {
+  display: inline-block;
+  width: 1.5ch;
+}
+
+.home-old {
+  color: var(--color-muted);
+}
+
+.home-outside summary {
+  cursor: pointer;
+}
+
+.home-show-all {
+  padding: var(--space-1) var(--space-2);
+  font: inherit;
+  color: var(--color-fg);
+  background: var(--color-bg);
+  border: 1px solid var(--color-muted);
+  border-radius: 4px;
+  cursor: pointer;
+}
