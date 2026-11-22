@@ -5,6 +5,7 @@ import { defaultPrefs, type Prefs } from "./api/prefs";
 import { defaultSide, sessionSides } from "./api/session";
 import { CopyLocation } from "./copy/CopyLocation";
 import { Frame } from "./Frame";
+import { RevisionInfo } from "./header/RevisionInfo";
 import { KeysProvider, KeysStatus } from "./keys/KeysProvider";
 import { ShortcutsButton } from "./keys/ShortcutsButton";
 import { ViewSwitch } from "./keys/ViewSwitch";
@@ -18,9 +19,12 @@ import { onSide, SideContext, urlSide, useSession } from "./session";
 import { Sidebar } from "./Sidebar";
 import { isSide, type Side } from "./sides";
 
-// The URL's side: ok (the URL's, or the default on pages with none),
-// or one the session doesn't have, as typed.
-type PageSide = { kind: "ok"; side: Side } | { kind: "wrong"; typed: string };
+// The URL's side: ok (the URL's), none (a page with no side: the
+// default), or one the session doesn't have, as typed.
+type PageSide =
+  | { kind: "ok"; side: Side }
+  | { kind: "none"; side: Side }
+  | { kind: "wrong"; typed: string };
 
 export function Root(
   props: RouteSectionProps & {
@@ -34,7 +38,7 @@ export function Root(
   // page fetch, a note instead.
   const page = createMemo((): PageSide => {
     const s = urlSide(location.pathname);
-    if (s === undefined) return { kind: "ok", side: defaultSide(session) };
+    if (s === undefined) return { kind: "none", side: defaultSide(session) };
     return isSide(s) && sessionSides(session).includes(s)
       ? { kind: "ok", side: s }
       : { kind: "wrong", typed: s };
@@ -46,8 +50,14 @@ export function Root(
   // The sidebar and search use the default side on a wrong-side page.
   const side = createMemo((): Side => {
     const p = page();
-    return p.kind === "ok" ? p.side : defaultSide(session);
+    return p.kind === "wrong" ? defaultSide(session) : p.side;
   });
+  // The side shown in the header: side pages only, not Home or not
+  // found.
+  const current = (): Side | undefined => {
+    const p = page();
+    return p.kind === "ok" ? p.side : undefined;
+  };
   return (
     <SideContext.Provider value={side}>
       <PrefsProvider
@@ -58,6 +68,7 @@ export function Root(
           <KeysProvider>
             <Frame
               sidebar={<Sidebar />}
+              revisions={<RevisionInfo current={current()} />}
               notices={<ProjectNotices />}
               views={<ViewSwitch />}
               search={<SearchBox placement="header" />}

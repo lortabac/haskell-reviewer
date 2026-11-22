@@ -1,6 +1,8 @@
-// Tips on buttons and links (D-300): CSS shows [data-tip] on hover and
-// keyboard focus (and only when the device can hover). Esc hides every
-// tip on screen (WCAG 1.4.13) until the pointer leaves or focus moves.
+// Tips on buttons and links (D-300), and on a few spans that are Tab
+// stops for them (the header's revisions, D-335): CSS shows [data-tip]
+// on hover and keyboard focus (and only when the device can hover).
+// Esc hides every tip on screen (WCAG 1.4.13) until the pointer leaves
+// or focus moves.
 // Only then it is ours (preventDefault, so it does not also clear a
 // selection); with no tip on screen, Esc goes on as usual.
 const TIP = "[data-tip]";

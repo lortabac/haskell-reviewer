@@ -284,10 +284,17 @@ The UI has a fixed **frame** and one **main view** at a time.
 
 ### 4.1 Frame
 
-- **Header**: project name, mode and revisions (`main..feature`, abbreviated
-  hashes), tiers, a global search box, a switch between views (Docs /
-  Source; a view the page has none of is shown muted, D-298), "Copy
-  location" (§5.7) and a Shortcuts button (§5.3).
+- **Header**: project name, mode and revisions, tiers, a global search
+  box, a switch between views (Docs / Source; a view the page has none
+  of is shown muted, D-298), "Copy location" (§5.7) and a Shortcuts
+  button (§5.3).
+  - Revisions, diff mode only (D-335): the `--diff` text
+    (`main..feature`), then each side's label and short hash (7 hex),
+    with a copy button for the full hash (§5.7). For `...` base is
+    "merge base", with "(1 of N)" when there are several. A working
+    tree head is "head: working tree", with no hash. Side pages also
+    show the current side ("Viewing: head"). Browse mode shows none of
+    this. Long labels are cut, the full text in a tip.
 - **Sidebar**: the module tree, grouped by package and component. In diff
   mode every module carries a change marker (added / removed / modified /
   renamed, and "settings changed" for its parse settings or role; from
@@ -1502,7 +1509,8 @@ calls, all with the hardening below:
     `working-tree-encoding` can't be checked without running the
     filter, which we never do: unless clean by stat, it is dirty,
     shown as its on-disk text with a "filtered file" note (`filtered:
-    true` on `api/file` and `api/source`, D-319). So is a file
+    true` on `api/file` and `api/source`, D-319; for now the note is in
+    the file view only, D-335). So is a file
     whose `text` or `crlf` attribute is set or unset, when reading it as
     the value (`text=set`, which `check-attr` prints the same way and git
     reads as no action) would clean its bytes differently. These are extra

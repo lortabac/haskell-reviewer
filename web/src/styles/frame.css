@@ -42,8 +42,10 @@ a {
 
 /* Header on top, sidebar left, main view right. */
 .frame {
-  /* The sidebar's height leaves room for it. */
-  --header-height: 2.75rem;
+  --header-min-height: 2.75rem;
+  /* The sidebar's height leaves room for the header. Frame.tsx sets
+     the real height; this is until then. */
+  --header-height: var(--header-min-height);
   display: grid;
   grid-template-areas:
     "header header"
@@ -56,7 +58,7 @@ a {
 .frame-header {
   grid-area: header;
   min-width: 0;
-  min-height: var(--header-height);
+  min-height: var(--header-min-height);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -69,6 +71,60 @@ a {
 
 .app-name {
   font-weight: 600;
+}
+
+/* The revisions (D-335). Each item stays on one line; the header wraps
+   between items. User text (the spec, labels) is cut with an ellipsis,
+   the full text in a tip. */
+.revisions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--space-3);
+  row-gap: var(--space-1);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.rev-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+.rev-key {
+  color: var(--color-muted);
+}
+
+.rev-cut {
+  min-width: 0;
+}
+
+.rev-cut-text {
+  display: block;
+  max-width: 20ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rev-merge-base {
+  text-decoration: underline dotted;
+}
+
+/* The header is at the top of the page: tips go below, not above
+   (base rule: [data-tip] in docs.css). Long ones wrap. */
+.frame-header [data-tip]::after {
+  top: 100%;
+  bottom: auto;
+  margin-top: 2px;
+  margin-bottom: 0;
+  max-width: min(40ch, calc(100vw - 2rem));
+  width: max-content;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /* The theme switch: like the sidebar's toggle, bold + border + inset

@@ -231,6 +231,37 @@ const go = (path: string) => {
   window.dispatchEvent(new PopStateEvent("popstate"));
 };
 
+describe("revisions in the header (D-335)", () => {
+  const current = (root: HTMLElement) =>
+    root.querySelector("header .rev-current")?.textContent;
+
+  it("diff mode: the side on side pages only", () => {
+    stubFetch({});
+    let root = mountAppAt(
+      "/tok/src/base/a.hs",
+      undefined,
+      undefined,
+      null,
+      diff,
+    );
+    expect(root.querySelector("header .revisions")).not.toBeNull();
+    expect(current(root)).toBe("Viewing: base");
+    unmountApp();
+    root = mountAppAt("/tok/", undefined, undefined, null, diff);
+    expect(root.querySelector("header .revisions")).not.toBeNull();
+    expect(current(root)).toBeUndefined();
+    unmountApp();
+    // A wrong side: not found, no side.
+    root = mountAppAt("/tok/src/tree/a.hs", undefined, undefined, null, diff);
+    expect(current(root)).toBeUndefined();
+  });
+
+  it("browse mode: nothing", () => {
+    const root = mountAppAt("/tok/src/tree/a.hs");
+    expect(root.querySelector("header .revisions")).toBeNull();
+  });
+});
+
 // The old side's answer comes after the new side's: the sidebar shows
 // the new side's list and keeps it.
 describe("sidebar per side", () => {

@@ -147,6 +147,12 @@ function FilePage(props: { path: string }): JSX.Element {
         </h1>
       </div>
       <Show when={banner()}>{(b) => <p class="file-banner">{b()}</p>}</Show>
+      {/* Read from disk, and git would filter it (D-335). */}
+      <Show when={view()?.filtered === true}>
+        <p class="file-note">
+          Shown as on disk: a git filter applies; the stored content may differ.
+        </p>
+      </Show>
       <Switch
         fallback={
           <Show when={slow()}>

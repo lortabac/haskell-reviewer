@@ -170,6 +170,30 @@ describe("FileView", () => {
     );
   });
 
+  it("filtered: one note, text and binary", async () => {
+    const note = "Shown as on disk: a git filter applies";
+    const text = await open(
+      "data.bin",
+      200,
+      cbor({ generation: 1, filtered: true, kind: "text", text: "big\n" }),
+    );
+    expect(text.querySelectorAll(".file-note")).toHaveLength(1);
+    expect(text.querySelector(".file-note")?.textContent).toContain(note);
+    unmountApp();
+    const bin = await open(
+      "logo.png",
+      200,
+      cbor({ generation: 1, filtered: true, kind: "binary", size: 3 }),
+    );
+    expect(bin.querySelector(".file-note")?.textContent).toContain(note);
+  });
+
+  it("not filtered: no note", async () => {
+    const main = await open("app/Main.hs", 200, cborFixture("file-text"));
+    expect(main.querySelector(".file-note")).toBeNull();
+    expect(main.textContent).not.toContain("git filter");
+  });
+
   it("404: not found", async () => {
     const main = await open("gone.hs", 404, "not found");
     expect(main.querySelector("h1")?.textContent).toBe(

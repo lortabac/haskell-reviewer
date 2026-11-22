@@ -460,12 +460,13 @@ export async function makeLongPathProject(): Promise<Project> {
   };
 }
 
-// fixtures/repos/sides.sh, shared with the Haskell tests: two commits.
-// Base (HEAD~1): A (imports B, doc "One.") and B. Head: A changed
-// (imports C, doc "Two.", a = c + 1), B gone, C added.
-export async function makeSidesProject(): Promise<Project> {
-  const root = await mkdtemp(join(tmpdir(), "hr-e2e-sides-"));
-  const script = join(import.meta.dirname, "../../../fixtures/repos/sides.sh");
+// A repo from fixtures/repos/<name>.sh, shared with the Haskell tests.
+async function repoProject(name: string): Promise<Project> {
+  const root = await mkdtemp(join(tmpdir(), `hr-e2e-${name}-`));
+  const script = join(
+    import.meta.dirname,
+    `../../../fixtures/repos/${name}.sh`,
+  );
   execFileSync("/bin/sh", [script, root], {
     stdio: ["ignore", "ignore", "pipe"],
   });
@@ -473,4 +474,17 @@ export async function makeSidesProject(): Promise<Project> {
     root,
     remove: () => rm(root, { recursive: true, force: true }),
   };
+}
+
+// sides.sh: two commits. Base (HEAD~1): A (imports B, doc "One.") and
+// B. Head: A changed (imports C, doc "Two.", a = c + 1), B gone, C
+// added.
+export function makeSidesProject(): Promise<Project> {
+  return repoProject("sides");
+}
+
+// edits.sh: one commit, then edits in the working tree; data.bin has
+// filter=lfs and is edited (filtered).
+export function makeEditsProject(): Promise<Project> {
+  return repoProject("edits");
 }
