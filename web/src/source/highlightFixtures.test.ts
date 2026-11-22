@@ -81,10 +81,13 @@ const cases = files
   .filter((f) => f.endsWith(".golden"))
   .map((g) => {
     const base = g.replace(/\.golden$/, "");
-    const src = ["hs", "lhs", "md", "scm"]
-      .map((ext) => `${base}.${ext}`)
-      .find((f) => files.includes(f));
-    if (src === undefined) throw new Error(`no source for ${g}`);
+    // The source: same name, any other extension (one per golden).
+    const srcs = files.filter(
+      (f) => f !== g && f.slice(0, f.lastIndexOf(".")) === base,
+    );
+    const [src] = srcs;
+    if (src === undefined || srcs.length > 1)
+      throw new Error(`want one source for ${g}, got ${srcs.join(", ")}`);
     return [g, src] as const;
   });
 
