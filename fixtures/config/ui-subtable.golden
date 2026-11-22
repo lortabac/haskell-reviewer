@@ -2,5 +2,6 @@ theme: dark
 exported-only: false
 sidebar: auto
 single-key-shortcuts: true
+changed-only: false
 == warnings
 config.toml:4:5: unknown table [ui.colors]

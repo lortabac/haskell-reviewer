@@ -245,6 +245,7 @@ test("focus on one control, pointer on another: Esc hides both tips", async ({
   const area = decl(page, "area");
   const toggle = area.locator(".decl-source-toggle");
   const refs = area.locator("a.decl-refs");
+  await expect(refs).toBeVisible();
   await page.keyboard.press("Shift");
   await refs.focus();
   await toggle.hover();

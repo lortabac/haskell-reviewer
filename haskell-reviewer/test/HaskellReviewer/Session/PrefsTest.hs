@@ -58,6 +58,14 @@ tests =
             >>= ( @?=
                     "{\"version\":1,\"theme\":\"dark\",\"singleKeyShortcuts\":false}\n"
                 ),
+      testCase "changed only: saved, read back by another store" $
+        withState $ \_ path -> do
+          (a, _) <- fileStore path
+          r <- a.update =<< patch "{\"changedOnly\":true}"
+          r @?= changedOnlyOn (effectiveOf config)
+          BS.readFile path >>= (@?= "{\"version\":1,\"changedOnly\":true}\n")
+          (b, _) <- fileStore path
+          b.current >>= (@?= changedOnlyOn (effectiveOf config)),
       testCase "two stores on one file: both keys survive, each sees the other" $
         withState $ \_ path -> do
           (a, _) <- fileStore path
@@ -322,7 +330,8 @@ config =
     { theme = ThemeSystem,
       exportedOnly = True,
       sidebar = SidebarFiles,
-      singleKeyShortcuts = True
+      singleKeyShortcuts = True,
+      changedOnly = False
     }
 
 effectiveOf :: UiDefaults -> Effective
@@ -331,13 +340,20 @@ effectiveOf d =
     { theme = d.theme,
       exportedOnly = d.exportedOnly,
       sidebar = d.sidebar,
-      singleKeyShortcuts = d.singleKeyShortcuts
+      singleKeyShortcuts = d.singleKeyShortcuts,
+      changedOnly = d.changedOnly
     }
 
--- | Shortcuts on, the default.
+-- | Shortcuts on and changed only off, the defaults.
 eff :: Theme -> Bool -> SidebarView -> Effective
 eff t e s =
-  Effective {theme = t, exportedOnly = e, sidebar = s, singleKeyShortcuts = True}
+  Effective
+    { theme = t,
+      exportedOnly = e,
+      sidebar = s,
+      singleKeyShortcuts = True,
+      changedOnly = False
+    }
 
 shortcutsOff :: Effective -> Effective
 shortcutsOff e =
@@ -345,7 +361,18 @@ shortcutsOff e =
     { theme = e.theme,
       exportedOnly = e.exportedOnly,
       sidebar = e.sidebar,
-      singleKeyShortcuts = False
+      singleKeyShortcuts = False,
+      changedOnly = e.changedOnly
+    }
+
+changedOnlyOn :: Effective -> Effective
+changedOnlyOn e =
+  Effective
+    { theme = e.theme,
+      exportedOnly = e.exportedOnly,
+      sidebar = e.sidebar,
+      singleKeyShortcuts = e.singleKeyShortcuts,
+      changedOnly = True
     }
 
 -- | A temp state dir and where ui.json goes in it.

@@ -71,6 +71,14 @@ const codeBgs = [
   "cursor-line",
 ];
 
+// The diff marker colours (D-337).
+const changes = [
+  "change-added",
+  "change-removed",
+  "change-modified",
+  "change-renamed",
+];
+
 describe("design tokens: contrast (SPEC §5.4, tokens.css header)", () => {
   it("found every token used below", () => {
     for (const name of [
@@ -90,6 +98,7 @@ describe("design tokens: contrast (SPEC §5.4, tokens.css header)", () => {
       "accent",
       "warn",
       ...hl,
+      ...changes,
     ]) {
       expect(t[name], `token --color-${name}`).toBeDefined();
     }
@@ -122,6 +131,11 @@ describe("design tokens: contrast (SPEC §5.4, tokens.css header)", () => {
     ].map((f): [string, string] => [f, "decl-head"]),
     ["warn", "bg"],
     ["warn", "surface"],
+    // Diff markers: Home is on bg, the sidebar on surface.
+    ...changes.flatMap((c): [string, string][] => [
+      [c, "bg"],
+      [c, "surface"],
+    ]),
   ];
 
   it.each(textPairs)("text %s on %s is >= 4.5:1 in both themes", (a, b) => {

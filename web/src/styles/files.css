@@ -92,3 +92,53 @@
   margin: var(--space-1) 0 0;
   padding-left: var(--space-3);
 }
+
+/* Diff markers (D-337): the sign in colour, after the name. On the
+   current row it takes fg, like .tree-marker. */
+.change-sign {
+  font-weight: 600;
+}
+
+.change-added {
+  color: var(--color-change-added);
+}
+
+.change-removed {
+  color: var(--color-change-removed);
+}
+
+.change-modified,
+.change-settings {
+  color: var(--color-change-modified);
+}
+
+.change-renamed {
+  color: var(--color-change-renamed);
+}
+
+.tree-file[aria-current="page"] .change-sign {
+  color: inherit;
+}
+
+/* Only on the other side: the name muted, "(on base)" after it. */
+.tree-ghost,
+.tree-ghost-side {
+  color: var(--color-muted);
+}
+
+.tree-ghost-side {
+  font-size: 0.85em;
+}
+
+/* A rename's tip: under the row, as wide as it, wrapped, so the
+   sidebar never clips it sideways. */
+.tree-row .tree-file[data-tip]::after {
+  top: 100%;
+  bottom: auto;
+  left: 0;
+  right: 0;
+  margin-top: 2px;
+  margin-bottom: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

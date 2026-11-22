@@ -21,8 +21,9 @@ function mount(start?: string): HTMLElement {
     () => (
       <FileTree
         root={tree}
+        side="tree"
         current={current()}
-        href={(p) => `/tok/src/tree/${p}`}
+        href={(s, p) => `/tok/src/${s}/${p}`}
       />
     ),
     root,

@@ -488,3 +488,9 @@ export function makeSidesProject(): Promise<Project> {
 export function makeEditsProject(): Promise<Project> {
   return repoProject("edits");
 }
+
+// renames.sh: every rename rule under pkg/ (use pkg as ROOT), and
+// changes in other/, outside ROOT.
+export function makeRenamesProject(): Promise<Project> {
+  return repoProject("renames");
+}

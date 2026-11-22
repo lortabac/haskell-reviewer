@@ -16,16 +16,10 @@ import {
   type ModuleTree,
 } from "../api/modules";
 import { apiModulesUrl } from "../docs/urls";
-import { usePageSide } from "../session";
-import type { Side } from "../sides";
+import { usePageSide, useSession } from "../session";
+import { otherSide, type Side } from "../sides";
 
-// Keys of the disclosure groups in the module tree.
-// JSON, since paths and component names can hold ":".
-export const packageKey = (cabalFile: string): string =>
-  JSON.stringify(["p", cabalFile]);
-export const componentKey = (cabalFile: string, comp: string): string =>
-  JSON.stringify(["c", cabalFile, comp]);
-export const otherKey = "other";
+import { componentKey, otherKey, packageKey } from "./keys";
 
 export interface SourceInfo {
   // Not "no-source": those have no path.
@@ -138,6 +132,11 @@ export interface Modules {
   names: () => readonly ModuleName[];
   // Anything to show in the Modules view.
   hasModules: () => boolean;
+  // Diff mode: the other side's tree, for ghosts (D-337). Fetched once
+  // the page side's tree is in. Undefined while loading or failed.
+  other: () => ModuleTree | undefined;
+  // The other side's tree couldn't be loaded.
+  otherFailed: () => boolean;
 }
 
 const ModulesContext = createContext<Modules>();
@@ -145,14 +144,16 @@ const ModulesContext = createContext<Modules>();
 // The module tree of the page's side. The last tree of each side is
 // kept, so going back to a side is instant (D-332).
 export function ModulesProvider(props: ParentProps): JSX.Element {
+  const session = useSession();
   const side = usePageSide();
   const trees = new Map<Side, Result<ModuleTree>>();
-  const [answer] = createResource(side, async (s) => {
+  const load = async (s: Side) => {
     const got =
       trees.get(s) ?? (await getJson(apiModulesUrl(s), decodeModuleTree));
     if (got.kind === "ok") trees.set(s, got);
     return { side: s, got };
-  });
+  };
+  const [answer] = createResource(side, load);
   // Only the page's side: never the last side's tree while loading.
   const tree = (): Result<ModuleTree> | undefined => {
     const r = answer();
@@ -184,6 +185,17 @@ export function ModulesProvider(props: ParentProps): JSX.Element {
         t.other.some((o) => o.kind === "module"))
     );
   });
+  // After the page side's tree, so it never slows that one down.
+  const wantOther = (): Side | undefined =>
+    session.mode === "diff" && ok() !== undefined
+      ? otherSide(side())
+      : undefined;
+  const [otherAnswer] = createResource(wantOther, load);
+  const otherResult = (): Result<ModuleTree> | undefined => {
+    const r = otherAnswer();
+    const want = wantOther();
+    return want !== undefined && r?.side === want ? r.got : undefined;
+  };
   const value: Modules = {
     tree,
     loading: () => answer.loading || tree() === undefined,
@@ -192,6 +204,14 @@ export function ModulesProvider(props: ParentProps): JSX.Element {
     byRef,
     names,
     hasModules,
+    other: () => {
+      const r = otherResult();
+      return r?.kind === "ok" ? r.value : undefined;
+    },
+    otherFailed: () => {
+      const r = otherResult();
+      return r !== undefined && r.kind !== "ok";
+    },
   };
   return (
     <ModulesContext.Provider value={value}>

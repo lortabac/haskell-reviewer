@@ -26,6 +26,28 @@
   box-shadow: inset 0 0 0 1px var(--color-fg);
 }
 
+/* The "Changed only" box and the legend, under the view toggle. */
+.changed-only {
+  display: block;
+  cursor: pointer;
+}
+
+.change-legend {
+  margin: 0 0 var(--space-2);
+  color: var(--color-muted);
+  font-size: 0.85em;
+}
+
+.change-legend-item {
+  white-space: nowrap;
+}
+
+/* A note above a tree (the changes didn't load, say). */
+.tree-note {
+  margin: 0 0 var(--space-2);
+  color: var(--color-muted);
+}
+
 /* A module with no source: text, not a link. Lines up with links. */
 .tree-entry {
   display: block;

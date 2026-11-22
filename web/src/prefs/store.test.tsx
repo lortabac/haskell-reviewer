@@ -102,6 +102,16 @@ describe("PrefsProvider", () => {
     });
   });
 
+  it("changed only: off at first, a set posts only that key", () => {
+    const fetch = stubFetch({});
+    mount();
+    expect(current().changedOnly()).toBe(false);
+    current().setChangedOnly(true);
+    expect(current().changedOnly()).toBe(true);
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ changedOnly: true });
+  });
+
   it("a click that doesn't change the value is a no-op: no POST (round 2)", () => {
     const fetch = stubFetch({});
     mount();
@@ -109,6 +119,7 @@ describe("PrefsProvider", () => {
     current().setExportedOnly(false); // already false
     current().setSidebar("auto"); // already auto
     current().setSingleKeyShortcuts(true); // already on
+    current().setChangedOnly(false); // already off
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -124,6 +135,7 @@ describe("PrefsProvider", () => {
           exportedOnly: true,
           sidebar: "files",
           singleKeyShortcuts: true,
+          changedOnly: false,
         },
       ],
     });
@@ -148,6 +160,7 @@ describe("PrefsProvider", () => {
       exportedOnly: false,
       sidebar: "auto",
       singleKeyShortcuts: true,
+      changedOnly: false,
     });
     await vi.waitFor(() => {
       expect(current().status()).toBeUndefined();
@@ -179,6 +192,7 @@ describe("PrefsProvider", () => {
       exportedOnly: true,
       sidebar: "auto",
       singleKeyShortcuts: true,
+      changedOnly: false,
     });
     // exportedOnly's own latest save succeeded, but theme's latest
     // save is still failed: the status must stay (per-key failed
@@ -204,6 +218,7 @@ describe("PrefsProvider", () => {
       exportedOnly: false,
       sidebar: "files",
       singleKeyShortcuts: false,
+      changedOnly: true,
     });
     await vi.waitFor(() => {
       expect(current().theme()).toBe("dark");
@@ -211,6 +226,7 @@ describe("PrefsProvider", () => {
       expect(current().singleKeyShortcuts()).toBe(false);
     });
     expect(current().exportedOnly()).toBe(true);
+    expect(current().changedOnly()).toBe(true);
   });
 
   it("failure keeps the chosen value and shows a polite status", async () => {

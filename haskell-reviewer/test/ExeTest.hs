@@ -128,7 +128,8 @@ prefsTests =
           Dir.createDirectoryIfMissing True (takeDirectory config)
           writeFile
             config
-            "[ui]\ntheme = 1\nsidebar = \"files\"\nsingle-key-shortcuts = false\n"
+            "[ui]\ntheme = 1\nsidebar = \"files\"\nsingle-key-shortcuts = false\n\
+            \changed-only = true\n"
           withServerXdg xdg id [dir] $ \server -> do
             seen <- readIORef server.seen
             seen
@@ -140,7 +141,7 @@ prefsTests =
             r <- getPath server "api/prefs"
             r.body
               @?= "{\"theme\":\"system\",\"exportedOnly\":false,\"sidebar\":\"files\",\
-                  \\"singleKeyShortcuts\":false}",
+                  \\"singleKeyShortcuts\":false,\"changedOnly\":true}",
       testCase "--verbose: which config and ui.json" $
         withTemp $ \dir -> withFreshXdg $ \xdg ->
           withServerXdg xdg id ["--verbose", dir] $ \server -> do
@@ -157,13 +158,13 @@ prefsTests =
             r.status @?= 200
             r.body
               @?= "{\"theme\":\"dark\",\"exportedOnly\":false,\"sidebar\":\"auto\",\
-                  \\"singleKeyShortcuts\":true}"
+                  \\"singleKeyShortcuts\":true,\"changedOnly\":false}"
             readFile' state >>= (@?= "{\"version\":1,\"theme\":\"dark\"}\n")
           withServerXdg xdg id [dir] $ \server -> do
             r <- getPath server "api/prefs"
             r.body
               @?= "{\"theme\":\"dark\",\"exportedOnly\":false,\"sidebar\":\"auto\",\
-                  \\"singleKeyShortcuts\":true}",
+                  \\"singleKeyShortcuts\":true,\"changedOnly\":false}",
       testCase "read-only state dir, unreadable config dir: works, one line each" $
         withTemp $ \dir -> withFreshXdg $ \xdg -> do
           Dir.createDirectory xdg.configHome
@@ -189,7 +190,7 @@ prefsTests =
                 r2.status @?= 200
                 r2.body
                   @?= "{\"theme\":\"dark\",\"exportedOnly\":true,\"sidebar\":\"auto\",\
-                      \\"singleKeyShortcuts\":true}"
+                      \\"singleKeyShortcuts\":true,\"changedOnly\":false}"
                 g <- getPath server "api/prefs"
                 g.body @?= r2.body
                 -- Logged before the first answer: on stderr by now.

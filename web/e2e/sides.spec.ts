@@ -17,20 +17,33 @@ async function start(
   return server;
 }
 
-// The side segment of every in-app link in main, the sidebar and the
-// search popup. Hoogle links are left out.
-async function linkSides(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
+// Every in-app link in main, the sidebar and the search popup stays on
+// side. Hoogle links are left out. The sidebar's ghosts link to the
+// other side, and say so (D-337).
+async function expectLinkSides(page: Page, side: "base" | "head") {
+  const links = await page.evaluate(() => {
     const token = location.pathname.split("/")[1];
     return [
       ...document.querySelectorAll(
         "main a[href], nav a[href], .frame-header .search-results a[href]",
       ),
     ]
-      .map((a) => a.getAttribute("href") ?? "")
-      .filter((h) => h.startsWith(`/${token}/`))
-      .map((h) => h.split(/[/?#]/)[3] ?? "");
+      .map((a) => ({
+        href: a.getAttribute("href") ?? "",
+        ghost: a.classList.contains("tree-ghost"),
+        text: a.textContent,
+      }))
+      .filter((l) => l.href.startsWith(`/${token}/`))
+      .map((l) => ({ ...l, side: l.href.split(/[/?#]/)[3] ?? "" }));
   });
+  const other = side === "base" ? "head" : "base";
+  expect(new Set(links.filter((l) => !l.ghost).map((l) => l.side))).toEqual(
+    new Set([side]),
+  );
+  for (const g of links.filter((l) => l.ghost)) {
+    expect(g.side, g.href).toBe(other);
+    expect(g.text, g.href).toContain(`(on ${other})`);
+  }
 }
 
 test("docs on both sides; an in-app side change shows the other side", async ({
@@ -72,11 +85,11 @@ test("links never switch side", async ({ page, startServer, sidesProject }) => {
       "href",
       new RegExp(`/docs/${side}/${to}#val%3A${name}$`),
     );
-    expect(new Set(await linkSides(page))).toEqual(new Set([side]));
+    await expectLinkSides(page, side);
     await link.click();
     await expect(page).toHaveURL(new RegExp(`/docs/${side}/${to}#`));
     await expect(page.locator("main h1")).toHaveText(to);
-    expect(new Set(await linkSides(page))).toEqual(new Set([side]));
+    await expectLinkSides(page, side);
   }
   // The source view: a token links to base.
   await page.goto(server.base + "src/base/src/A.hs");
@@ -85,7 +98,7 @@ test("links never switch side", async ({ page, startServer, sidesProject }) => {
     "href",
     /\/src\/base\/src\/B\.hs#L3$/,
   );
-  expect(new Set(await linkSides(page))).toEqual(new Set(["base"]));
+  await expectLinkSides(page, "base");
   await b.first().click();
   await expect(page).toHaveURL(/\/src\/base\/src\/B\.hs#L3$/);
 });
@@ -107,7 +120,7 @@ test("search, text search and refs use the page's side", async ({
     "href",
     /\/docs\/base\/B$/,
   );
-  expect(new Set(await linkSides(page))).toEqual(new Set(["base"]));
+  await expectLinkSides(page, "base");
   await page.goto(server.base + "docs/head/A");
   await box.fill("B");
   await expect(page.locator(".frame-header .search-status")).toHaveText(
@@ -118,7 +131,7 @@ test("search, text search and refs use the page's side", async ({
       ".frame-header .search-results a[data-kind=name][href$='/docs/head/B']",
     ),
   ).toHaveCount(0);
-  expect(new Set(await linkSides(page))).toEqual(new Set(["head"]));
+  await expectLinkSides(page, "head");
   // Text search: "c + 1" is on head only.
   await page.goto(server.base + "search/head?q=c%20%2B%201");
   await expect(page.locator("main")).toContainText("1 matching line in 1 file");
@@ -130,7 +143,7 @@ test("search, text search and refs use the page's side", async ({
   // Refs of b, from base: base rows.
   await page.goto(server.base + "refs/base/B?decl=val%3Ab");
   await expect(page.locator("main")).toContainText("5 references in 2 modules");
-  expect(new Set(await linkSides(page))).toEqual(new Set(["base"]));
+  await expectLinkSides(page, "base");
 });
 
 test("wrong side: not found, with one link to head", async ({

@@ -300,6 +300,21 @@ The UI has a fixed **frame** and one **main view** at a time.
   renamed, and "settings changed" for its parse settings or role; from
   `api/modules/<side>`, D-325) and a filter "changed only". The tree also has the "Other
   files" group, and shows "listed, no source" and banner entries (§2.3).
+  - Markers, diff mode (D-337): a sign in colour after the name (`+`
+    added, `−` removed, `~` modified, `→` renamed, `⚙` settings) and
+    the word for screen readers; a legend under the box. Files get the
+    same from `api/diff-files`. A rename shows at each side's own path,
+    "renamed from a" on head and "renamed to b" on base, the full text
+    in a tip. An entry only on the other side is a ghost: muted, with
+    "(on base)" or "(on head)", linking there. A package or component
+    only there says so too; in Files a folder of ghosts is a plain
+    folder. Ghosts are never the current entry.
+  - "Changed only" (both views, diff mode only, remembered: D-336)
+    keeps changed entries, ghosts, the current entry and broken
+    packages, and their groups. Boot files and loose files with no
+    marker are hidden. Groups open by default when 500 entries or
+    fewer remain. If the changes can't be loaded (pairing failed),
+    nothing is filtered and a note says so. Browse mode has no box.
 - **LLM panel** (§6): a collapsible right-hand panel.
 
 All views are **URL-addressable** (D-27). URLs are readable and semantic,
@@ -1093,8 +1108,8 @@ as not configured (§8), with the reason.
 - One user config: `$XDG_CONFIG_HOME/haskell-reviewer/config.toml` (on macOS
   the same XDG path, defaulting to `~/.config`). It holds the LLM provider,
   endpoint, model, key source, the deny-list and UI defaults (`[ui]`:
-  `theme`, `exported-only`, `sidebar`, `single-key-shortcuts`; D-199,
-  D-297). A bad file is never fatal:
+  `theme`, `exported-only`, `sidebar`, `single-key-shortcuts`,
+  `changed-only`; D-199, D-297, D-336). A bad file is never fatal:
   each problem is a warning on stderr with line and column.
 - Highlighting rules for other languages are next to it, in
   `highlight/*.toml` (§5.6, D-330). They are read once at start, in name
@@ -1104,7 +1119,8 @@ as not configured (§8), with the reason.
   same extension, the first one keeps it. Other files in the dir are not
   read. The tool never writes there.
 - UI choices made in the page and "remembered across sessions" (theme
-  override, diff layout, "exported only", single-key shortcuts) are stored
+  override, diff layout, "exported only", single-key shortcuts, "changed
+  only") are stored
   by the tool in `$XDG_STATE_HOME/haskell-reviewer/ui.json` (D-68, D-200;
   default `~/.local/state`), written atomically. They take precedence over
   the config's UI defaults. The tool never rewrites `config.toml`. With no
@@ -1924,7 +1940,8 @@ a framework would cost more than it saves.
   contrast pairs (§5.4) are defined once, as design tokens. System font
   stacks only. No inline styles; one helper may set custom properties from
   code (row positions, D-275).
-- **Preferences** (theme, layout, "exported only", shortcuts) are read from
+- **Preferences** (theme, layout, "exported only", shortcuts, "changed
+  only") are read from
   and written to the server (D-68). The port changes on every run, so
   `localStorage` would forget them.
 - **Bundle**: the CI checks that the bundle contains no `eval` or `new

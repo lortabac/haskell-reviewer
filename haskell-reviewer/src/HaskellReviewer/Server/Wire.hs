@@ -511,7 +511,7 @@ encodeIndexing (Generation g) side p =
 -- | GET and POST api\/prefs: every preference, defaults filled in.
 --
 -- > {"theme":"system","exportedOnly":false,"sidebar":"auto",
--- >  "singleKeyShortcuts":true}
+-- >  "singleKeyShortcuts":true,"changedOnly":false}
 --
 -- No generation: preferences don't belong to a snapshot (D-197).
 encodePrefs :: Effective -> LBS.ByteString
@@ -521,6 +521,7 @@ encodePrefs e =
       <> ("exportedOnly" .= e.exportedOnly)
       <> ("sidebar" .= sidebarName e.sidebar)
       <> ("singleKeyShortcuts" .= e.singleKeyShortcuts)
+      <> ("changedOnly" .= e.changedOnly)
 
 -- | GET api\/search\/\<side>?q=…:
 --

@@ -3,3 +3,4 @@ theme = 1
 exported-only = "yes"
 sidebar = ["files"]
 single-key-shortcuts = "no"
+changed-only = 1

@@ -12,6 +12,7 @@
    On the docs page (D-300): fg, muted, link, each hl-* (not excluded)
    and warn on decl-head, warn on bg and surface; ring or border:
    accent/bg, accent/decl-head, focus/decl-head.
+   Diff markers: each change-* on bg and surface.
    Don't put text in muted/border or muted/mark (dark theme): both are
    under 4.5:1.
 
@@ -59,6 +60,14 @@
   --color-decl-head: light-dark(#f0f6fc, #121d2f);
   --color-accent: light-dark(#0969da, #4493f8);
   --color-warn: light-dark(#8a5a00, #d29922);
+
+  /* Diff markers in the sidebar (D-337): the sign's colour. Text on bg
+     and surface. On the current row the sign takes fg instead. Settings
+     use the modified colour. */
+  --color-change-added: light-dark(#116329, #3fb950);
+  --color-change-removed: light-dark(#a40e26, #f85149);
+  --color-change-modified: light-dark(#7d4e00, #d29922);
+  --color-change-renamed: light-dark(#6639ba, #bc8cff);
 
   --space-1: 0.25rem;
   --space-2: 0.5rem;

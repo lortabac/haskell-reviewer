@@ -125,7 +125,7 @@ warmUpPrefs = do
       ( "POST",
         json,
         "{\"theme\":\"light\",\"exportedOnly\":true,\"sidebar\":\"files\",\
-        \\"singleKeyShortcuts\":false}"
+        \\"singleKeyShortcuts\":false,\"changedOnly\":true}"
       ),
       ("POST", json, "{"),
       ("POST", json, "[]"),
@@ -134,6 +134,7 @@ warmUpPrefs = do
       ("POST", json, "{\"theme\":1}"),
       ("POST", json, "{\"exportedOnly\":null}"),
       ("POST", json, "{\"singleKeyShortcuts\":\"no\"}"),
+      ("POST", json, "{\"changedOnly\":1}"),
       ("POST", json, BS.replicate (prefsBodyLimit + 1) 32),
       ("POST", [], "{}"),
       ("PUT", json, "{}")
@@ -149,7 +150,7 @@ warmUpPrefs = do
           void (evaluate (sum (map (Text.length . renderBadValue) d.oddValues)))
     )
     [ "{\"version\":1,\"theme\":\"dark\",\"exportedOnly\":true,\
-      \\"singleKeyShortcuts\":false,\"sidebar\":\"high\",\
+      \\"singleKeyShortcuts\":false,\"sidebar\":\"high\",\"changedOnly\":true,\
       \\"other\":[1,\"x\",null,{},2.5]}",
       "",
       "[]",
