@@ -1,5 +1,6 @@
-// The diff view: /<token>/diff/<path>[?ws=ignore][#<side>-L<n>]
-// (D-341, D-342). One file, base against head, unified. Data:
+// The diff view: /<token>/diff/<path>[?ws=ignore&layout=split][#<side>-L<n>]
+// (D-341, D-342, D-344). One file, base against head, unified or side
+// by side. Data:
 // api/diff, then each side's text (api/file) and highlighting
 // (api/source).
 import { A, useLocation, useNavigate, useResolvedPath } from "@solidjs/router";
@@ -62,22 +63,30 @@ import {
 import { lineIndex, lineText } from "../source/lines";
 import { createDelay } from "../ui/focus";
 import { bringOnPage } from "../ui/scroll";
-import { type DiffApi, DiffGrid, type SideText } from "./DiffGrid";
+import {
+  type DiffApi,
+  DiffGrid,
+  type GridState,
+  type SideText,
+} from "./DiffGrid";
+import { createFits } from "./fit";
 import { diffNotes } from "./notes";
 import {
   blockStarts,
   countsMatch,
-  deleteRow,
+  defaultShown,
   hunkStarts,
   type Rows,
   rowLabel,
   rowsOf,
   stepTo,
 } from "./rows";
+import { type DiffLayout, lineOn, sideOfRow } from "./split";
 import {
   diffHash,
   diffHref,
   diffPathFromPathname,
+  layoutFromSearch,
   parseDiffHash,
   searchWithWs,
   wsFromSearch,
@@ -102,6 +111,7 @@ export const texts = {
   headSource: "Head source",
   noMore: "No more changes.",
   noDocs: "No docs for this page.",
+  tooNarrow: "Side by side needs a wider window: showing unified.",
 };
 
 export function DiffView(): JSX.Element {
@@ -341,9 +351,12 @@ function DiffPage(props: { path: string }): JSX.Element {
       if (lexed === undefined || t === undefined || p === undefined) {
         return undefined;
       }
+      // The page's layout= is kept (D-344).
+      const layout = layoutFromSearch(location.search);
       const here = (line: number | null) =>
         diffHref(props.path, {
           ws: ws(),
+          layout,
           at: line === null ? undefined : { side, line },
         });
       const links = linkInfos(
@@ -597,43 +610,76 @@ function DiffBody(props: {
   const renderBase = renderOf(base);
   const renderHead = renderOf(head);
   const hash = createMemo(() => parseDiffHash(location.hash));
-  // The row of the hash. A line past the end: none.
-  const marked = createMemo((): number | undefined => {
-    const h = hash();
-    if (h === undefined) return undefined;
-    const map = (h.side === "base" ? base : head).lineRow;
-    return h.line < map.length ? map[h.line] : undefined;
-  });
+  // The row and side of the hash. A line past the end: none.
+  const marked = createMemo(
+    (): { row: number; side: DiffSessionSide } | undefined => {
+      const h = hash();
+      if (h === undefined) return undefined;
+      const map = (h.side === "base" ? base : head).lineRow;
+      const row = h.line < map.length ? map[h.line] : undefined;
+      return row === undefined ? undefined : { row, side: h.side };
+    },
+    undefined,
+    { equals: (a, b) => a?.row === b?.row && a?.side === b?.side },
+  );
   const hint = () => {
     const h = hash();
     return h === undefined || marked() === undefined
       ? ""
       : `${h.side === "base" ? "Base" : "Head"} line ${h.line} marked.`;
   };
-  // A row's side, and its line there. Removed rows: base; the rest
-  // (gaps too: equal rows) head.
-  const paneOf = (r: number) => (rows.kind[r] === deleteRow ? base : head);
-  const lineOf = (r: number) =>
-    (paneOf(r) === base ? rows.base[r] : rows.head[r]) ?? 0;
+  // A side's pane. The cursor's side comes from the grid (unified:
+  // removed rows base, the rest head).
+  const paneOf = (s: DiffSessionSide) => (s === "base" ? base : head);
   let api: DiffApi | undefined;
   // A same-file link was followed: where the cursor goes, once the
   // hash changes.
   let jump: { row: number; col: number } | undefined;
   // Back came here before the highlight: once it comes, land again.
-  let land: { row: number; col: number } | undefined;
+  let land: { row: number; col: number; side: DiffSessionSide } | undefined;
 
+  // Unified or side by side (D-344): the URL's, when it fits; else
+  // unified, with a note. Expansion is kept over a switch, and so is
+  // the cursor (carried by onLeave / start).
+  const [shown, setShown] = createSignal(defaultShown(rows));
+  const wanted = (): DiffLayout =>
+    layoutFromSearch(location.search) ?? "unified";
+  let wrap!: HTMLDivElement;
+  let remProbe!: HTMLDivElement;
+  const fits = createFits(
+    () => wrap,
+    () => remProbe,
+  );
+  const layout = createMemo((): DiffLayout =>
+    wanted() === "split" && fits() ? "split" : "unified",
+  );
+  const narrow = () => wanted() === "split" && !fits();
+  let carry: GridState | undefined;
   const grid = (
-    <DiffGrid
-      path={props.path}
-      rows={rows}
-      base={base.text}
-      head={head.text}
-      renderBase={renderBase()}
-      renderHead={renderHead()}
-      whole={props.whole}
-      marked={marked()}
-      ref={(a) => (api = a)}
-    />
+    <Show when={layout()} keyed>
+      {(l) => {
+        const start = carry;
+        carry = undefined;
+        return (
+          <DiffGrid
+            path={props.path}
+            rows={rows}
+            base={base.text}
+            head={head.text}
+            layout={l}
+            shown={shown()}
+            setShown={setShown}
+            renderBase={renderBase()}
+            renderHead={renderHead()}
+            whole={props.whole}
+            marked={marked()}
+            start={start}
+            onLeave={(s) => (carry = s)}
+            ref={(a) => (api = a)}
+          />
+        );
+      }}
+    </Show>
   );
 
   createEffect(
@@ -642,8 +688,9 @@ function DiffBody(props: {
       const state: unknown = untrack(() => location.state);
       const origin = originOf(state);
       // Back to an origin with no hash: the first row (D-342).
-      const r = m ?? (origin === undefined ? undefined : 0);
+      const r = m?.row ?? (origin === undefined ? undefined : 0);
       if (r === undefined || a === undefined) return;
+      const side = m?.side ?? sideOfRow(rows, r);
       // Back to a gap: the gap, kept closed.
       if (origin?.gap !== true) a.reveal(r);
       const j = jump;
@@ -652,17 +699,21 @@ function DiffBody(props: {
       // A link of another file took us here: focus the line.
       const codeJump = isCodeJump(state);
       if (origin !== undefined) {
-        a.focusRow(r, origin.col);
-        if (origin.gap !== true && untrack(paneOf(r).hl) === undefined) {
-          land = { row: r, col: origin.col };
+        a.focusRow(r, origin.col, side);
+        // The side whose text the cell shows (unified: the row's, so
+        // head on an equal row whatever the hash).
+        const shows = untrack(layout) === "split" ? side : sideOfRow(rows, r);
+        if (origin.gap !== true && untrack(paneOf(shows).hl) === undefined) {
+          land = { row: r, col: origin.col, side: shows };
         }
       } else if (j !== undefined && j.row === r && a.hasFocus()) {
-        a.focusRow(r, j.col);
-      } else if (a.hasFocus() || codeJump) a.focusRow(r, 0);
-      else a.setCursorRow(r);
+        a.focusRow(r, j.col, side);
+      } else if (a.hasFocus() || codeJump) a.focusRow(r, 0, side);
+      else a.setCursorRow(r, side);
       a.scrollToRow(r, "center");
+      // The grid may be a new one by then (a layout switch).
       const frame = requestAnimationFrame(() => {
-        const el = a.rowEl(r);
+        const el = api?.rowEl(r);
         if (el !== undefined) bringOnPage(el);
       });
       onCleanup(() => cancelAnimationFrame(frame));
@@ -672,7 +723,7 @@ function DiffBody(props: {
   createEffect(
     on([base.hl, head.hl], () => {
       const l = land;
-      if (l === undefined || paneOf(l.row).hl() === undefined) return;
+      if (l === undefined || paneOf(l.side).hl() === undefined) return;
       land = undefined;
       queueMicrotask(() => {
         const a = api;
@@ -680,7 +731,7 @@ function DiffBody(props: {
         const c = a.cursor();
         const at = { line: c.row, col: c.col };
         if (shouldReland({ line: l.row, col: l.col }, at, a.hasFocus())) {
-          a.focusRow(l.row, l.col);
+          a.focusRow(l.row, l.col, l.side);
         }
       });
     }),
@@ -693,10 +744,17 @@ function DiffBody(props: {
     if (a === undefined) return;
     const c = a.cursor();
     const origin: Origin = c.gap ? { col: 0, gap: true } : { col: c.col };
+    // The hash marks the cursor already: its row (unified: either
+    // side's hash of an equal row), its side too in split.
+    const m = untrack(marked);
+    const here =
+      m !== undefined &&
+      m.row === c.row &&
+      (untrack(layout) === "unified" || m.side === c.side);
     saveOrigin(
-      diffHash({ side: paneOf(c.row).side, line: lineOf(c.row) }),
+      diffHash({ side: c.side, line: lineOn(rows, c.row, c.side) }),
       origin,
-      untrack(marked) === c.row,
+      here,
       c.first,
       to,
     );
@@ -707,9 +765,9 @@ function DiffBody(props: {
   const at = (to: "docs" | "source") => {
     const a = api;
     if (a === undefined) return undefined;
-    const r = a.cursor().row;
-    const p = paneOf(r);
-    const line = lineOf(r);
+    const c = a.cursor();
+    const p = paneOf(c.side);
+    const line = lineOn(rows, c.row, c.side);
     if (to === "source") return { href: lineHref(p.side, p.path, line) };
     if (isMarkdownPath(p.path)) return { href: mdHref(p.side, p.path) };
     const ref = p.lexed()?.ref ?? null;
@@ -736,11 +794,15 @@ function DiffBody(props: {
     const c = a.cursor();
     const fresh = dir === 1 && !stepped && !a.hasFocus() && c.first;
     stepped = true;
-    const to = stepTo(starts, fresh ? c.row - 1 : c.row, dir);
+    // From the cursor's display row: in split it may hold two rows.
+    const from = fresh ? c.lo - 1 : dir === 1 ? c.hi : c.lo;
+    const to = stepTo(starts, from, dir);
     if (to === undefined) return texts.noMore;
     a.reveal(to);
-    if (focus) a.focusRow(to, 0);
-    else a.setCursorRow(to);
+    // Split: base if the block starts with a removed row, else head.
+    const side = sideOfRow(rows, to);
+    if (focus) a.focusRow(to, 0, side);
+    else a.setCursorRow(to, side);
     a.scrollToRow(to, "center");
     return focus ? true : rowLabel(rows, to);
   };
@@ -768,33 +830,40 @@ function DiffBody(props: {
   // A same-file code link: the cursor goes to its target's column.
   const sameFileJump = (e: MouseEvent, a: HTMLAnchorElement) => {
     if (!a.classList.contains("code-link")) return;
-    const rowEl = a.closest<HTMLElement>(".code-row");
-    if (rowEl === null) return;
-    const pane = paneOf(Number(rowEl.dataset.key));
+    const cell = a.closest<HTMLElement>(".code-cell");
+    const s = cell?.dataset.side;
+    if (s !== "base" && s !== "head") return;
+    const pane = paneOf(s);
     const h = pane.hl();
-    const s = pane.lexed();
+    const lexed = pane.lexed();
     const k = Number(a.dataset.link);
-    if (h === undefined || s === undefined || h.links[k - 1]?.here !== true) {
+    if (
+      h === undefined ||
+      lexed === undefined ||
+      h.links[k - 1]?.here !== true
+    ) {
       return;
     }
     const t = pane.text;
-    const j = jumpOf(k, s.targets, h.runs, (n) => lineText(t.text, t.index, n));
+    const j = jumpOf(k, lexed.targets, h.runs, (n) =>
+      lineText(t.text, t.index, n),
+    );
     if (j === undefined) return;
     const row = pane.lineRow[j.line];
     if (row === undefined) return;
     if (a.hash === location.hash) {
       // Same URL: no navigation, so move here.
       e.preventDefault();
-      api?.focusRow(row, j.col);
+      api?.focusRow(row, j.col, pane.side);
       api?.scrollToRow(row, "center");
     } else jump = { row, col: j.col };
   };
   // Any same-site link in the grid: as FileView.
   const onClick = (e: MouseEvent) => onLeaveClick(e, sameFileJump, saveCursor);
-  let wrap!: HTMLDivElement;
   onMount(() => {
     // After Try again: the marked row, else the first one.
-    if (props.takeFocus()) api?.focusRow(untrack(marked) ?? 0, 0);
+    const m = untrack(marked);
+    if (props.takeFocus()) api?.focusRow(m?.row ?? 0, 0, m?.side);
     // Native: before the router's click handler on the document.
     wrap.addEventListener("click", onClick);
     onCleanup(() => wrap.removeEventListener("click", onClick));
@@ -806,6 +875,18 @@ function DiffBody(props: {
       <p class="sr-only" role="status">
         {hint()}
       </p>
+      {/* Always there, so the note is said when it comes. */}
+      <div role="status">
+        <Show when={narrow()}>
+          <p class="file-note">{texts.tooNarrow}</p>
+        </Show>
+      </div>
+      {/* 1rem wide: createFits reads the rem size off it. */}
+      <div
+        class="diff-rem-probe"
+        aria-hidden="true"
+        ref={(el) => (remProbe = el)}
+      />
       {grid}
     </div>
   );

@@ -134,3 +134,21 @@ export function drawCell(
     untrack(() => after(had));
   });
 }
+
+// How far to scroll sideways so a box (a link's rect) is between left
+// (the sticky gutter's right edge) and right. Positive: to the right.
+// A box wider than the room keeps its start in view. Whole px, so
+// scrollLeft rounding leaves no sliver out, and never past the start.
+export function revealX(
+  r: { left: number; right: number },
+  left: number,
+  right: number,
+): number {
+  if (r.left < left) return Math.floor(r.left - left);
+  if (r.right > right) {
+    const end = r.right - right;
+    const start = r.left - left;
+    return end <= start ? Math.ceil(end) : Math.floor(start);
+  }
+  return 0;
+}

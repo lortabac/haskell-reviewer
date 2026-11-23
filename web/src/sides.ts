@@ -11,6 +11,8 @@ export function isSide(s: string | undefined): s is Side {
 }
 
 // The other side of a diff session. Tree has none.
+export function otherSide(s: DiffSessionSide): DiffSessionSide;
+export function otherSide(s: Side): Side | undefined;
 export function otherSide(s: Side): Side | undefined {
   switch (s) {
     case "base":

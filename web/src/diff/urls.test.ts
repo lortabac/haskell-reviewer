@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   diffHref,
   diffPathFromPathname,
+  layoutFromSearch,
   parseDiffHash,
+  searchWithLayout,
   searchWithWs,
   wsFromSearch,
 } from "./urls";
@@ -65,5 +67,24 @@ describe("searchWithWs", () => {
     expect(searchWithWs("?ws=ignore&layout=split", false)).toBe(
       "?layout=split",
     );
+  });
+
+  it("layout", () => {
+    expect(layoutFromSearch("?layout=split")).toBe("split");
+    expect(layoutFromSearch("?ws=ignore&layout=unified")).toBe("unified");
+    expect(layoutFromSearch("?layout=wide")).toBeUndefined();
+    expect(layoutFromSearch("")).toBeUndefined();
+    expect(searchWithLayout("?ws=ignore", "split")).toBe(
+      "?ws=ignore&layout=split",
+    );
+    expect(searchWithLayout("?layout=split", undefined)).toBe("");
+    expect(
+      diffHref("a.hs", {
+        ws: true,
+        layout: "split",
+        at: { side: "base", line: 2 },
+      }),
+    ).toBe("/diff/a.hs?ws=ignore&layout=split#base-L2");
+    expect(diffHref("a.hs", { layout: undefined })).toBe("/diff/a.hs");
   });
 });

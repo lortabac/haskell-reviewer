@@ -612,6 +612,55 @@ describe("DiffView", () => {
     ).toBe("10");
   });
 
+  it("Back to an equal row by base's hash: lands again once head's links come", async () => {
+    // Head's line 9 ("e9"): "9" links to line 1. Head's source comes
+    // after base's.
+    const headSource = cbor({
+      generation: 1,
+      path: "src/A.hs",
+      ref: "A",
+      tier: { kind: "syntactic", reason: "no-hie" },
+      partial: false,
+      filtered: false,
+      highlight: "lexed",
+      runs: [9, 2, 0, 3, 2, 1],
+      regions: [],
+      targets: [["local", 1, 1]],
+      outline: [],
+    });
+    const fetch = stubFetch({
+      "/tok/api/diff/src/A.hs": [200, diffBody()],
+      "/tok/api/file/base/src/A.hs": [200, file(baseText)],
+      "/tok/api/file/head/src/A.hs": [200, file(headText)],
+      "/tok/api/source/base/src/A.hs": [200, baseSource],
+      "/tok/api/source/head/src/A.hs": [200, headSource],
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    vi.stubGlobal("fetch", (u: string) =>
+      u === "/tok/api/source/head/src/A.hs"
+        ? gate.then(() => fetch(u))
+        : fetch(u),
+    );
+    const root = mountAppAt(
+      "/tok/diff/src/A.hs#base-L9",
+      undefined,
+      undefined,
+      { origin: { col: 1 } },
+      diffSession,
+    );
+    await vi.waitFor(() =>
+      expect(root.querySelectorAll(".diff-delete a.code-link")).toHaveLength(2),
+    );
+    expect(
+      document.activeElement?.closest(".code-row")?.getAttribute("data-key"),
+    ).toBe("8");
+    release();
+    await vi.waitFor(() =>
+      expect(document.activeElement?.textContent).toBe("9"),
+    );
+  });
+
   const button = (main: HTMLElement, text: string) =>
     [...main.querySelectorAll("button")].find((b) => b.textContent === text);
 
@@ -791,5 +840,280 @@ describe("DiffView", () => {
     await ready(main);
     await new Promise((r) => setTimeout(r, 50));
     expect(document.activeElement).toBe(copy);
+  });
+
+  describe("side by side (D-344)", () => {
+    // The side of the focused cell, and its row's key.
+    const at = () => {
+      const c = document.activeElement?.closest<HTMLElement>(".code-cell");
+      return {
+        side: c?.dataset.side,
+        key: c?.closest(".code-row")?.getAttribute("data-key"),
+      };
+    };
+    const key = (k: string) =>
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: k, bubbles: true }),
+      );
+    const cellOf = (main: HTMLElement, k: number, side: string) =>
+      main.querySelector<HTMLElement>(
+        `.code-row[data-key="${k}"] .code-cell[data-side="${side}"]`,
+      )!;
+
+    it("four cells a row; removed and added lines paired", async () => {
+      const { main } = open("/tok/diff/src/A.hs?layout=split");
+      const g = await ready(main);
+      // Gap, 3 equal, the pair, 3 equal, gap.
+      expect(g.getAttribute("aria-rowcount")).toBe("9");
+      expect(g.getAttribute("aria-colcount")).toBe("4");
+      const pair = main.querySelector('.code-row[data-key="10"]')!;
+      expect(
+        [...pair.querySelectorAll(".code-num")].map((n) =>
+          n.getAttribute("aria-label"),
+        ),
+      ).toEqual(["removed line 11", "added line 11"]);
+      expect(
+        [...pair.querySelectorAll(".code-cell")].map((c) => c.textContent),
+      ).toEqual(["xold foo", "new bar"]);
+      // The code cell points to its number.
+      const base = cellOf(main, 10, "base");
+      expect(base.getAttribute("aria-describedby")).toBe("diff-b-10");
+      expect(main.querySelector("#diff-b-10")?.getAttribute("aria-label")).toBe(
+        "removed line 11",
+      );
+      expect(
+        main
+          .querySelector('.code-row[data-key="9"] .code-num')
+          ?.getAttribute("aria-label"),
+      ).toBe("base line 10, unchanged");
+      expect(
+        main.querySelector(".diff-gap-cell")?.getAttribute("aria-colspan"),
+      ).toBe("4");
+      // Same-file links keep the layout.
+      await vi.waitFor(() =>
+        expect(base.querySelectorAll("a.code-link")).toHaveLength(2),
+      );
+      expect(
+        [...base.querySelectorAll("a.code-link")].map((a) =>
+          a.getAttribute("href"),
+        ),
+      ).toEqual([
+        "/tok/diff/src/A.hs?layout=split#base-L1",
+        "/tok/src/base/src/B.hs#L3",
+      ]);
+    });
+
+    it("← and → cross sides at the ends; ↓ keeps the side", async () => {
+      const { main } = open("/tok/diff/src/A.hs?layout=split");
+      await ready(main);
+      const base = cellOf(main, 10, "base");
+      await vi.waitFor(() =>
+        expect(base.querySelectorAll("a.code-link")).toHaveLength(2),
+      );
+      base.focus();
+      key("ArrowRight");
+      expect(document.activeElement?.textContent).toBe("old");
+      key("ArrowRight");
+      expect(document.activeElement?.textContent).toBe("foo");
+      key("ArrowRight");
+      expect(at()).toEqual({ side: "head", key: "10" });
+      key("ArrowLeft");
+      expect(at()).toEqual({ side: "base", key: "10" });
+      expect(document.activeElement).toBe(base);
+      key("ArrowDown");
+      expect(at()).toEqual({ side: "base", key: "11" });
+    });
+
+    // .diff-text's width, and a way to change it (the observers run,
+    // the measure comes in a frame).
+    const fakeWidth = (initial: number) => {
+      let width = initial;
+      vi.spyOn(
+        HTMLElement.prototype,
+        "getBoundingClientRect",
+      ).mockImplementation(function (this: HTMLElement) {
+        if (this.classList.contains("diff-rem-probe"))
+          return new DOMRect(0, 0, 16, 0);
+        if (this.classList.contains("diff-text"))
+          return new DOMRect(0, 0, width, 600);
+        return Element.prototype.getBoundingClientRect.call(this);
+      });
+      const observers: ResizeObserverCallback[] = [];
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          constructor(cb: ResizeObserverCallback) {
+            observers.push(cb);
+          }
+          observe(): void {}
+          unobserve(): void {}
+          disconnect(): void {}
+        },
+      );
+      return (w: number) => {
+        width = w;
+        for (const cb of observers) cb([], {} as ResizeObserver);
+      };
+    };
+    const frame = () => new Promise((r) => requestAnimationFrame(r));
+
+    it("too narrow: unified and a note; wide again: split, focus kept", async () => {
+      const resize = fakeWidth(1000);
+      const { main } = open("/tok/diff/src/A.hs?layout=split");
+      await ready(main);
+      expect(main.querySelector(".diff-half")).not.toBeNull();
+      cellOf(main, 10, "base").focus();
+      resize(900);
+      await vi.waitFor(() =>
+        expect(main.textContent).toContain(texts.tooNarrow),
+      );
+      expect(main.querySelector(".diff-text .file-note")?.textContent).toBe(
+        "Side by side needs a wider window: showing unified.",
+      );
+      expect(main.querySelector(".diff-half")).toBeNull();
+      // Unified row 10 is the removed line.
+      await vi.waitFor(() => expect(at()).toEqual({ side: "base", key: "10" }));
+      // Not back before 62rem.
+      resize(980);
+      await frame();
+      await frame();
+      expect(main.querySelector(".diff-half")).toBeNull();
+      resize(1000);
+      await vi.waitFor(() =>
+        expect(main.querySelector(".diff-half")).not.toBeNull(),
+      );
+      expect(main.textContent).not.toContain(texts.tooNarrow);
+      await vi.waitFor(() => expect(at()).toEqual({ side: "base", key: "10" }));
+    });
+
+    it("a switch takes no focus the grid didn't have", async () => {
+      const resize = fakeWidth(1000);
+      const { main } = open("/tok/diff/src/A.hs?layout=split");
+      await ready(main);
+      const whole = [...main.querySelectorAll("button")].find(
+        (b) => b.textContent === texts.wholeFile,
+      )!;
+      whole.focus();
+      resize(900);
+      await vi.waitFor(() =>
+        expect(main.querySelector(".diff-half")).toBeNull(),
+      );
+      await frame();
+      expect(document.activeElement).toBe(whole);
+    });
+
+    it("a switch keeps the cursor row's place on screen", async () => {
+      const lines = (p: string) =>
+        file(Array.from({ length: 200 }, (_, i) => `${p}${i + 1}\n`).join(""));
+      const resize = fakeWidth(900);
+      const { main } = open("/tok/diff/src/A.hs?layout=split", {
+        "/tok/api/diff/src/A.hs": [
+          200,
+          diffBody({
+            diff: {
+              kind: "lines",
+              runs: [
+                ["delete", 200],
+                ["insert", 200],
+              ],
+              crlfLines: 0,
+              bom: null,
+            },
+          }),
+        ],
+        "/tok/api/file/base/src/A.hs": [200, lines("b")],
+        "/tok/api/file/head/src/A.hs": [200, lines("h")],
+      });
+      const g = await ready(main);
+      // Unified: row 250 (head's line 51) 100 px under the top.
+      expect(main.querySelector(".diff-half")).toBeNull();
+      g.scrollTop = 250 * 21 - 100;
+      g.dispatchEvent(new Event("scroll"));
+      await vi.waitFor(() =>
+        expect(main.querySelector('.code-row[data-key="250"]')).not.toBeNull(),
+      );
+      main
+        .querySelector<HTMLElement>('.code-row[data-key="250"] .code-cell')!
+        .focus();
+      resize(1000);
+      await vi.waitFor(() =>
+        expect(main.querySelector(".diff-half")).not.toBeNull(),
+      );
+      // Split row 50 holds it: 100 px under the top again.
+      expect(grid(main)!.scrollTop).toBe(50 * 21 - 100);
+      await vi.waitFor(() => expect(at()).toEqual({ side: "head", key: "50" }));
+    });
+
+    it("Back: the hashed row's other half is a new entry", async () => {
+      const { main } = open("/tok/diff/src/A.hs?layout=split#base-L9");
+      await ready(main);
+      await vi.waitFor(() =>
+        expect(
+          main.querySelector('.code-row[data-key="8"] .code-line-target'),
+        ).not.toBeNull(),
+      );
+      cellOf(main, 8, "head").focus();
+      const push = vi.spyOn(window.history, "pushState");
+      press("2", "Digit2");
+      await vi.waitFor(() =>
+        expect(window.location.pathname + window.location.hash).toBe(
+          "/tok/src/head/src/A.hs#L9",
+        ),
+      );
+      expect(push.mock.calls[0]?.[2]).toBe(
+        "/tok/diff/src/A.hs?layout=split#head-L9",
+      );
+    });
+
+    it("n / p never stay on the cursor's split row", async () => {
+      // Split rows: 0 (blocks' first pair), 1-2, 3 (second pair), ...
+      const { main } = open("/tok/diff/src/A.hs?layout=split", steps);
+      await ready(main);
+      cellOf(main, 3, "head").focus();
+      press("p");
+      expect(at()).toEqual({ side: "base", key: "0" });
+      cellOf(main, 3, "base").focus();
+      press("n");
+      expect(at()).toEqual({ side: "base", key: "13" });
+      press("p");
+      expect(at()).toEqual({ side: "base", key: "3" });
+    });
+
+    it("an added-first block: p from base leaves the row; lands on head", async () => {
+      const { main } = open("/tok/diff/src/A.hs?layout=split", {
+        "/tok/api/diff/src/A.hs": [
+          200,
+          diffBody({
+            diff: {
+              kind: "lines",
+              runs: [
+                ["insert", 1],
+                ["delete", 1],
+                ["equal", 2],
+                ["insert", 1],
+                ["delete", 1],
+                ["equal", 3],
+              ],
+              crlfLines: 0,
+              bom: null,
+            },
+          }),
+        ],
+        "/tok/api/file/base/src/A.hs": [
+          200,
+          file("b1\nb2\nb3\nb4\nb5\nb6\nb7\n"),
+        ],
+        "/tok/api/file/head/src/A.hs": [
+          200,
+          file("h1\nh2\nh3\nh4\nh5\nh6\nh7\n"),
+        ],
+      });
+      await ready(main);
+      cellOf(main, 3, "base").focus();
+      press("p");
+      expect(at()).toEqual({ side: "head", key: "0" });
+      press("n");
+      expect(at()).toEqual({ side: "head", key: "3" });
+    });
   });
 });

@@ -7,6 +7,12 @@
 # "double" (src/Util.hs) on 91. src/Util.hs is unchanged. big.txt:
 # 20,000 lines, all changed (under 1 MiB a side).
 #
+# src/Pairs.hs, for side by side (D-344): lines 6-7 removed against
+# 6-9 added (2 against 4), 10-12 removed against 12 added (3 against
+# 1). Links on both: "n" and "m" (locals), "double" and "triple"
+# (src/Util.hs). Line 15 (equal) is 301 characters, with "double k"
+# at its end.
+#
 # Kinds, for the notes: data.bin (binary), huge.txt (too large on
 # head), sub (gitlink), link (symlink target), kind.txt (file to
 # symlink), crlf.txt (CRLF on head), bom.txt (BOM added), ws.txt
@@ -24,7 +30,7 @@ name:          diffview
 version:       0.1
 
 library
-  exposed-modules:  Calc Util
+  exposed-modules:  Calc Pairs Util
   hs-source-dirs:   src
   build-depends:    base
   default-language: Haskell2010
@@ -48,6 +54,24 @@ calc() {
   } > "$d/src/Calc.hs"
 }
 calc double 'Sum of all.' 'sum xs' double
+# pairs BODY: src/Pairs.hs with BODY between the header and wide.
+pairs() {
+  {
+    printf 'module Pairs (pick, both, wide) where\n\nimport Util (double, triple)\n\n'
+    printf '%s\n' "$1"
+    printf '\nwide :: Int -> Int\nwide k = k'
+    awk 'BEGIN { for (i = 0; i < 70; i++) printf " + 1" }'
+    printf ' + double k\n'
+  } > "$d/src/Pairs.hs"
+}
+pairs 'pick :: Int -> Int
+pick n = double n
+  + n * 2
+
+both :: Int -> Int
+both m = triple m
+  - m
+  - 1'
 awk 'BEGIN { for (i = 1; i <= 20000; i++) printf "base line %05d\n", i }' > "$d/big.txt"
 printf 'a\000b' > "$d/data.bin"
 printf 'small\n' > "$d/huge.txt"
@@ -72,6 +96,14 @@ printf '160000 %s\tsub\000' "$sub1" | g -C "$d" update-index -z --index-info
 commit_at "$d" 0 -m base
 
 calc 'double, triple' 'Sum of all, doubled.' 'sum (map double xs)' triple
+pairs 'pick :: Int -> Int
+pick n = triple n
+  + double n
+  + n
+  + 1
+
+both :: Int -> Int
+both m = double m'
 awk 'BEGIN { for (i = 1; i <= 20000; i++) printf "head line %05d\n", i }' > "$d/big.txt"
 printf 'a\000bc' > "$d/data.bin"
 # 40000 lines of 30 bytes: over 1 MiB.
