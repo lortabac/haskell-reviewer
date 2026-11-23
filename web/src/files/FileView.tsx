@@ -44,6 +44,7 @@ import {
 import { createSource } from "../source/createSource";
 import { FindBar, type FindHandle } from "../source/FindBar";
 import { shouldReland } from "../source/landing";
+import { originOf, saveOrigin } from "../source/origin";
 import { RefsBar, type RefsHandle } from "../source/RefsBar";
 import { utf16Cols } from "../source/columns";
 import { highlightDecor, highlightedLine } from "../source/decor";
@@ -114,6 +115,8 @@ function FilePage(props: { path: string }): JSX.Element {
   };
   // Set by FileText: the docs of the declaration at the cursor.
   let docsAt: (() => ViewTarget | undefined) | undefined;
+  // Set by FileText: save the cursor's line in history (D-339).
+  let leave: (() => void) | undefined;
   useViewLinks({
     current: "source",
     docs: () => {
@@ -124,6 +127,7 @@ function FilePage(props: { path: string }): JSX.Element {
     },
     source: () => hrefFor(side(), props.path),
     at: (to) => (to === "docs" ? docsAt?.() : undefined),
+    leave: () => leave?.(),
   });
   // A link in main (like a symlink target) took us here: its page is
   // gone, so put focus on the new heading instead of letting it drop to
@@ -162,9 +166,17 @@ function FilePage(props: { path: string }): JSX.Element {
       >
         <Match when={view()} keyed>
           {(v) =>
-            body(v, props.path, lexed, (f) => {
-              docsAt = f;
-            })
+            body(
+              v,
+              props.path,
+              lexed,
+              (f) => {
+                docsAt = f;
+              },
+              (f) => {
+                leave = f;
+              },
+            )
           }
         </Match>
         <Match when={result()?.kind === "error"}>
@@ -180,6 +192,7 @@ function body(
   path: string,
   source: () => LexedSource | undefined,
   setDocsAt: (f: (() => ViewTarget | undefined) | undefined) => void,
+  setLeave: (f: (() => void) | undefined) => void,
 ): JSX.Element {
   switch (v.kind) {
     case "text":
@@ -189,6 +202,7 @@ function body(
           path={path}
           source={source()}
           setDocsAt={setDocsAt}
+          setLeave={setLeave}
         />
       );
     case "binary":
@@ -245,6 +259,7 @@ function FileText(props: {
   path: string;
   source: LexedSource | undefined;
   setDocsAt?: (f: (() => ViewTarget | undefined) | undefined) => void;
+  setLeave?: (f: (() => void) | undefined) => void;
 }): JSX.Element {
   const side = usePageSide();
   const location = useLocation();
@@ -309,16 +324,37 @@ function FileText(props: {
   let jump: { line: number; col: number } | undefined;
   // Where a refs link landed before the highlight came.
   let land: { line: number; col: number } | undefined;
+  // Before we leave for a link: Back comes to the cursor (D-339).
+  const saveCursor = (to?: string) => {
+    const a = api;
+    if (a === undefined) return;
+    const c = a.cursor();
+    saveOrigin(c.line, c.col, untrack(marks)?.from, to);
+  };
+  // eslint-disable-next-line solid/reactivity -- given once
+  props.setLeave?.(() => saveCursor());
+  onCleanup(() => props.setLeave?.(undefined));
   const onLinkClick = (e: MouseEvent) => {
     const a =
       e.target instanceof Element
-        ? e.target.closest<HTMLAnchorElement>("a.code-link")
+        ? e.target.closest<HTMLAnchorElement>("a[href]")
         : null;
+    if (a === null || e.defaultPrevented || e.button !== 0) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+    // A new tab, or another site: no history here.
+    if (a.target !== "" || a.origin !== window.location.origin) return;
+    // The router leaves these to the browser.
+    if (a.hasAttribute("download") || a.relList.contains("external")) return;
+    sameFileJump(e, a);
+    if (e.defaultPrevented || a.href === window.location.href) return;
+    saveCursor(a.href);
+  };
+  // A same-file code link (D-284).
+  const sameFileJump = (e: MouseEvent, a: HTMLAnchorElement) => {
     const s = props.source;
     const h = hl();
-    if (a === null || s === undefined || h === undefined) return;
-    if (e.defaultPrevented || e.button !== 0) return;
-    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+    if (!a.classList.contains("code-link")) return;
+    if (s === undefined || h === undefined) return;
     const k = Number(a.dataset.link);
     if (h.links[k - 1]?.here !== true) return;
     const text = props.text;
@@ -401,8 +437,14 @@ function FileText(props: {
   createEffect(
     // The state too: a link to the line already in the URL (same
     // hash, new state) is a new landing.
-    on([marks, () => location.state], ([m]) => {
+    on([marks, () => location.state], ([marked]) => {
       const a = api;
+      // Back to an origin with no hash: line 1 (D-339).
+      const m =
+        marked ??
+        (originOf(untrack(() => location.state)) === undefined
+          ? undefined
+          : { from: 1, to: 1 });
       if (m === undefined || a === undefined) return;
       // The cursor goes there too, so Tab lands on the line. Focus
       // stays in the view if it was there (its old row may go away).
@@ -425,8 +467,16 @@ function FileText(props: {
         codeJump && typeof state === "object" && state !== null
           ? (state as { len?: unknown }).len
           : undefined;
-      markLanded(state, m.from, cp, len);
-      if (j !== undefined && j.line === m.from && a.hasFocus()) {
+      // Back to where a link was followed: the cursor, focused. No
+      // search mark: it would move the cursor to its own column.
+      const origin = originOf(state);
+      markLanded(state, m.from, cp, origin === undefined ? len : undefined);
+      if (origin !== undefined) {
+        a.focusAt(m.from, origin.col);
+        if (untrack(hl) === undefined) {
+          land = { line: m.from, col: origin.col };
+        }
+      } else if (j !== undefined && j.line === m.from && a.hasFocus()) {
         a.focusAt(j.line, j.col);
       } else if (typeof cp === "number" && cp >= 1) {
         const col =
@@ -580,6 +630,7 @@ function FileText(props: {
             onHits={setFind}
             onOpen={() => findBar?.closeQuietly()}
             handle={(h) => (refsBar = h)}
+            onLeave={() => saveCursor()}
           />
         </FindBar>
       </Show>

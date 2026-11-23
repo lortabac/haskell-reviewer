@@ -1,9 +1,18 @@
 import { createSignal } from "solid-js";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi,
+} from "vitest";
 import type { Indexing } from "../api/events";
 import { cbor, cborFixture, fixture, stubFetch } from "../../test/fixtures";
 import { fakeLayout } from "../../test/layout";
 import { fallbackRowHeight as h } from "../source/CodeView";
+import { originOf } from "../source/origin";
 import { mountAppAt, unmountApp } from "../../test/mount";
 
 // Mounts the app at /tok/src/tree/<path>, with the API answering
@@ -844,6 +853,115 @@ describe("FileView links and refetch", () => {
     expect(click.defaultPrevented).toBe(true);
     expect(window.location.hash).toBe("#L4");
     expect(document.activeElement).toBe(linkOn(main, 4));
+  });
+
+  it("Back comes to the line a link was followed from (D-339)", async () => {
+    const { main } = await openWith([[200, lexed()]]);
+    const def = linkOn(main, 4);
+    def.focus();
+    const len = window.history.length;
+    def.click();
+    await vi.waitFor(() => {
+      expect(window.location.pathname).toBe("/tok/docs/tree/Main");
+    });
+    // The origin entry, then the docs page.
+    expect(window.history.length).toBe(len + 2);
+    window.history.back();
+    await vi.waitFor(() => {
+      expect(window.location.pathname + window.location.hash).toBe(
+        "/tok/src/tree/app/Main.hs#L4",
+      );
+      expect(document.activeElement).toBe(linkOn(main, 4));
+    });
+  });
+
+  it("a same-file link: Back comes to the line it was on", async () => {
+    const { main } = await openWith(
+      [[200, lexed()]],
+      undefined,
+      "/tok/src/tree/app/Main.hs#L5",
+    );
+    const use = linkOn(main, 1);
+    use.focus();
+    use.click();
+    await vi.waitFor(() => {
+      expect(window.location.hash).toBe("#L4");
+    });
+    window.history.back();
+    await vi.waitFor(() => {
+      expect(window.location.hash).toBe("#L1");
+      expect(document.activeElement).toBe(linkOn(main, 1));
+    });
+    window.history.back();
+    await vi.waitFor(() => {
+      expect(window.location.hash).toBe("#L5");
+    });
+  });
+
+  it("a ctrl-click or an external link: no history entry", async () => {
+    const { main } = await openWith(
+      [[200, lexed()]],
+      undefined,
+      "/tok/src/tree/app/Main.hs#L2",
+    );
+    const len = window.history.length;
+    // Last of all: jsdom would follow them.
+    const stop = (e: Event) => e.preventDefault();
+    window.addEventListener("click", stop);
+    onTestFinished(() => window.removeEventListener("click", stop));
+    const def = linkOn(main, 4);
+    def.focus();
+    const ctrl = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      ctrlKey: true,
+    });
+    def.dispatchEvent(ctrl);
+    const ext = main.querySelectorAll<HTMLAnchorElement>(
+      '.code-row[data-line="5"] a.code-link',
+    )[1]!;
+    ext.focus();
+    ext.click();
+    expect(window.history.length).toBe(len);
+    expect(window.location.hash).toBe("#L2");
+    expect(originOf(window.history.state)).toBeUndefined();
+  });
+
+  it("from line 1 with no hash: no entry, Back lands on line 1", async () => {
+    const { main } = await openWith([[200, lexed()]]);
+    const use = linkOn(main, 1);
+    use.focus();
+    const len = window.history.length;
+    use.click();
+    await vi.waitFor(() => {
+      expect(window.location.hash).toBe("#L4");
+    });
+    expect(window.history.length).toBe(len + 1);
+    window.history.back();
+    await vi.waitFor(() => {
+      expect(window.location.hash).toBe("");
+      expect(document.activeElement).toBe(linkOn(main, 1));
+    });
+  });
+
+  it("References to a declaration: Back comes to its line", async () => {
+    const { main } = await openWith([[200, lexed()]]);
+    const button = main.querySelector<HTMLButtonElement>(".code-refs-button")!;
+    linkOn(main, 4).focus();
+    await vi.waitFor(() =>
+      expect(button.textContent).toBe("References to main"),
+    );
+    button.click();
+    await vi.waitFor(() =>
+      expect(window.location.pathname).toBe("/tok/refs/tree/Main"),
+    );
+    window.history.back();
+    await vi.waitFor(() => {
+      expect(window.location.pathname + window.location.hash).toBe(
+        "/tok/src/tree/app/Main.hs#L4",
+      );
+      expect(document.activeElement).toBe(linkOn(main, 4));
+    });
   });
 
   it("References: a declaration goes to its page; an outside name says why", async () => {

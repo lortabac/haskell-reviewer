@@ -709,6 +709,13 @@ are off (D-297, D-298).
 In the source view, ←/→ move between the links of the line and ↑/↓
 keep the column (D-284).
 
+Following a link from the source view (a link in the code, `g d`,
+References, `1`/`2`) first adds the cursor's line to the history, so
+Back comes to it (D-339).
+On the docs page, a declaration's References and Go to source links,
+`g r`, `2` and the header Docs/Source switch do the same with its
+top-level declaration, if it has focus (D-340).
+
 ### 5.4 Accessibility
 
 (D-29) Target: **WCAG 2.1 level AA**.

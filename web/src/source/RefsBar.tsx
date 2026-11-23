@@ -37,6 +37,8 @@ export interface RefsBarProps {
   onOpen?: () => void;
   // Gets ways to drive the bar (the g r and Esc keys).
   handle?: (h: RefsHandle) => void;
+  // Called right before it goes to the refs page.
+  onLeave?: () => void;
 }
 
 export interface RefsHandle {
@@ -158,6 +160,7 @@ export function RefsBar(props: RefsBarProps): JSX.Element {
     closeQuietly();
     switch (t.kind) {
       case "decl":
+        props.onLeave?.();
         navigate(refsHref(side(), t.ref, t.id));
         return;
       case "local": {
