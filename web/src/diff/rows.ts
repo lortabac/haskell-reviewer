@@ -289,3 +289,42 @@ export function buttonText(
   const [x, y] = how === "down" ? [a, a + step - 1] : [b - step + 1, b];
   return { text: `${step}`, name: `${step} lines, ${range(x, y)}` };
 }
+
+// The first row of each change block (a run of removed and added
+// rows), in order.
+export function blockStarts(rows: Rows): number[] {
+  const out: number[] = [];
+  const { kind, count } = rows;
+  for (let i = 0; i < count; i++) {
+    if (kind[i] !== equalRow && (i === 0 || kind[i - 1] === equalRow)) {
+      out.push(i);
+    }
+  }
+  return out;
+}
+
+// The first changed row of each hunk: blocks joined when at most
+// 2 × ctx equal rows lie between them (git's -U3), whatever is open.
+export function hunkStarts(rows: Rows, ctx = context): number[] {
+  const out: number[] = [];
+  const { kind, count } = rows;
+  let lastChange = -1;
+  for (let i = 0; i < count; i++) {
+    if (kind[i] === equalRow) continue;
+    if (lastChange < 0 || i - lastChange - 1 > 2 * ctx) out.push(i);
+    lastChange = i;
+  }
+  return out;
+}
+
+// The next start after row r (dir 1), or the last one before it
+// (dir -1). undefined: none that way.
+export function stepTo(
+  starts: readonly number[],
+  r: number,
+  dir: 1 | -1,
+): number | undefined {
+  if (dir === 1) return starts.find((s) => s > r);
+  // No findLast in ES2022.
+  return [...starts].reverse().find((s) => s < r);
+}

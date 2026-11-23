@@ -299,7 +299,7 @@ describe("DiffView", () => {
     expect(urls(fetch)).not.toContain("/tok/api/file/base/src/A.hs");
   });
 
-  it("not text: a placeholder line", async () => {
+  it("not text: the note says why", async () => {
     const { main } = open("/tok/diff/src/A.hs", {
       "/tok/api/diff/src/A.hs": [
         200,
@@ -310,7 +310,12 @@ describe("DiffView", () => {
         }),
       ],
     });
-    await vi.waitFor(() => expect(main.textContent).toContain(texts.noLines));
+    await vi.waitFor(() =>
+      expect(main.querySelector(".file-note")?.textContent).toBe(
+        "Binary file changed (3 bytes → 4 bytes).",
+      ),
+    );
+    expect(main.querySelector(".code-toolbar")).toBeNull();
   });
 
   it("ws=ignore asks for it; a ws change fetches the diff only", async () => {
@@ -411,5 +416,380 @@ describe("DiffView", () => {
     expect(heads).toBe(2);
     expect(g.getAttribute("aria-rowcount")).toBe("10");
     expect(main.textContent).not.toContain(texts.mismatch);
+  });
+
+  it("too slow: fetched once, again only on Try again", async () => {
+    const { main, fetch } = open("/tok/diff/src/A.hs", {
+      "/tok/api/diff/src/A.hs": [200, diffBody({ diff: { kind: "too-slow" } })],
+    });
+    await vi.waitFor(() =>
+      expect(main.querySelector(".file-note")?.textContent).toBe(
+        "This diff took over 2 s, so it isn't shown.",
+      ),
+    );
+    const diffs = () =>
+      urls(fetch).filter((u) => u === "/tok/api/diff/src/A.hs").length;
+    await new Promise((r) => setTimeout(r, 50));
+    expect(diffs()).toBe(1);
+    const links = [...main.querySelectorAll(".diff-retry a")].map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(links).toEqual(["/tok/src/base/src/A.hs", "/tok/src/head/src/A.hs"]);
+    const again = [...main.querySelectorAll("button")].find(
+      (b) => b.textContent === texts.tryAgain,
+    );
+    again?.click();
+    await vi.waitFor(() => expect(diffs()).toBe(2));
+    // No text fetch for a diff with no lines.
+    expect(urls(fetch).some((u) => u.startsWith("/tok/api/file/"))).toBe(false);
+  });
+
+  it("the ws toggle: a new entry, the hash kept", async () => {
+    const { main, fetch } = open("/tok/diff/src/A.hs#head-L12", {
+      "/tok/api/diff/src/A.hs?ws=ignore": [
+        200,
+        diffBody({ ignoreWhitespace: true }),
+      ],
+    });
+    await ready(main);
+    const button = () =>
+      [...main.querySelectorAll("button")].find(
+        (b) => b.textContent === texts.ws,
+      );
+    expect(button()?.getAttribute("aria-pressed")).toBe("false");
+    const n = window.history.length;
+    button()?.focus();
+    button()?.click();
+    await vi.waitFor(() =>
+      expect(urls(fetch)).toContain("/tok/api/diff/src/A.hs?ws=ignore"),
+    );
+    const l = window.location;
+    expect(l.pathname + l.search + l.hash).toBe(
+      "/tok/diff/src/A.hs?ws=ignore#head-L12",
+    );
+    expect(window.history.length).toBe(n + 1);
+    await ready(main);
+    expect(button()?.getAttribute("aria-pressed")).toBe("true");
+    // The same button: focus stayed on it.
+    expect(document.activeElement).toBe(button());
+    await vi.waitFor(() =>
+      expect(main.querySelector(".code-line-target")).not.toBeNull(),
+    );
+  });
+
+  // Blocks at rows 0, 4 and 15; hunks at 0 and 15.
+  const steps = {
+    "/tok/api/diff/src/A.hs": [
+      200,
+      diffBody({
+        diff: {
+          kind: "lines",
+          runs: [
+            ["delete", 1],
+            ["insert", 1],
+            ["equal", 2],
+            ["delete", 1],
+            ["insert", 1],
+            ["equal", 9],
+            ["delete", 1],
+            ["insert", 1],
+            ["equal", 3],
+          ],
+          crlfLines: 0,
+          bom: null,
+        },
+      }),
+    ],
+    "/tok/api/file/base/src/A.hs": [
+      200,
+      file(Array.from({ length: 17 }, (_, i) => `b${i + 1}\n`).join("")),
+    ],
+    "/tok/api/file/head/src/A.hs": [
+      200,
+      file(Array.from({ length: 17 }, (_, i) => `h${i + 1}\n`).join("")),
+    ],
+  } satisfies Record<string, [number, unknown]>;
+
+  const press = (key: string, code = `Key${key.toUpperCase()}`) =>
+    (document.activeElement ?? document.body).dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key,
+        code,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  const focusedKey = () =>
+    document.activeElement?.closest(".code-row")?.getAttribute("data-key");
+  const status = () => document.querySelector(".keys-status")?.textContent;
+
+  it("j / k: hunks; n / p: change blocks; no more at the ends", async () => {
+    const { main } = open("/tok/diff/src/A.hs", steps);
+    await ready(main);
+    // From outside the grid: the cursor's own row counts.
+    press("j");
+    expect(focusedKey()).toBe("0");
+    press("j");
+    expect(focusedKey()).toBe("15");
+    press("j");
+    expect(focusedKey()).toBe("15");
+    expect(status()).toBe(texts.noMore);
+    press("k");
+    expect(focusedKey()).toBe("0");
+    press("n");
+    expect(focusedKey()).toBe("4");
+    press("n");
+    expect(focusedKey()).toBe("15");
+    press("p");
+    expect(focusedKey()).toBe("4");
+    press("p");
+    press("p");
+    expect(focusedKey()).toBe("0");
+    expect(status()?.trim()).toBe(texts.noMore);
+  });
+
+  it("2 and 1: source and docs at the cursor's side and line; Back first", async () => {
+    const { main } = open("/tok/diff/src/A.hs");
+    const g = await ready(main);
+    // The removed row: base's line 11.
+    g.querySelector<HTMLElement>(
+      '.code-row[data-key="10"] .code-cell',
+    )?.click();
+    const cell = g.querySelector<HTMLElement>(
+      '.code-row[data-key="10"] .code-cell',
+    );
+    cell?.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    await vi.waitFor(() => expect(focusedKey()).toBe("10"));
+    const push = vi.spyOn(window.history, "pushState");
+    press("2", "Digit2");
+    await vi.waitFor(() =>
+      expect(window.location.pathname + window.location.hash).toBe(
+        "/tok/src/base/src/A.hs#L11",
+      ),
+    );
+    // The origin entry first, then the router's.
+    expect(push.mock.calls[0]?.[0]).toEqual({ origin: { col: 0 } });
+    expect(push.mock.calls[0]?.[2]).toBe("/tok/diff/src/A.hs#base-L11");
+    unmountApp();
+    const again = open("/tok/diff/src/A.hs#base-L11");
+    await ready(again.main);
+    await vi.waitFor(() =>
+      expect(
+        again.main.querySelector(".code-line-target")?.getAttribute("data-key"),
+      ).toBe("10"),
+    );
+    // Wait for base's highlight: docs need its module.
+    await vi.waitFor(() =>
+      expect(
+        again.main.querySelector(".diff-delete a.code-link"),
+      ).not.toBeNull(),
+    );
+    press("1", "Digit1");
+    await vi.waitFor(() =>
+      expect(window.location.pathname).toBe("/tok/docs/base/A"),
+    );
+  });
+
+  it("Back to an origin: focus on the saved column, once links come", async () => {
+    stubFetch({
+      "/tok/api/diff/src/A.hs": [200, diffBody()],
+      "/tok/api/file/base/src/A.hs": [200, file(baseText)],
+      "/tok/api/file/head/src/A.hs": [200, file(headText)],
+      "/tok/api/source/base/src/A.hs": [200, baseSource],
+    });
+    const root = mountAppAt(
+      "/tok/diff/src/A.hs#base-L11",
+      undefined,
+      undefined,
+      { origin: { col: 1 } },
+      diffSession,
+    );
+    await vi.waitFor(() =>
+      expect(document.activeElement?.textContent).toBe("old"),
+    );
+    expect(
+      root.querySelector(".code-line-target")?.getAttribute("data-key"),
+    ).toBe("10");
+  });
+
+  const button = (main: HTMLElement, text: string) =>
+    [...main.querySelectorAll("button")].find((b) => b.textContent === text);
+
+  it("1 on a removed line before base is lexed: no docs, not head's", async () => {
+    const { main } = open("/tok/diff/src/A.hs", {
+      "/tok/api/source/base/src/A.hs": [404, { error: "not found" }],
+      "/tok/api/source/head/src/A.hs": [200, baseSource],
+    });
+    const g = await ready(main);
+    await vi.waitFor(() =>
+      expect(main.querySelector(".diff-insert a.code-link")).not.toBeNull(),
+    );
+    g.querySelector<HTMLElement>(
+      '.code-row[data-key="10"] .code-cell',
+    )?.focus();
+    await vi.waitFor(() => expect(focusedKey()).toBe("10"));
+    press("1", "Digit1");
+    await vi.waitFor(() => expect(status()).toBe(texts.noDocs));
+    expect(window.location.pathname).toBe("/tok/diff/src/A.hs");
+  });
+
+  it("change buttons: the cursor moves, focus stays, the row is said", async () => {
+    const { main } = open("/tok/diff/src/A.hs", steps);
+    await ready(main);
+    const next = button(main, texts.nextChange)!;
+    const prev = button(main, texts.prevChange)!;
+    next.focus();
+    next.click();
+    expect(document.activeElement).toBe(next);
+    expect(status()).toBe("removed line 1");
+    next.click();
+    expect(status()).toBe("removed line 4");
+    next.click();
+    next.click();
+    expect(status()).toBe(texts.noMore);
+    prev.click();
+    expect(status()).toBe("removed line 4");
+    // The cursor is there: Tab into the grid lands on it.
+    const stop = main.querySelector<HTMLElement>(
+      '[role="grid"] [tabindex="0"]',
+    );
+    expect(stop?.closest(".code-row")?.getAttribute("data-key")).toBe("4");
+  });
+
+  it("j, then focus leaves the grid, j again: the next hunk", async () => {
+    const { main } = open("/tok/diff/src/A.hs", steps);
+    await ready(main);
+    press("j");
+    expect(focusedKey()).toBe("0");
+    const whole = button(main, texts.wholeFile)!;
+    whole.focus();
+    whole.click();
+    press("j");
+    expect(focusedKey()).toBe("15");
+  });
+
+  it("too slow with -w on: the ws toggle stays, to turn it off", async () => {
+    const { main } = open("/tok/diff/src/A.hs?ws=ignore", {
+      "/tok/api/diff/src/A.hs?ws=ignore": [
+        200,
+        diffBody({ ignoreWhitespace: true, diff: { kind: "too-slow" } }),
+      ],
+    });
+    await vi.waitFor(() =>
+      expect(button(main, texts.ws)?.getAttribute("aria-pressed")).toBe("true"),
+    );
+    expect(button(main, texts.wholeFile)).toBeUndefined();
+  });
+
+  it("Try again: still too slow is said; then the grid takes focus", async () => {
+    let calls = 0;
+    const routes: Record<string, [number, unknown]> = {
+      "/tok/api/file/base/src/A.hs": [200, file(baseText)],
+      "/tok/api/file/head/src/A.hs": [200, file(headText)],
+    };
+    Object.defineProperty(routes, "/tok/api/diff/src/A.hs", {
+      enumerable: true,
+      get: () => [
+        200,
+        ++calls <= 2 ? diffBody({ diff: { kind: "too-slow" } }) : diffBody(),
+      ],
+    });
+    stubFetch(routes);
+    const root = mountAppAt(
+      "/tok/diff/src/A.hs",
+      undefined,
+      undefined,
+      null,
+      diffSession,
+    );
+    const main = root.querySelector("main")!;
+    await vi.waitFor(() =>
+      expect(button(main, texts.tryAgain)).not.toBeUndefined(),
+    );
+    button(main, texts.tryAgain)?.focus();
+    button(main, texts.tryAgain)?.click();
+    await vi.waitFor(() => expect(status()).toBe(texts.stillSlow));
+    button(main, texts.tryAgain)?.click();
+    const g = await ready(main);
+    await vi.waitFor(() =>
+      expect(g.contains(document.activeElement)).toBe(true),
+    );
+  });
+
+  it("Back to a gap: the gap gets focus, still closed", async () => {
+    stubFetch({
+      "/tok/api/diff/src/A.hs": [200, diffBody()],
+      "/tok/api/file/base/src/A.hs": [200, file(baseText)],
+      "/tok/api/file/head/src/A.hs": [200, file(headText)],
+    });
+    const root = mountAppAt(
+      "/tok/diff/src/A.hs#head-L1",
+      undefined,
+      undefined,
+      { origin: { col: 0, gap: true } },
+      diffSession,
+    );
+    const g = await ready(root.querySelector("main")!);
+    await vi.waitFor(() =>
+      expect(document.activeElement?.classList.contains("diff-gap-cell")).toBe(
+        true,
+      ),
+    );
+    expect(g.getAttribute("aria-rowcount")).toBe("10");
+  });
+
+  it("Try again, then no grid: a later grid takes no focus", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    let calls = 0;
+    // After Try again: runs that don't fit the texts (no grid).
+    const bad = diffBody({
+      diff: {
+        kind: "lines",
+        runs: [
+          ["equal", 11],
+          ["delete", 1],
+          ["insert", 1],
+          ["equal", 10],
+        ],
+        crlfLines: 0,
+        bom: null,
+      },
+    });
+    const routes: Record<string, [number, unknown]> = {
+      "/tok/api/file/base/src/A.hs": [200, file(baseText)],
+      "/tok/api/file/head/src/A.hs": [200, file(headText)],
+      "/tok/api/diff/src/A.hs?ws=ignore": [
+        200,
+        diffBody({ ignoreWhitespace: true }),
+      ],
+    };
+    Object.defineProperty(routes, "/tok/api/diff/src/A.hs", {
+      enumerable: true,
+      get: () => [
+        200,
+        ++calls === 1 ? diffBody({ diff: { kind: "too-slow" } }) : bad,
+      ],
+    });
+    stubFetch(routes);
+    const root = mountAppAt(
+      "/tok/diff/src/A.hs",
+      undefined,
+      undefined,
+      null,
+      diffSession,
+    );
+    const main = root.querySelector("main")!;
+    await vi.waitFor(() =>
+      expect(button(main, texts.tryAgain)).not.toBeUndefined(),
+    );
+    button(main, texts.tryAgain)?.click();
+    await vi.waitFor(() => expect(main.textContent).toContain(texts.mismatch));
+    const copy = main.querySelector<HTMLButtonElement>(".copy-host button")!;
+    copy.focus();
+    window.history.pushState(null, "", "/tok/diff/src/A.hs?ws=ignore");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    await ready(main);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(document.activeElement).toBe(copy);
   });
 });

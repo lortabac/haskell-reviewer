@@ -37,12 +37,13 @@ const change = (
   path: string,
   status: string,
   oldPath: string | null = null,
+  note: string | null = null,
 ) => ({
   path,
   oldPath,
   status,
   similarity: status === "renamed" ? 90 : null,
-  note: null,
+  note,
 });
 
 const outsidePaths = Array.from({ length: 12 }, (_, i) => `other/f${i}`);
@@ -53,7 +54,7 @@ const diffFiles = (over: Record<string, unknown> = {}) => ({
   head: { label: "feature", commit: "b".repeat(40) },
   files: [
     change("docs/new.md", "renamed", "docs/old.md"),
-    change("src/A.hs", "modified"),
+    change("src/A.hs", "modified", null, "mode-changed"),
     change("src/B.hs", "removed"),
     change("src/C.hs", "added"),
   ],
@@ -151,7 +152,7 @@ describe("Home in diff mode", () => {
     });
   });
 
-  it("the list: signs, links on the right side, removed ones on base", async () => {
+  it("the list: signs, links to the diff view, notes", async () => {
     const root = mount();
     await vi.waitFor(() => {
       expect(rows(root)).toHaveLength(4);
@@ -159,14 +160,16 @@ describe("Home in diff mode", () => {
     const [ren, mod, rem, add] = rows(root);
     expect(text(ren)).toBe("→renamed docs/new.md from docs/old.md (90%)");
     expect(ren?.querySelector("a")?.getAttribute("href")).toBe(
-      "/tok/src/head/docs/new.md",
+      "/tok/diff/docs/new.md",
     );
     expect(mod?.querySelector("a")?.getAttribute("href")).toBe(
-      "/tok/src/head/src/A.hs",
+      "/tok/diff/src/A.hs",
     );
+    expect(text(mod)).toBe("~modified src/A.hs (mode changed)");
+    // No side in a diff URL: the sign word says removed.
     const a = rem?.querySelector("a");
-    expect(a?.getAttribute("href")).toBe("/tok/src/base/src/B.hs");
-    expect(text(a)).toBe("src/B.hs (on base)");
+    expect(a?.getAttribute("href")).toBe("/tok/diff/src/B.hs");
+    expect(text(a)).toBe("src/B.hs");
     expect(rem?.querySelector(".sr-only")?.textContent).toBe("removed");
     expect(add?.querySelector("[aria-hidden=true]")?.textContent).toBe("+");
   });

@@ -45,3 +45,12 @@ export function parseDiffHash(hash: string): DiffLine | undefined {
 export function wsFromSearch(search: string): boolean {
   return new URLSearchParams(search).get("ws") === "ignore";
 }
+
+// A search string with ws=ignore on or off; other params kept.
+export function searchWithWs(search: string, on: boolean): string {
+  const q = new URLSearchParams(search);
+  if (on) q.set("ws", "ignore");
+  else q.delete("ws");
+  const s = q.toString();
+  return s === "" ? "" : "?" + s;
+}

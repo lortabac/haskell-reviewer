@@ -20,6 +20,7 @@ import { docsHref } from "../api/module";
 import { type LexedSource, type OutlineEntry } from "../api/source";
 import { bannerText } from "../modules/notices";
 import { useModules } from "../modules/store";
+import { noteTexts } from "../diff/notes";
 import { declAtLine, outlineStep } from "../keys/outline";
 import {
   useCopyLocation,
@@ -44,7 +45,7 @@ import {
 import { createSource } from "../source/createSource";
 import { FindBar, type FindHandle } from "../source/FindBar";
 import { isCodeJump, shouldReland } from "../source/landing";
-import { originOf, saveOrigin } from "../source/origin";
+import { onLeaveClick, originOf, saveOrigin } from "../source/origin";
 import { RefsBar, type RefsHandle } from "../source/RefsBar";
 import { utf16Cols } from "../source/columns";
 import { highlightDecor, highlightedLine } from "../source/decor";
@@ -153,9 +154,7 @@ function FilePage(props: { path: string }): JSX.Element {
       <Show when={banner()}>{(b) => <p class="file-banner">{b()}</p>}</Show>
       {/* Read from disk, and git would filter it (D-335). */}
       <Show when={view()?.filtered === true}>
-        <p class="file-note">
-          Shown as on disk: a git filter applies; the stored content may differ.
-        </p>
+        <p class="file-note">{noteTexts.filtered}</p>
       </Show>
       <Switch
         fallback={
@@ -329,26 +328,19 @@ function FileText(props: {
     const a = api;
     if (a === undefined) return;
     const c = a.cursor();
-    saveOrigin(c.line, c.col, untrack(marks)?.from, to);
+    saveOrigin(
+      `#L${c.line}`,
+      { col: c.col },
+      untrack(marks)?.from === c.line,
+      c.line === 1,
+      to,
+    );
   };
   // eslint-disable-next-line solid/reactivity -- given once
   props.setLeave?.(() => saveCursor());
   onCleanup(() => props.setLeave?.(undefined));
-  const onLinkClick = (e: MouseEvent) => {
-    const a =
-      e.target instanceof Element
-        ? e.target.closest<HTMLAnchorElement>("a[href]")
-        : null;
-    if (a === null || e.defaultPrevented || e.button !== 0) return;
-    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
-    // A new tab, or another site: no history here.
-    if (a.target !== "" || a.origin !== window.location.origin) return;
-    // The router leaves these to the browser.
-    if (a.hasAttribute("download") || a.relList.contains("external")) return;
-    sameFileJump(e, a);
-    if (e.defaultPrevented || a.href === window.location.href) return;
-    saveCursor(a.href);
-  };
+  const onLinkClick = (e: MouseEvent) =>
+    onLeaveClick(e, sameFileJump, saveCursor);
   // A same-file code link (D-284).
   const sameFileJump = (e: MouseEvent, a: HTMLAnchorElement) => {
     const s = props.source;

@@ -1,6 +1,7 @@
-// A refs link landed before the highlight came, so the token was no
-// link yet. Once it comes, land again, but only if the cursor is still
-// where we put it and focus is in the view (T12).
+// A refs link (or Back, D-339) landed before the highlight came, so
+// the token was no link yet. Once it comes, land again, but only if
+// the cursor is still where we put it and focus is in the view (T12).
+// line: a line; the diff view passes a row.
 export function shouldReland(
   land: { line: number; col: number },
   cursor: { line: number; col: number } | undefined,

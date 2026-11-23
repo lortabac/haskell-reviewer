@@ -7,6 +7,8 @@ export type ActionId =
   | "search"
   | "next"
   | "prev"
+  | "nextChange"
+  | "prevChange"
   | "open"
   | "definition"
   | "references"
@@ -44,17 +46,34 @@ export const keymap: readonly KeyRow[] = [
     id: "next",
     bindings: ["j"],
     keys: ["j"],
-    label: "Next declaration",
-    where: "Docs, source",
-    control: "Tab (docs), Outline list (source)",
+    label: "Next declaration or hunk",
+    where: "Docs, source, diff",
+    control: "Tab (docs), Outline list (source), Next change button (diff)",
   },
   {
     id: "prev",
     bindings: ["k"],
     keys: ["k"],
-    label: "Previous declaration",
-    where: "Docs, source",
-    control: "Shift+Tab (docs), Outline list (source)",
+    label: "Previous declaration or hunk",
+    where: "Docs, source, diff",
+    control:
+      "Shift+Tab (docs), Outline list (source), Previous change button (diff)",
+  },
+  {
+    id: "nextChange",
+    bindings: ["n"],
+    keys: ["n"],
+    label: "Next change",
+    where: "Diff",
+    control: "Next change button",
+  },
+  {
+    id: "prevChange",
+    bindings: ["p"],
+    keys: ["p"],
+    label: "Previous change",
+    where: "Diff",
+    control: "Previous change button",
   },
   {
     id: "open",
@@ -139,7 +158,7 @@ export const keymap: readonly KeyRow[] = [
 ];
 
 // Keys that may repeat while held down.
-export const repeatable: ReadonlySet<string> = new Set(["j", "k"]);
+export const repeatable: ReadonlySet<string> = new Set(["j", "k", "n", "p"]);
 
 // How long g waits for its second key, in ms.
 export const sequenceTimeout = 1000;

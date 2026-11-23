@@ -101,6 +101,9 @@ export interface DiffApi {
   // Show a hidden row and a few around it.
   reveal: (row: number) => void;
   hasFocus: () => boolean;
+  // The cursor: its row (a gap: its first row), its column (0 on a
+  // gap), whether it is on a gap and on the first visible item.
+  cursor: () => { row: number; col: number; gap: boolean; first: boolean };
   // The mounted element of a row, if any.
   rowEl: (row: number) => HTMLElement | undefined;
 }
@@ -299,6 +302,15 @@ export function DiffGrid(props: DiffGridProps): JSX.Element {
       scrollToIdx(indexOfRow(vis(), r), align),
     reveal: doReveal,
     hasFocus: () => box.contains(document.activeElement),
+    cursor: () => {
+      const c = cursor();
+      return {
+        row: rowOfKey(c.key),
+        col: isGapKey(c.key) ? 0 : c.col,
+        gap: isGapKey(c.key),
+        first: curIdx() === 0,
+      };
+    },
     rowEl: (r) => rowByKey(keyOfRow(r)),
   });
 

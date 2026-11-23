@@ -3,6 +3,7 @@ import {
   diffHref,
   diffPathFromPathname,
   parseDiffHash,
+  searchWithWs,
   wsFromSearch,
 } from "./urls";
 
@@ -53,5 +54,16 @@ describe("diff URLs", () => {
     expect(wsFromSearch("?ws=ignore")).toBe(true);
     expect(wsFromSearch("?ws=other")).toBe(false);
     expect(wsFromSearch("")).toBe(false);
+  });
+});
+
+describe("searchWithWs", () => {
+  it("adds or drops ws, keeps the rest", () => {
+    expect(searchWithWs("", true)).toBe("?ws=ignore");
+    expect(searchWithWs("?ws=ignore", false)).toBe("");
+    expect(searchWithWs("?layout=split", true)).toBe("?layout=split&ws=ignore");
+    expect(searchWithWs("?ws=ignore&layout=split", false)).toBe(
+      "?layout=split",
+    );
   });
 });

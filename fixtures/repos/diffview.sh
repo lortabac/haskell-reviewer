@@ -74,7 +74,7 @@ commit_at "$d" 0 -m base
 calc 'double, triple' 'Sum of all, doubled.' 'sum (map double xs)' triple
 awk 'BEGIN { for (i = 1; i <= 20000; i++) printf "head line %05d\n", i }' > "$d/big.txt"
 printf 'a\000bc' > "$d/data.bin"
-# 40000 lines of 29 bytes: over 1 MiB.
+# 40000 lines of 30 bytes: over 1 MiB.
 awk 'BEGIN { for (i = 0; i < 40000; i++) printf "line %05d of a big text file\n", i }' > "$d/huge.txt"
 rm "$d/link"
 ln -s src/Calc.hs "$d/link"

@@ -483,6 +483,27 @@ describe("Sidebar in diff mode", () => {
     expect(lib.getAttribute("aria-expanded")).toBe("false");
   });
 
+  it("a diff page: its path is current, never a ghost", async () => {
+    const { nav } = mount({
+      prefs: { sidebar: "files", changedOnly: false },
+      at: "/tok/diff/src/A.hs",
+    });
+    const p = panel(nav, "files");
+    await vi.waitFor(() => {
+      expect(link(p, "A.hs").getAttribute("aria-current")).toBe("page");
+    });
+    unmountApp();
+    const again = mount({
+      prefs: { sidebar: "files", changedOnly: false },
+      at: "/tok/diff/src/B.hs",
+    });
+    const q = panel(again.nav, "files");
+    await vi.waitFor(() => {
+      expect(link(q, "B.hs").textContent).toContain("(on base)");
+    });
+    expect(q.querySelector('[aria-current="page"]')).toBeNull();
+  });
+
   it("changed only, files, nothing changed: the note and the current file", async () => {
     const { nav } = mount({
       prefs: { sidebar: "files", changedOnly: true },
