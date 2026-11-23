@@ -1,4 +1,4 @@
-// Helpers for the virtualiser.
+// Helpers for the virtualiser, shared by the source and diff views.
 import { defaultRangeExtractor, type Range } from "@tanstack/solid-virtual";
 import {
   createEffect,
@@ -7,6 +7,12 @@ import {
   onCleanup,
   type Owner,
 } from "solid-js";
+
+// About 0.9rem × 1.5 at 16px: the row height until the probe is
+// measured (and in tests, which have no layout).
+export const fallbackRowHeight = 21;
+// Rows mounted past each edge of the screen.
+export const overscan = 10;
 
 // The rows to mount: the window around the screen, plus pinned lines
 // (indexes from 0) anywhere in the file: the cursor's line and the

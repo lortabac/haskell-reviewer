@@ -337,12 +337,15 @@ back/forward, new tabs and copy-paste between tabs work. Shape:
 /<token>/docs/<side>/<module>[#<decl>]
 /<token>/src/<side>/<path/to/File.hs>[#L<n>[-L<m>]]
 /<token>/md/<side>/<path/to/File.md>[#<anchor>]
-/<token>/diff/<path/to/File.hs>[?layout=unified|split][#<side>-L<n>]
+/<token>/diff/<path/to/File.hs>[?<query>][#<side>-L<n>]
 /<token>/changes[#<decl-id>]
 /<token>/refs/<side>/<module>?decl=<decl>
 /<token>/search/<side>?q=<text>
 ```
 
+`/diff` has no side: it shows both. Its path is head's, else base's; in
+browse mode it says "Not in diff mode." Its query is free-form:
+`ws=ignore` now, `layout=unified|split` later (D-341).
 `<side>` is `head` / `base` in diff mode and `tree` in browse mode. Links
 keep the page's side (§5.1). A side the session doesn't have shows "not
 found in this snapshot", with one link to the same page on the default
@@ -499,6 +502,13 @@ Available in diff mode only. It shows the textual diff file by file.
 - Layouts: **unified** and **side-by-side**, toggled globally and remembered
   across sessions.
 - Context lines can be expanded step by step, or for the whole file.
+  Three context lines around each change by default (as git); hidden
+  lines are a gap row with buttons: 20 more from either end, or all.
+  "Show whole file" shows every line (D-341).
+- One row per line: removed lines show base's text, unchanged and added
+  lines head's. Both line numbers in the gutter, a + or − sign, and a
+  tint. `#base-L<n>` or `#head-L<n>` marks a line; a hidden one opens
+  its gap. `?ws=ignore` ignores whitespace (D-341).
 - Both sides are syntax-highlighted (§5.6) and navigable: identifiers link to the
   definition on *their own side* (a base-side line links into the base
   snapshot).

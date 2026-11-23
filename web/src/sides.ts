@@ -3,6 +3,9 @@
 export const sides = ["tree", "base", "head"] as const;
 export type Side = (typeof sides)[number];
 
+// A side of a diff session.
+export type DiffSessionSide = Exclude<Side, "tree">;
+
 export function isSide(s: string | undefined): s is Side {
   return (sides as readonly (string | undefined)[]).includes(s);
 }

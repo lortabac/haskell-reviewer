@@ -19,6 +19,29 @@ const one = (t: Target): LinkInfo => {
 };
 
 describe("linkInfos", () => {
+  it("here: same-file links go where it says (D-341)", () => {
+    const here = (n: number | null) =>
+      n === null ? "/diff/src/A.hs" : `/diff/src/A.hs#base-L${n}`;
+    const infos = linkInfos(
+      "base",
+      view,
+      [
+        ["local", 7, 3],
+        ["decl", "A", "src/A.hs", 4, "val:y", [], 1, null, false],
+        ["decl", "B", "src/B.hs", 4, "val:y", [], 1, null, false],
+        ["module", "A", "src/A.hs", [], 1],
+      ],
+      "/tok",
+      here,
+    );
+    expect(infos.map((i) => [i?.href, i?.here])).toEqual([
+      ["/tok/diff/src/A.hs#base-L7", true],
+      ["/tok/diff/src/A.hs#base-L4", true],
+      ["/tok/src/base/src/B.hs#L4", false],
+      ["/tok/diff/src/A.hs", true],
+    ]);
+  });
+
   it("a local use: its binder's line here", () => {
     const i = one(["local", 7, 3]);
     expect(i).toEqual({

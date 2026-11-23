@@ -9,7 +9,6 @@ import {
 import {
   createEffect,
   createMemo,
-  createRenderEffect,
   createSelector,
   createSignal,
   createUniqueId,
@@ -18,7 +17,6 @@ import {
   on,
   onCleanup,
   onMount,
-  untrack,
 } from "solid-js";
 import { setVar } from "../ui/cssom";
 import { bringOnPage } from "../ui/scroll";
@@ -29,12 +27,15 @@ import { focusKeepingSelection } from "./focus";
 import { inLine, type Matches } from "./find";
 import { createPaint, maxRangesPerRow } from "./findPaint";
 import {
+  isPlain,
   isSelectAll,
   keyTarget,
   landOn,
+  modsOf,
   nextStop,
+  pageRows,
+  sideStep,
   type Spot,
-  type Stop,
 } from "./keys";
 import type { LineKind } from "./highlight";
 import type { CardText } from "./hover";
@@ -43,13 +44,27 @@ import { lineNodes } from "./paint";
 import {
   colIn,
   domPoint,
+  linkStops,
   nodeAt,
   nodesAt,
   pointAt,
-  replaceKeepingSelection,
   selectedLines,
 } from "./selection";
-import { createRowHeight, mountRows, withPins } from "./virtual";
+import {
+  createPendingFocus,
+  createRovingStop,
+  drawCell,
+  focusSpot,
+  keepTopOnNewHeight,
+  sameFields,
+} from "./grid";
+import {
+  createRowHeight,
+  fallbackRowHeight,
+  mountRows,
+  overscan,
+  withPins,
+} from "./virtual";
 
 // Lines from 1, columns in UTF-16 units from 0. link: the cursor is on
 // the link starting at col (it has focus, not the cell). See D-284.
@@ -135,11 +150,6 @@ export interface CodeViewProps {
   ref?: (api: CodeApi) => void;
 }
 
-// 0.9rem × 1.5 at 16px, about: only until the probe is measured (and
-// in tests, which have no layout).
-export const fallbackRowHeight = 21;
-const overscan = 10;
-
 export function CodeView(props: CodeViewProps): JSX.Element {
   let box!: HTMLDivElement;
   let rowsEl!: HTMLDivElement;
@@ -164,10 +174,7 @@ export function CodeView(props: CodeViewProps): JSX.Element {
   );
 
   const setCursor = (c: Cursor) => {
-    const cur = cursor();
-    if (cur.line !== c.line || cur.col !== c.col || cur.link !== c.link) {
-      setCursorRaw(c);
-    }
+    if (!sameFields(cursor(), c)) setCursorRaw(c);
   };
 
   // Scrolled with focus elsewhere and the cursor off screen: the cursor
@@ -211,25 +218,14 @@ export function CodeView(props: CodeViewProps): JSX.Element {
   const lineLength = (n: number) => lineText(props.text, props.index, n).length;
 
   // The links of a cell, read from the DOM: the stops of → and ←.
-  const linksOf = (cell: Element): (Stop & { el: HTMLElement })[] =>
-    [...cell.querySelectorAll<HTMLElement>("a.code-link")].map((el) => {
-      const start = colIn(cell, el, 0);
-      return { start, end: start + el.textContent.length, el };
-    });
+  const linksOf = linkStops;
 
-  // Roving tabindex: the cursor's link has tabindex 0 (set by hand: the
-  // rows are drawn by hand), the cell -1. One Tab stop in the view.
-  let stopEl: HTMLElement | undefined;
+  // Roving tabindex: the cursor's link has tabindex 0, the cell -1. One
+  // Tab stop in the view.
+  const roving = createRovingStop(linksOf);
   const applyStop = (cell: Element | undefined, c: Cursor) => {
-    let el: HTMLElement | undefined;
-    if (c.link && cell !== undefined) {
-      el = linksOf(cell).find((s) => s.start === c.col)?.el;
-      // The link went (a redraw): the cell again.
-      if (el === undefined) setCursor({ ...c, link: false });
-    }
-    if (stopEl !== undefined && stopEl !== el) stopEl.tabIndex = -1;
-    stopEl = el;
-    if (el !== undefined) el.tabIndex = 0;
+    // The link went (a redraw): the cell again.
+    if (!roving(cell, c)) setCursor({ ...c, link: false });
   };
   const cellOf = (n: number) =>
     row(n)?.querySelector<HTMLElement>(".code-cell") ?? undefined;
@@ -287,10 +283,16 @@ export function CodeView(props: CodeViewProps): JSX.Element {
   // The cursor's row is pinned, so it's mounted and its cell focusable
   // once the cursor moves: at once in an event handler, after the
   // effects inside an effect (then pendingFocus does it).
-  let pendingFocus:
-    { line: number; want: number | Spot; page: boolean } | undefined;
+  const pendingFocus = createPendingFocus<{
+    line: number;
+    want: number | Spot;
+    page: boolean;
+  }>(
+    () => box,
+    (p) => tryFocus(p.line, p.want, p.page),
+  );
   const focusAt = (n: number, want: number | Spot, page = true) => {
-    pendingFocus = undefined;
+    pendingFocus.clear();
     const line = clamp(n);
     // The cursor first: its row gets pinned (mounted).
     if (cursor().line !== line) {
@@ -298,7 +300,7 @@ export function CodeView(props: CodeViewProps): JSX.Element {
       setCursor({ line, col: Math.min(col, lineLength(line)), link: false });
     }
     if (page) scrollToLine(line, "auto");
-    if (!tryFocus(line, want, page)) pendingFocus = { line, want, page };
+    pendingFocus.request({ line, want, page });
   };
   const focusLine = (n: number) => focusAt(n, goal);
 
@@ -381,37 +383,28 @@ export function CodeView(props: CodeViewProps): JSX.Element {
       e.target.closest(".code-cell") === null
     )
       return;
-    const mods = {
-      ctrl: e.ctrlKey,
-      meta: e.metaKey,
-      alt: e.altKey,
-      shift: e.shiftKey,
-    };
+    const mods = modsOf(e);
     if (isSelectAll(e.key, mods)) {
       e.preventDefault();
       copy.selectAll();
       return;
     }
     const cur = cursor();
-    const plain = !mods.ctrl && !mods.meta && !mods.alt && !mods.shift;
-    if (plain && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
+    if (isPlain(mods) && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
       e.preventDefault();
       const dir = e.key === "ArrowRight" ? 1 : -1;
       const cell = cellOf(cur.line);
       const to =
         cell === undefined ? undefined : nextStop(linksOf(cell), cur, dir);
       if (to === undefined) {
-        box.scrollLeft += 40 * dir;
+        box.scrollLeft += sideStep * dir;
         return;
       }
       goal = to.col;
       focusAt(cur.line, to, false);
       return;
     }
-    const page = Math.max(
-      1,
-      Math.floor(box.clientHeight / rowHeight.height()) - 1,
-    );
+    const page = pageRows(box.clientHeight, rowHeight.height());
     const to = keyTarget(e.key, mods, cur.line, count(), page);
     if (to === undefined) return;
     e.preventDefault();
@@ -581,12 +574,6 @@ export function CodeView(props: CodeViewProps): JSX.Element {
     focusAt(line, col, false);
   };
 
-  // Focus went elsewhere: a waiting focus must not take it back later.
-  const onAnyFocus = (e: FocusEvent) => {
-    if (!(e.target instanceof Node) || !box.contains(e.target)) {
-      pendingFocus = undefined;
-    }
-  };
   // A drag or Shift+click that ends on a link selects, it doesn't
   // follow the link. Native, not delegated: before the router's.
   // Ctrl, Cmd or Alt clicks (a new tab) are the browser's.
@@ -617,20 +604,18 @@ export function CodeView(props: CodeViewProps): JSX.Element {
     if (cell === null || r === null) return;
     const line = Number(r.getAttribute("data-line"));
     const cur = cursor();
-    let c: Cursor;
-    if (t.matches("a.code-link")) {
-      c = { line, col: colIn(cell, t, 0), link: true };
-    } else if (t === cell) {
-      c = { line, col: cur.line === line ? cur.col : 0, link: false };
-    } else return;
-    if (c.line === cur.line && c.col === cur.col && c.link === cur.link) {
-      return;
-    }
+    const spot = focusSpot(
+      t,
+      cell,
+      linksOf(cell),
+      cur.line === line ? cur.col : 0,
+    );
+    if (spot === undefined) return;
+    const c: Cursor = { line, ...spot };
+    if (sameFields(c, cur)) return;
     goal = c.col;
     // A focus waiting for another line must not pull it back.
-    if (pendingFocus !== undefined && pendingFocus.line !== line) {
-      pendingFocus = undefined;
-    }
+    if (pendingFocus.get()?.line !== line) pendingFocus.clear();
     setCursor(c);
     applyStop(cell, c);
   };
@@ -638,12 +623,10 @@ export function CodeView(props: CodeViewProps): JSX.Element {
     rowHeight.observe(probe);
     box.addEventListener("click", onClick);
     box.addEventListener("focusin", onFocusIn);
-    document.addEventListener("focusin", onAnyFocus);
     // On window: a drag can end outside it.
     window.addEventListener("mouseup", onMouseUp);
     document.addEventListener("mousemove", onMouseMove);
     onCleanup(() => {
-      document.removeEventListener("focusin", onAnyFocus);
       window.removeEventListener("mouseup", onMouseUp);
       document.removeEventListener("mousemove", onMouseMove);
       clearTimeout(upTimer);
@@ -651,20 +634,15 @@ export function CodeView(props: CodeViewProps): JSX.Element {
     });
   });
 
-  // A new row height (the probe's first measure, zoom, fonts): keep the
-  // same line at the top. The virtualiser only sees it on measure().
-  let lastHeight = fallbackRowHeight;
-  createEffect(() => {
-    const h = rowHeight.height();
-    if (h === lastHeight) return;
-    const top = box.scrollTop / lastHeight;
-    lastHeight = h;
-    v.measure();
-    // The new height first: the browser clamps scrollTop to the old one.
-    setVar(rowsEl, "--code-h", `${v.getTotalSize()}px`);
-    box.scrollTop = top * h;
-    // The outline of a find hit moved with its row.
-    repaint();
+  // A new row height: the same line at the top, and the outline of a
+  // find hit moved with its row.
+  keepTopOnNewHeight({
+    height: rowHeight.height,
+    fallback: fallbackRowHeight,
+    box: () => box,
+    rows: () => rowsEl,
+    v,
+    after: () => repaint(),
   });
   createEffect(() => {
     setVar(box, "--code-digits", String(String(count()).length));
@@ -731,23 +709,25 @@ export function CodeView(props: CodeViewProps): JSX.Element {
         />
       </div>
     ) as Node;
-    // Children by hand: a new renderLine swaps them under a live
-    // selection, which must stay where it was.
-    createRenderEffect(() => {
-      const render = props.renderLine;
-      const nodes =
-        render === undefined ? lineNodes(plainPieces(text)) : render(n, text);
-      const active = document.activeElement;
-      const had = active !== null && cell.contains(active);
-      replaceKeepingSelection(cell, nodes);
-      untrack(() => {
+    // Children by hand: a new renderLine redraws them.
+    drawCell(
+      () => cell,
+      // eslint-disable-next-line solid/reactivity -- drawCell tracks it
+      () => {
+        const render = props.renderLine;
+        return render === undefined
+          ? lineNodes(plainPieces(text))
+          : render(n, text);
+      },
+      // eslint-disable-next-line solid/reactivity -- run untracked, after a draw
+      (had) => {
         const c = cursor();
         if (c.line !== n) return;
         // New <a>: the stop again.
         applyStop(cell, c);
         // Focus was on a link that went: back to the cursor. Not if a
         // focus waits for another line (it takes over).
-        const p = pendingFocus;
+        const p = pendingFocus.get();
         if (
           had &&
           !cell.contains(document.activeElement) &&
@@ -755,8 +735,8 @@ export function CodeView(props: CodeViewProps): JSX.Element {
         ) {
           focusAt(n, p?.want ?? { link: cursor().link, col: c.col }, false);
         }
-      });
-    });
+      },
+    );
     return row;
   }
 
@@ -856,12 +836,7 @@ export function CodeView(props: CodeViewProps): JSX.Element {
   };
   // A focus that waited for its row or the cell's tabindex (user
   // effects run after the DOM ones).
-  const retryFocus = () => {
-    const p = pendingFocus;
-    if (p !== undefined && tryFocus(p.line, p.want, p.page)) {
-      pendingFocus = undefined;
-    }
-  };
+  const retryFocus = pendingFocus.retry;
   createEffect(
     on(
       cursor,

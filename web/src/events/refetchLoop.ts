@@ -2,6 +2,7 @@
 // most once a second, plus once at done; nothing for another snapshot.
 // Shared by the source view and the docs page.
 import {
+  type Accessor,
   createEffect,
   createSignal,
   onCleanup,
@@ -9,6 +10,7 @@ import {
   useContext,
 } from "solid-js";
 import { usePageSide } from "../session";
+import type { Side } from "../sides";
 import { IndexingContext } from "./indexing";
 import { refetchStep } from "./partialRefetch";
 
@@ -20,16 +22,19 @@ export interface Answered {
 
 // get: one fetch. take: gets only the answer of the last fetch; says
 // its generation and partial, undefined to drop it (the loop goes on
-// as before), "stop" to stop for good. first: a first answer got some
-// other way (no fetch for it here). Returns: fetch now.
+// as before), "stop" to stop for good. Options: first, a first answer
+// got some other way (no fetch for it here); side, whose indexing
+// events count (the page's unless given). Returns: fetch now.
 export function createRefetchLoop<R>(
   get: (signal: AbortSignal) => Promise<R>,
   take: (r: R) => Answered | "stop" | undefined,
-  first?: Answered,
+  opts: { first?: Answered | undefined; side?: Accessor<Side> } = {},
 ): () => void {
   const indexing = useContext(IndexingContext);
-  // The page's side only: a base "done" must not stop a head page.
-  const side = usePageSide();
+  const first = opts.first;
+  // One side only: a base "done" must not stop a head page.
+  const pageSide = usePageSide();
+  const side = opts.side ?? pageSide;
   // Bumped on each fetch: a late answer of an earlier one is dropped.
   let seq = 0;
   let ac: AbortController | undefined;

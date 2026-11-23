@@ -494,3 +494,10 @@ export function makeEditsProject(): Promise<Project> {
 export function makeRenamesProject(): Promise<Project> {
   return repoProject("renames");
 }
+
+// diffview.sh: the diff view (D-341). src/Calc.hs changes on lines 3,
+// 5, 7 and 91 with a 77-line gap between; big.txt has 20,000 lines,
+// all changed; and one file of each kind for the notes.
+export function makeDiffViewProject(): Promise<Project> {
+  return repoProject("diffview");
+}

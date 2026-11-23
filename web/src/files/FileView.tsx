@@ -43,7 +43,7 @@ import {
 } from "../source/CodeView";
 import { createSource } from "../source/createSource";
 import { FindBar, type FindHandle } from "../source/FindBar";
-import { shouldReland } from "../source/landing";
+import { isCodeJump, shouldReland } from "../source/landing";
 import { originOf, saveOrigin } from "../source/origin";
 import { RefsBar, type RefsHandle } from "../source/RefsBar";
 import { utf16Cols } from "../source/columns";
@@ -452,11 +452,7 @@ function FileText(props: {
       jump = undefined;
       // A link of another file took us here: focus the line.
       const state: unknown = untrack(() => location.state);
-      const codeJump =
-        typeof state === "object" &&
-        state !== null &&
-        "codeJump" in state &&
-        state.codeJump === true;
+      const codeJump = isCodeJump(state);
       // A refs page link also says the token's column (code points).
       const cp =
         codeJump && typeof state === "object" && state !== null

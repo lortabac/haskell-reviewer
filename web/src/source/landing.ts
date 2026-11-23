@@ -13,3 +13,14 @@ export function shouldReland(
     cursor.col === land.col
   );
 }
+
+// The history state of a code link to another file: focus its target
+// line when it lands (paint.ts sets it).
+export function isCodeJump(state: unknown): boolean {
+  return (
+    typeof state === "object" &&
+    state !== null &&
+    "codeJump" in state &&
+    state.codeJump === true
+  );
+}

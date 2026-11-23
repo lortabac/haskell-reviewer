@@ -13,6 +13,9 @@
    and warn on decl-head, warn on bg and surface; ring or border:
    accent/bg, accent/decl-head, focus/decl-head.
    Diff markers: each change-* on bg and surface.
+   Diff view rows (D-341): fg, muted, link and each hl-* on diff-added,
+   diff-removed and their -cursor bands; change-added on the added
+   ones, change-removed on the removed ones; focus on all four.
    Don't put text in muted/border or muted/mark (dark theme): both are
    under 4.5:1.
 
@@ -68,6 +71,14 @@
   --color-change-removed: light-dark(#a40e26, #f85149);
   --color-change-modified: light-dark(#7d4e00, #d29922);
   --color-change-renamed: light-dark(#6639ba, #bc8cff);
+
+  /* Diff view rows (D-341): the tint of added and removed lines, and a
+     stronger one for the cursor line while the view has focus. Light
+     enough that every text colour still reads. */
+  --color-diff-added: light-dark(#e6ffec, #12261e);
+  --color-diff-added-cursor: light-dark(#d4f8dc, #1a3427);
+  --color-diff-removed: light-dark(#fff0ee, #25171c);
+  --color-diff-removed-cursor: light-dark(#ffe7e4, #341d24);
 
   --space-1: 0.25rem;
   --space-2: 0.5rem;

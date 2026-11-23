@@ -3,6 +3,7 @@ import { type JSX, untrack } from "solid-js";
 import { basePath } from "./base";
 import type { Prefs } from "./api/prefs";
 import { browseSession, type Session } from "./api/session";
+import { DiffView } from "./diff/DiffView";
 import { DocsView } from "./docs/DocsView";
 import { FileView } from "./files/FileView";
 import { Home } from "./Home";
@@ -46,6 +47,7 @@ export function App(props: {
         <Route path="/refs/:side/*ref" component={RefsView} />
         <Route path="/src/:side/*path" component={FileView} />
         <Route path="/md/:side/*path" component={MarkdownView} />
+        <Route path="/diff/*path" component={DiffView} />
         <Route path="/search/:side" component={TextSearchView} />
         <Route path="*" component={NotFound} />
       </Router>

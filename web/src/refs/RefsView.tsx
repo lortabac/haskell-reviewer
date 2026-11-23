@@ -182,7 +182,11 @@ function RefsPage(props: { module: string; decl: string }): JSX.Element {
       }
       return { generation: refs.generation, partial: refs.partial };
     },
-    useCached ? { generation: cached.generation, partial: false } : undefined,
+    {
+      first: useCached
+        ? { generation: cached.generation, partial: false }
+        : undefined,
+    },
   );
   if (!useCached) fetchNow();
 
