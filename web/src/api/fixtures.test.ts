@@ -94,6 +94,7 @@ const decoders: Record<string, (value: unknown) => unknown> = {
   "file-symlink": decodeFileView,
   "file-submodule": decodeFileView,
   "file-filtered": decodeFileView,
+  "file-not-local": decodeFileView,
   modules: decodeModuleTree,
   "modules-implicit": decodeModuleTree,
   "modules-diff": decodeModuleTree,
@@ -147,6 +148,9 @@ const decoders: Record<string, (value: unknown) => unknown> = {
   "source-markdown": decodeSourceView,
   "markdown-page": decodeMarkdownPage,
   "markdown-not-text": decodeMarkdownPage,
+  "markdown-filtered": decodeMarkdownPage,
+  "markdown-not-local": decodeMarkdownPage,
+  "source-not-local": decodeSourceView,
   "source-warm-up": decodeSourceView,
   "source-not-found": decodeSourceNotFound,
   "text-search": decodeTextSearch,
@@ -195,6 +199,21 @@ describe("API fixtures", () => {
       .map((n) => decodeFileView(fixture(n)));
     expect(sorted(views.map((v) => v.kind))).toEqual(sorted(fileViewKinds));
     expect(sorted(views.map((v) => String(v.filtered)))).toEqual([
+      "false",
+      "true",
+    ]);
+  });
+
+  it("the Markdown fixtures cover every kind, filtered or not", () => {
+    const pages = [...fixtures.keys()]
+      .filter((n) => n.startsWith("markdown-"))
+      .map((n) => decodeMarkdownPage(fixture(n)));
+    expect(sorted(pages.map((p) => p.kind))).toEqual([
+      "doc",
+      "not-local",
+      "not-text",
+    ]);
+    expect(sorted(pages.map((p) => String(p.filtered)))).toEqual([
       "false",
       "true",
     ]);
@@ -533,7 +552,11 @@ describe("API fixtures", () => {
     const views = [...fixtures.keys()]
       .filter((n) => n.startsWith("source-") && n !== "source-not-found")
       .map((n) => decodeSourceView(fixture(n)));
-    expect(sorted(views.map((v) => v.highlight))).toEqual(["lexed", "plain"]);
+    expect(sorted(views.map((v) => v.highlight))).toEqual([
+      "lexed",
+      "not-local",
+      "plain",
+    ]);
     expect(sorted(views.map((v) => String(v.partial)))).toEqual([
       "false",
       "true",

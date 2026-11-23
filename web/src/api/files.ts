@@ -48,6 +48,8 @@ export type FileView = FileViewHead &
     // resolved: the listed file the link points to, if any.
     | { kind: "symlink"; target: string; resolved: string | null }
     | { kind: "submodule"; commit: string | null }
+    // The blob is not in the local repo (partial clone).
+    | { kind: "not-local" }
   );
 
 export const fileViewKinds = [
@@ -56,6 +58,7 @@ export const fileViewKinds = [
   "too-large",
   "symlink",
   "submodule",
+  "not-local",
 ] as const;
 
 function decodeEntry(value: unknown, path: string): Entry {
@@ -117,5 +120,7 @@ export function decodeFileView(value: unknown): FileView {
         kind,
         commit: field(o, "commit", path, nullable(str)),
       };
+    case "not-local":
+      return { generation, filtered, kind };
   }
 }

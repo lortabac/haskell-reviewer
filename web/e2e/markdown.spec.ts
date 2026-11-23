@@ -1,5 +1,9 @@
 // Markdown files (D-327, D-328): coloured in the source view, rendered
 // as their docs view, links into the tool.
+import { execFileSync } from "node:child_process";
+import { appendFile, cp, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test } from "./support/fixtures";
 
 test("source view: coloured", async ({ page, server }) => {
@@ -51,4 +55,54 @@ test("not Markdown, or no such file: not found", async ({ page, server }) => {
   await expect(page.locator("main")).toContainText("not found", {
     ignoreCase: true,
   });
+});
+
+// A copy of edits.sh's repo where *.md is filtered, and an edited
+// notes.md: read from disk, so the rendered page says so (D-343).
+test("filtered: the rendered page has the note", async ({
+  page,
+  startServer,
+  editsProject,
+}) => {
+  const root = await mkdtemp(join(tmpdir(), "hr-e2e-mdfilter-"));
+  try {
+    await cp(editsProject.root, root, { recursive: true });
+    await appendFile(join(root, ".gitattributes"), "*.md filter=lfs -text\n");
+    // Committed, then edited: git can't tell without the filter, so the
+    // file is read from disk.
+    await writeFile(join(root, "notes.md"), "pointer\n");
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-C", root, ...args], {
+        stdio: "ignore",
+        // As support/project.ts: no user or system git config.
+        env: {
+          ...process.env,
+          GIT_CONFIG_GLOBAL: "/dev/null",
+          GIT_CONFIG_NOSYSTEM: "1",
+        },
+      });
+    git("add", "-A");
+    git(
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@example.com",
+      "commit",
+      "-q",
+      "-m",
+      "md",
+    );
+    await writeFile(join(root, "notes.md"), "# Notes\n");
+    const server = await startServer({ root, diff: "HEAD" });
+    await server.waitForLog(/indexing: done/, 20_000);
+    await page.goto(server.base + "md/head/notes.md");
+    await expect(
+      page.getByRole("heading", { name: "Notes", exact: true }),
+    ).toBeVisible();
+    await expect(page.locator("main .file-note")).toHaveText([
+      "Shown as on disk: a git filter applies; the stored content may differ.",
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

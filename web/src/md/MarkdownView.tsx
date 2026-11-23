@@ -33,6 +33,7 @@ import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
 import { usePageSide } from "../session";
 import { createDelay, focusInMain, focusLost } from "../ui/focus";
+import { noteTexts } from "../ui/notes";
 
 export function MarkdownView(): JSX.Element {
   const side = usePageSide();
@@ -93,6 +94,10 @@ function MarkdownPageView(props: { path: string }): JSX.Element {
           {props.path}
         </h1>
       </div>
+      {/* Read from disk, and git would filter it (D-343). */}
+      <Show when={page()?.filtered === true}>
+        <p class="file-note">{noteTexts.filtered}</p>
+      </Show>
       <Switch
         fallback={
           <Show when={slow()}>
@@ -108,7 +113,9 @@ function MarkdownPageView(props: { path: string }): JSX.Element {
               <p>
                 {p.kind === "not-text"
                   ? "This file is not text, so it can't be shown rendered."
-                  : "This file took too long to render."}{" "}
+                  : p.kind === "not-local"
+                    ? noteTexts.notLocal
+                    : "This file took too long to render."}{" "}
                 <a href={withBase(base(), hrefFor(side(), props.path))}>
                   See the file
                 </a>

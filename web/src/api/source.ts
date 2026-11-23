@@ -136,6 +136,9 @@ interface SourceHead {
 
 export type PlainSource = SourceHead & { highlight: "plain" };
 
+// The blob is not in the local repo (partial clone): nothing to show.
+export type NotLocalSource = SourceHead & { highlight: "not-local" };
+
 export type LexedSource = SourceHead & {
   highlight: "lexed";
   // 6 per run: line delta, start col, line span, end col, class, link.
@@ -146,7 +149,7 @@ export type LexedSource = SourceHead & {
   outline: OutlineEntry[];
 };
 
-export type SourceView = PlainSource | LexedSource;
+export type SourceView = PlainSource | NotLocalSource | LexedSource;
 
 export interface SourceNotFound {
   generation: number;
@@ -344,9 +347,11 @@ export function decodeSourceView(value: unknown): SourceView {
     o,
     "highlight",
     path,
-    oneOf(["plain", "lexed"] as const),
+    oneOf(["plain", "not-local", "lexed"] as const),
   );
-  if (highlight === "plain") return { ...head, highlight };
+  if (highlight === "plain" || highlight === "not-local") {
+    return { ...head, highlight };
+  }
   const runs = field(o, "runs", path, array(nat));
   const regions = field(o, "regions", path, array(nat));
   const targets = field(o, "targets", path, array(decodeTarget));

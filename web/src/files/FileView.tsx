@@ -20,7 +20,6 @@ import { docsHref } from "../api/module";
 import { type LexedSource, type OutlineEntry } from "../api/source";
 import { bannerText } from "../modules/notices";
 import { useModules } from "../modules/store";
-import { noteTexts } from "../diff/notes";
 import { declAtLine, outlineStep } from "../keys/outline";
 import {
   useCopyLocation,
@@ -55,6 +54,7 @@ import { lineIndex, lineText } from "../source/lines";
 import { tokenAt } from "../source/refTarget";
 import { createDelay, focusInMain, focusLost } from "../ui/focus";
 import { bytes, limit } from "../ui/format";
+import { noteTexts } from "../ui/notes";
 import { bringOnPage } from "../ui/scroll";
 import {
   apiFileUrl,
@@ -217,6 +217,8 @@ function body(
       );
     case "symlink":
       return <Symlink target={v.target} resolved={v.resolved} />;
+    case "not-local":
+      return <p>{noteTexts.notLocal}</p>;
     case "submodule":
       return (
         <p>

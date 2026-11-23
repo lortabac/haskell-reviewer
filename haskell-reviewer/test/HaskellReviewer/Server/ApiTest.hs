@@ -41,6 +41,7 @@ import Data.Text qualified as Text
 import HaskellReviewer.Core.Config (builtinDefaults)
 import HaskellReviewer.Core.FileContent (FileContent (..), LinkInfo (..))
 import HaskellReviewer.Core.FileList (CommitId (..), EntryKind (..))
+import HaskellReviewer.Core.Git (ObjectId (..))
 import HaskellReviewer.Core.Modules (Literate (..))
 import HaskellReviewer.Core.Parser (FileKind (..), ParseSettings (..))
 import HaskellReviewer.Core.Project (Extension (..), Language (..))
@@ -174,6 +175,27 @@ tests =
         failed.body @?= "cannot read file"
         readIORef logged
           >>= (@?= ["haskell-reviewer: cannot read app/Main.hs: Permission denied"]),
+      testCase "blob not in the local repo: 200 not-local (D-343), logged" $ do
+        logged <- newIORef []
+        let api =
+              fixtureApi
+                { readEntry = \_ _ _ -> pure (Left (ReadMissing (ObjectId "ee"))),
+                  logger = newLogger LevelInfo (\l -> modifyIORef' logged (<> [l])),
+                  workers = 0
+                }
+        r <- getApi api ["api", "file", "tree", "app", "Main.hs"]
+        r.status @?= 200
+        lookup "Content-Type" r.headers @?= Just "application/cbor"
+        let why = "object ee is not in the local repo"
+        v <- cborValue r.body
+        v
+          @?= Aeson.object
+            [ "generation" Aeson..= (1 :: Int),
+              "kind" Aeson..= ("not-local" :: Text),
+              "filtered" Aeson..= False
+            ]
+        readIORef logged
+          >>= (@?= ["haskell-reviewer: cannot read app/Main.hs: " <> why]),
       testCase "module tree: JSON with a length, no-store" $ do
         r <- getApi fixtureApi ["api", "modules", "tree"]
         r.status @?= 200

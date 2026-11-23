@@ -338,6 +338,8 @@ data IndexFailure
     SourceGone
   | -- | A read error, as the OS says it.
     SourceUnreadable Text
+  | -- | The blob is not in the local repo (partial clone, D-331, D-343).
+    SourceNotLocal
   | -- | A bug, or indexing was stopped, with a message.
     IndexCrashed Text
   deriving (Eq, Show)
@@ -809,8 +811,9 @@ indexOne c reading =
     work =
       deps.readModule path >>= \case
         Left ReadGone -> pure (Broke SourceGone)
-        Left (ReadFailed why) -> unreadable why
-        Left (ReadMissing o) -> unreadable (missingReason o)
+        Left (ReadFailed why) -> cannotRead why >> pure (Broke (SourceUnreadable why))
+        Left (ReadMissing o) ->
+          cannotRead (missingReason o) >> pure (Broke SourceNotLocal)
         Right (TextContent t)
           | FileSize (Text.Foreign.lengthWord8 t) > bigFileSize,
             not reading.holdsBig ->
@@ -832,7 +835,7 @@ indexOne c reading =
         Right (TooLarge info) -> pure (Done (IndexedTooLarge info) Nothing)
         -- A link, a submodule: no longer a file.
         Right _ -> pure (Broke SourceGone)
-    unreadable why = do
+    cannotRead why =
       quietly . logInfo deps.logger $
         "haskell-reviewer: "
           <> deps.label
@@ -840,7 +843,6 @@ indexOne c reading =
           <> relPathText path
           <> ": "
           <> why
-      pure (Broke (SourceUnreadable why))
 
 -- | Fill the slot, count it, add its names, update the cache, all at
 -- once. Logs the progress at each tenth.
