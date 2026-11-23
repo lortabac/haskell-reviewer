@@ -3,6 +3,8 @@ exported-only: false
 sidebar: auto
 single-key-shortcuts: true
 changed-only: false
+diff-layout: unified
 == warnings
 config.toml:2:9: ui.theme: unknown value "blue", expected system, light or dark
 config.toml:3:11: ui.sidebar: unknown value "Files", expected auto, modules or files
+config.toml:4:15: ui.diff-layout: unknown value "wide", expected unified or split

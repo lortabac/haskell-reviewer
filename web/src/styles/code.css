@@ -16,6 +16,12 @@
   font-size: 0.85rem;
 }
 
+/* Unified / Side by side: one group. Pressed look: frame.css. */
+.diff-layout {
+  display: flex;
+  gap: var(--space-1);
+}
+
 /* Its own line under the button and the bar, so opening the bar
    doesn't change the toolbar's height. */
 .code-hint {

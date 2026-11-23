@@ -21,9 +21,12 @@ import { createDispatcher } from "./dispatch";
 import type { ActionId } from "./keymap";
 import { KeysHelp } from "./KeysHelp";
 
-// True: done. A string: done, and say it (no link here, …). False:
-// nothing to do here, the key goes on.
-export type KeyHandler = () => boolean | string;
+// True: done. A string: done, and say it (no link here, …). afterNav:
+// done, and say it once the navigation it started has changed the URL
+// (the status is cleared by then); dropped after 1 s, or by any key.
+// False: nothing to do here, the key
+// goes on.
+export type KeyHandler = () => boolean | string | { afterNav: string };
 
 export type KeyActions = Partial<Record<ActionId, KeyHandler>>;
 
@@ -128,6 +131,15 @@ export function KeysProvider(props: ParentProps): JSX.Element {
     timer = setTimeout(() => setStatus(""), 5000);
   };
   onCleanup(() => clearTimeout(timer));
+  // Words for after the next navigation (KeyHandler's afterNav).
+  // Dropped after 1 s, or by any key.
+  let afterNav: string | undefined;
+  let afterNavTimer: ReturnType<typeof setTimeout> | undefined;
+  const dropAfterNav = () => {
+    clearTimeout(afterNavTimer);
+    afterNav = undefined;
+  };
+  onCleanup(() => clearTimeout(afterNavTimer));
   // A new page: the old words are about the old one.
   const location = useLocation();
   createEffect(
@@ -135,7 +147,10 @@ export function KeysProvider(props: ParentProps): JSX.Element {
       () => [location.pathname, location.search, location.hash],
       () => {
         clearTimeout(timer);
-        setStatus("");
+        const words = afterNav;
+        dropAfterNav();
+        if (words !== undefined) say(words);
+        else setStatus("");
       },
       { defer: true },
     ),
@@ -155,15 +170,21 @@ export function KeysProvider(props: ParentProps): JSX.Element {
     navigate(t.href, { state: t.state });
   };
 
-  const done = (r: boolean | string): boolean => {
+  const done = (r: boolean | string | { afterNav: string }): boolean => {
     if (typeof r === "string") {
       say(r);
+      return true;
+    }
+    if (typeof r === "object") {
+      afterNav = r.afterNav;
+      afterNavTimer = setTimeout(dropAfterNav, 1000);
       return true;
     }
     return r;
   };
 
   const run = (id: ActionId): boolean => {
+    dropAfterNav();
     switch (id) {
       case "help":
         opener = undefined;

@@ -13,6 +13,7 @@ import Data.Text.Encoding qualified as Text.Encoding
 import HaskellReviewer.Core.Config
   ( ParsedConfig (..),
     UiDefaults (..),
+    diffLayoutName,
     parseConfig,
     renderConfigWarning,
     sidebarName,
@@ -69,6 +70,7 @@ dump f = do
       "sidebar: " <> sidebarName d.sidebar,
       "single-key-shortcuts: " <> bool d.singleKeyShortcuts,
       "changed-only: " <> bool d.changedOnly,
+      "diff-layout: " <> diffLayoutName d.diffLayout,
       "== warnings"
     ]
       <> map (renderConfigWarning "config.toml") parsed.warnings

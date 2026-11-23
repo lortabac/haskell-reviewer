@@ -504,12 +504,15 @@ The whole file, syntax-highlighted (§5.6), with line numbers.
 
 Available in diff mode only. It shows the textual diff file by file.
 - Layouts: **unified** and **side-by-side**, toggled globally and remembered
-  across sessions. `?layout=split` (or `unified`) picks one for the page
-  (D-344). Side by side: one row per pair of lines, base on the left,
+  across sessions (the `diffLayout` preference, default unified; D-345).
+  A toolbar group "Unified / Side by side" and `u` change it: they save
+  the preference and drop `layout=` from the URL (replace, no history
+  entry). `?layout=split` (or `unified`) picks one for the page only and
+  is never saved (D-344). Side by side: one row per pair of lines, base on the left,
   head on the right; in a change block the i-th removed line pairs with
   the i-th added one, and the longer side's extra lines face a hatched
   empty cell. Both sides scroll sideways together (one offset;
-  provisional, D-344). The cursor is on one side: ↑/↓ keep it, ←/→
+  D-344). The cursor is on one side: ↑/↓ keep it, ←/→
   cross at the ends of the line's links; `j`/`k`/`n`/`p` land on base
   when the block starts with a removed line, else head; `#<side>-L<n>`
   marks that side only. Expansion, "Show whole file" and the cursor
@@ -735,7 +738,7 @@ are off (D-297, D-298).
 | `s` | Toggle the inline source of the focused declaration |
 | `f` | Find in file (source and diff views) |
 | `1` `2` `3` `4` | Docs · Source · Diff · Expanded diff (`3`/`4` diff mode only) |
-| `u` | Toggle unified / side-by-side |
+| `u` | Toggle unified / side-by-side (diff view). Saves the preference; when the window is too narrow it flips the preference and says so (D-345) |
 | `b` | Switch side (base/head) |
 | `a` | Ask the LLM about the focus/selection |
 | `y` | Copy the focused item's primary identifier (§5.7) |
@@ -1168,7 +1171,7 @@ as not configured (§8), with the reason.
   the same XDG path, defaulting to `~/.config`). It holds the LLM provider,
   endpoint, model, key source, the deny-list and UI defaults (`[ui]`:
   `theme`, `exported-only`, `sidebar`, `single-key-shortcuts`,
-  `changed-only`; D-199, D-297, D-336). A bad file is never fatal:
+  `changed-only`, `diff-layout`; D-199, D-297, D-336, D-345). A bad file is never fatal:
   each problem is a warning on stderr with line and column.
 - Highlighting rules for other languages are next to it, in
   `highlight/*.toml` (§5.6, D-330). They are read once at start, in name
@@ -2007,7 +2010,7 @@ a framework would cost more than it saves.
   contrast pairs (§5.4) are defined once, as design tokens. System font
   stacks only. No inline styles; one helper may set custom properties from
   code (row positions, D-275).
-- **Preferences** (theme, layout, "exported only", shortcuts, "changed
+- **Preferences** (theme, diff layout, "exported only", shortcuts, "changed
   only") are read from
   and written to the server (D-68). The port changes on every run, so
   `localStorage` would forget them.

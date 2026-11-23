@@ -9,6 +9,7 @@ export type ActionId =
   | "prev"
   | "nextChange"
   | "prevChange"
+  | "layout"
   | "open"
   | "definition"
   | "references"
@@ -74,6 +75,14 @@ export const keymap: readonly KeyRow[] = [
     label: "Previous change",
     where: "Diff",
     control: "Previous change button",
+  },
+  {
+    id: "layout",
+    bindings: ["u"],
+    keys: ["u"],
+    label: "Unified or side by side",
+    where: "Diff",
+    control: "Unified / Side by side buttons",
   },
   {
     id: "open",

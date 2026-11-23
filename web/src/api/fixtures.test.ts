@@ -52,7 +52,7 @@ import {
   type ModulePage,
 } from "./module";
 import { decodeMarkdownPage } from "./markdown";
-import { decodePrefs, sidebarViews, themes } from "./prefs";
+import { decodePrefs, diffLayouts, sidebarViews, themes } from "./prefs";
 import { decodeSession } from "./session";
 import { decodeRefs, decodeRefsNotFound, refKinds, refsUrl } from "./refs";
 import {
@@ -474,6 +474,7 @@ describe("API fixtures", () => {
       sidebar: "auto",
       singleKeyShortcuts: true,
       changedOnly: false,
+      diffLayout: "unified",
     });
     // Every key off its default.
     const other = decodePrefs(fixture("prefs"));
@@ -482,6 +483,8 @@ describe("API fixtures", () => {
     expect(other.sidebar).not.toBe("auto");
     expect(other.singleKeyShortcuts).toBe(false);
     expect(other.changedOnly).toBe(true);
+    expect(other.diffLayout).toBe("split");
+    expect(diffLayouts).toContain(other.diffLayout);
     expect(themes).toContain(other.theme);
     expect(sidebarViews).toContain(other.sidebar);
   });
@@ -936,6 +939,7 @@ describe("decoders reject bad shapes", () => {
       sidebar: "files",
       singleKeyShortcuts: false,
       changedOnly: true,
+      diffLayout: "split",
     };
     expect(decodePrefs(good)).toEqual(good);
     for (const bad of [
@@ -950,6 +954,9 @@ describe("decoders reject bad shapes", () => {
       { ...good, singleKeyShortcuts: "false" },
       { ...good, changedOnly: undefined },
       { ...good, changedOnly: 1 },
+      { ...good, diffLayout: undefined },
+      { ...good, diffLayout: "wide" },
+      { ...good, diffLayout: true },
     ]) {
       expect(() => decodePrefs(bad), JSON.stringify(bad)).toThrow(DecodeError);
     }

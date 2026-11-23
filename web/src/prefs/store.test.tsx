@@ -112,6 +112,16 @@ describe("PrefsProvider", () => {
     expect(JSON.parse(init.body as string)).toEqual({ changedOnly: true });
   });
 
+  it("diff layout: unified at first, a set posts only that key", () => {
+    const fetch = stubFetch({});
+    mount();
+    expect(current().diffLayout()).toBe("unified");
+    current().setDiffLayout("split");
+    expect(current().diffLayout()).toBe("split");
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ diffLayout: "split" });
+  });
+
   it("a click that doesn't change the value is a no-op: no POST (round 2)", () => {
     const fetch = stubFetch({});
     mount();
@@ -120,6 +130,7 @@ describe("PrefsProvider", () => {
     current().setSidebar("auto"); // already auto
     current().setSingleKeyShortcuts(true); // already on
     current().setChangedOnly(false); // already off
+    current().setDiffLayout("unified"); // already unified
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -136,6 +147,7 @@ describe("PrefsProvider", () => {
           sidebar: "files",
           singleKeyShortcuts: true,
           changedOnly: false,
+          diffLayout: "unified",
         },
       ],
     });
@@ -161,6 +173,7 @@ describe("PrefsProvider", () => {
       sidebar: "auto",
       singleKeyShortcuts: true,
       changedOnly: false,
+      diffLayout: "unified",
     });
     await vi.waitFor(() => {
       expect(current().status()).toBeUndefined();
@@ -193,6 +206,7 @@ describe("PrefsProvider", () => {
       sidebar: "auto",
       singleKeyShortcuts: true,
       changedOnly: false,
+      diffLayout: "unified",
     });
     // exportedOnly's own latest save succeeded, but theme's latest
     // save is still failed: the status must stay (per-key failed
@@ -219,6 +233,7 @@ describe("PrefsProvider", () => {
       sidebar: "files",
       singleKeyShortcuts: false,
       changedOnly: true,
+      diffLayout: "split",
     });
     await vi.waitFor(() => {
       expect(current().theme()).toBe("dark");
@@ -227,6 +242,7 @@ describe("PrefsProvider", () => {
     });
     expect(current().exportedOnly()).toBe(true);
     expect(current().changedOnly()).toBe(true);
+    expect(current().diffLayout()).toBe("split");
   });
 
   it("failure keeps the chosen value and shows a polite status", async () => {

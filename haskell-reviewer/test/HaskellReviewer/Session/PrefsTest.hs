@@ -12,7 +12,8 @@ import Data.List (sort)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import HaskellReviewer.Core.Config
-  ( SidebarView (..),
+  ( DiffLayout (..),
+    SidebarView (..),
     Theme (..),
     UiDefaults (..),
   )
@@ -66,6 +67,14 @@ tests =
           BS.readFile path >>= (@?= "{\"version\":1,\"changedOnly\":true}\n")
           (b, _) <- fileStore path
           b.current >>= (@?= changedOnlyOn (effectiveOf config)),
+      testCase "diff layout: saved, read back by another store" $
+        withState $ \_ path -> do
+          (a, _) <- fileStore path
+          r <- a.update =<< patch "{\"diffLayout\":\"split\"}"
+          r @?= layoutSplit (effectiveOf config)
+          BS.readFile path >>= (@?= "{\"version\":1,\"diffLayout\":\"split\"}\n")
+          (b, _) <- fileStore path
+          b.current >>= (@?= layoutSplit (effectiveOf config)),
       testCase "two stores on one file: both keys survive, each sees the other" $
         withState $ \_ path -> do
           (a, _) <- fileStore path
@@ -331,7 +340,8 @@ config =
       exportedOnly = True,
       sidebar = SidebarFiles,
       singleKeyShortcuts = True,
-      changedOnly = False
+      changedOnly = False,
+      diffLayout = LayoutUnified
     }
 
 effectiveOf :: UiDefaults -> Effective
@@ -341,10 +351,11 @@ effectiveOf d =
       exportedOnly = d.exportedOnly,
       sidebar = d.sidebar,
       singleKeyShortcuts = d.singleKeyShortcuts,
-      changedOnly = d.changedOnly
+      changedOnly = d.changedOnly,
+      diffLayout = d.diffLayout
     }
 
--- | Shortcuts on and changed only off, the defaults.
+-- | Shortcuts on, changed only off, layout unified: the defaults.
 eff :: Theme -> Bool -> SidebarView -> Effective
 eff t e s =
   Effective
@@ -352,7 +363,8 @@ eff t e s =
       exportedOnly = e,
       sidebar = s,
       singleKeyShortcuts = True,
-      changedOnly = False
+      changedOnly = False,
+      diffLayout = LayoutUnified
     }
 
 shortcutsOff :: Effective -> Effective
@@ -362,7 +374,8 @@ shortcutsOff e =
       exportedOnly = e.exportedOnly,
       sidebar = e.sidebar,
       singleKeyShortcuts = False,
-      changedOnly = e.changedOnly
+      changedOnly = e.changedOnly,
+      diffLayout = e.diffLayout
     }
 
 changedOnlyOn :: Effective -> Effective
@@ -372,7 +385,19 @@ changedOnlyOn e =
       exportedOnly = e.exportedOnly,
       sidebar = e.sidebar,
       singleKeyShortcuts = e.singleKeyShortcuts,
-      changedOnly = True
+      changedOnly = True,
+      diffLayout = e.diffLayout
+    }
+
+layoutSplit :: Effective -> Effective
+layoutSplit e =
+  Effective
+    { theme = e.theme,
+      exportedOnly = e.exportedOnly,
+      sidebar = e.sidebar,
+      singleKeyShortcuts = e.singleKeyShortcuts,
+      changedOnly = e.changedOnly,
+      diffLayout = LayoutSplit
     }
 
 -- | A temp state dir and where ui.json goes in it.

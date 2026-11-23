@@ -46,9 +46,12 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import HaskellReviewer.Core.Config
-  ( SidebarView,
+  ( DiffLayout,
+    SidebarView,
     Theme,
     UiDefaults (..),
+    diffLayoutFromName,
+    diffLayoutName,
     sidebarFromName,
     sidebarName,
     themeFromName,
@@ -86,7 +89,8 @@ data Prefs = Prefs
     exportedOnly :: !(Maybe Bool),
     sidebar :: !(Maybe SidebarView),
     singleKeyShortcuts :: !(Maybe Bool),
-    changedOnly :: !(Maybe Bool)
+    changedOnly :: !(Maybe Bool),
+    diffLayout :: !(Maybe DiffLayout)
   }
   deriving (Eq, Show)
 
@@ -103,7 +107,8 @@ data Effective = Effective
     exportedOnly :: !Bool,
     sidebar :: !SidebarView,
     singleKeyShortcuts :: !Bool,
-    changedOnly :: !Bool
+    changedOnly :: !Bool,
+    diffLayout :: !DiffLayout
   }
   deriving (Eq, Show)
 
@@ -168,7 +173,8 @@ noPrefs =
       exportedOnly = Nothing,
       sidebar = Nothing,
       singleKeyShortcuts = Nothing,
-      changedOnly = Nothing
+      changedOnly = Nothing,
+      diffLayout = Nothing
     }
 
 -- | No ui.json yet.
@@ -183,7 +189,8 @@ effective d p =
       exportedOnly = fromMaybe d.exportedOnly p.exportedOnly,
       sidebar = fromMaybe d.sidebar p.sidebar,
       singleKeyShortcuts = fromMaybe d.singleKeyShortcuts p.singleKeyShortcuts,
-      changedOnly = fromMaybe d.changedOnly p.changedOnly
+      changedOnly = fromMaybe d.changedOnly p.changedOnly,
+      diffLayout = fromMaybe d.diffLayout p.diffLayout
     }
 
 -- | The keys of the patch win.
@@ -198,7 +205,8 @@ overridePrefs new old =
       exportedOnly = orElse new.exportedOnly old.exportedOnly,
       sidebar = orElse new.sidebar old.sidebar,
       singleKeyShortcuts = orElse new.singleKeyShortcuts old.singleKeyShortcuts,
-      changedOnly = orElse new.changedOnly old.changedOnly
+      changedOnly = orElse new.changedOnly old.changedOnly,
+      diffLayout = orElse new.diffLayout old.diffLayout
     }
   where
     orElse a b = maybe b Just a
@@ -220,6 +228,7 @@ patchKeys (PrefsPatch new) =
     <> ["sidebar" | Just _ <- [new.sidebar]]
     <> ["singleKeyShortcuts" | Just _ <- [new.singleKeyShortcuts]]
     <> ["changedOnly" | Just _ <- [new.changedOnly]]
+    <> ["diffLayout" | Just _ <- [new.diffLayout]]
 
 -- | The keys a patch sets.
 patchPrefs :: PrefsPatch -> Prefs
@@ -259,6 +268,10 @@ encodePrefsFile file =
         (Encoding.pair "singleKeyShortcuts" . Encoding.bool)
         p.singleKeyShortcuts
       <> maybe mempty (Encoding.pair "changedOnly" . Encoding.bool) p.changedOnly
+      <> maybe
+        mempty
+        (Encoding.pair "diffLayout" . Encoding.text . diffLayoutName)
+        p.diffLayout
       <> foldMap
         (\(k, v) -> Encoding.pair k (Aeson.toEncoding v))
         (KeyMap.toAscList file.others)
@@ -314,6 +327,7 @@ readKey key v = case key of
   "sidebar" -> Just (enum sidebarFromName ["auto", "modules", "files"] setSidebar)
   "singleKeyShortcuts" -> Just (bool setSingleKeyShortcuts)
   "changedOnly" -> Just (bool setChangedOnly)
+  "diffLayout" -> Just (enum diffLayoutFromName ["unified", "split"] setDiffLayout)
   _ -> Nothing
   where
     bool :: (Bool -> Prefs -> Prefs) -> Either BadValue (Prefs -> Prefs)
@@ -344,7 +358,8 @@ setTheme x =
         exportedOnly = Nothing,
         sidebar = Nothing,
         singleKeyShortcuts = Nothing,
-        changedOnly = Nothing
+        changedOnly = Nothing,
+        diffLayout = Nothing
       }
 
 setExportedOnly :: Bool -> Prefs -> Prefs
@@ -355,7 +370,8 @@ setExportedOnly x =
         exportedOnly = Just x,
         sidebar = Nothing,
         singleKeyShortcuts = Nothing,
-        changedOnly = Nothing
+        changedOnly = Nothing,
+        diffLayout = Nothing
       }
 
 setSidebar :: SidebarView -> Prefs -> Prefs
@@ -366,7 +382,8 @@ setSidebar x =
         exportedOnly = Nothing,
         sidebar = Just x,
         singleKeyShortcuts = Nothing,
-        changedOnly = Nothing
+        changedOnly = Nothing,
+        diffLayout = Nothing
       }
 
 setSingleKeyShortcuts :: Bool -> Prefs -> Prefs
@@ -377,7 +394,8 @@ setSingleKeyShortcuts x =
         exportedOnly = Nothing,
         sidebar = Nothing,
         singleKeyShortcuts = Just x,
-        changedOnly = Nothing
+        changedOnly = Nothing,
+        diffLayout = Nothing
       }
 
 setChangedOnly :: Bool -> Prefs -> Prefs
@@ -388,7 +406,20 @@ setChangedOnly x =
         exportedOnly = Nothing,
         sidebar = Nothing,
         singleKeyShortcuts = Nothing,
-        changedOnly = Just x
+        changedOnly = Just x,
+        diffLayout = Nothing
+      }
+
+setDiffLayout :: DiffLayout -> Prefs -> Prefs
+setDiffLayout x =
+  overridePrefs
+    Prefs
+      { theme = Nothing,
+        exportedOnly = Nothing,
+        sidebar = Nothing,
+        singleKeyShortcuts = Nothing,
+        changedOnly = Nothing,
+        diffLayout = Just x
       }
 
 quoted :: Text -> Text

@@ -13,7 +13,7 @@ import type { DiffSessionSide } from "../sides";
 import { deleteRow, equalRow, insertRow, type Rows } from "./rows";
 
 // The two layouts of the diff view.
-export type DiffLayout = "unified" | "split";
+export type { DiffLayout } from "../api/prefs";
 
 export interface Split {
   count: number;
