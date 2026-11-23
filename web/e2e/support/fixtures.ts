@@ -13,6 +13,7 @@ import { join } from "node:path";
 import {
   makeCabalProject,
   makeDocsProject,
+  makeDiffViewProject,
   makeEditsProject,
   makeHlProject,
   makeLinksProject,
@@ -103,6 +104,7 @@ interface WorkerFixtures {
   linksProject: Project;
   sidesProject: Project;
   editsProject: Project;
+  diffviewProject: Project;
 }
 
 export const test = base.extend<TestFixtures, WorkerFixtures>({
@@ -176,6 +178,16 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     { scope: "worker" },
   ],
 
+  diffviewProject: [
+    // eslint-disable-next-line no-empty-pattern
+    async ({}, use) => {
+      const p = await makeDiffViewProject();
+      await use(p);
+      await p.remove();
+    },
+    { scope: "worker" },
+  ],
+
   // eslint-disable-next-line no-empty-pattern
   xdg: async ({}, use) => {
     const dir = await mkdtemp(join(tmpdir(), "hr-e2e-xdg-"));
@@ -234,7 +246,14 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
           // The source URL: for a failed load, the resource.
           const text = `${m.type()}: ${m.text()} [${m.location().url}]`;
           if (m.type() === "error") errors.push(text);
-          else if (m.type() === "warning") warnings.push(text);
+          else if (m.type() === "warning") {
+            warnings.push(text);
+            // The diff view's texts didn't fit its runs (D-341): a bug
+            // here, though the app only warns.
+            if (/^diff of .*: (runs have|head text is)/.test(m.text())) {
+              errors.push(text);
+            }
+          }
         });
         page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
       };

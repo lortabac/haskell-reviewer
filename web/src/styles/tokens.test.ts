@@ -71,6 +71,14 @@ const codeBgs = [
   "cursor-line",
 ];
 
+// The diff view's row tints (D-341), by sign colour.
+const diffBgs: [string, string][] = [
+  ["diff-added", "change-added"],
+  ["diff-added-cursor", "change-added"],
+  ["diff-removed", "change-removed"],
+  ["diff-removed-cursor", "change-removed"],
+];
+
 // The diff marker colours (D-337).
 const changes = [
   "change-added",
@@ -99,6 +107,7 @@ describe("design tokens: contrast (SPEC §5.4, tokens.css header)", () => {
       "warn",
       ...hl,
       ...changes,
+      ...diffBgs.map(([b]) => b),
     ]) {
       expect(t[name], `token --color-${name}`).toBeDefined();
     }
@@ -136,6 +145,11 @@ describe("design tokens: contrast (SPEC §5.4, tokens.css header)", () => {
       [c, "bg"],
       [c, "surface"],
     ]),
+    // Diff view rows: all code text, and the row's sign.
+    ...diffBgs.flatMap(([b, sign]): [string, string][] => [
+      ...["fg", "muted", "link", ...hl].map((f): [string, string] => [f, b]),
+      [sign, b],
+    ]),
   ];
 
   it.each(textPairs)("text %s on %s is >= 4.5:1 in both themes", (a, b) => {
@@ -160,6 +174,8 @@ describe("design tokens: contrast (SPEC §5.4, tokens.css header)", () => {
     ["focus", "decl-head"],
     // The dashed bar by excluded lines.
     ["hl-excluded", "surface"],
+    // The focus ring on a diff row.
+    ...diffBgs.map(([b]): [string, string] => ["focus", b]),
   ];
 
   it.each(uiPairs)("non-text %s on %s is >= 3:1 in both themes", (a, b) => {

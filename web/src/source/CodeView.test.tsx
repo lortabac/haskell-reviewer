@@ -13,10 +13,10 @@ import {
   CodeView,
   type CodeViewProps,
   type FindHits,
-  fallbackRowHeight as h,
   type LineDecor,
   type LineMarks,
 } from "./CodeView";
+import { fallbackRowHeight as h } from "./virtual";
 
 let dispose: (() => void) | undefined;
 

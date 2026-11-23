@@ -1,0 +1,134 @@
+/* The diff view (diff/DiffGrid.tsx, D-341). Built on the source view's
+   classes (code.css): code-view, code-row, code-num, code-cell. Here:
+   two line numbers, the sign column, row tints and gap rows. */
+.diff-view {
+  /* Base and head numbers, then the sign. */
+  --code-gutter: calc(2 * var(--code-digits, 1) * 1ch + 3 * var(--space-2));
+  --code-mark-width: 2ch;
+  /* The gap cell is as wide as the box (cqw). */
+  container-type: inline-size;
+}
+
+/* Both numbers from CSS (data-b, data-h), so never in the text. */
+.diff-view .code-num {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.diff-view .code-num::before,
+.diff-view .code-num::after {
+  flex: none;
+  width: calc(var(--code-digits, 1) * 1ch);
+  text-align: right;
+}
+
+.diff-view .code-num::before {
+  content: attr(data-b);
+}
+
+.diff-view .code-num::after {
+  content: attr(data-h);
+}
+
+/* + or −, from CSS too. Not colour alone: the sign, and the row's name
+   says added or removed. */
+.diff-sign {
+  position: sticky;
+  left: var(--code-gutter);
+  z-index: 1;
+  flex: none;
+  width: var(--code-mark-width);
+  text-align: center;
+  background: var(--color-surface);
+  user-select: none;
+}
+
+.diff-insert > .diff-sign::before {
+  content: "+" / "";
+  color: var(--color-change-added);
+}
+
+.diff-delete > .diff-sign::before {
+  content: "\2212" / "";
+  color: var(--color-change-removed);
+}
+
+.diff-insert > .diff-sign,
+.diff-insert > .code-cell {
+  background: var(--color-diff-added);
+}
+
+.diff-delete > .diff-sign,
+.diff-delete > .code-cell {
+  background: var(--color-diff-removed);
+}
+
+/* The cursor band on a tinted row: a stronger tint. */
+.code-view:focus-within .code-cursor-line.diff-insert > .code-cell {
+  background: var(--color-diff-added-cursor);
+}
+
+.code-view:focus-within .code-cursor-line.diff-delete > .code-cell {
+  background: var(--color-diff-removed-cursor);
+}
+
+/* A marked line: the gutter shows it, as in the source view
+   (code.css: bold, a bar, the mark colour). */
+
+/* Gap rows: one cell, as wide as the box, kept on screen when
+   scrolled sideways. Buttons first, so they fit at 320 px. */
+.diff-gap-cell {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100cqw;
+  font-family: var(--font-sans);
+  color: var(--color-muted);
+  background: var(--color-surface);
+  border-block: 1px dashed var(--color-border);
+  user-select: none;
+}
+
+/* As the toolbar's text. */
+.diff-gap-text {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.85rem;
+}
+
+/* The look is code.css's toolbar buttons. Smaller, to fit a row:
+   0.8rem × 1.25 + borders is under the row's 1.5 × 0.9rem. */
+.diff-gap-cell > .diff-gap-button {
+  flex: none;
+  padding: 0 var(--space-2);
+  font-size: 0.8rem;
+  line-height: 1.25;
+}
+
+/* down shows the gap's top, up its bottom. */
+.diff-gap-down::before {
+  content: "\2193\00a0" / "";
+}
+
+.diff-gap-up::before {
+  content: "\2191\00a0" / "";
+}
+
+.diff-gap-button:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 0;
+}
+
+@media (forced-colors: active) {
+  .diff-insert > .code-cell,
+  .diff-delete > .code-cell {
+    border-left: 2px solid CanvasText;
+  }
+}

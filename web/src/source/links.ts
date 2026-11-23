@@ -48,19 +48,29 @@ function externalInfo(t: ExternalTarget): LinkInfo {
 }
 
 // One per target, by index (link word − 1). side: the page's; links
-// stay on it. base: the router base.
+// stay on it. base: the router base. here: the router path of a line
+// of this same file (null: the file), if not the source view's (the
+// diff view, D-341).
 export function linkInfos(
   side: Side,
   view: ViewPlace,
   targets: readonly Target[],
   base: string | undefined,
+  here?: (line: number | null) => string,
 ): (LinkInfo | undefined)[] {
   const app = (rel: string) => withBase(base, rel);
+  // A line of a file, or the file.
+  const at = (path: string, line: number | null) =>
+    here !== undefined && path === view.path
+      ? here(line)
+      : line === null
+        ? hrefFor(side, path)
+        : lineHref(side, path, line);
   return targets.map((t): LinkInfo => {
     switch (t[0]) {
       case "local":
         return {
-          href: app(lineHref(side, view.path, t[1])),
+          href: app(at(view.path, t[1])),
           about: `bound at line ${t[1]}`,
           guess: false,
           external: false,
@@ -79,9 +89,7 @@ export function linkInfos(
           };
         }
         return {
-          href: app(
-            line === null ? hrefFor(side, path) : lineHref(side, path, line),
-          ),
+          href: app(at(path, line)),
           about:
             line === null
               ? `defined in ${path}`
@@ -94,7 +102,7 @@ export function linkInfos(
       case "module": {
         const [, ref, path, reasons] = t;
         return {
-          href: app(path === null ? docsHref(side, ref) : hrefFor(side, path)),
+          href: app(path === null ? docsHref(side, ref) : at(path, null)),
           about: `module ${ref}`,
           guess: reasons.length > 0,
           external: false,

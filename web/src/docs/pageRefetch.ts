@@ -88,7 +88,7 @@ export function createPageRefetch(
       }
       return next;
     },
-    first,
+    { first },
   );
   return {
     targets,

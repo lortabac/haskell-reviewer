@@ -72,10 +72,12 @@ export function createPageSource(page: {
   const fresh = createSource(
     () => path ?? "",
     () => page.generation,
-    () => wanted() && path !== null && cacheGet(key) === undefined,
-    // Not the memo: a done answer equal to a partial one must count.
-    (s) => {
-      if (!s.partial) cachePut(key, s);
+    {
+      enabled: () => wanted() && path !== null && cacheGet(key) === undefined,
+      // Not the memo: a done answer equal to a partial one must count.
+      onAnswer: (s) => {
+        if (!s.partial) cachePut(key, s);
+      },
     },
   );
   const highlight = createMemo((): Highlight | undefined => {

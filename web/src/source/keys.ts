@@ -7,6 +7,28 @@ export interface Mods {
   shift: boolean;
 }
 
+// The modifiers of a key event.
+export function modsOf(e: {
+  ctrlKey: boolean;
+  metaKey: boolean;
+  altKey: boolean;
+  shiftKey: boolean;
+}): Mods {
+  return { ctrl: e.ctrlKey, meta: e.metaKey, alt: e.altKey, shift: e.shiftKey };
+}
+
+export function isPlain(mods: Mods): boolean {
+  return !mods.ctrl && !mods.meta && !mods.alt && !mods.shift;
+}
+
+// Rows a PageUp / PageDown moves: those on screen less one.
+export function pageRows(clientHeight: number, rowHeight: number): number {
+  return Math.max(1, Math.floor(clientHeight / rowHeight) - 1);
+}
+
+// px to scroll sideways when ← or → has no stop to go to.
+export const sideStep = 40;
+
 // The line a key moves the cursor to (clamped into 1..count), or
 // undefined if the key isn't ours. page: lines on screen less one.
 export function keyTarget(
@@ -44,6 +66,11 @@ export function isSelectAll(key: string, mods: Mods): boolean {
 export interface Stop {
   start: number;
   end: number;
+}
+
+// A stop and its element.
+export interface StopAt extends Stop {
+  el: HTMLElement;
 }
 
 // Where the cursor is on its line: the cell at a column, or a link

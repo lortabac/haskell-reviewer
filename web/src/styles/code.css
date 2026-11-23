@@ -31,8 +31,11 @@
   gap: var(--space-1) var(--space-2);
 }
 
+/* Buttons and inputs in and around the code views (also the diff view's
+   gap buttons, diff.css). */
 .code-toolbar button,
-.code-find-bar input {
+.code-find-bar input,
+.diff-gap-button {
   padding: var(--space-1) var(--space-2);
   font: inherit;
   color: var(--color-fg);
@@ -42,7 +45,8 @@
   border-radius: 4px;
 }
 
-.code-toolbar button {
+.code-toolbar button,
+.diff-gap-button {
   cursor: pointer;
 }
 

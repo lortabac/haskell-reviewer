@@ -3,6 +3,7 @@
 // end of the selection is mapped to a line and column, then the file's
 // text between them is copied. Line numbers and page chrome never get
 // in.
+import type { StopAt } from "./keys";
 import { type LineIndex, offsetOf } from "./lines";
 
 // Where a selection end is: before the view, after it, or at a column
@@ -50,6 +51,14 @@ export function domPoint(view: Element, node: Node, offset: number): Point {
     return { kind: "at", line: lineOf(row), col: 0 };
   }
   return before;
+}
+
+// The code links of a cell, as stops for → and ←.
+export function linkStops(cell: Element): StopAt[] {
+  return [...cell.querySelectorAll<HTMLElement>("a.code-link")].map((el) => {
+    const start = colIn(cell, el, 0);
+    return { start, end: start + el.textContent.length, el };
+  });
 }
 
 // The column (UTF-16) of a point inside a cell: the length of the text

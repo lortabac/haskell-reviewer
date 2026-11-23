@@ -89,6 +89,9 @@ const banned: [string, string][] = [
     "export const u = (b: string) => `${b}/md/tree/README.md`;",
     "no-restricted-syntax",
   ],
+  // Diff URLs only from diff/urls.ts (D-341).
+  ['export const u = "/diff/a.hs";', "no-restricted-syntax"],
+  ["export const u = (p: string) => `/diff/${p}`;", "no-restricted-syntax"],
 ];
 
 const clean = "export const A = () => <div class='x'>{'text'}</div>;\n";

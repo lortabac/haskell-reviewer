@@ -101,6 +101,20 @@ const urlBans = [
   },
 ];
 
+// Diff view URLs have no side, but one module builds them all the same
+// (D-341).
+const diffPrefix = "/^\\/diff(\\/|$)/";
+const diffBans = [
+  {
+    selector: `Literal[value=${diffPrefix}]`,
+    message: "Build diff URLs with diff/urls.ts.",
+  },
+  {
+    selector: `TemplateElement[value.raw=${diffPrefix}]`,
+    message: "Build diff URLs with diff/urls.ts.",
+  },
+];
+
 // Where side URLs may be written by hand: the URL modules, the routes,
 // and tests.
 const urlModules = [
@@ -160,12 +174,24 @@ export default tseslint.config(
       "no-implied-eval": "error",
       "no-new-func": "error",
       "no-script-url": "error",
-      "no-restricted-syntax": ["error", ...banned, ...styleBans, ...urlBans],
+      "no-restricted-syntax": [
+        "error",
+        ...banned,
+        ...styleBans,
+        ...urlBans,
+        ...diffBans,
+      ],
     },
   },
   {
     files: urlModules,
     rules: { "no-restricted-syntax": ["error", ...banned, ...styleBans] },
+  },
+  {
+    files: ["src/diff/urls.ts"],
+    rules: {
+      "no-restricted-syntax": ["error", ...banned, ...styleBans, ...urlBans],
+    },
   },
   {
     files: ["src/ui/cssom.ts"],

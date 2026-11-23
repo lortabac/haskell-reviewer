@@ -11,7 +11,7 @@ import {
 import type { Indexing } from "../api/events";
 import { cbor, cborFixture, fixture, stubFetch } from "../../test/fixtures";
 import { fakeLayout } from "../../test/layout";
-import { fallbackRowHeight as h } from "../source/CodeView";
+import { fallbackRowHeight as h } from "../source/virtual";
 import { originOf } from "../source/origin";
 import { mountAppAt, unmountApp } from "../../test/mount";
 
