@@ -10,6 +10,7 @@ import {
 import { getJson, type Result } from "../api/client";
 import { decodeFileList, type FileList } from "../api/files";
 import { DiffFilesNotes, openAllUpTo, useDiffFiles } from "../diff/store";
+import { diffPathFromPathname } from "../diff/urls";
 import { usePrefs } from "../prefs/store";
 import { usePageSide } from "../session";
 import type { Side } from "../sides";
@@ -31,7 +32,12 @@ export function FilesPanel(): JSX.Element {
     return { side: s, got };
   });
   const location = useLocation();
-  const current = createMemo(() => pathFromPathname(location.pathname, side()));
+  // On a diff page: its path, on head (D-342; ghosts are never current).
+  const current = createMemo(
+    () =>
+      pathFromPathname(location.pathname, side()) ??
+      (side() === "head" ? diffPathFromPathname(location.pathname) : undefined),
+  );
   // "/<token>", from the router.
   const base = useResolvedPath(() => "/");
   const href = (s: Side, path: string): string =>

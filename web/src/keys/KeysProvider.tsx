@@ -27,7 +27,7 @@ export type KeyHandler = () => boolean | string;
 
 export type KeyActions = Partial<Record<ActionId, KeyHandler>>;
 
-export type ViewName = "docs" | "source" | "refs";
+export type ViewName = "docs" | "source" | "refs" | "diff";
 
 export interface ViewTarget {
   // A router path (no base).
@@ -41,8 +41,8 @@ export interface ViewLinks {
   docs: () => string | undefined;
   source: () => string | undefined;
   // Where 1 / 2 and the header links go: the same place in the other
-  // view. Undefined: docs() / source().
-  at?: (to: "docs" | "source") => ViewTarget | undefined;
+  // view. Undefined: docs() / source(). null: none here (said).
+  at?: (to: "docs" | "source") => ViewTarget | null | undefined;
   // Called right before goView leaves this page.
   leave?: () => void;
 }
@@ -145,7 +145,8 @@ export function KeysProvider(props: ParentProps): JSX.Element {
     const l = links();
     if (l === undefined) return;
     if (l.current === to) return;
-    const t = l.at?.(to) ?? hrefOnly(l[to]());
+    const a = l.at?.(to);
+    const t = a === null ? undefined : (a ?? hrefOnly(l[to]()));
     if (t === undefined) {
       say(missingWords[to]);
       return;

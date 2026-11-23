@@ -2,18 +2,21 @@ import { describe, expect, it } from "vitest";
 import type { DiffRun } from "../api/diff";
 import {
   allShown,
+  blockStarts,
   buttonText,
   countsMatch,
   defaultShown,
   expand,
   gapButtons,
   gapLabel,
+  hunkStarts,
   indexOfKey,
   indexOfRow,
   keyAt,
   reveal,
   rowLabel,
   rowsOf,
+  stepTo,
   visibleOf,
   type Visible,
 } from "./rows";
@@ -231,5 +234,56 @@ describe("labels (G23)", () => {
       text: "Show 1",
       name: "Show 1 line, 6",
     });
+  });
+});
+
+describe("hunks and blocks", () => {
+  // Changes at rows 2-3, 10 (6 equal between: one hunk), 18 (7
+  // equal: a new hunk).
+  const r = rowsOf([
+    ["equal", 2],
+    ["delete", 1],
+    ["insert", 1],
+    ["equal", 6],
+    ["insert", 1],
+    ["equal", 7],
+    ["delete", 1],
+    ["equal", 4],
+  ]);
+
+  it("blocks: each run of changes", () => {
+    expect(blockStarts(r)).toEqual([2, 10, 18]);
+  });
+
+  it("hunks: blocks joined at context 3", () => {
+    expect(hunkStarts(r)).toEqual([2, 18]);
+    expect(hunkStarts(r, 2)).toEqual([2, 10, 18]);
+  });
+
+  it("no changes: none", () => {
+    const same = rowsOf([["equal", 5]]);
+    expect(blockStarts(same)).toEqual([]);
+    expect(hunkStarts(same)).toEqual([]);
+  });
+
+  it("a change at the start and the end", () => {
+    const e = rowsOf([
+      ["insert", 1],
+      ["equal", 9],
+      ["delete", 2],
+    ]);
+    expect(blockStarts(e)).toEqual([0, 10]);
+    expect(hunkStarts(e)).toEqual([0, 10]);
+  });
+
+  it("stepTo: next after, previous before, none at the ends", () => {
+    const s = [2, 10, 18];
+    expect(stepTo(s, 0, 1)).toBe(2);
+    expect(stepTo(s, 2, 1)).toBe(10);
+    expect(stepTo(s, 5, -1)).toBe(2);
+    expect(stepTo(s, 10, -1)).toBe(2);
+    expect(stepTo(s, 18, 1)).toBeUndefined();
+    expect(stepTo(s, 2, -1)).toBeUndefined();
+    expect(stepTo([], 0, 1)).toBeUndefined();
   });
 });

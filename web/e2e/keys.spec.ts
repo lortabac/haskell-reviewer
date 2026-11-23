@@ -90,8 +90,9 @@ test("?: the overlay, focus on the switch, Tab wraps, Esc puts focus back", asyn
   ).toBeVisible();
   await expect(toggle(page)).toBeFocused();
   await expect(toggle(page)).toBeChecked();
-  await expect(dialog(page).locator("tbody tr")).toHaveCount(13);
+  await expect(dialog(page).locator("tbody tr")).toHaveCount(15);
   await expect(dialog(page)).toContainText("Copy the name or path");
+  await expect(dialog(page)).toContainText("Next declaration or hunk");
   const close = dialog(page).getByRole("button", { name: "Close" });
   // Tab and Shift+Tab stay inside.
   await page.keyboard.press("Shift+Tab");

@@ -27,7 +27,8 @@
   width: 1.5ch;
 }
 
-.home-old {
+/* Muted words in a file row: the old path, the note. */
+.home-muted {
   color: var(--color-muted);
 }
 

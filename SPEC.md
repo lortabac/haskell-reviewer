@@ -319,13 +319,14 @@ The UI has a fixed **frame** and one **main view** at a time.
     marker are hidden. Groups open by default when 500 entries or
     fewer remain. If the changes can't be loaded (pairing failed),
     nothing is filtered and a note says so. Browse mode has no box.
-- **Home**, diff mode (D-338): the revisions as text, the changed files
-  and modules counted by status, the rename-limit and truncated notes,
-  the changed files (sign, path, "from <old> (n%)" for renames; the
-  first 1000, then "Show all"), and the changed files outside ROOT.
-  Module counts match the sidebar's markers and ghosts. File links go to
-  the source view until the diff view exists; a removed file links to
-  base and says "(on base)". Browse mode: just the hint.
+- **Home**, diff mode (D-338, D-342): the revisions as text, the
+  changed files and modules counted by status, the rename-limit and
+  truncated notes, the changed files (sign, path, "from <old> (n%)" for
+  renames, then the file's note in brackets: type changed, mode
+  changed, git filter; the first 1000, then "Show all"), and the changed
+  files outside ROOT. Module counts match the sidebar's markers and
+  ghosts. Each file links to its diff (`/diff/<path>`). Browse mode:
+  just the hint.
 - **LLM panel** (§6): a collapsible right-hand panel.
 
 All views are **URL-addressable** (D-27). URLs are readable and semantic,
@@ -345,7 +346,8 @@ back/forward, new tabs and copy-paste between tabs work. Shape:
 
 `/diff` has no side: it shows both. Its path is head's, else base's; in
 browse mode it says "Not in diff mode." Its query is free-form:
-`ws=ignore` now, `layout=unified|split` later (D-341).
+`ws=ignore` now, `layout=unified|split` later (D-341). On a diff page
+the sidebar's current file is the diff's path on head (D-342).
 `<side>` is `head` / `base` in diff mode and `tree` in browse mode. Links
 keep the page's side (§5.1). A side the session doesn't have shows "not
 found in this snapshot", with one link to the same page on the default
@@ -519,11 +521,24 @@ Available in diff mode only. It shows the textual diff file by file.
   (D-325).
 - **Find in file** (`f`, or a toolbar button) searches the whole file on
   both sides, as in §4.4.
-- Option to ignore whitespace-only changes (as git's `-w`).
-- **Notes** instead of lines (D-331): binary (a → b bytes), too large,
-  submodule (a → b commits), a blob not in a partial clone, and "diff
-  too slow" (over the 2 s limit, §11.4.7). Line endings changed and BOM
-  added or removed are notes next to the lines.
+- Option to ignore whitespace-only changes (as git's `-w`): an "Ignore
+  whitespace" toolbar button sets `?ws=ignore`, as a new history entry
+  that keeps the hash and the other query params (D-342).
+- **Notes** instead of lines (D-331, D-342): binary (a → b bytes), too
+  large, submodule (a → b commits), a blob not in a partial clone, mixed
+  kinds ("Base: …; head: …"), and "diff too slow" (over the 2 s limit,
+  §11.4.7) with a "Try again" button and links to each side's source;
+  no retry on its own. Next to the lines: line endings changed, BOM
+  added or removed, type changed ("Changed from a file to a symbolic
+  link"), mode changed, a git filter, a symbolic link, a rename, "No
+  changes in this file." and, with `-w`, "No changes when whitespace is
+  ignored.".
+- Keys: `j`/`k` go to the next or previous hunk (as git's, with 3
+  context lines, whatever is open), `n`/`p` to the next or previous
+  change block; "No more changes." at the ends. "Previous change" and
+  "Next change" toolbar buttons do the same as `p`/`n`, with focus kept
+  on the button. `1`/`2` open the docs or source of the cursor's side
+  and line (D-342).
 
 ### 4.6 Expanded (semantic) diff view
 
@@ -700,8 +715,8 @@ are off (D-297, D-298).
 | Key | Action |
 |-----|--------|
 | `/` | Focus global search (`"text"` in quotes searches file contents) |
-| `j` / `k` | Next / previous declaration (docs, expanded diff) or hunk (diff) |
-| `n` / `p` | Next / previous **change** (any view, diff mode) |
+| `j` / `k` | Next / previous declaration (docs, source, expanded diff) or hunk (diff) |
+| `n` / `p` | Next / previous **change** (diff view now; source view T15a; docs M4) |
 | `]` / `[` | Next / previous changed file or module |
 | `Enter` | Open the focused item (in the source view: follow the link); native, no binding |
 | `g d` | Go to definition of the identifier under the cursor/focus |
@@ -725,6 +740,9 @@ Back comes to it (D-339).
 On the docs page, a declaration's References and Go to source links,
 `g r`, `2` and the header Docs/Source switch do the same with its
 top-level declaration, if it has focus (D-340).
+The diff view does the same with `#<side>-L<line>` of its cursor: a
+link in the grid, `1`/`2` (D-342).
+`j`, `k`, `n` and `p` repeat when held down.
 
 ### 5.4 Accessibility
 

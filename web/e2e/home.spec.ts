@@ -30,7 +30,7 @@ async function home(page: Page, server: Server): Promise<void> {
   ).toBeVisible();
 }
 
-test("sides.sh: counts, the list, links on the right side", async ({
+test("sides.sh: counts, the list, links to the diff view", async ({
   page,
   startServer,
   sidesProject,
@@ -48,16 +48,23 @@ test("sides.sh: counts, the list, links on the right side", async ({
     /^Diff HEAD~1\.\.HEAD\. Base: HEAD~1 \([0-9a-f]{7}\)\. Head: HEAD \([0-9a-f]{7}\)\.$/,
   );
   const list = main(page).locator(".home-files");
-  const b = list.getByRole("link", { name: "src/B.hs (on base)" });
-  await expect(b).toHaveAttribute("href", /\/src\/base\/src\/B\.hs$/);
+  const b = list.getByRole("link", { name: "src/B.hs", exact: true });
+  await expect(b).toHaveAttribute("href", /\/diff\/src\/B\.hs$/);
   const c = list.getByRole("link", { name: "src/C.hs", exact: true });
-  await expect(c).toHaveAttribute("href", /\/src\/head\/src\/C\.hs$/);
+  await expect(c).toHaveAttribute("href", /\/diff\/src\/C\.hs$/);
   await expect(
     list.getByRole("link", { name: "readme-link", exact: true }),
-  ).toHaveAttribute("href", /\/src\/head\/readme-link$/);
+  ).toHaveAttribute("href", /\/diff\/readme-link$/);
+  // A removed file: its diff, all removed lines.
   await b.click();
-  await expect(page).toHaveURL(/\/src\/base\/src\/B\.hs$/);
+  await expect(page).toHaveURL(/\/diff\/src\/B\.hs$/);
   await expect(page.locator("main h1")).toHaveText("src/B.hs");
+  await expect(
+    page
+      .getByRole("grid", { name: "Diff of src/B.hs" })
+      .locator(".diff-delete")
+      .first(),
+  ).toBeVisible();
   // No changes outside ROOT here: no header count.
   await expect(page.locator(".outside-count")).toHaveCount(0);
 });

@@ -184,12 +184,14 @@ describe("createDispatcher", () => {
     expect(ran).toEqual([]);
   });
 
-  it("held down: only j and k repeat", () => {
+  it("held down: only j, k, n and p repeat", () => {
     press("j", { repeat: true });
     press("k", { repeat: true });
+    press("n", { repeat: true });
+    press("p", { repeat: true });
     press("s", { repeat: true });
     press("Escape", { repeat: true });
-    expect(ran).toEqual(["next", "prev"]);
+    expect(ran).toEqual(["next", "prev", "nextChange", "prevChange"]);
   });
 
   it("nothing done: the default stays", () => {

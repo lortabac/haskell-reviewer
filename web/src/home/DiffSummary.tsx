@@ -1,7 +1,6 @@
 // Home in diff mode (D-338, SPEC §4.1): the revisions as text, counts
 // by status, notes, the changed files and the ones outside ROOT. Paths
-// are user data: text only. Links go to the source view for now (T12
-// moves them to the diff view).
+// are user data: text only. Links go to the diff view (D-342).
 import { A } from "@solidjs/router";
 import { createMemo, createSignal, For, type JSX, Show } from "solid-js";
 import type { ChangedFile, DiffFiles, Outside } from "../api/diffFiles";
@@ -12,11 +11,12 @@ import {
   truncatedText,
   useDiffFiles,
 } from "../diff/store";
-import { hrefFor } from "../files/paths";
+import { changeNoteWords } from "../diff/notes";
+import { diffHref } from "../diff/urls";
 import { mergeBaseCount, mergeBaseText, shortHash } from "../header/revText";
 import { useModules } from "../modules/store";
 import { unionModules } from "../modules/union";
-import { ChangeSign, GhostSide } from "../ui/ChangeSign";
+import { ChangeSign } from "../ui/ChangeSign";
 import { plural } from "../ui/format";
 import {
   fileCounts,
@@ -156,28 +156,30 @@ function FileList(props: { files: readonly ChangedFile[] }): JSX.Element {
   );
 }
 
-// A removed file is only on base: its link goes there and says so. A
-// rename: the new path, then "from <old> (n%)", as in the sidebar.
+// The path links to its diff (D-342). A rename: the new path, then
+// "from <old> (n%)", as in the sidebar. Then the file's note, if any.
 function FileRow(props: { file: ChangedFile }): JSX.Element {
   const f = () => props.file;
-  const removed = () => f().status === "removed";
   return (
     <li>
       <ChangeSign change={f().status} />{" "}
-      <A href={hrefFor(removed() ? "base" : "head", f().path)}>
-        {f().path}
-        <Show when={removed()}>
-          <GhostSide on="base" />
-        </Show>
-      </A>
+      <A href={diffHref(f().path)}>{f().path}</A>
       <Show when={f().oldPath !== null ? f().oldPath : undefined}>
         {(old) => (
           <>
             {" "}
-            <span class="home-old">
+            <span class="home-muted">
               from {old()}
               {f().similarity !== null ? ` (${f().similarity}%)` : ""}
             </span>
+          </>
+        )}
+      </Show>
+      <Show when={f().note}>
+        {(n) => (
+          <>
+            {" "}
+            <span class="home-muted">({changeNoteWords(n())})</span>
           </>
         )}
       </Show>
