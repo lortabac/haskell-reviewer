@@ -346,7 +346,8 @@ back/forward, new tabs and copy-paste between tabs work. Shape:
 
 `/diff` has no side: it shows both. Its path is head's, else base's; in
 browse mode it says "Not in diff mode." Its query is free-form:
-`ws=ignore` now, `layout=unified|split` later (D-341). On a diff page
+`ws=ignore` and `layout=unified|split` (D-341, D-344); a bad `layout`
+is ignored, and same-file links on the page keep it. On a diff page
 the sidebar's current file is the diff's path on head (D-342).
 `<side>` is `head` / `base` in diff mode and `tree` in browse mode. Links
 keep the page's side (§5.1). A side the session doesn't have shows "not
@@ -503,7 +504,16 @@ The whole file, syntax-highlighted (§5.6), with line numbers.
 
 Available in diff mode only. It shows the textual diff file by file.
 - Layouts: **unified** and **side-by-side**, toggled globally and remembered
-  across sessions.
+  across sessions. `?layout=split` (or `unified`) picks one for the page
+  (D-344). Side by side: one row per pair of lines, base on the left,
+  head on the right; in a change block the i-th removed line pairs with
+  the i-th added one, and the longer side's extra lines face a hatched
+  empty cell. Both sides scroll sideways together (one offset;
+  provisional, D-344). The cursor is on one side: ↑/↓ keep it, ←/→
+  cross at the ends of the line's links; `j`/`k`/`n`/`p` land on base
+  when the block starts with a removed line, else head; `#<side>-L<n>`
+  marks that side only. Expansion, "Show whole file" and the cursor
+  are kept when the layout changes.
 - Context lines can be expanded step by step, or for the whole file.
   Three context lines around each change by default (as git); hidden
   lines are a gap row with buttons: 20 more from either end, or all.
@@ -773,7 +783,9 @@ link in the grid, `1`/`2` (D-342).
   once in a polite live region when the list is complete. The local
   references bar says "Reference n of m, line L" (D-296).
 - Text scales to 200% without loss of function. Side-by-side diffs fall
-  back to unified below a minimum width.
+  back to unified when the page is under 60rem wide (200% zoom or text
+  counts), with the note "Side by side needs a wider window: showing
+  unified."; once fallen back, it needs 62rem to come back (D-344).
 - Reflows to one column (header, then sidebar, then main) at 320px wide,
   with no sideways scroll (D-212).
 

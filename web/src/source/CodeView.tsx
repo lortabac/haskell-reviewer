@@ -56,6 +56,7 @@ import {
   drawCell,
   focusSpot,
   keepTopOnNewHeight,
+  revealX,
   sameFields,
 } from "./grid";
 import {
@@ -232,19 +233,18 @@ export function CodeView(props: CodeViewProps): JSX.Element {
 
   // Scroll sideways so el isn't under the sticky gutter or past the
   // right edge.
-  const revealX = (el: Element, rect?: DOMRect) => {
+  const scrollToReveal = (el: Element, rect?: DOMRect) => {
     const b = box.getBoundingClientRect();
-    const r = rect ?? el.getBoundingClientRect();
     const gutter =
       el
         .closest(".code-row")
         ?.querySelector(".code-mark")
         ?.getBoundingClientRect().right ?? b.left;
-    const right = b.left + box.clientWidth;
-    if (r.left < gutter) box.scrollLeft -= gutter - r.left;
-    else if (r.right > right) {
-      box.scrollLeft += Math.min(r.right - right, r.left - gutter);
-    }
+    box.scrollLeft += revealX(
+      rect ?? el.getBoundingClientRect(),
+      gutter,
+      b.left + box.clientWidth,
+    );
   };
 
   // Focus line n at want: a column (the link there, else the cell) or
@@ -268,7 +268,7 @@ export function CodeView(props: CodeViewProps): JSX.Element {
     if (link !== undefined) {
       // In view first, then the card (placed there), then focus: the
       // description is there when focus comes.
-      revealX(link);
+      scrollToReveal(link);
       if (page) bringOnPage(r);
       hover.beforeFocus(link);
       focusKeepingSelection(link);
@@ -828,7 +828,7 @@ export function CodeView(props: CodeViewProps): JSX.Element {
       reveal = false;
       const cell = cellOf(m.line[f.current]!);
       if (cell !== undefined) {
-        revealX(cell, cur.getBoundingClientRect());
+        scrollToReveal(cell, cur.getBoundingClientRect());
         // It may have moved the view: the boxes again.
         outline(cur);
       }

@@ -132,3 +132,152 @@
     border-left: 2px solid CanvasText;
   }
 }
+
+/* Side by side (D-344): one row, two halves. Each half: the number
+   (sign from CSS) and the code in a clip box. The halves stay put
+   (sticky, as wide as the box); the code moves sideways by --diff-x,
+   one offset for both sides (diff/hscroll.ts). The rows are as wide as
+   the box plus what the longest line needs past its half, so the box
+   has a native scrollbar. */
+.diff-split-view {
+  /* Number, gap, sign, padding, border. */
+  --diff-num: calc(
+    (var(--code-digits, 1) + 1) * 1ch + 3 * var(--space-2) + 1px
+  );
+}
+
+.diff-split-view .code-rows {
+  width: calc(
+    100cqw +
+      max(
+        0px,
+        var(--code-cols, 0) * 1ch + 2 * var(--space-2) + 2px -
+          (50cqw - var(--diff-num))
+      )
+  );
+}
+
+.diff-split {
+  position: sticky;
+  left: 0;
+  flex: none;
+  display: flex;
+  width: 100cqw;
+}
+
+.diff-half {
+  flex: 0 0 50%;
+  display: flex;
+  min-width: 0;
+}
+
+.diff-half.diff-head {
+  border-left: 1px solid var(--color-border);
+}
+
+.diff-split-view .code-num {
+  position: static;
+  width: var(--diff-num);
+}
+
+.diff-split-view .code-num::before {
+  content: attr(data-n);
+}
+
+.diff-split-view .code-num::after {
+  content: "";
+  width: 1ch;
+}
+
+.diff-half.diff-insert > .code-num::after {
+  content: "+" / "";
+  color: var(--color-change-added);
+}
+
+.diff-half.diff-delete > .code-num::after {
+  content: "\2212" / "";
+  color: var(--color-change-removed);
+}
+
+/* A marked half: the sign in fg, on the mark colour. */
+.diff-half.code-line-target > .code-num::after {
+  color: inherit;
+}
+
+.diff-clip {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: clip;
+}
+
+.diff-clip > .code-cell {
+  width: max-content;
+  min-width: 100%;
+  height: 100%;
+  transform: translateX(calc(-1 * var(--diff-x, 0px)));
+}
+
+/* The ring on the clip box: the cell moves and is clipped. */
+.diff-clip > .code-cell:focus-visible {
+  outline: none;
+}
+
+.diff-clip:has(> .code-cell:focus-visible) {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.diff-half.diff-insert > .diff-clip {
+  background: var(--color-diff-added);
+}
+
+.diff-half.diff-delete > .diff-clip {
+  background: var(--color-diff-removed);
+}
+
+/* No line on this side: hatched, no text. */
+.diff-empty > .diff-clip {
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent 0 0.4em,
+    var(--color-border) 0.4em 0.5em
+  );
+}
+
+/* The cursor band: on the cursor's half only. */
+.code-view:focus-within .diff-cursor-half > .diff-clip {
+  background: var(--color-cursor-line);
+}
+
+.code-view:focus-within .diff-cursor-half.diff-insert > .diff-clip {
+  background: var(--color-diff-added-cursor);
+}
+
+.code-view:focus-within .diff-cursor-half.diff-delete > .diff-clip {
+  background: var(--color-diff-removed-cursor);
+}
+
+.code-view:focus-within .diff-cursor-half > .code-num {
+  color: var(--color-fg);
+}
+
+/* createFits (diff/fit.ts) reads the rem size off it. */
+.diff-rem-probe {
+  position: absolute;
+  width: 1rem;
+  height: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+@media (forced-colors: active) {
+  .diff-half.diff-insert > .diff-clip,
+  .diff-half.diff-delete > .diff-clip {
+    border-left: 2px solid CanvasText;
+  }
+
+  .code-view:focus-within .diff-cursor-half > .code-num {
+    outline: 2px solid CanvasText;
+    outline-offset: -2px;
+  }
+}
