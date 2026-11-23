@@ -14,6 +14,7 @@ module HaskellReviewer.Server.Wire
     -- * Bodies
     encodeFileList,
     encodeFileView,
+    encodeFileNotLocal,
     encodeModuleTree,
     encodeDiffFiles,
     encodeSession,
@@ -196,6 +197,8 @@ encodeFileList (Generation g) fl =
 -- > {"generation":1,"kind":"symlink","target":"../x","resolved":"x","filtered":false}
 -- > {"generation":1,"kind":"submodule","commit":"0123...","filtered":false}
 --
+-- A blob missing from a partial clone is 'encodeFileNotLocal'.
+--
 -- @resolved@ may be null, and @commit@ too (a nested repo). @filtered@
 -- is true for a file read from disk that git would filter (see
 -- 'FileNotes').
@@ -219,7 +222,19 @@ encodeFileView (Generation g) notes content =
     kind k = ("kind", Cbor.text k)
     bytes (FileSize n) = Cbor.int n
 
--- | The @filtered@ field of the file and source views.
+-- | GET api\/file\/\<side>\/\<path> for a blob missing from a partial
+-- clone (D-343):
+--
+-- > {"generation":1,"kind":"not-local","filtered":false}
+encodeFileNotLocal :: Generation -> FileNotes -> LBS.ByteString
+encodeFileNotLocal (Generation g) notes =
+  Cbor.cborBody . Cbor.obj $
+    [ ("generation", Cbor.word64 g),
+      ("kind", Cbor.text "not-local"),
+      ("filtered", filteredValue notes)
+    ]
+
+-- | The @filtered@ field of the file, source and Markdown views.
 filteredValue :: FileNotes -> Cbor.Encoding
 filteredValue notes = Cbor.bool $ case notes.filtered of
   Filtered -> True

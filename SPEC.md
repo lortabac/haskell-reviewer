@@ -441,7 +441,8 @@ links. A relative link to a file of the snapshot opens it in the tool
 (a Markdown file rendered, anything else in the source view, `#L<n>`
 kept); `#anchor` links go to a heading of the page (GitHub's anchors);
 http and https links are external; anything else is text. `haskell` and
-`hs` code blocks are coloured as in §5.6. Browse mode only for now.
+`hs` code blocks are coloured as in §5.6. A filtered file (§11.4) has the
+same note as in the source view (D-343). Browse mode only for now.
 
 ### 4.3 Inline declaration source
 
@@ -1571,8 +1572,9 @@ calls, all with the hardening below:
     `working-tree-encoding` can't be checked without running the
     filter, which we never do: unless clean by stat, it is dirty,
     shown as its on-disk text with a "filtered file" note (`filtered:
-    true` on `api/file` and `api/source`, D-319; for now the note is in
-    the file view only, D-335). So is a file
+    true` on `api/file`, `api/source` and `api/markdown`, D-319, D-343;
+    the note is in the file view and the rendered Markdown view,
+    D-335, D-343). So is a file
     whose `text` or `crlf` attribute is set or unset, when reading it as
     the value (`text=set`, which `check-attr` prints the same way and git
     reads as no action) would clean its bytes differently. These are extra
@@ -1860,7 +1862,14 @@ a framework would cost more than it saves.
   comes from `api/file`. While the answer is partial, the view refetches
   on `indexing` events, at most once a second (D-286). `api/file` and
   `api/source` also carry `filtered`: true for a working-tree file read
-  from disk that git would filter (D-319). A module page
+  from disk that git would filter (D-319), and so does `api/markdown`
+  (D-343). A blob missing from a partial clone is a 200, not a 500:
+  `api/file` and `api/markdown` have kind `not-local`, `api/source` has
+  highlight `not-local` (only the head fields besides); the views say
+  "Not in the local repo (partial clone)." (D-343). Exceptions: the
+  module page and refs still answer 500 "cannot read file", and
+  `api/source` answers `plain` for a file it doesn't read (no module,
+  no language rules). A module page
   has the same `partial` flag and a targets table of the same shape for
   its links out of the module (D-289); the docs page refetches it the
   same way and only its links change (D-293). Search is

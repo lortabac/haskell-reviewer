@@ -151,6 +151,8 @@ cases =
     cbor "file-submodule" (okCbor fixtureApi (file ["vendor", "dep"])),
     -- Read from disk, and git would filter it (LFS, say).
     cbor "file-filtered" (okCbor filteredApi (file ["app", "Main.hs"])),
+    -- A blob missing from a partial clone (D-343).
+    cbor "file-not-local" (okCbor (missingApi fixtureApi) (file ["app", "Main.hs"])),
     json "modules" (okJson projectApi ["api", "modules", "tree"]),
     json "modules-implicit" (okJson implicitApi ["api", "modules", "tree"]),
     -- Diff mode: every marker value, on every kind of module.
@@ -224,6 +226,12 @@ cases =
     -- Markdown, rendered: every node; not text.
     cbor "markdown-page" (okCbor sourceApi (markdown ["s", "docs", "All.md"])),
     cbor "markdown-not-text" (okCbor sourceApi (markdown ["s", "blob.md"])),
+    cbor "markdown-not-local" $
+      okCbor (missingApi sourceApi) (markdown ["s", "docs", "All.md"]),
+    cbor "markdown-filtered" (okCbor filteredSource (markdown ["s", "docs", "All.md"])),
+    -- A module's blob is missing: the slot fails, the view says so.
+    cbor "source-not-local" $
+      okCbor (indexed (missingApi sourceApi)) (source ["s", "src", "B.hs"]),
     json "source-not-found" $
       notFoundJson sourceApi {workers = 0} (source ["s", "nope.hs"]),
     cbor "source-warm-up" $
@@ -264,6 +272,8 @@ cases =
     modulePath ref = ["api", "module", "tree", ref]
     source p = ["api", "source", "tree"] <> p
     markdown p = ["api", "markdown", "tree"] <> p
+    missingApi api = api {readEntry = \_ _ _ -> pure (Left (ReadMissing (hex 'e')))}
+    filteredSource = sourceApi {fileNotes = \_ _ -> FileNotes {filtered = Filtered}}
     filteredApi = fixtureApi {fileNotes = \_ _ -> FileNotes {filtered = Filtered}}
     crashingApi = answering (ParserCrashed "boom")
     slowApi = answering TooSlow

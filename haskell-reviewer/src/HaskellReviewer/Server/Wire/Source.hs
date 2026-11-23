@@ -110,7 +110,9 @@ the module page, partial true when resolution read a module not ready
 yet (the client asks again later), filtered as on api/file (a file
 read from disk that git would filter; 'FileNotes'). highlight is
 "plain" (nothing more: not a module, generated, preprocessed, not
-text, too large, or text only with nothing to show) or "lexed", which
+text, too large, or text only with nothing to show), "not-local" (the
+blob is missing from a partial clone: nothing more either, D-343) or
+"lexed", which
 adds:
 
 - runs: a flat int array, 6 per run: start line minus the previous
@@ -168,6 +170,8 @@ data SourceView = SourceView
 -- | What we show.
 data SourceBody
   = PlainBody
+  | -- | The blob is not in the local repo (D-343).
+    NotLocalBody
   | LexedBody LexedSource
 
 -- | A lexed file. See Note [Source view].
@@ -236,6 +240,7 @@ encodeSource (Generation g) idx v =
     ]
       <> case v.body of
         PlainBody -> [("highlight", Cbor.text "plain")]
+        NotLocalBody -> [("highlight", Cbor.text "not-local")]
         LexedBody s ->
           [ ("highlight", Cbor.text "lexed"),
             ("runs", Cbor.list Cbor.word32 (runWords s.runs)),
@@ -314,7 +319,8 @@ sourceWarmUp =
       (map (defaultParseSettings,) [declsWarmUp, badModule, fieldsModule])
     <> zipWith parsed [10 ..] highlightWarmUp
     <> [ view "Slow.hs" Nothing (textOnlySource (textOnlyModule TooSlow [])),
-         view "notes.txt" Nothing PlainBody
+         view "notes.txt" Nothing PlainBody,
+         view "Remote.hs" Nothing NotLocalBody
        ]
   where
     idx = resolveWarmUpIndex

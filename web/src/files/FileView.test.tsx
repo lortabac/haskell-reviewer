@@ -197,6 +197,14 @@ describe("FileView", () => {
     expect(bin.querySelector(".file-note")?.textContent).toContain(note);
   });
 
+  it("not local: says so (D-343)", async () => {
+    const main = await open("big.bin", 200, cborFixture("file-not-local"));
+    expect(main.textContent).toContain(
+      "Not in the local repo (partial clone).",
+    );
+    expect(main.querySelector(".file-note")).toBeNull();
+  });
+
   it("not filtered: no note", async () => {
     const main = await open("app/Main.hs", 200, cborFixture("file-text"));
     expect(main.querySelector(".file-note")).toBeNull();

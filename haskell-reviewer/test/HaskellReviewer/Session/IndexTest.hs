@@ -176,6 +176,22 @@ tests =
           "haskell-reviewer: cannot read C.hs: Permission denied" `elem` logged
         assertBool (show logged) $
           "haskell-reviewer: cannot index D.hs: user error (boom)" `elem` logged,
+      testCase "a blob not in the local repo: SourceNotLocal, logged (D-343)" $ do
+        fake <- newFake []
+        let deps =
+              fake.deps
+                { readModule = \p -> case relPathText p of
+                    "B.hs" -> pure (Left (ReadMissing (ObjectId "ee")))
+                    _ -> fake.deps.readModule p
+                }
+        index <- indexOf ["A", "B"]
+        within (runWorkers 1 [IndexJob deps index])
+        states <- atomically (readStates index)
+        Map.lookup (m "B") states @?= Just (Failed SourceNotLocal)
+        logged <- readTVarIO fake.logged
+        assertBool (show logged) $
+          "haskell-reviewer: cannot read B.hs: object ee is not in the local repo"
+            `elem` logged,
       testCase "not text, too large, no longer a file" $ do
         fake <- newFake []
         let deps =

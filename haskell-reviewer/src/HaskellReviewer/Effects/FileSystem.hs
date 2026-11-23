@@ -407,8 +407,10 @@ data ReadError
     ReadGone
   | -- | Some other IO error, e.g. no permission.
     ReadFailed Text
-  | -- | A blob not in the local repo (partial clone). Only the diff
-    -- route tells it apart; the others answer as for 'ReadFailed'.
+  | -- | A blob not in the local repo (partial clone). The diff,
+    -- file, source and Markdown routes and the index slots tell it apart
+    -- (D-343); the module page, refs and the project files answer as for
+    -- 'ReadFailed'.
     ReadMissing ObjectId
   deriving (Eq, Show)
 

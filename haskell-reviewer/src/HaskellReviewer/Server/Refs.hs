@@ -143,6 +143,7 @@ warmUpRefs = do
       renderSimpleQuery True [("module", "Nope"), ("decl", "val:x")],
       renderSimpleQuery True [("module", utf8 gone), ("decl", "val:x")],
       renderSimpleQuery True [("module", utf8 unreadable), ("decl", "val:x")],
+      renderSimpleQuery True [("module", utf8 notLocal), ("decl", "val:x")],
       renderSimpleQuery True [("module", utf8 crashed), ("decl", "val:x")],
       "?module=" <> anyRef,
       "?decl=val:x",
@@ -255,6 +256,9 @@ refsWith found req respond
             HomeFailed SourceGone -> respond (missing src MissingModule)
             HomeFailed (SourceUnreadable _) ->
               respond (plain status500 "cannot read file")
+            -- The refs page: still a 500 (D-343).
+            HomeFailed SourceNotLocal ->
+              respond (plain status500 "cannot read file")
             HomeFailed (IndexCrashed _) ->
               respond (plain status500 "cannot index module")
             HomeParsed i names ->
@@ -297,7 +301,7 @@ plain st = responseLBS st [(hContentType, "text/plain; charset=utf-8")]
 
 -- | The resolution warm-up project's slot states ('warmUpStates'),
 -- through the same finder and order as a snapshot. Some slots are not
--- done, so answers are partial, and three refs fail.
+-- done, so answers are partial, and four refs fail.
 warmUpSource :: Source
 warmUpSource =
   Source
@@ -320,6 +324,7 @@ warmUpHome :: Text -> Home
 warmUpHome ref
   | ref == gone = HomeFailed SourceGone
   | ref == unreadable = HomeFailed (SourceUnreadable "x")
+  | ref == notLocal = HomeFailed SourceNotLocal
   | ref == crashed = HomeFailed (IndexCrashed "x")
   | Just i <- resolveModuleRef resolveWarmUpIndex ref,
     ModuleParsed _ <- resolveWarmUpInput.state i =
@@ -333,7 +338,8 @@ namesOf i = case resolveWarmUpInput.state i of
   _ -> []
 
 -- | Refs of the fake failures.
-gone, unreadable, crashed :: Text
+gone, unreadable, notLocal, crashed :: Text
 gone = "warm-up:gone"
 unreadable = "warm-up:unreadable"
+notLocal = "warm-up:not-local"
 crashed = "warm-up:crashed"

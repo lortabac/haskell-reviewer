@@ -4,6 +4,7 @@ import { decodeMarkdownPage } from "./markdown";
 
 const page = (blocks: unknown[]) => ({
   generation: 3,
+  filtered: false,
   kind: "doc",
   doc: { blocks, since: null },
 });
@@ -47,6 +48,7 @@ describe("decodeMarkdownPage", () => {
     );
     expect(v).toEqual({
       generation: 3,
+      filtered: false,
       kind: "doc",
       doc: {
         since: null,
@@ -81,15 +83,23 @@ describe("decodeMarkdownPage", () => {
     });
   });
 
-  it("not text, too slow", () => {
-    expect(decodeMarkdownPage({ generation: 1, kind: "not-text" })).toEqual({
-      generation: 1,
+  it("not text, not local, too slow", () => {
+    const head = { generation: 1, filtered: true };
+    expect(decodeMarkdownPage({ ...head, kind: "not-text" })).toEqual({
+      ...head,
       kind: "not-text",
     });
-    expect(decodeMarkdownPage({ generation: 1, kind: "too-slow" })).toEqual({
-      generation: 1,
+    expect(decodeMarkdownPage({ ...head, kind: "not-local" })).toEqual({
+      ...head,
+      kind: "not-local",
+    });
+    expect(decodeMarkdownPage({ ...head, kind: "too-slow" })).toEqual({
+      ...head,
       kind: "too-slow",
     });
+    expect(() =>
+      decodeMarkdownPage({ generation: 1, kind: "not-text" }),
+    ).toThrow(DecodeError);
   });
 
   it("rejects a bad class, a bad piece, a bad link", () => {

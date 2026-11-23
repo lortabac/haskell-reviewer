@@ -85,6 +85,7 @@ import HaskellReviewer.Server.Security (methodNotAllowed, notFound)
 import HaskellReviewer.Server.Wire
   ( encodeFileList,
     encodeFileNotFound,
+    encodeFileNotLocal,
     encodeFileView,
     encodeIndexing,
     encodeModuleNotFound,
@@ -94,6 +95,7 @@ import HaskellReviewer.Server.Wire.Markdown
   ( MarkdownAnswer (..),
     encodeMarkdownPage,
     markdownSource,
+    warmUpMarkdown,
   )
 import HaskellReviewer.Server.Wire.Page
   ( ModuleAnswer (..),
@@ -227,10 +229,13 @@ newSnapshot side share source fl modules markers = do
   searchModules <- evaluate (moduleCandidates modules)
   _ <- evaluate (forceCandidates searchModules)
   sequence_
-    [ evaluate (LBS.length (encodeFileView firstGeneration n c))
+    [ evaluate (LBS.length body)
     | n <- [unfiltered, FileNotes {filtered = Filtered}],
-      c <- cborWarmUp
+      body <-
+        encodeFileNotLocal firstGeneration n
+          : map (encodeFileView firstGeneration n) cborWarmUp
     ]
+  warmUpMarkdown
   -- Slots read only files of the list (indexAndReport in
   -- "HaskellReviewer.App.Run"): a symlink's blob is not its text.
   let blobOf p = case Map.lookup p fl.entries of
@@ -309,8 +314,10 @@ fileApp api side segs req respond
             api.readEntry snap path kind >>= \case
               Left ReadGone -> respond notFound
               Left (ReadFailed why) -> respond =<< readFailed api snap path why
-              Left (ReadMissing o) ->
-                respond =<< readFailed api snap path (missingReason o)
+              Left (ReadMissing o) -> do
+                logCantRead api snap path (missingReason o)
+                respond . cbor $
+                  encodeFileNotLocal snap.generation (api.fileNotes snap path)
               Right content ->
                 respond . cbor $
                   encodeFileView
@@ -434,7 +441,10 @@ sourceApp api side segs req respond
         | Just lang <- langFor api.langs path ->
             withText api snap path (respond (missing snap)) respond $ \t ->
               -- Lazy: scanned when the body is built, inside the request.
-              let body = maybe PlainBody (langSource lang) t
+              let body = case t of
+                    GotText x -> langSource lang x
+                    GotNotText -> PlainBody
+                    GotNotLocal -> NotLocalBody
                in view snap (viewOf snap path Nothing False body)
         | otherwise -> view snap (plain snap path Nothing)
       Just i -> case (.source) <$> findModule snap.modules i of
@@ -452,12 +462,15 @@ sourceApp api side segs req respond
           view snap (viewOf snap path (Just i) False (textOnlySource t))
         Just (Right (IndexedNotText _)) -> view snap (plain snap path (Just i))
         Just (Right (IndexedTooLarge _)) -> view snap (plain snap path (Just i))
+        Just (Left SourceNotLocal) ->
+          view snap (viewOf snap path (Just i) False NotLocalBody)
         Just (Left e) -> respond (indexFailed (missing snap) e)
         -- Every Haskell source has a slot.
         Nothing -> respond (missing snap)
 
 -- | @GET api\/markdown\/\<side>\/\<path segments>@: a Markdown file,
--- rendered, as CBOR ('encodeMarkdownPage'). Not text: @not-text@. A
+-- rendered, as CBOR ('encodeMarkdownPage'). Not text: @not-text@. Not
+-- local: @not-local@ (D-343). A
 -- path not in the list or not Markdown, or a file gone, is a 404 with a
 -- JSON body ('encodeFileNotFound'). A bad side is a plain 404.
 markdownApp :: FilesApi -> Text -> [Text] -> Application
@@ -471,7 +484,9 @@ markdownApp api side segs req respond
             | isMarkdownPath path,
               Map.member path snap.files.entries ->
                 withMarkdown api snap path (respond (missing snap)) respond $ \md ->
-                  computed snap (pure (encodeMarkdownPage snap.generation md)) >>= respond
+                  let notes = api.fileNotes snap path
+                   in computed snap (pure (encodeMarkdownPage snap.generation notes md))
+                        >>= respond
           _ -> respond (missing snap)
   | otherwise = respond notFound
   where
@@ -489,20 +504,24 @@ withMarkdown ::
   IO ResponseReceived
 withMarkdown api snap path gone respond k =
   withText api snap path gone respond $ \case
-    Just t -> k . maybe MarkdownTooSlow MarkdownDoc =<< markdownGuarded env t
-    Nothing -> k MarkdownNotText
+    GotText t -> k . maybe MarkdownTooSlow MarkdownDoc =<< markdownGuarded env t
+    GotNotText -> k MarkdownNotText
+    GotNotLocal -> k MarkdownNotLocal
   where
     env = MarkdownEnv {path = path, exists = (`Map.member` snap.files.entries)}
 
--- | Read a file of the list: its text, or 'Nothing' if it isn't text.
--- Gone: the first action. A read error: its 500.
+-- | What 'withText' read.
+data TextRead = GotText Text | GotNotText | GotNotLocal
+
+-- | Read a file of the list: its text, or why not. Gone: the first
+-- action. A read error: its 500.
 withText ::
   FilesApi ->
   Snapshot ->
   RelPath ->
   IO ResponseReceived ->
   (Response -> IO ResponseReceived) ->
-  (Maybe Text -> IO ResponseReceived) ->
+  (TextRead -> IO ResponseReceived) ->
   IO ResponseReceived
 withText api snap path gone respond k = case Map.lookup path snap.files.entries of
   Nothing -> gone
@@ -510,10 +529,9 @@ withText api snap path gone respond k = case Map.lookup path snap.files.entries 
     api.readEntry snap path kind >>= \case
       Left ReadGone -> gone
       Left (ReadFailed why) -> respond =<< readFailed api snap path why
-      -- Not local: as a read error here (D-331).
-      Left (ReadMissing o) -> respond =<< readFailed api snap path (missingReason o)
-      Right (TextContent t) -> k (Just t)
-      Right _ -> k Nothing
+      Left (ReadMissing o) -> logCantRead api snap path (missingReason o) >> k GotNotLocal
+      Right (TextContent t) -> k (GotText t)
+      Right _ -> k GotNotText
 
 -- | Build and force a CBOR body inside 'withRequest'. No slot waits in
 -- here (Note [Indexing] in "HaskellReviewer.Session.Index").
@@ -595,9 +613,10 @@ withLength contentType st body =
     ]
     body
 
--- | A read error: logged, then a 500.
-readFailed :: FilesApi -> Snapshot -> RelPath -> Text -> IO Response
-readFailed api snap path why = do
+-- | Log a file we can't read. A blob missing from a partial clone is
+-- logged too, but the route answers 200 (D-343).
+logCantRead :: FilesApi -> Snapshot -> RelPath -> Text -> IO ()
+logCantRead api snap path why =
   logInfo api.logger $
     "haskell-reviewer: "
       <> sideTag snap.side
@@ -605,6 +624,11 @@ readFailed api snap path why = do
       <> relPathText path
       <> ": "
       <> why
+
+-- | A read error: logged, then a 500.
+readFailed :: FilesApi -> Snapshot -> RelPath -> Text -> IO Response
+readFailed api snap path why = do
+  logCantRead api snap path why
   pure (serverError "cannot read file")
 
 -- | A slot with no answer: the route's 404 if the file is gone, else a
@@ -613,6 +637,9 @@ indexFailed :: Response -> IndexFailure -> Response
 indexFailed gone = \case
   SourceGone -> gone
   SourceUnreadable _ -> serverError "cannot read file"
+  -- The module page and refs: still a 500 (D-343). api/source answers
+  -- not-local before it gets here.
+  SourceNotLocal -> serverError "cannot read file"
   IndexCrashed _ -> serverError "cannot index module"
 
 -- | The listing failed. The reason is on stderr.

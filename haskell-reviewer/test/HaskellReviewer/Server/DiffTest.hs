@@ -162,11 +162,13 @@ tests =
         str (field "kind" (field "head" m)) @?= "not-local"
         str (field "kind" (field "base" m)) @?= "text"
         str (field "kind" (field "diff" m)) @?= "not-text"
-        -- api/file keeps its 500 for now (D-331).
+        -- api/file answers 200 not-local (D-343).
         let notLocal = Left (ReadMissing (ObjectId "ab"))
             missing = fixtureApi {readEntry = \_ _ _ -> pure notLocal, workers = 0}
         viaFile <- getApi missing ["api", "file", "tree", "app", "Main.hs"]
-        (viaFile.status, viaFile.body) @?= (500, "cannot read file"),
+        viaFile.status @?= 200
+        fileView <- cborValue viaFile.body
+        str (field "kind" fileView) @?= "not-local",
       testCase "the line diff throws: 500, logged; too slow: a note" $ do
         logged <- newIORef []
         let crashing =

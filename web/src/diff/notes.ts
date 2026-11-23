@@ -4,18 +4,7 @@ import type { ChangeNote } from "../api/diffFiles";
 import type { DiffSide, DiffView } from "../api/diff";
 import { shortHash } from "../header/revText";
 import { bytes, limit, plural } from "../ui/format";
-
-export const noteTexts = {
-  filtered:
-    "Shown as on disk: a git filter applies; the stored content may differ.",
-  modeChanged: "File mode changed.",
-  symlink: "Symbolic link: the lines are its target.",
-  unchanged: "No changes in this file.",
-  noTextChange: "No changes in the text.",
-  wsOnly: "No changes when whitespace is ignored.",
-  tooSlow: "This diff took over 2 s, so it isn't shown.",
-  notLocal: "Not in the local repo (partial clone).",
-};
+import { noteTexts } from "../ui/notes";
 
 // The short words for a file's note, on Home.
 export function changeNoteWords(n: ChangeNote): string {

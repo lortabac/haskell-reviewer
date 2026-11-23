@@ -37,6 +37,7 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import HaskellReviewer.Core.Eol (Filtering (..))
 import HaskellReviewer.Core.FileContent (FileContent (..), FileNotes (..), LinkInfo (..))
+import HaskellReviewer.Core.Git (ObjectId (..))
 import HaskellReviewer.Core.Highlight (DisplayClass (..), linkedRunWidth)
 import HaskellReviewer.Core.Lang (Lang (..), buildLangs)
 import HaskellReviewer.Core.ModuleModel
@@ -92,7 +93,7 @@ coverage = do
   views <- mapM (cborValue . encodeSource (Generation 1) resolveWarmUpIndex) sourceWarmUp
   cover <- cborValue (encodeSource (Generation 1) resolveWarmUpIndex coveringView)
   sort (Set.toList (Set.fromList [str (field "highlight" v) | v <- views]))
-    @?= ["lexed", "plain"]
+    @?= ["lexed", "not-local", "plain"]
   bool (field "partial" cover) @?= True
   let targets = arr (field "targets" cover)
       kinds = Set.fromList [str (head' t) | t <- map arr targets]
@@ -173,10 +174,12 @@ textOnlyCase :: Assertion
 textOnlyCase = do
   case textOnlySource (textOnlyModule TooSlow []) of
     PlainBody -> pure ()
+    NotLocalBody -> assertFailure "too slow: not-local"
     LexedBody _ -> assertFailure "too slow: not plain"
   -- A parse error without tokens: nothing to show.
   case textOnlySource (textOnlyModule (ParseFailed err Nothing) []) of
     PlainBody -> pure ()
+    NotLocalBody -> assertFailure "no tokens: not-local"
     LexedBody _ -> assertFailure "no tokens: not plain"
   where
     err = ParseError {message = "x", code = Nothing, span = Nothing}
@@ -265,6 +268,13 @@ routeTests =
       let link = Link LinkInfo {target = "x.hs", resolved = Nothing}
       became <- getApi sourceApi {readEntry = \_ _ _ -> pure (Right link)} path
       became.status @?= 404,
+    testCase "a blob not in the local repo: 200 not-local (D-343)" $ do
+      let with = sourceApi {readEntry = \_ _ _ -> pure (Left missingBlob)}
+      -- A module (through its slot) and Markdown.
+      forM_ ["s/src/B.hs", "s/README.md"] $ \p -> do
+        v <- okSource (indexed with) p
+        (p, str (field "highlight" v)) @?= (p, "not-local")
+        (p, fieldCount v) @?= (p, 7),
     testCase "errors: other side, not GET, listing failed" $ do
       r1 <- getApi sourceApi ["api", "source", "head", "s", "src", "B.hs"]
       (r1.status, r1.body) @?= (404, "not found")
@@ -341,6 +351,14 @@ langTests =
       arr (field "targets" v) @?= []
       -- "notes": line 1, keyword (class 0), no link.
       map int (arr (field "runs" v)) @?= [1, 1, 0, 6, 0, 0],
+    testCase "an extension with rules, blob not local: not-local" $ do
+      let api =
+            sourceApi
+              { langs = txtRules,
+                readEntry = \_ _ _ -> pure (Left missingBlob)
+              }
+      v <- okSource api "s/notes.txt"
+      str (field "highlight" v) @?= "not-local",
     testCase "no rules: plain" $ do
       v <- okSource sourceApi "s/notes.txt"
       str (field "highlight" v) @?= "plain",
@@ -404,6 +422,21 @@ markdownTests =
     testCase "api/markdown: not text" $ do
       v <- okMarkdown "s/blob.md"
       str (field "kind" v) @?= "not-text",
+    testCase "api/markdown: filtered on every kind; not local" $ do
+      let filtered = sourceApi {fileNotes = \_ _ -> FileNotes {filtered = Filtered}}
+          get api p = do
+            r <- getApi api (["api", "markdown", "tree"] <> Text.splitOn "/" p)
+            r.status @?= 200
+            cborValue r.body
+      plain <- okMarkdown "s/README.md"
+      field "filtered" plain @?= Aeson.Bool False
+      doc <- get filtered "s/README.md"
+      (str (field "kind" doc), field "filtered" doc) @?= ("doc", Aeson.Bool True)
+      blob <- get filtered "s/blob.md"
+      (str (field "kind" blob), field "filtered" blob) @?= ("not-text", Aeson.Bool True)
+      gone <- get sourceApi {readEntry = \_ _ _ -> pure (Left missingBlob)} "s/README.md"
+      (str (field "kind" gone), field "filtered" gone)
+        @?= ("not-local", Aeson.Bool False),
     testCase "api/markdown: 404 for no file, not Markdown, bad side" $ do
       mapM_
         ( \segs -> do
@@ -507,3 +540,7 @@ head' :: [Aeson.Value] -> Aeson.Value
 head' = \case
   x : _ -> x
   [] -> Aeson.Null
+
+-- | A blob missing from a partial clone.
+missingBlob :: ReadError
+missingBlob = ReadMissing (ObjectId "ee")
