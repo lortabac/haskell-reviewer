@@ -369,7 +369,9 @@ describe("hand-made page: details", () => {
     // Rough bound: quadratic would be 4 million links.
     expect(main.querySelectorAll("a").length).toBeLessThan(10 * count);
     expect(took).toBeLessThan(20_000);
-  });
+    // Above the 20 s bound: a slow runner (macOS CI) takes over the
+    // default 5 s, and the bound above is the real check.
+  }, 30_000);
 });
 
 describe("hand-made page: exported only", () => {
