@@ -542,6 +542,18 @@ Available in diff mode only. It shows the textual diff file by file.
   - hits in hidden lines count; moving to one opens its gap;
   - the live region says "Match 3 of 12, removed line 40";
   - a layout or whitespace change searches again, from the cursor.
+- **Copy** takes the text from the two files, not the page (D-347):
+  - unified: each line in its own text (base's on a removed line, else
+    head's), never a `+`/`−` sign or a line number;
+  - side by side: only the side where the selection starts; the other
+    side can't be selected;
+  - hidden lines in a gap are copied too; line endings are kept per
+    side, a BOM never;
+  - Ctrl+A in the grid: every line (unified) or the cursor side's file
+    (side by side);
+  - `y` copies the name at the cursor, else `path:line` on the cursor's
+    side (base: the old path of a rename); Copy location gives the same
+    `path:line`, or `path:12-15` for a selection.
 - Option to ignore whitespace-only changes (as git's `-w`): an "Ignore
   whitespace" toolbar button sets `?ws=ignore`, as a new history entry
   that keeps the hash and the other query params (D-342).
@@ -922,7 +934,8 @@ link in the grid, `1`/`2` (D-342).
   line numbers or gutter markers. Views are virtualised (§11.7), so a
   copied selection is built from the file's text, not from the DOM, and a
   long selection copies every line it spans. A plain text selection in the source and
-  diff views copies only the code.
+  diff views copies only the code; in the diff view, only one side's code
+  (§4.5).
 
 ---
 

@@ -109,3 +109,8 @@ is updated if needed (§10.3).
   series (`hieVersion` 9122 vs 9124). Check `readHieFileWithVersion` with
   a series-only check. Else, one companion per exact GHC version (a §7.1
   change).
+- **Q-DIFF-LINK-DRAG**: In the diff grid a drag that starts on a code link
+  selects nothing in Chromium and WebKit (they don't start a selection on
+  a link). The source view works around it by hand (CodeView
+  `onMouseDown`, `linkDrag`). Move that code to a shared helper
+  and use it in the diff grid too? Out of scope for T14b (D-347).

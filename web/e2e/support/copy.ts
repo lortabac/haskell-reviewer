@@ -1,5 +1,10 @@
-// Copy and selection helpers for the source view specs.
-import { type BrowserContext, expect, type Page } from "@playwright/test";
+// Copy and selection helpers for the source and diff view specs.
+import {
+  type BrowserContext,
+  expect,
+  type Locator,
+  type Page,
+} from "@playwright/test";
 import { lines } from "./project";
 
 export type At = [line: number, col: number];
@@ -51,34 +56,47 @@ export async function selectAt(
   n: number,
   col: number,
 ): Promise<void> {
-  await page
-    .locator(`main .code-view .code-row[data-line="${n}"] .code-cell`)
-    .evaluate(
-      (cell, [h, c]) => {
-        const w = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
-        let node: Node | undefined;
-        let left = c;
-        for (let t = w.nextNode(); t !== null; t = w.nextNode()) {
-          const len = (t as Text).length;
-          if (left <= len) {
-            node = t;
-            break;
-          }
-          left -= len;
+  await selectIn(
+    page.locator(`main .code-view .code-row[data-line="${n}"] .code-cell`),
+    how,
+    col,
+  );
+}
+
+// The same in any cell (the diff grid's).
+export async function selectIn(
+  cell: Locator,
+  how: "start" | "extend",
+  col: number,
+): Promise<void> {
+  await cell.evaluate(
+    (el, [h, c]) => {
+      const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      let node: Node | undefined;
+      let left = c;
+      for (let t = w.nextNode(); t !== null; t = w.nextNode()) {
+        const len = (t as Text).length;
+        if (left <= len) {
+          node = t;
+          break;
         }
-        if (node === undefined) throw new Error(`no col ${c}`);
-        const at = node;
-        return new Promise<void>((done) => {
-          document.addEventListener("selectionchange", () => done(), {
-            once: true,
-          });
-          const sel = getSelection();
-          if (h === "start") sel?.setBaseAndExtent(at, left, at, left);
-          else sel?.extend(at, left);
+        left -= len;
+      }
+      // An empty line: the cell itself.
+      if (node === undefined && c === 0) node = el;
+      if (node === undefined) throw new Error(`no col ${c}`);
+      const at = node;
+      return new Promise<void>((done) => {
+        document.addEventListener("selectionchange", () => done(), {
+          once: true,
         });
-      },
-      [how, col] as const,
-    );
+        const sel = getSelection();
+        if (h === "start") sel?.setBaseAndExtent(at, left, at, left);
+        else sel?.extend(at, left);
+      });
+    },
+    [how, col] as const,
+  );
 }
 
 // Select from a to b (both rows mounted).

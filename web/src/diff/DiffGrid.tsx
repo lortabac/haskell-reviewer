@@ -26,6 +26,7 @@ import {
 } from "solid-js";
 import { setVar } from "../ui/cssom";
 import { bringOnPage } from "../ui/scroll";
+import { createCopy } from "../source/copy";
 import { plainPieces } from "../source/display";
 import { createFindDraw } from "../source/findDraw";
 import { focusKeepingSelection } from "../source/focus";
@@ -40,6 +41,7 @@ import {
 } from "../source/grid";
 import {
   isPlain,
+  isSelectAll,
   keyTarget,
   landOn,
   modsOf,
@@ -49,9 +51,9 @@ import {
   type Spot,
   type StopAt,
 } from "../source/keys";
-import { type LineIndex, lineText } from "../source/lines";
+import { lineText } from "../source/lines";
 import { lineNodes } from "../source/paint";
-import { colIn, linkStops } from "../source/selection";
+import { colIn, linkStops, selectionEnds } from "../source/selection";
 import {
   createRowHeight,
   fallbackRowHeight,
@@ -59,6 +61,19 @@ import {
   overscan,
   withPins,
 } from "../source/virtual";
+import {
+  cellSideAt,
+  type CopyModel,
+  diffAllText,
+  diffCopied,
+  diffPoint,
+  halfSide,
+  type LineRange,
+  selectedRange,
+  selectionKeys,
+  sideOf,
+  type SideText,
+} from "./copy";
 import { type CellSpace, cellLine, type DiffHits, isFor } from "./find";
 import { plainScroll, sharedScroll, type SideScroll } from "./hscroll";
 import {
@@ -97,12 +112,6 @@ import {
 
 const diffSides: readonly DiffSessionSide[] = ["base", "head"];
 const noClip = { left: -Infinity, right: Infinity };
-
-// One side's text and its lines.
-export interface SideText {
-  text: string;
-  index: LineIndex;
-}
 
 // key: a row key (rows.ts keyAt) over display rows. side: the cell's
 // (unified: from the row, removed is base). link: on a stop rather
@@ -160,6 +169,13 @@ export interface DiffApi {
   };
   // The mounted element of a unified row, if any.
   rowEl: (row: number) => HTMLElement | undefined;
+  // The lines the selection covers, for Copy location (copy.ts
+  // selectedRange; select-all: the cursor side's whole file).
+  // Undefined: no selection, or none in the grid.
+  selectedRange: () => LineRange | undefined;
+  // Esc: clear the selection, and end select-all now. False if there
+  // was no selection.
+  clearSelection: () => boolean;
 }
 
 export interface DiffGridProps {
@@ -279,6 +295,10 @@ export function DiffGrid(props: DiffGridProps): JSX.Element {
   // Where ↑ and ↓ aim (UTF-16), kept over short lines.
   let goal = untrack(rawCursor).col;
 
+  // Rows of the selection's ends. Pinned like the cursor's row, else a
+  // row that goes moves the end.
+  const [selKeys, setSelKeys] = createSignal<readonly number[]>([]);
+
   const follow = () => {
     const r = v.range;
     if (!v.isScrolling || r === null || box.contains(document.activeElement))
@@ -303,7 +323,7 @@ export function DiffGrid(props: DiffGridProps): JSX.Element {
     overscan,
     get rangeExtractor() {
       // eslint-disable-next-line solid/reactivity -- read again on each change
-      const p = [curIdx()];
+      const p = [curIdx(), ...selKeys().map((k) => indexOfKey(vis(), k))];
       return (r: VRange) => withPins(r, p);
     },
     onChange: follow,
@@ -327,13 +347,8 @@ export function DiffGrid(props: DiffGridProps): JSX.Element {
     rowByKey(k)?.querySelector<HTMLElement>(
       isGapKey(k) ? ".code-cell" : `.code-cell[data-side="${side}"]`,
     ) ?? undefined;
-  const sideOfCell = (
-    cell: Element,
-    fallback: DiffSessionSide,
-  ): DiffSessionSide => {
-    const s = cell instanceof HTMLElement ? cell.dataset.side : undefined;
-    return s === "base" || s === "head" ? s : fallback;
-  };
+  const sideOfCell = (cell: Element, fallback: DiffSessionSide) =>
+    sideOf(cell) ?? fallback;
   const scrollToIdx = (i: number, align: "auto" | "center" | "start") => {
     v.scrollToIndex(Math.min(Math.max(0, i), count() - 1), { align });
   };
@@ -473,6 +488,59 @@ export function DiffGrid(props: DiffGridProps): JSX.Element {
     return { row, side, ...span, col: c.col, gap, first };
   };
 
+  // The cursor's side as y and Copy location see it: an empty cell's
+  // other side, head on a gap.
+  const cursorSide = (): DiffSessionSide => {
+    const c = apiCursor();
+    return c.gap ? "head" : c.side;
+  };
+  // Copy (copy.ts). Split copies one side, selSide: set by a press in a
+  // half or by Ctrl+A, and following the selection's anchor. The other
+  // side can't be selected (diff-select-<side>, styles/diff.css).
+  let selSide: DiffSessionSide = untrack(rawCursor).side;
+  const setSelSide = (side: DiffSessionSide) => {
+    selSide = side;
+    if (!split) return;
+    box.classList.toggle("diff-select-base", side === "base");
+    box.classList.toggle("diff-select-head", side === "head");
+  };
+  const model = (): CopyModel => ({
+    ...cells,
+    base: props.base,
+    head: props.head,
+    vis: vis(),
+  });
+  // The anchor cell's side, else selSide.
+  const anchorSide = (sel: Selection | null): DiffSessionSide => {
+    const a = sel?.anchorNode;
+    return (a == null ? undefined : cellSideAt(box, a)) ?? selSide;
+  };
+  const copy = createCopy({
+    view: () => box,
+    rows: () => rowsEl,
+    copied: (sel) => diffCopied(box, model(), sel, anchorSide(sel)),
+    all: () => diffAllText(model(), selSide),
+    onSelection: (sel) => {
+      const ks = selectionKeys(box, sel);
+      const cur = selKeys();
+      if (ks.length !== cur.length || ks.some((k, i) => k !== cur[i])) {
+        setSelKeys(ks);
+      }
+      if (!split || sel === null || sel.isCollapsed) return;
+      // From outside the grid: the cursor's side.
+      const a = sel.anchorNode;
+      const side =
+        a === null
+          ? undefined
+          : box.contains(a)
+            ? cellSideAt(box, a)
+            : cursorSide();
+      if (side !== undefined && side !== selSide) setSelSide(side);
+    },
+  });
+  const linesOf = (side: DiffSessionSide) =>
+    (side === "base" ? props.base : props.head).index.count;
+
   // eslint-disable-next-line solid/reactivity -- once, at setup
   props.ref?.({
     focusRow: (r, col, side) => {
@@ -493,6 +561,29 @@ export function DiffGrid(props: DiffGridProps): JSX.Element {
     hasFocus: () => box.contains(document.activeElement),
     cursor: apiCursor,
     rowEl: (r) => rowByKey(keyOfRow(r)),
+    selectedRange: () => {
+      const sel = getSelection();
+      if (copy.isAllSelected()) {
+        const side = split ? selSide : cursorSide();
+        const n = linesOf(side);
+        return n === 0 ? undefined : { side, from: 1, to: n };
+      }
+      const ends = selectionEnds(sel);
+      if (ends === undefined) return undefined;
+      return selectedRange(
+        model(),
+        diffPoint(box, ends[0], ends[1]),
+        diffPoint(box, ends[2], ends[3]),
+        split ? anchorSide(sel) : cursorSide(),
+      );
+    },
+    clearSelection: () => {
+      copy.endSelectAll();
+      const sel = getSelection();
+      if (sel === null || sel.isCollapsed) return false;
+      sel.removeAllRanges();
+      return true;
+    },
   });
 
   // A gap button: show part of the gap, then focus the same button on
@@ -536,6 +627,13 @@ export function DiffGrid(props: DiffGridProps): JSX.Element {
       return;
     const mods = modsOf(e);
     const cur = cursor();
+    // Ctrl+A: copy gives every row (unified) or the cursor side's file.
+    if (isSelectAll(e.key, mods)) {
+      e.preventDefault();
+      setSelSide(cursorSide());
+      copy.selectAll();
+      return;
+    }
     if (isPlain(mods) && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
       e.preventDefault();
       const dir = e.key === "ArrowRight" ? 1 : -1;
@@ -582,8 +680,24 @@ export function DiffGrid(props: DiffGridProps): JSX.Element {
     )?.querySelector<HTMLElement>(".code-cell") ??
     null;
 
+  // A left click on a row ends select-all at once (its selectionchange
+  // can come after a quick copy); the scrollbar and a right click keep
+  // it.
+  const onMouseDown = (e: MouseEvent) => {
+    if (!(e.target instanceof Element) || e.button !== 0) return;
+    if (e.target.closest(".code-row") !== null) copy.endSelectAll();
+  };
+  // Split: a press in a half (mouse, pen or touch) picks the side to
+  // select.
+  const onPointerDown = (e: PointerEvent) => {
+    if (!split || !(e.target instanceof Element) || e.button !== 0) return;
+    if (e.shiftKey) return;
+    const half = e.target.closest(".diff-half");
+    if (half !== null) setSelSide(halfSide(half));
+  };
   // A click on a line: the cursor goes there (the link clicked, else
-  // the caret's column). A drag that selects only moves the cursor.
+  // the caret's column). A drag that selects only moves the cursor:
+  // split, to the selection's end row on the anchor's side.
   const onMouseUp = (e: MouseEvent) => {
     if (e.button !== 0 || !(e.target instanceof Element)) return;
     const r = e.target.closest<HTMLElement>(".code-row");
@@ -593,7 +707,13 @@ export function DiffGrid(props: DiffGridProps): JSX.Element {
     const side = sideAt(k, sideOfCell(cell, cursor().side));
     const sel = getSelection();
     if (sel !== null && !sel.isCollapsed) {
-      setCursor({ key: k, side, col: 0, link: false });
+      const end =
+        split && sel.focusNode !== null
+          ? diffPoint(box, sel.focusNode, sel.focusOffset)
+          : undefined;
+      if (end?.kind === "at" && indexOfKey(vis(), end.key) >= 0) {
+        setCursor({ key: end.key, side: anchorSide(sel), col: 0, link: false });
+      } else setCursor({ key: k, side, col: 0, link: false });
       return;
     }
     const stop = e.target.closest<HTMLElement>("a.code-link, button");
@@ -641,6 +761,7 @@ export function DiffGrid(props: DiffGridProps): JSX.Element {
     rowHeight.observe(probe);
     box.addEventListener("focusin", onFocusIn);
     hx = split ? sharedScroll(box, rowsEl) : plainScroll(box);
+    setSelSide(selSide);
     // The hit's outline is cut to its cell's view: again on a sideways
     // scroll (split: after sharedScroll moved the cells).
     let x = box.scrollLeft;
@@ -997,6 +1118,8 @@ export function DiffGrid(props: DiffGridProps): JSX.Element {
       keys,
       () => {
         pendingFocus.retry();
+        // Still all selected if it was.
+        copy.afterMount();
         repaintSoon();
       },
       { defer: true },
@@ -1039,6 +1162,8 @@ export function DiffGrid(props: DiffGridProps): JSX.Element {
         aria-colcount={colCount}
         aria-label={`Diff of ${props.path}`}
         onKeyDown={onKeyDown}
+        onMouseDown={onMouseDown}
+        onPointerDown={onPointerDown}
         onMouseUp={onMouseUp}
       >
         <div ref={(el) => (rowsEl = el)} class="code-rows" role="rowgroup" />

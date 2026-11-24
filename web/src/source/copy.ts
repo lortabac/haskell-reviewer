@@ -1,8 +1,7 @@
-// Copy for one source view (SPEC §5.7): the document copy handler, the
-// selection's lines (to pin), and Ctrl+A for the whole file.
+// Copy for one view of a file (SPEC §5.7): the document copy handler,
+// a hook on each selection change (to pin its ends), and Ctrl+A for
+// the whole text. The source view and the diff grid use it.
 import { onCleanup, onMount } from "solid-js";
-import type { LineIndex } from "./lines";
-import { copiedText, selectionLines } from "./selection";
 
 // Where the selection's ends are, to tell if it changed.
 interface Shape {
@@ -35,8 +34,8 @@ function sameAnchor(a: Shape, b: Shape): boolean {
 }
 
 export interface Copy {
-  // Ctrl+A in the view: select the mounted rows; copy gives the whole
-  // file while the selection stays the one made here.
+  // Ctrl+A in the view: select the mounted rows; copy gives all()
+  // while the selection stays the one made here.
   selectAll: () => void;
   // Call after rows were mounted or removed: keeps the mounted rows
   // selected while select-all is on.
@@ -50,10 +49,12 @@ export interface Copy {
 export function createCopy(opts: {
   view: () => HTMLElement;
   rows: () => HTMLElement;
-  text: string;
-  index: LineIndex;
-  // The selection's ends in the view changed (lines to keep mounted).
-  onSelectionLines: (lines: number[]) => void;
+  // What a copy of sel gives; undefined: leave it to the browser.
+  copied: (sel: Selection) => string | undefined;
+  // What a copy gives after selectAll.
+  all: () => string;
+  // The selection changed (its ends' rows to keep mounted).
+  onSelection: (sel: Selection | null) => void;
 }): Copy {
   // The selection made by selectAll, while it's still the one there.
   let allSelected: Shape | undefined;
@@ -67,7 +68,7 @@ export function createCopy(opts: {
 
   const onSelectionChange = () => {
     const sel = getSelection();
-    opts.onSelectionLines(selectionLines(opts.view(), sel));
+    opts.onSelection(sel);
     if (allSelected !== undefined) {
       if (sel === null || !sameShape(allSelected, shapeOf(sel))) {
         allSelected = undefined;
@@ -77,7 +78,6 @@ export function createCopy(opts: {
 
   const onCopy = (e: ClipboardEvent) => {
     if (e.defaultPrevented || e.clipboardData === null) return;
-    const view = opts.view();
     // A field of its own (search box, a later text area): not ours.
     const t = e.target;
     if (
@@ -85,16 +85,16 @@ export function createCopy(opts: {
       (t instanceof HTMLInputElement ||
         t instanceof HTMLTextAreaElement ||
         t.isContentEditable) &&
-      !view.contains(t)
+      !opts.view().contains(t)
     ) {
       return;
     }
     const sel = getSelection();
     let text: string | undefined;
     if (allSelected !== undefined) {
-      text = opts.text.slice(opts.index.bom ? 1 : 0);
+      text = opts.all();
     } else if (sel !== null) {
-      text = copiedText(view, opts.text, opts.index, sel);
+      text = opts.copied(sel);
     }
     if (text === undefined) return;
     e.clipboardData.setData("text/plain", text);
