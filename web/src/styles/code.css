@@ -134,6 +134,11 @@
   color: var(--color-muted);
   background: var(--color-surface);
   border-right: 1px solid var(--color-border);
+  /* Bars at the edges, set by the rules below (left: the #L mark, right:
+     a change; top and bottom: lines the other side lost or gained). */
+  box-shadow:
+    var(--sh-l, 0 0 #0000), var(--sh-r, 0 0 #0000), var(--sh-t, 0 0 #0000),
+    var(--sh-b, 0 0 #0000);
   user-select: none;
 }
 
@@ -141,8 +146,111 @@
   content: attr(data-n);
 }
 
+/* Diff mode (D-348): room in the gutter for a change sign, from the
+   start, so the text doesn't move when the marks come. */
+.code-view-changes {
+  --code-change-width: 2ch;
+  --code-gutter: calc(
+    var(--code-digits, 1) * 1ch + 2 * var(--space-2) + var(--code-change-width)
+  );
+}
+
+.code-view-changes .code-num {
+  padding-left: calc(var(--space-2) + var(--code-change-width));
+}
+
+/* The sign of a changed line, at the left of its number, in the change
+   colour, plus a bar on the gutter's right edge. The glyph is the cue
+   that is not colour; it stays in forced colours. */
+.code-chg-added {
+  --chg: var(--color-change-added);
+}
+
+.code-chg-removed {
+  --chg: var(--color-change-removed);
+}
+
+.code-chg-modified {
+  --chg: var(--color-change-modified);
+}
+
+.code-edge {
+  --chg-edge: var(--color-change-removed);
+}
+
+.code-edge-added {
+  --chg-edge: var(--color-change-added);
+}
+
+.code-chg > .code-num::after {
+  position: absolute;
+  left: var(--space-1);
+  top: 0;
+  color: var(--chg);
+}
+
+.code-chg-added > .code-num::after {
+  content: "+" / "";
+}
+
+.code-chg-removed > .code-num::after {
+  content: "\2212" / "";
+}
+
+.code-chg-modified > .code-num::after {
+  content: "\7e" / "";
+}
+
+.code-chg > .code-num {
+  --sh-r: inset -3px 0 0 var(--chg);
+}
+
+/* Lines the other side lost (head: a minus) or gained (base: a plus)
+   at a line's bottom or top edge: a small sign in that corner and a
+   line across the gutter. */
+.code-edge > .code-num::after {
+  content: "\2212" / "";
+  position: absolute;
+  left: var(--space-1);
+  bottom: 0;
+  font-size: 0.8em;
+  line-height: 1;
+  color: var(--chg-edge);
+}
+
+.code-edge-added > .code-num::after {
+  content: "+" / "";
+}
+
+.code-edge-above:not(.code-edge-below) > .code-num::after {
+  top: 0;
+  bottom: auto;
+}
+
+.code-edge-below > .code-num {
+  --sh-b: inset 0 -2px 0 var(--chg-edge);
+}
+
+.code-edge-above > .code-num {
+  --sh-t: inset 0 2px 0 var(--chg-edge);
+}
+
+@media (forced-colors: active) {
+  .code-chg > .code-num {
+    border-right: 3px solid CanvasText;
+  }
+
+  .code-edge-below > .code-num {
+    border-bottom: 2px solid CanvasText;
+  }
+
+  .code-edge-above > .code-num {
+    border-top: 2px solid CanvasText;
+  }
+}
+
 /* Markers between the number and the code: outline links, the CPP
-   bar (later diff signs). Sticks with the gutter. */
+   bar. Sticks with the gutter. */
 .code-mark {
   position: sticky;
   left: var(--code-gutter);
@@ -320,7 +428,13 @@
 }
 
 .code-line-target > .code-num {
-  box-shadow: inset 3px 0 0 var(--color-fg);
+  --sh-l: inset 3px 0 0 var(--color-fg);
+}
+
+/* Red or amber on the mark colour is too faint: the signs go fg. */
+.code-row.code-line-target {
+  --chg: var(--color-fg);
+  --chg-edge: var(--color-fg);
 }
 
 /* Muted is too faint on the mark colour. */

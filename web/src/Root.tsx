@@ -16,6 +16,7 @@ import { NotFound } from "./NotFound";
 import { PrefsProvider, PrefsStatus } from "./prefs/store";
 import { ThemeSwitch } from "./prefs/ThemeSwitch";
 import { SearchBox } from "./search/SearchBox";
+import { notDiffMode } from "./diff/words";
 import { onSide, SideContext, urlSide, useSession } from "./session";
 import { Sidebar } from "./Sidebar";
 import { isSide, type Side } from "./sides";
@@ -123,7 +124,7 @@ function WrongSide(props: { side: string }): JSX.Element {
     session.mode === "diff"
       ? `This session compares base and head; there is no “${props.side}” side.`
       : props.side === "base" || props.side === "head"
-        ? "Not in diff mode."
+        ? notDiffMode
         : `This session has only the tree side; there is no “${props.side}” side.`;
   return (
     <NotFound

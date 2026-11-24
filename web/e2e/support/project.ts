@@ -501,3 +501,11 @@ export function makeRenamesProject(): Promise<Project> {
 export function makeDiffViewProject(): Promise<Project> {
   return repoProject("diffview");
 }
+
+// marks.sh: the source view's change marks (D-348). src/Marks.hs has a
+// delete at each end, an insert and a mixed block; ren/Old.hs is
+// renamed to ren/New.hs with an edit; added, removed, unchanged and
+// EOL-only files.
+export function makeMarksProject(): Promise<Project> {
+  return repoProject("marks");
+}

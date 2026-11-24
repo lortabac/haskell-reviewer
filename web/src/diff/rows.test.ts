@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DiffRun } from "../api/diff";
 import {
   allShown,
+  blocks,
   blockStarts,
   buttonText,
   countsMatch,
@@ -285,5 +286,21 @@ describe("hunks and blocks", () => {
     expect(stepTo(s, 18, 1)).toBeUndefined();
     expect(stepTo(s, 2, -1)).toBeUndefined();
     expect(stepTo([], 0, 1)).toBeUndefined();
+  });
+});
+
+describe("blocks", () => {
+  it("start and end of each run of changed rows", () => {
+    const r = rowsOf([
+      ["delete", 1],
+      ["insert", 2],
+      ["equal", 2],
+      ["delete", 1],
+    ]);
+    expect(blocks(r)).toEqual([
+      [0, 3],
+      [5, 6],
+    ]);
+    expect(blocks(rowsOf([["equal", 2]]))).toEqual([]);
   });
 });

@@ -24,6 +24,7 @@ import {
   type SourcePart,
   type TextOnlyModule,
 } from "../api/module";
+import { useDiffLink } from "../diff/link";
 import { hrefFor, lineHref, withBase } from "../files/paths";
 import { usePageSide } from "../session";
 import { pageLinkInfos } from "../source/links";
@@ -131,14 +132,23 @@ function DocsPage(props: { moduleRef: string }): JSX.Element {
   // Docs / Source in the header. The path from the tree until the page
   // comes.
   const modules = useModules();
+  const diffLink = useDiffLink();
+  const pagePath = () => {
+    const p = page();
+    return p === undefined
+      ? modules.byRef().get(props.moduleRef)?.path
+      : p.path;
+  };
   useViewLinks({
     current: "docs",
     docs: () => docsHref(side(), props.moduleRef),
     source: () => {
-      const p = page();
-      const path =
-        p === undefined ? modules.byRef().get(props.moduleRef)?.path : p.path;
+      const path = pagePath();
       return path == null ? undefined : hrefFor(side(), path);
+    },
+    diff: () => {
+      const path = pagePath();
+      return path == null ? undefined : diffLink(side(), path);
     },
   });
   // A link in main took us here: put focus on the new heading, as the
@@ -499,12 +509,17 @@ function ModulePage(props: {
   });
   // 2: the source at the declaration with focus, else the first on
   // screen.
+  const diffLink = useDiffLink();
   useViewLinks({
     current: "docs",
     docs: () => docsHref(side(), props.typedRef),
     source: () => {
       const path = props.page.path;
       return path === null ? undefined : hrefFor(side(), path);
+    },
+    diff: () => {
+      const path = props.page.path;
+      return path === null ? undefined : diffLink(side(), path);
     },
     at: (to) => {
       const path = props.page.path;

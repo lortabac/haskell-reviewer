@@ -497,8 +497,22 @@ The whole file, syntax-highlighted (§5.6), with line numbers.
   the whole file" ("use Find" until the `f` key exists). The search is
   literal and smart case; Enter and Shift+Enter go to the next and
   previous match (D-288).
-- In diff mode, changed lines carry gutter markers, and a "show diff here"
-  action switches to the diff view at the same place.
+- In diff mode, changed lines carry gutter markers, and a "Show diff
+  here" button (also `3` and the header's Diff item) opens the diff view
+  at the cursor's line on this side, `/diff/<path>#<side>-L<n>`; Back
+  returns to the source line (D-348). The markers come from the plain
+  diff (whitespace not ignored). A change block is a run of changed rows.
+  On head: the added lines of a block with no removed rows are *added*
+  (`+`); the added lines of a block that also removes rows are *modified*
+  (`~`); a block that only removes rows puts *removed below* on the line
+  before it (*removed above* on line 1 at the start of the file). Base is
+  the same the other way: *removed* (`−`), *modified*, *added below* and
+  *above*. An added file marks all its lines added, a removed one all
+  removed. `n`/`p` step between the blocks of this side, with the diff
+  view's words ("No more changes."), and the toolbar has Previous and
+  Next change buttons. The gutter has room for the sign from the start.
+  Too slow or not text: no markers, with a note. The button stays
+  enabled on an unchanged file and says "No changes in this file."
 
 ### 4.5 Diff view
 
@@ -740,7 +754,7 @@ setting, **"single-key shortcuts: on/off"** (default on, toggle in the `?`
 overlay and the user config), turns them all off (D-45). Every action
 also has a UI control, so nothing is lost with shortcuts off. Keys match
 the character typed (`event.key`), so Shift is fine where a layout needs
-it for `?`, `/`, `1`, `2`; with Ctrl, Alt or Meta held no shortcut fires.
+it for `?`, `/`, `1`, `2`, `3`; with Ctrl, Alt or Meta held no shortcut fires.
 `g d` and `g r` are sequences: the second key within 1 second. A
 "Shortcuts" button in the header opens the overlay, also when shortcuts
 are off (D-297, D-298).
@@ -749,14 +763,14 @@ are off (D-297, D-298).
 |-----|--------|
 | `/` | Focus global search (`"text"` in quotes searches file contents) |
 | `j` / `k` | Next / previous declaration (docs, source, expanded diff) or hunk (diff) |
-| `n` / `p` | Next / previous **change** (diff view now; source view T15a; docs M4) |
+| `n` / `p` | Next / previous **change** (diff and source views; docs M4) |
 | `]` / `[` | Next / previous changed file or module |
 | `Enter` | Open the focused item (in the source view: follow the link); native, no binding |
 | `g d` | Go to definition of the identifier under the cursor/focus |
 | `g r` | Find references |
 | `s` | Toggle the inline source of the focused declaration |
 | `f` | Find in file (source and diff views) |
-| `1` `2` `3` `4` | Docs · Source · Diff · Expanded diff (`3`/`4` diff mode only) |
+| `1` `2` `3` `4` | Docs · Source · Diff · Expanded diff (`3`/`4` diff mode only). `3` goes to the diff at the cursor's line from the source view, and to the top of the diff from docs, Markdown and refs pages (at the line: M4) |
 | `u` | Toggle unified / side-by-side (diff view). Saves the preference; when the window is too narrow it flips the preference and says so (D-345) |
 | `b` | Switch side (base/head) |
 | `a` | Ask the LLM about the focus/selection |
@@ -787,7 +801,11 @@ link in the grid, `1`/`2` (D-342).
   per-line roles, with an accessible name for each line ("added line 42",
   "removed line 40"). Identifier links have names that include their
   target. In the source view the line's links are a token cursor: one
-  Tab stop, arrows move between links (D-284).
+  Tab stop, arrows move between links (D-284). In diff mode the line's
+  name adds the change: "12, added", "12, modified", "12, removed",
+  "12, lines removed below" or "above" or "above and below" (base:
+  "lines added …"); the sign is
+  drawn from CSS and is not the only cue (D-348).
 - The LLM answer stream is an `aria-live="polite"` region that announces
   the result when the answer finishes, not token by token.
 - Contrast ≥ 4.5:1 for text in both themes, including syntax-highlighting

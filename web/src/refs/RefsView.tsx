@@ -22,6 +22,7 @@ import { createStore, reconcile } from "solid-js/store";
 import { getJson } from "../api/client";
 import { docsHref } from "../api/module";
 import { decodeRefs, type Refs, refsUrl } from "../api/refs";
+import { useDiffLink } from "../diff/link";
 import { anchorName } from "../docs/urls";
 import { createRefetchLoop } from "../events/refetchLoop";
 import { IndexingContext } from "../events/indexing";
@@ -200,12 +201,18 @@ function RefsPage(props: { module: string; decl: string }): JSX.Element {
     }
     return undefined;
   };
+  const diffLink = useDiffLink();
+  const sourcePath = () => modules.byRef().get(module)?.path ?? binding()?.path;
   useViewLinks({
     current: "refs",
     docs: () => docsHref(side(), module, decl),
     source: () => {
-      const path = modules.byRef().get(module)?.path ?? binding()?.path;
+      const path = sourcePath();
       return path == null ? undefined : hrefFor(side(), path);
+    },
+    diff: () => {
+      const path = sourcePath();
+      return path == null ? undefined : diffLink(side(), path);
     },
     at: (to) => {
       const b = binding();

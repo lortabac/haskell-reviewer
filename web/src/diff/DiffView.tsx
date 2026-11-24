@@ -46,6 +46,7 @@ import {
   useKeyActions,
   useKeys,
   useViewLinks,
+  type ToView,
   type ViewLinks,
 } from "../keys/KeysProvider";
 import { declAtLine } from "../keys/outline";
@@ -113,9 +114,10 @@ import {
   searchWithWs,
   wsFromSearch,
 } from "./urls";
+import { notDiffMode, stepTexts } from "./words";
 
 export const texts = {
-  notDiff: "Not in diff mode.",
+  notDiff: notDiffMode,
   notFound: "No file at this path on either side.",
   failed: "Couldn't load this diff. See the terminal for details.",
   mismatch: "Couldn't show this diff.",
@@ -124,13 +126,10 @@ export const texts = {
   emptyRemoved: "Empty file removed.",
   ws: "Ignore whitespace",
   wholeFile: "Show whole file",
-  prevChange: "Previous change",
-  nextChange: "Next change",
   tryAgain: "Try again",
   stillSlow: "Still too slow.",
   baseSource: "Base source",
   headSource: "Head source",
-  noMore: "No more changes.",
   noDocs: "No docs for this page.",
   tooNarrow: "Side by side needs a wider window: showing unified.",
   saidUnified: "Unified.",
@@ -526,7 +525,8 @@ function DiffPage(props: { path: string }): JSX.Element {
       return ref === null ? undefined : docsHref(s, ref);
     },
     source: () => hrefFor(topSide(), topPath()),
-    at: (to) => hooks?.at(to),
+    diff: () => diffHref(props.path),
+    at: (to) => (to === "diff" ? undefined : hooks?.at(to)),
     leave: () => hooks?.leave(),
   });
 
@@ -596,10 +596,10 @@ function DiffPage(props: { path: string }): JSX.Element {
             <span class="diff-tools">
               <Show when={rowsShown()}>
                 <button type="button" onClick={() => stepChange(-1)}>
-                  {texts.prevChange}
+                  {stepTexts.prevChange}
                 </button>
                 <button type="button" onClick={() => stepChange(1)}>
-                  {texts.nextChange}
+                  {stepTexts.nextChange}
                 </button>
                 <button
                   type="button"
@@ -710,7 +710,7 @@ function DiffPage(props: { path: string }): JSX.Element {
 // What the grid's body gives the page while it lives.
 interface BodyHooks {
   // 1 / 2: the docs or source of the cursor's side and line.
-  at: NonNullable<ViewLinks["at"]>;
+  at: (to: Exclude<ToView, "diff">) => ReturnType<NonNullable<ViewLinks["at"]>>;
   // Back comes to the cursor (D-339).
   leave: () => void;
   // The change buttons: the cursor goes there, focus stays. What to
@@ -978,7 +978,7 @@ function DiffBody(props: {
   // 1 / 2: the docs or source of the cursor's side and line. null:
   // none on that side (not lexed yet, or no module), never the other
   // side's.
-  const at = (to: "docs" | "source") => {
+  const at = (to: Exclude<ToView, "diff">) => {
     const a = api;
     if (a === undefined) return undefined;
     const c = a.cursor();
@@ -1013,7 +1013,7 @@ function DiffBody(props: {
     // From the cursor's display row: in split it may hold two rows.
     const from = fresh ? c.lo - 1 : dir === 1 ? c.hi : c.lo;
     const to = stepTo(starts, from, dir);
-    if (to === undefined) return texts.noMore;
+    if (to === undefined) return stepTexts.noMore;
     a.reveal(to);
     // Split: base if the block starts with a removed row, else head.
     const side = sideOfRow(rows, to);

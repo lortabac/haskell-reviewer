@@ -140,7 +140,10 @@ describe("design tokens: contrast (SPEC §5.4, tokens.css header)", () => {
     ].map((f): [string, string] => [f, "decl-head"]),
     ["warn", "bg"],
     ["warn", "surface"],
-    // Diff markers: Home is on bg, the sidebar on surface.
+    // Diff markers: Home is on bg, the sidebar and the source gutter on
+    // surface. On the #L mark the sign goes fg (code.css), so there is
+    // no change-* on mark. The cursor band is on the cell, not the
+    // gutter.
     ...changes.flatMap((c): [string, string][] => [
       [c, "bg"],
       [c, "surface"],

@@ -37,9 +37,16 @@ async function expectLinkSides(page: Page, side: "base" | "head") {
       .map((l) => ({ ...l, side: l.href.split(/[/?#]/)[3] ?? "" }));
   });
   const other = side === "base" ? "head" : "base";
-  expect(new Set(links.filter((l) => !l.ghost).map((l) => l.side))).toEqual(
-    new Set([side]),
-  );
+  // The diff view's URLs have no side segment (D-341), but a line hash
+  // names one: it must be the page's.
+  const isDiff = (l: { href: string }) => l.href.includes("/diff/");
+  for (const l of links.filter(isDiff)) {
+    const hashSide = /#(base|head)-L/.exec(l.href)?.[1];
+    if (hashSide !== undefined) expect(hashSide, l.href).toBe(side);
+  }
+  expect(
+    new Set(links.filter((l) => !l.ghost && !isDiff(l)).map((l) => l.side)),
+  ).toEqual(new Set([side]));
   for (const g of links.filter((l) => l.ghost)) {
     expect(g.side, g.href).toBe(other);
     expect(g.text, g.href).toContain(`(on ${other})`);
