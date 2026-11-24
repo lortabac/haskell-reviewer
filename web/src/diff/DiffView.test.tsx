@@ -216,9 +216,9 @@ describe("DiffView", () => {
     );
     // Rows 14..20 (lines 15..21) shown: the gap is gone.
     expect(g.getAttribute("aria-rowcount")).toBe("16");
-    expect(main.querySelector('[role="status"]')?.textContent).toBe(
-      "Head line 18 marked.",
-    );
+    expect(
+      main.querySelector('.diff-text > [role="status"]')?.textContent,
+    ).toBe("Head line 18 marked.");
   });
 
   it("an equal row answers to the base hash too; past the end marks none", async () => {
@@ -445,6 +445,38 @@ describe("DiffView", () => {
     await vi.waitFor(() => expect(diffs()).toBe(2));
     // No text fetch for a diff with no lines.
     expect(urls(fetch).some((u) => u.startsWith("/tok/api/file/"))).toBe(false);
+  });
+
+  it("too slow, then rows with ws: focus stays on the ws button", async () => {
+    const { main } = open("/tok/diff/src/A.hs", {
+      "/tok/api/diff/src/A.hs": [200, diffBody({ diff: { kind: "too-slow" } })],
+      "/tok/api/diff/src/A.hs?ws=ignore": [
+        200,
+        diffBody({ ignoreWhitespace: true }),
+      ],
+    });
+    const button = () =>
+      [...main.querySelectorAll("button")].find(
+        (b) => b.textContent === texts.ws,
+      );
+    await vi.waitFor(() => expect(button()).toBeDefined());
+    const before = button();
+    // No rows: no Find button.
+    const find = () =>
+      main.querySelector<HTMLButtonElement>(".code-find-button");
+    expect(find()?.hidden).toBe(true);
+    before?.focus();
+    before?.click();
+    await ready(main);
+    expect(button()).toBe(before);
+    expect(document.activeElement).toBe(before);
+    expect(find()?.hidden).toBe(false);
+    // And back: the same button again.
+    window.history.back();
+    await vi.waitFor(() => expect(grid(main)).toBeNull());
+    expect(button()).toBe(before);
+    expect(document.activeElement).toBe(before);
+    expect(find()?.hidden).toBe(true);
   });
 
   it("the ws toggle: a new entry, the hash kept", async () => {

@@ -261,6 +261,18 @@
   color: var(--color-fg);
 }
 
+/* Toolbar parts shown only with rows (DiffView): no box of their own. */
+.diff-tools {
+  display: contents;
+}
+
+/* The row of the current find hit (code.css): the bar on the sign
+   (unified) or on the half's number (split). */
+.code-find-line > .diff-sign,
+.diff-half.code-find-line > .code-num {
+  box-shadow: var(--code-find-bar);
+}
+
 /* createFits (diff/fit.ts) reads the rem size off it. */
 .diff-rem-probe {
   position: absolute;

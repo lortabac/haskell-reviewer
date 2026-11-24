@@ -1,6 +1,8 @@
 import { render } from "solid-js/web";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CodeApi, FindHits } from "./CodeView";
+import { createSignal } from "solid-js";
+import { createFinder, type Finder, type Matches } from "./find";
 import { FindBar, type FindHandle, typingDelay } from "./FindBar";
 import { lineIndex } from "./lines";
 
@@ -10,18 +12,25 @@ let last: FindHits | undefined;
 let focused: [number, number] | undefined;
 let handle: FindHandle | undefined;
 
+const finder = createFinder(text, lineIndex(text));
+let setFinder: (f: Finder) => void = () => undefined;
+let cursorAt = { line: 1, col: 0 };
+let status: ((m: Matches, i: number) => string) | undefined;
+
 function mount(keyHint?: string): HTMLElement {
   const root = document.createElement("div");
   document.body.append(root);
+  const [current, setCurrent] = createSignal(finder);
+  setFinder = setCurrent;
   const api = {
-    cursor: () => ({ line: 1, col: 0, link: false }),
+    cursor: () => ({ ...cursorAt, link: false }),
     focusAt: (n: number, c: number) => (focused = [n, c]),
   } as unknown as CodeApi;
   dispose = render(
     () => (
       <FindBar
-        text={text}
-        index={lineIndex(text)}
+        finder={current}
+        status={status}
         api={() => api}
         onFind={(h) => (last = h)}
         handle={(h) => (handle = h)}
@@ -37,6 +46,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   last = undefined;
   focused = undefined;
+  cursorAt = { line: 1, col: 0 };
+  status = undefined;
 });
 afterEach(() => {
   dispose?.();
@@ -213,5 +224,113 @@ describe("FindBar", () => {
       }),
     );
     expect(last?.current).toBe(0);
+  });
+
+  it("a new finder: the same query again, from the cursor", () => {
+    const r = mount();
+    button(r).click();
+    type(r, "foo");
+    vi.advanceTimersByTime(typingDelay);
+    const other = "x\nfoo\nfoo\nfoo\n";
+    cursorAt = { line: 3, col: 0 };
+    setFinder(createFinder(other, lineIndex(other)));
+    expect(last?.matches.count).toBe(3);
+    expect(last?.current).toBe(1);
+    vi.advanceTimersByTime(typingDelay);
+    expect(live(r).textContent).toBe("Match 2 of 3, line 3");
+  });
+
+  it("a new finder while closed: its hits when it opens", () => {
+    const r = mount();
+    button(r).click();
+    type(r, "foo");
+    key(input(r), "Escape");
+    const other = "foo\n";
+    setFinder(createFinder(other, lineIndex(other)));
+    expect(last).toBeUndefined();
+    button(r).click();
+    expect(last?.matches.count).toBe(1);
+  });
+
+  it("uses the status it is given", () => {
+    status = (m, i) => `hit ${i + 1}/${m.count}`;
+    const r = mount();
+    button(r).click();
+    type(r, "bar");
+    vi.advanceTimersByTime(typingDelay);
+    expect(live(r).textContent).toBe("hit 1/1");
+  });
+
+  describe("off (a diff with no rows)", () => {
+    const text2 = "foo\nfoo\n";
+    const f2 = createFinder(text2, lineIndex(text2));
+    // A bar with a child button, and a button outside it.
+    function mountOff() {
+      const [off, setOff] = createSignal(false);
+      const root = document.createElement("div");
+      document.body.append(root);
+      const other = document.createElement("button");
+      document.body.append(other);
+      dispose = render(
+        () => (
+          <FindBar
+            off={off()}
+            finder={() => f2}
+            api={() => ({
+              cursor: () => ({ line: 1, col: 0 }),
+              focusAt: (l, c) => (focused = [l, c]),
+            })}
+            onFind={(x) => (last = x)}
+            handle={(x) => (handle = x)}
+          >
+            <button type="button" class="child">
+              Child
+            </button>
+          </FindBar>
+        ),
+        root,
+      );
+      return { root, other, setOff };
+    }
+
+    it("no off: the button and the hint are shown", () => {
+      const r = mount();
+      expect(button(r).hasAttribute("hidden")).toBe(false);
+      expect(q(r, ".code-hint").hasAttribute("hidden")).toBe(false);
+    });
+
+    it("on while open: closes quietly, focus stays elsewhere", () => {
+      const { root: r, other, setOff } = mountOff();
+      handle?.open();
+      type(r, "foo");
+      expect(last?.matches.count).toBe(2);
+      other.focus();
+      setOff(true);
+      expect(q<HTMLElement>(r, ".code-find-bar").hidden).toBe(true);
+      expect(button(r).hidden).toBe(true);
+      expect(q<HTMLElement>(r, ".code-hint").hidden).toBe(true);
+      expect(last).toBeUndefined();
+      expect(handle?.isOpen()).toBe(false);
+      expect(focused).toBeUndefined();
+      expect(document.activeElement).toBe(other);
+      expect(live(r).textContent).toBe("");
+      setOff(false);
+      expect(q<HTMLElement>(r, ".code-find-bar").hidden).toBe(true);
+      expect(button(r).hidden).toBe(false);
+      handle?.open();
+      expect(last?.matches.count).toBe(2);
+    });
+
+    it("on with focus in the bar or on the button: to the child", () => {
+      const { root: r, setOff } = mountOff();
+      handle?.open();
+      expect(document.activeElement).toBe(input(r));
+      setOff(true);
+      expect(document.activeElement).toBe(q(r, ".child"));
+      setOff(false);
+      button(r).focus();
+      setOff(true);
+      expect(document.activeElement).toBe(q(r, ".child"));
+    });
   });
 });

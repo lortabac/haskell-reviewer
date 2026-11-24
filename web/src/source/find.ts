@@ -11,6 +11,13 @@ export interface Matches {
   to: Uint32Array;
 }
 
+// The hits of find (T09). current: the one to show (-1: none). A new
+// object moves the view to the current hit, even if it is the same one.
+export interface FindHits {
+  matches: Matches;
+  current: number;
+}
+
 export const noMatches: Matches = {
   count: 0,
   line: new Uint32Array(0),

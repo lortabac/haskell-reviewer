@@ -10,3 +10,11 @@ export function bringOnPage(el: Element): void {
     window.scrollBy(0, r.top);
   }
 }
+
+// el is all inside the scroll box (its borders and scrollbar out).
+export function inBox(el: Element, box: Element): boolean {
+  const b = box.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  const top = b.top + box.clientTop;
+  return r.top >= top && r.bottom <= top + box.clientHeight;
+}

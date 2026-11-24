@@ -533,8 +533,15 @@ Available in diff mode only. It shows the textual diff file by file.
   a copied file shows as added (D-74). The file list with statuses,
   similarity and changes outside ROOT comes from `api/diff-files`
   (D-325).
-- **Find in file** (`f`, or a toolbar button) searches the whole file on
-  both sides, as in §4.4.
+- **Find in file** (`f`, or the first toolbar button) searches the whole
+  file on both sides, as in §4.4 (D-346):
+  - it searches what each cell shows: unified, base's text on a removed
+    line, else head's (an unchanged line once); side by side, both cells,
+    so an unchanged line can give two hits;
+  - hits go in row order, base before head on a side-by-side row;
+  - hits in hidden lines count; moving to one opens its gap;
+  - the live region says "Match 3 of 12, removed line 40";
+  - a layout or whitespace change searches again, from the cursor.
 - Option to ignore whitespace-only changes (as git's `-w`): an "Ignore
   whitespace" toolbar button sets `?ws=ignore`, as a new history entry
   that keeps the hash and the other query params (D-342).
