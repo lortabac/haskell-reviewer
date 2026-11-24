@@ -15,6 +15,9 @@ const codes: Record<string, string> = {
   "!": "Digit1",
   Escape: "Escape",
   Shift: "ShiftLeft",
+  "[": "BracketLeft",
+  "]": "BracketRight",
+  "}": "BracketRight",
 };
 
 function press(
@@ -120,6 +123,20 @@ describe("createDispatcher", () => {
     press("1", { shiftKey: true });
     press("J", { shiftKey: true });
     expect(ran).toEqual(["help", "search", "docsView"]);
+  });
+
+  it("] and [ fire through tinykeys (D-350)", () => {
+    const e = press("]");
+    press("[");
+    expect(e.defaultPrevented).toBe(true);
+    expect(ran).toEqual(["nextFile", "prevFile"]);
+  });
+
+  it("] and [: not with Shift; not with Ctrl+Alt (AltGr on Windows)", () => {
+    press("}", { shiftKey: true });
+    press("]", { shiftKey: true });
+    press("]", { ctrlKey: true, altKey: true });
+    expect(ran).toEqual([]);
   });
 
   it("Shift held between g and d keeps the sequence", () => {

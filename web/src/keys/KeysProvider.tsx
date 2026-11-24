@@ -2,7 +2,7 @@
 // the ? overlay, the view links of the header. Views add their own
 // actions with useKeyActions and their Docs / Source links with
 // useViewLinks; the latest one added wins.
-import { useLocation, useNavigate } from "@solidjs/router";
+import { useLocation, useNavigate, useResolvedPath } from "@solidjs/router";
 import {
   type Accessor,
   createContext,
@@ -15,12 +15,14 @@ import {
   type ParentProps,
   useContext,
 } from "solid-js";
-import { notDiffMode } from "../diff/words";
+import { fileStepTexts, notDiffMode } from "../diff/words";
 import { usePrefs } from "../prefs/store";
 import { useSession } from "../session";
 import { copyText } from "../copy/clipboard";
+import { withBase } from "../files/paths";
 import type { DiffSessionSide } from "../sides";
 import { createDispatcher } from "./dispatch";
+import type { FileStep } from "./fileSteps";
 import type { ActionId } from "./keymap";
 import { KeysHelp } from "./KeysHelp";
 
@@ -105,10 +107,16 @@ export interface KeysApi {
   // The page's side switch, if it has one (the header item).
   sideTarget: Accessor<(() => SideTarget | undefined) | undefined>;
   goSide: (fromKey?: boolean) => void;
+  // ] and [, and the Previous / Next file buttons (fromButton).
+  stepFile: (dir: 1 | -1, fromButton?: boolean) => void;
+  // The button of dir on the page a button press of dir went to: true
+  // once, if it should take focus back (D-350).
+  takeRefocus: (dir: 1 | -1) => boolean;
   register: (actions: KeyActions) => () => void;
   addLinks: (links: ViewLinks) => () => void;
   addLocation: (f: () => LocationText | undefined) => () => void;
   addSideTarget: (f: () => SideTarget | undefined) => () => void;
+  addFileSteps: (f: (dir: 1 | -1) => FileStep) => () => void;
 }
 
 export const KeysContext = createContext<KeysApi>();
@@ -145,6 +153,28 @@ export function useSideTarget(f: () => SideTarget | undefined): void {
   onCleanup(keys.addSideTarget(f));
 }
 
+// ] and [ of a view, while it lives.
+export function useFileSteps(f: (dir: 1 | -1) => FileStep): void {
+  const keys = useKeys();
+  if (keys === undefined) return;
+  onCleanup(keys.addFileSteps(f));
+}
+
+// A stack of handlers: the top one wins; add gives the remover.
+function stack<T>(): {
+  all: Accessor<readonly T[]>;
+  add: (x: T) => () => void;
+} {
+  const [all, setAll] = createSignal<readonly T[]>([]);
+  return {
+    all,
+    add: (x) => {
+      setAll((xs) => [...xs, x]);
+      return () => setAll((xs) => xs.filter((y) => y !== x));
+    },
+  };
+}
+
 const missingWords = {
   docs: "No docs for this page.",
   source: "No source for this page.",
@@ -157,17 +187,14 @@ export function KeysProvider(props: ParentProps): JSX.Element {
   const navigate = useNavigate();
   const [helpOpen, setHelpOpen] = createSignal(false);
   let opener: HTMLElement | undefined;
-  const [actions, setActions] = createSignal<readonly KeyActions[]>([]);
-  const [linkList, setLinkList] = createSignal<readonly ViewLinks[]>([]);
-  const links = () => linkList().at(-1);
-  const [locationList, setLocationList] = createSignal<
-    readonly (() => LocationText | undefined)[]
-  >([]);
-  const locationFn = () => locationList().at(-1);
-  const [sideList, setSideList] = createSignal<
-    readonly (() => SideTarget | undefined)[]
-  >([]);
-  const sideTarget = () => sideList().at(-1);
+  const actions = stack<KeyActions>();
+  const linkStack = stack<ViewLinks>();
+  const links = () => linkStack.all().at(-1);
+  const locations = stack<() => LocationText | undefined>();
+  const locationFn = () => locations.all().at(-1);
+  const sides = stack<() => SideTarget | undefined>();
+  const sideTarget = () => sides.all().at(-1);
+  const steps = stack<(dir: 1 | -1) => FileStep>();
 
   // The same text again isn't read: it gets a no-break space at the
   // end, or loses it (as in FindBar). Cleared after a while.
@@ -265,6 +292,56 @@ export function KeysProvider(props: ParentProps): JSX.Element {
     }
   };
 
+  // A Previous / Next file press that navigated: the same button on
+  // the page it went to takes focus back, if nothing else did, so it can
+  // be pressed again (D-350). Dropped on any other page, click or key.
+  let carry: { dir: 1 | -1; at: string } | undefined;
+  const base = useResolvedPath(() => "/");
+  const here = () => location.pathname + location.search;
+  createEffect(
+    on(
+      here,
+      (h) => {
+        if (carry !== undefined && carry.at !== h) carry = undefined;
+      },
+      { defer: true },
+    ),
+  );
+  const dropCarry = () => (carry = undefined);
+  onMount(() => {
+    document.addEventListener("pointerdown", dropCarry, true);
+    document.addEventListener("keydown", dropCarry, true);
+    onCleanup(() => {
+      document.removeEventListener("pointerdown", dropCarry, true);
+      document.removeEventListener("keydown", dropCarry, true);
+    });
+  });
+  const takeRefocus = (dir: 1 | -1): boolean => {
+    const c = carry;
+    if (c === undefined || c.dir !== dir || c.at !== here()) return false;
+    carry = undefined;
+    return true;
+  };
+
+  // The view's leave first, so Back comes to this place.
+  const stepFile = (dir: 1 | -1, fromButton = false): void => {
+    carry = undefined;
+    if (session.mode !== "diff") {
+      say(notDiffMode);
+      return;
+    }
+    const f = steps.all().at(-1);
+    const r = f === undefined ? fileStepTexts.elsewhere : f(dir);
+    if (typeof r === "string") {
+      say(r);
+      return;
+    }
+    links()?.leave?.();
+    done({ afterNav: r.words });
+    if (fromButton) carry = { dir, at: withBase(base(), r.href) };
+    navigate(r.href);
+  };
+
   const run = (id: ActionId): boolean => {
     dropAfterNav();
     switch (id) {
@@ -293,6 +370,10 @@ export function KeysProvider(props: ParentProps): JSX.Element {
       case "otherSide":
         goSide(true);
         return true;
+      case "nextFile":
+      case "prevFile":
+        stepFile(id === "nextFile" ? 1 : -1);
+        return true;
       case "copy": {
         // A tree row, a refs row: the text is in the element.
         const own = document.activeElement?.closest<HTMLElement>("[data-copy]");
@@ -318,7 +399,7 @@ export function KeysProvider(props: ParentProps): JSX.Element {
 
   // The latest view with a handler for id.
   const runView = (id: ActionId): boolean => {
-    const list = actions();
+    const list = actions.all();
     for (let i = list.length - 1; i >= 0; i--) {
       const h = list[i]?.[id];
       if (h === undefined) continue;
@@ -347,22 +428,13 @@ export function KeysProvider(props: ParentProps): JSX.Element {
     copyLocation,
     sideTarget,
     goSide,
-    register: (a) => {
-      setActions((l) => [...l, a]);
-      return () => setActions((l) => l.filter((x) => x !== a));
-    },
-    addLinks: (l) => {
-      setLinkList((xs) => [...xs, l]);
-      return () => setLinkList((xs) => xs.filter((x) => x !== l));
-    },
-    addLocation: (f) => {
-      setLocationList((xs) => [...xs, f]);
-      return () => setLocationList((xs) => xs.filter((x) => x !== f));
-    },
-    addSideTarget: (f) => {
-      setSideList((xs) => [...xs, f]);
-      return () => setSideList((xs) => xs.filter((x) => x !== f));
-    },
+    stepFile,
+    takeRefocus,
+    register: actions.add,
+    addLinks: linkStack.add,
+    addLocation: locations.add,
+    addSideTarget: sides.add,
+    addFileSteps: steps.add,
   };
 
   onMount(() => {

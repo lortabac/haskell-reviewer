@@ -2,7 +2,7 @@
 import { Route, Router, useLocation } from "@solidjs/router";
 import { render } from "solid-js/web";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cbor, stubFetch } from "../../test/fixtures";
+import { cbor, fixture, stubFetch } from "../../test/fixtures";
 import { fakeLayout } from "../../test/layout";
 import { mountAppAt, unmountApp } from "../../test/mount";
 import { diffSession } from "../../test/sessions";
@@ -156,6 +156,66 @@ describe("SideSwitch", () => {
     expect(item()).toBeNull();
     press("b");
     expect(status()).toBe("No other side for this page.");
+  });
+});
+
+// The other side targets of Markdown, refs and text search pages.
+describe("SideSwitch on other pages", () => {
+  const diffFiles = {
+    generation: 1,
+    base: { label: "main", commit: "a".repeat(40) },
+    head: { label: "feature", commit: "b".repeat(40) },
+    files: [],
+    outside: null,
+    renameLimitHit: false,
+    truncated: false,
+  };
+  function openPage(url: string) {
+    stubFetch({
+      "/tok/api/diff-files": [200, diffFiles],
+      "/tok/api/prefs": [200, defaultPrefs],
+      "/tok/api/modules/head": [200, fixture("modules")],
+      "/tok/api/modules/base": [200, fixture("modules")],
+      "/tok/api/refs/head?module=R.Shape&decl=val%3Aarea": [
+        200,
+        fixture("refs"),
+      ],
+    });
+    mountAppAt(url, undefined, undefined, null, diffSession);
+  }
+
+  it("Markdown: the hash is kept", async () => {
+    openPage("/tok/md/head/README.md#intro");
+    // A link only once the list is in (while it loads: "Loading
+    // changes…"), and README.md isn't changed.
+    await vi.waitFor(() =>
+      expect(item()?.getAttribute("href")).toBe("/tok/md/base/README.md"),
+    );
+    item()!.click();
+    await vi.waitFor(() => expect(here()).toBe("/tok/md/base/README.md#intro"));
+  });
+
+  it("refs: the declaration is kept", async () => {
+    openPage("/tok/refs/head/R.Shape?decl=val%3Aarea");
+    await vi.waitFor(() =>
+      expect(item()?.getAttribute("href")).toBe(
+        "/tok/refs/base/R.Shape?decl=val%3Aarea",
+      ),
+    );
+    expect(item()?.textContent).toBe("View on base");
+  });
+
+  it("text search: the same query on the other side", async () => {
+    openPage("/tok/search/base?q=main");
+    await vi.waitFor(() =>
+      expect(item()?.getAttribute("href")).toBe("/tok/search/head?q=main"),
+    );
+    item()!.click();
+    await vi.waitFor(() =>
+      expect(location.pathname + location.search).toBe(
+        "/tok/search/head?q=main",
+      ),
+    );
   });
 });
 

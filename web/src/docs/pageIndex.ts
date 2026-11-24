@@ -15,6 +15,7 @@ import type {
   WireId,
 } from "../api/module";
 import type { DocComment } from "../api/richtext";
+import { memoBy } from "../memo";
 
 // Every declaration of the page with a handle, nested ones too, in
 // page order: constructors, fields, methods, associated types and
@@ -125,17 +126,10 @@ export interface PageIndex {
 const sameSpan = (a: Span, b: Span) =>
   a[0] === b[0] && a[1] === b[1] && a[2] === b[2] && a[3] === b[3];
 
-const cache = new WeakMap<ParsedModule, PageIndex>();
-
 // The index of a page, built on first use.
-export function pageIndex(page: ParsedModule): PageIndex {
-  let ix = cache.get(page);
-  if (ix === undefined) {
-    ix = build(page);
-    cache.set(page, ix);
-  }
-  return ix;
-}
+export const pageIndex: (page: ParsedModule) => PageIndex = memoBy(
+  (page: ParsedModule) => build(page),
+);
 
 function build(page: ParsedModule): PageIndex {
   const decls: AnyDecl[] = [];

@@ -600,6 +600,8 @@ Available in diff mode only. It shows the textual diff file by file.
   and line (D-342). `b` and the "Other side" toolbar button switch the
   cursor's side (§5.1, D-349); the button keeps focus and says the
   line.
+  `]`/`[` and the "Next file" / "Previous file" toolbar buttons go to
+  the next or previous changed file (§5.3, D-350).
 
 ### 4.6 Expanded (semantic) diff view
 
@@ -802,7 +804,7 @@ are off (D-297, D-298).
 | `/` | Focus global search (`"text"` in quotes searches file contents) |
 | `j` / `k` | Next / previous declaration (docs, source, expanded diff) or hunk (diff) |
 | `n` / `p` | Next / previous **change** (diff and source views; docs M4) |
-| `]` / `[` | Next / previous changed file or module |
+| `]` / `[` | Next / previous changed file (diff and source views) or module (docs), in sidebar order, in the same view; no wrap ("No more changed files."). The diff view keeps `ws` and `layout`, source and docs open at the top; Back comes to where you were. Source and docs skip files and modules of the other side only. "Next file" / "Previous file" buttons in the diff and source toolbars (D-350). Diff mode only |
 | `Enter` | Open the focused item (in the source view: follow the link); native, no binding |
 | `g d` | Go to definition of the identifier under the cursor/focus |
 | `g r` | Find references |

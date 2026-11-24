@@ -150,6 +150,8 @@ export interface Modules {
   otherByRef: () => ReadonlyMap<string, RefInfo> | undefined;
 }
 
+export const loadingModulesText = "Loading modules…";
+
 const ModulesContext = createContext<Modules>();
 
 // The module tree of the page's side. The last tree of each side is

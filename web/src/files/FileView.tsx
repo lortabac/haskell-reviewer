@@ -19,9 +19,11 @@ import { decodeFileView, type FileView as View } from "../api/files";
 import { docsHref } from "../api/module";
 import { type LexedSource, type OutlineEntry } from "../api/source";
 import { useDiffLink } from "../diff/link";
-import { useDiffFiles } from "../diff/store";
+import { FileStepButtons } from "../diff/FileStepButtons";
+import { fileStep, sourceOrder } from "../diff/fileOrder";
+import { filesWhy, useDiffFiles } from "../diff/store";
 import { stepTo } from "../diff/rows";
-import { stepTexts } from "../diff/words";
+import { fileStepTexts, stepTexts } from "../diff/words";
 import { bannerText } from "../modules/notices";
 import { useModules } from "../modules/store";
 import { declAtLine, outlineStep } from "../keys/outline";
@@ -30,6 +32,7 @@ import {
   useCopyLocation,
   useKeyActions,
   useKeys,
+  useFileSteps,
   useSideTarget,
   useViewLinks,
   type ViewTarget,
@@ -160,6 +163,14 @@ function FilePage(props: { path: string }): JSX.Element {
     const s = side();
     if (s === "tree") return undefined;
     return sourceTarget(pathTarget(diffFiles, s, props.path), s);
+  });
+  // ] and [: this side's changed files, at their top (D-350).
+  useFileSteps((dir) => {
+    const s = side();
+    if (s === "tree") return fileStepTexts.elsewhere;
+    const m = diffFiles.marks();
+    if (m === undefined) return filesWhy(diffFiles);
+    return fileStep(sourceOrder(m), props.path, dir, (p) => hrefFor(s, p));
   });
   // A link in main (like a symlink target) took us here: its page is
   // gone, so put focus on the new heading instead of letting it drop to
@@ -778,6 +789,7 @@ function FileText(props: {
               {diffButton()}
             </button>
           </Show>
+          <FileStepButtons />
         </FindBar>
       </Show>
       {view}

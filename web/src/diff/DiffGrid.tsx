@@ -144,7 +144,7 @@ export interface DiffApi {
   // default from the row (removed: base, else head).
   focusRow: (row: number, col: number, side?: DiffSessionSide) => void;
   // Move the cursor, no focus change and no scroll. col: on the row's
-  // line (0 on a gap).
+  // line (0 on a gap); the goal column keeps it as given.
   setCursorRow: (row: number, side?: DiffSessionSide, col?: number) => void;
   scrollToRow: (row: number, align?: "auto" | "center" | "start") => void;
   // Show a hidden row and a few around it.
@@ -570,8 +570,10 @@ export function DiffGrid(props: DiffGridProps): JSX.Element {
     setCursorRow: (r, side, col = 0) => {
       const k = keyOfRow(r);
       const s = sideAt(k, side ?? sideOfRow(rows, r));
-      const c = isGapKey(k) ? 0 : Math.min(col, lineLength(k, s));
-      goal = c;
+      const gap = isGapKey(k);
+      const c = gap ? 0 : Math.min(col, lineLength(k, s));
+      // The goal stays unclamped, as in focusRow (D-349).
+      goal = gap ? 0 : col;
       setCursor({ key: k, side: s, col: c, link: false });
     },
     scrollToRow: (r, align = "center") =>

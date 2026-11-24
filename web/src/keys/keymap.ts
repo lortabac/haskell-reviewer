@@ -9,6 +9,8 @@ export type ActionId =
   | "prev"
   | "nextChange"
   | "prevChange"
+  | "nextFile"
+  | "prevFile"
   | "layout"
   | "open"
   | "definition"
@@ -77,6 +79,23 @@ export const keymap: readonly KeyRow[] = [
     label: "Previous change",
     where: "Diff, source (diff mode)",
     control: "Previous change button",
+  },
+  {
+    id: "nextFile",
+    bindings: ["]"],
+    keys: ["]"],
+    label: "Next changed file (module in docs)",
+    where: "Diff, source, docs (diff mode)",
+    control: "Next file button (diff, source); docs: the sidebar, Changed only",
+  },
+  {
+    id: "prevFile",
+    bindings: ["["],
+    keys: ["["],
+    label: "Previous changed file (module in docs)",
+    where: "Diff, source, docs (diff mode)",
+    control:
+      "Previous file button (diff, source); docs: the sidebar, Changed only",
   },
   {
     id: "layout",
