@@ -38,6 +38,7 @@ import {
   useViewLinks,
 } from "../keys/KeysProvider";
 import { useModules } from "../modules/store";
+import { useModuleSide } from "../modules/otherModule";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
 import { usePageSide } from "../session";
@@ -52,7 +53,7 @@ import {
   summary,
 } from "./groups";
 import { snippetParts } from "./snippet";
-import { refsFromLocation } from "./urls";
+import { refsFromLocation, refsHref } from "./urls";
 
 // Complete answers of the last 4 pages, for Back (same snapshot only).
 const cacheSize = 4;
@@ -223,6 +224,12 @@ function RefsPage(props: { module: string; decl: string }): JSX.Element {
       };
     },
   });
+
+  // b: the same declaration's references on the other side (D-349).
+  useModuleSide(
+    () => module,
+    (s, r) => refsHref(s, r, decl),
+  );
 
   // y: the focused row or link copies itself (data-copy, in the
   // dispatcher). Else the name of the subject.

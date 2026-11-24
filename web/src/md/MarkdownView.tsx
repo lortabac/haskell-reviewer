@@ -19,6 +19,8 @@ import { decodeMarkdownPage, type MarkdownPage } from "../api/markdown";
 import type { Doc } from "../api/richtext";
 import { CopyButton } from "../copy/CopyButton";
 import { useDiffLink } from "../diff/link";
+import { useDiffFiles } from "../diff/store";
+import { markdownTarget, pathTarget } from "../files/otherSide";
 import { type Links, LinksContext } from "../docs/links";
 import { anchorId, DocView } from "../docs/RichText";
 import {
@@ -29,7 +31,11 @@ import {
   mdPathFromPathname,
   withBase,
 } from "../files/paths";
-import { useCopyLocation, useViewLinks } from "../keys/KeysProvider";
+import {
+  useCopyLocation,
+  useSideTarget,
+  useViewLinks,
+} from "../keys/KeysProvider";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
 import { usePageSide } from "../session";
@@ -76,6 +82,18 @@ function MarkdownPageView(props: { path: string }): JSX.Element {
     docs: () => mdHref(side(), props.path),
     source: () => hrefFor(side(), props.path),
     diff: () => diffLink(side(), props.path),
+  });
+  // b: the same file on the other side, the hash kept (D-349).
+  const diffFiles = useDiffFiles();
+  const location = useLocation();
+  useSideTarget(() => {
+    const s = side();
+    if (s === "tree") return undefined;
+    return markdownTarget(
+      pathTarget(diffFiles, s, props.path),
+      s,
+      () => location.hash,
+    );
   });
   // No lines here: the path.
   useCopyLocation(() => props.path);

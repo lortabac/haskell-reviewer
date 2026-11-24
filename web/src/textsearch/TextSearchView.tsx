@@ -25,11 +25,12 @@ import { CopyButton } from "../copy/CopyButton";
 import { lastFocus } from "../copy/lastFocus";
 import { location as locationText } from "../copy/names";
 import { hrefFor, lineHref } from "../files/paths";
-import { useCopyLocation } from "../keys/KeysProvider";
+import { useCopyLocation, useSideTarget } from "../keys/KeysProvider";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
 import { textTooLong, textTooLongText } from "../search/query";
-import { usePageSide } from "../session";
+import { onSide, usePageSide } from "../session";
+import { otherSide } from "../sides";
 import { createDelay } from "../ui/focus";
 import {
   groupHits,
@@ -124,6 +125,14 @@ function TextSearchPage(props: { q: string }): JSX.Element {
   );
 
   const focus = lastFocus(() => list, "[data-hit-key]");
+  // b: the same search on the other side (D-349). Never off.
+  useSideTarget(() => {
+    const s = side();
+    if (s === "tree") return undefined;
+    const o = otherSide(s);
+    const top = onSide(location.pathname, location.search, location.hash, o);
+    return { kind: "go", side: o, top };
+  });
   useCopyLocation(
     () => focus.get()?.dataset.copy ?? { say: "No location here." },
   );

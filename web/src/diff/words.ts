@@ -6,3 +6,8 @@ export const stepTexts = {
 };
 
 export const notDiffMode = "Not in diff mode.";
+
+// A file or module on one side only (D-349).
+export function onlyOn(side: string): string {
+  return `Only on ${side}.`;
+}

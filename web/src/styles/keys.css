@@ -26,6 +26,24 @@
   color: var(--color-muted);
 }
 
+/* View on base / head (D-349). Off: muted, still focusable, the
+   reason in a tip. */
+.side-switch {
+  padding: var(--space-1) var(--space-2);
+  white-space: nowrap;
+  border: 1px solid transparent;
+  border-radius: 4px;
+}
+
+.side-switch-off {
+  font: inherit;
+  color: var(--color-muted);
+  background: none;
+  border-style: dashed;
+  border-color: var(--color-muted);
+  cursor: default;
+}
+
 .shortcuts-button {
   padding: var(--space-1) var(--space-2);
   font: inherit;

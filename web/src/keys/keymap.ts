@@ -19,6 +19,7 @@ export type ActionId =
   | "docsView"
   | "sourceView"
   | "diffView"
+  | "otherSide"
   | "escape"
   | "help";
 
@@ -156,6 +157,14 @@ export const keymap: readonly KeyRow[] = [
     label: "Diff view",
     where: "Diff mode",
     control: "Diff link in the header; Show diff here (source)",
+  },
+  {
+    id: "otherSide",
+    bindings: ["b"],
+    keys: ["b"],
+    label: "View on the other side (base or head)",
+    where: "Diff mode",
+    control: "View on base / head in the header; Other side button (diff)",
   },
   {
     id: "escape",

@@ -21,7 +21,6 @@ import {
   docsHref,
   type ModulePage as Page,
   type ParsedModule,
-  type SourcePart,
   type TextOnlyModule,
 } from "../api/module";
 import { useDiffLink } from "../diff/link";
@@ -47,6 +46,7 @@ import { CopyButton } from "../copy/CopyButton";
 import { location as locationText } from "../copy/names";
 import { declCopyText, declLine } from "./copyText";
 import { useModules } from "../modules/store";
+import { useModuleSide } from "../modules/otherModule";
 import { firstCodeLine } from "./source";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
@@ -151,6 +151,12 @@ function DocsPage(props: { moduleRef: string }): JSX.Element {
       return path == null ? undefined : diffLink(side(), path);
     },
   });
+  // b: the module on the other side (ModulePage adds the
+  // declaration).
+  useModuleSide(
+    () => props.moduleRef,
+    (s, r) => docsHref(s, r),
+  );
   // A link in main took us here: put focus on the new heading, as the
   // old one is gone. Anchors may move it on (ModulePage).
   if (fromMain) {
@@ -507,6 +513,32 @@ function ModulePage(props: {
     const d = item === undefined ? undefined : handleOf(item);
     return d === undefined ? path : locationText(path, declLine(d));
   });
+  // The top-level declaration with focus, else the first on screen.
+  // The one leave saves first (focus in the header: the last one).
+  const declHere = (): AnyDecl | undefined => {
+    const r = rootEl();
+    const sec =
+      declFocus.get() ?? (r === undefined ? undefined : currentSection(r));
+    return sec === undefined
+      ? undefined
+      : ix().byHandle.get(Number(sec.dataset.handle));
+  };
+  const leaveDecl = () => {
+    const sec = declFocus.get();
+    if (sec !== undefined) saveDecl(sec);
+  };
+  // b: the same declaration on the other side (D-349). Missing there:
+  // that page's notice.
+  useModuleSide(
+    () => props.typedRef,
+    (s, r) => docsHref(s, r),
+    (s, r) => {
+      const d = declHere();
+      const id = d === undefined ? undefined : ix().idOfHandle(d.n);
+      return { href: docsHref(s, r, id ?? null) };
+    },
+    leaveDecl,
+  );
   // 2: the source at the declaration with focus, else the first on
   // screen.
   const diffLink = useDiffLink();
@@ -523,27 +555,15 @@ function ModulePage(props: {
     },
     at: (to) => {
       const path = props.page.path;
-      const r = rootEl();
       if (to !== "source" || path === null) return undefined;
-      // The one leave saves first (focus in the header: the last one).
-      const sec =
-        declFocus.get() ?? (r === undefined ? undefined : currentSection(r));
-      const d =
-        sec === undefined
-          ? undefined
-          : ix().byHandle.get(Number(sec.dataset.handle));
+      const d = declHere();
       const line =
-        d !== undefined && "source" in d
-          ? firstCodeLine(d.source as SourcePart[])
-          : undefined;
+        d !== undefined && "source" in d ? firstCodeLine(d.source) : undefined;
       return line === undefined
         ? { href: hrefFor(side(), path) }
         : { href: lineHref(side(), path, line), state: { codeJump: true } };
     },
-    leave: () => {
-      const sec = declFocus.get();
-      if (sec !== undefined) saveDecl(sec);
-    },
+    leave: leaveDecl,
   });
   const hidden = createMemo(() => hiddenCount(props.parsed));
   const ctx: PageCtx = {

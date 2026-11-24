@@ -9,6 +9,7 @@ import { Frame } from "./Frame";
 import { RevisionInfo } from "./header/RevisionInfo";
 import { KeysProvider, KeysStatus } from "./keys/KeysProvider";
 import { ShortcutsButton } from "./keys/ShortcutsButton";
+import { SideSwitch } from "./keys/SideSwitch";
 import { ViewSwitch } from "./keys/ViewSwitch";
 import { ProjectNotices } from "./modules/ProjectNotices";
 import { ModulesProvider } from "./modules/store";
@@ -73,7 +74,12 @@ export function Root(
                 sidebar={<Sidebar />}
                 revisions={<RevisionInfo current={current()} />}
                 notices={<ProjectNotices />}
-                views={<ViewSwitch />}
+                views={
+                  <>
+                    <ViewSwitch />
+                    <SideSwitch />
+                  </>
+                }
                 search={<SearchBox placement="header" />}
                 controls={
                   <>

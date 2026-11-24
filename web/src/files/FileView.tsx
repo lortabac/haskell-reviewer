@@ -19,6 +19,7 @@ import { decodeFileView, type FileView as View } from "../api/files";
 import { docsHref } from "../api/module";
 import { type LexedSource, type OutlineEntry } from "../api/source";
 import { useDiffLink } from "../diff/link";
+import { useDiffFiles } from "../diff/store";
 import { stepTo } from "../diff/rows";
 import { stepTexts } from "../diff/words";
 import { bannerText } from "../modules/notices";
@@ -29,6 +30,7 @@ import {
   useCopyLocation,
   useKeyActions,
   useKeys,
+  useSideTarget,
   useViewLinks,
   type ViewTarget,
 } from "../keys/KeysProvider";
@@ -68,6 +70,7 @@ import {
   changesWhy,
   createSourceChanges,
 } from "./sourceChanges";
+import { listState, otherFile, pathTarget, sourceTarget } from "./otherSide";
 import {
   apiFileUrl,
   hrefFor,
@@ -149,6 +152,14 @@ function FilePage(props: { path: string }): JSX.Element {
     missing: (to) =>
       to === "diff" ? (diffHooks?.why() ?? changesTexts.unchanged) : undefined,
     leave: () => leave?.(),
+  });
+  // b: the path only (FileText adds the line). Also binary files,
+  // symlinks and not found (it may be on the other side).
+  const diffFiles = useDiffFiles();
+  useSideTarget(() => {
+    const s = side();
+    if (s === "tree") return undefined;
+    return sourceTarget(pathTarget(diffFiles, s, props.path), s);
   });
   // A link in main (like a symlink target) took us here: its page is
   // gone, so put focus on the new heading instead of letting it drop to
@@ -672,6 +683,25 @@ function FileText(props: {
   useCopyLocation(() => {
     const r = api?.selectedLines();
     return r === undefined ? here() : locationText(props.path, r.from, r.to);
+  });
+  // b: the same line on the other side (D-349). Back: the cursor.
+  const diffFiles = useDiffFiles();
+  useSideTarget(() => {
+    const s = changes.side();
+    if (s === undefined) return undefined;
+    const o = {
+      side: s,
+      path: props.path,
+      ...listState(diffFiles, props.path),
+      state: changes.state(),
+    };
+    // The cursor only on use: no mapLine on every move.
+    return sourceTarget(
+      otherFile({ ...o, line: undefined }),
+      s,
+      () => otherFile({ ...o, line: api?.cursor().line }),
+      () => saveCursor(),
+    );
   });
   // 1: the docs of the declaration at the cursor.
   // eslint-disable-next-line solid/reactivity -- given once
