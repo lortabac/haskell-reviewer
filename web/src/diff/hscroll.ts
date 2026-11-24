@@ -1,11 +1,11 @@
 // Sideways scroll of the diff grid. The grid only calls a SideScroll:
 // scroll by, and the x range where a cell's text can be seen.
 //
-// Split (D-344, provisional): one offset for both sides. The box
-// scrolls natively (its scrollbar, wheel, trackpad), the halves stay
-// put (sticky) and the code cells move by --diff-x. All of it is here,
-// in the .diff-split-view CSS and in splitRow's .diff-clip box, so it
-// can be swapped.
+// Split (D-344): one offset for both sides. The box scrolls natively
+// (its scrollbar, wheel, trackpad), the halves stay put (sticky) and
+// the code cells move by --diff-x. All of it is here, in the
+// .diff-split-view CSS and in splitRow's .diff-clip box, so it can be
+// swapped.
 import { onCleanup } from "solid-js";
 import { setVar } from "../ui/cssom";
 

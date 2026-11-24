@@ -1,3 +1,4 @@
 [ui]
 theme = "blue"
 sidebar = "Files"
+diff-layout = "wide"

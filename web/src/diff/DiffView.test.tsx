@@ -3,6 +3,7 @@ import { cbor, stubFetch } from "../../test/fixtures";
 import { fakeLayout } from "../../test/layout";
 import { mountAppAt, unmountApp } from "../../test/mount";
 import { diffSession } from "../../test/sessions";
+import { defaultPrefs, type Prefs } from "../api/prefs";
 import { texts } from "./DiffView";
 
 // 21 lines a side; line 11 differs. Rows: 10 equal, 1 removed, 1
@@ -64,17 +65,19 @@ function open(
   url: string,
   routes: Record<string, [number, unknown]> = {},
   browse = false,
+  prefs?: Prefs,
 ) {
   const fetch = stubFetch({
     "/tok/api/diff/src/A.hs": [200, diffBody()],
     "/tok/api/file/base/src/A.hs": [200, file(baseText)],
     "/tok/api/file/head/src/A.hs": [200, file(headText)],
     "/tok/api/source/base/src/A.hs": [200, baseSource],
+    "/tok/api/prefs": [200, defaultPrefs],
     ...routes,
   });
   const root = mountAppAt(
     url,
-    undefined,
+    prefs,
     undefined,
     null,
     browse ? undefined : diffSession,
@@ -1114,6 +1117,201 @@ describe("DiffView", () => {
       expect(at()).toEqual({ side: "head", key: "0" });
       press("n");
       expect(at()).toEqual({ side: "head", key: "3" });
+    });
+
+    describe("layout pref (D-345)", () => {
+      const splitPrefs: Prefs = { ...defaultPrefs, diffLayout: "split" };
+      const group = (main: HTMLElement) =>
+        main.querySelector<HTMLElement>('[role="group"][aria-label="Layout"]')!;
+      const btn = (main: HTMLElement, name: string) =>
+        [...group(main).querySelectorAll("button")].find(
+          (b) => b.textContent === name,
+        )!;
+      const pressed = (main: HTMLElement) =>
+        [...group(main).querySelectorAll("button")].map((b) => [
+          b.textContent,
+          b.getAttribute("aria-pressed"),
+        ]);
+      const posts = (fetch: ReturnType<typeof stubFetch>) =>
+        (fetch.mock.calls as unknown as [string, RequestInit?][])
+          .filter((c) => c[1]?.method === "POST")
+          .map((c) => JSON.parse(c[1]?.body as string) as unknown);
+      const said = () =>
+        (document.querySelector(".keys-status")?.textContent ?? "").replace(
+          /\u00a0/g,
+          "",
+        );
+
+      it("the group: Unified pressed with the default pref", async () => {
+        const { main } = open("/tok/diff/src/A.hs");
+        await ready(main);
+        expect(pressed(main)).toEqual([
+          ["Unified", "true"],
+          ["Side by side", "false"],
+        ]);
+        expect(main.querySelector(".diff-half")).toBeNull();
+      });
+
+      it("the pref split: side by side, no URL needed", async () => {
+        const { main } = open("/tok/diff/src/A.hs", {}, false, splitPrefs);
+        await ready(main);
+        expect(main.querySelector(".diff-half")).not.toBeNull();
+        expect(pressed(main)).toEqual([
+          ["Unified", "false"],
+          ["Side by side", "true"],
+        ]);
+      });
+
+      it("a click saves the pref and switches", async () => {
+        const { main, fetch } = open("/tok/diff/src/A.hs");
+        await ready(main);
+        btn(main, "Side by side").click();
+        await vi.waitFor(() =>
+          expect(main.querySelector(".diff-half")).not.toBeNull(),
+        );
+        expect(posts(fetch)).toEqual([{ diffLayout: "split" }]);
+        expect(location.search).toBe("");
+        btn(main, "Unified").click();
+        await vi.waitFor(() =>
+          expect(main.querySelector(".diff-half")).toBeNull(),
+        );
+        expect(posts(fetch)).toEqual([
+          { diffLayout: "split" },
+          { diffLayout: "unified" },
+        ]);
+      });
+
+      it("a click on a ?layout= page drops it: replace, other params kept", async () => {
+        const { main, fetch } = open(
+          "/tok/diff/src/A.hs?ws=ignore&layout=split",
+          {
+            "/tok/api/diff/src/A.hs?ws=ignore": [
+              200,
+              diffBody({ ignoreWhitespace: true }),
+            ],
+          },
+          false,
+          splitPrefs,
+        );
+        await ready(main);
+        const before = history.length;
+        btn(main, "Unified").click();
+        await vi.waitFor(() => expect(location.search).toBe("?ws=ignore"));
+        expect(history.length).toBe(before);
+        expect(posts(fetch)).toEqual([{ diffLayout: "unified" }]);
+        await vi.waitFor(() =>
+          expect(main.querySelector(".diff-half")).toBeNull(),
+        );
+      });
+
+      it("?layout=unified over the pref split: unified, nothing saved", async () => {
+        const { main, fetch } = open(
+          "/tok/diff/src/A.hs?layout=unified",
+          {},
+          false,
+          splitPrefs,
+        );
+        await ready(main);
+        expect(main.querySelector(".diff-half")).toBeNull();
+        expect(pressed(main)).toEqual([
+          ["Unified", "true"],
+          ["Side by side", "false"],
+        ]);
+        expect(posts(fetch)).toEqual([]);
+      });
+
+      it("u flips, saves and says it", async () => {
+        const { main, fetch } = open("/tok/diff/src/A.hs");
+        await ready(main);
+        cellOf(main, 9, "head").focus();
+        press("u");
+        await vi.waitFor(() =>
+          expect(main.querySelector(".diff-half")).not.toBeNull(),
+        );
+        expect(said()).toBe("Side by side.");
+        expect(posts(fetch)).toEqual([{ diffLayout: "split" }]);
+        press("u");
+        await vi.waitFor(() =>
+          expect(main.querySelector(".diff-half")).toBeNull(),
+        );
+        expect(said()).toBe("Unified.");
+        expect(posts(fetch)).toEqual([
+          { diffLayout: "split" },
+          { diffLayout: "unified" },
+        ]);
+      });
+
+      it("a click on a ?layout= page keeps the hash and doesn't scroll", async () => {
+        const { main } = open(
+          "/tok/diff/src/A.hs?layout=split#head-L9",
+          {},
+          false,
+          splitPrefs,
+        );
+        await ready(main);
+        await new Promise((r) => setTimeout(r, 100));
+        const scrolled = vi.spyOn(window, "scrollTo");
+        btn(main, "Unified").click();
+        await vi.waitFor(() => expect(location.search).toBe(""));
+        expect(location.hash).toBe("#head-L9");
+        expect(scrolled).not.toHaveBeenCalled();
+      });
+
+      it("u: no new history entry; held down (repeat) it does nothing", async () => {
+        const { main, fetch } = open("/tok/diff/src/A.hs?layout=split");
+        await ready(main);
+        cellOf(main, 9, "head").focus();
+        const held = (document.activeElement ?? document.body).dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "u",
+            code: "KeyU",
+            repeat: true,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        expect(held).toBe(true);
+        await new Promise((r) => setTimeout(r, 100));
+        expect(location.search).toBe("?layout=split");
+        expect(posts(fetch)).toEqual([]);
+        const before = history.length;
+        press("u");
+        await vi.waitFor(() => expect(location.search).toBe(""));
+        expect(history.length).toBe(before);
+        await vi.waitFor(() => expect(said()).toBe("Unified."));
+      });
+
+      it("u on a ?layout= page: flips the URL's layout, drops the param", async () => {
+        // The pref is unified already: nothing to save.
+        const { main, fetch } = open("/tok/diff/src/A.hs?layout=split");
+        await ready(main);
+        cellOf(main, 9, "head").focus();
+        press("u");
+        await vi.waitFor(() => expect(location.search).toBe(""));
+        expect(posts(fetch)).toEqual([]);
+        await vi.waitFor(() => expect(said()).toBe("Unified."));
+      });
+
+      it("u when too narrow: the pref flips, the status says why", async () => {
+        fakeWidth(900);
+        const { main, fetch } = open("/tok/diff/src/A.hs");
+        await ready(main);
+        cellOf(main, 9, "head").focus();
+        press("u");
+        await vi.waitFor(() => expect(said()).toBe("Side by side."));
+        // The note says why; the key status doesn't say it twice.
+        await vi.waitFor(() =>
+          expect(main.querySelector(".diff-text .file-note")?.textContent).toBe(
+            "Side by side needs a wider window: showing unified.",
+          ),
+        );
+        expect(posts(fetch)).toEqual([{ diffLayout: "split" }]);
+        expect(pressed(main)).toEqual([
+          ["Unified", "false"],
+          ["Side by side", "true"],
+        ]);
+        expect(main.querySelector(".diff-half")).toBeNull();
+      });
     });
   });
 });

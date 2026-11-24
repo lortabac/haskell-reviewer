@@ -3,5 +3,6 @@ exported-only: false
 sidebar: modules
 single-key-shortcuts: true
 changed-only: false
+diff-layout: unified
 == warnings
 config.toml:3:18: ui.exported-only: expected a boolean, got an integer

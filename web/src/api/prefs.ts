@@ -8,6 +8,9 @@ export type Theme = (typeof themes)[number];
 export const sidebarViews = ["auto", "modules", "files"] as const;
 export type SidebarView = (typeof sidebarViews)[number];
 
+export const diffLayouts = ["unified", "split"] as const;
+export type DiffLayout = (typeof diffLayouts)[number];
+
 export type Prefs = {
   theme: Theme;
   exportedOnly: boolean;
@@ -16,6 +19,8 @@ export type Prefs = {
   singleKeyShortcuts: boolean;
   // Diff mode: the sidebar shows only changed entries (D-336).
   changedOnly: boolean;
+  // Diff view layout (D-345).
+  diffLayout: DiffLayout;
 };
 
 // Before the first GET answers (or if it's slow or fails): same as the
@@ -26,6 +31,7 @@ export const defaultPrefs: Prefs = {
   sidebar: "auto",
   singleKeyShortcuts: true,
   changedOnly: false,
+  diffLayout: "unified",
 };
 
 export function decodePrefs(value: unknown, path = "$"): Prefs {
@@ -36,5 +42,6 @@ export function decodePrefs(value: unknown, path = "$"): Prefs {
     sidebar: field(o, "sidebar", path, oneOf(sidebarViews)),
     singleKeyShortcuts: field(o, "singleKeyShortcuts", path, bool),
     changedOnly: field(o, "changedOnly", path, bool),
+    diffLayout: field(o, "diffLayout", path, oneOf(diffLayouts)),
   };
 }

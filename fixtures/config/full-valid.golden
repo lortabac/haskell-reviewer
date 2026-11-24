@@ -3,4 +3,5 @@ exported-only: true
 sidebar: files
 single-key-shortcuts: false
 changed-only: true
+diff-layout: split
 == warnings

@@ -28,6 +28,7 @@ import {
 } from "../api/diff";
 import { decodeFileView } from "../api/files";
 import { docsHref } from "../api/module";
+import { diffLayouts } from "../api/prefs";
 import type { LexedSource } from "../api/source";
 import { CopyButton } from "../copy/CopyButton";
 import {
@@ -47,6 +48,7 @@ import {
 import { declAtLine } from "../keys/outline";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
+import { usePrefs } from "../prefs/store";
 import { useSession } from "../session";
 import type { DiffSessionSide } from "../sides";
 import { createSource } from "../source/createSource";
@@ -88,6 +90,7 @@ import {
   diffPathFromPathname,
   layoutFromSearch,
   parseDiffHash,
+  searchWithLayout,
   searchWithWs,
   wsFromSearch,
 } from "./urls";
@@ -112,6 +115,14 @@ export const texts = {
   noMore: "No more changes.",
   noDocs: "No docs for this page.",
   tooNarrow: "Side by side needs a wider window: showing unified.",
+  saidUnified: "Unified.",
+  saidSideBySide: "Side by side.",
+  layoutGroup: "Layout",
+};
+
+const layoutLabels: Record<DiffLayout, string> = {
+  unified: "Unified",
+  split: "Side by side",
 };
 
 export function DiffView(): JSX.Element {
@@ -389,6 +400,24 @@ function DiffPage(props: { path: string }): JSX.Element {
   }, false);
   // Ignore whitespace: also when -w is on or too slow, to turn it off.
   const toolbarShown = () => rowsShown() || tooSlow() || ws();
+  // The URL's layout wins for this page; else the pref (D-345).
+  const prefs = usePrefs();
+  const wanted = (): DiffLayout =>
+    layoutFromSearch(location.search) ?? prefs.diffLayout();
+  // A click or u: save the pref, and drop layout= so the pref is the
+  // truth again. Replace: no history entry.
+  // True if it dropped layout= (a navigation follows).
+  const setLayout = (l: DiffLayout): boolean => {
+    prefs.setDiffLayout(l);
+    if (layoutFromSearch(location.search) === undefined) return false;
+    navigate(
+      diffHref(props.path) +
+        searchWithLayout(location.search, undefined) +
+        location.hash,
+      { replace: true, scroll: false },
+    );
+    return true;
+  };
   const [whole, setWhole] = createSignal(false);
   // Same URL, ws on or off: a new history entry, same hash, other
   // params kept (D-342).
@@ -490,6 +519,23 @@ function DiffPage(props: { path: string }): JSX.Element {
               {texts.ws}
             </button>
             <Show when={rowsShown()}>
+              <div
+                class="diff-layout"
+                role="group"
+                aria-label={texts.layoutGroup}
+              >
+                <For each={diffLayouts}>
+                  {(l) => (
+                    <button
+                      type="button"
+                      aria-pressed={wanted() === l}
+                      onClick={() => setLayout(l)}
+                    >
+                      {layoutLabels[l]}
+                    </button>
+                  )}
+                </For>
+              </div>
               <span class="code-hint">{texts.hint}</span>
             </Show>
           </div>
@@ -526,6 +572,8 @@ function DiffPage(props: { path: string }): JSX.Element {
                   path={props.path}
                   rows={m.rows}
                   whole={whole()}
+                  wanted={wanted()}
+                  setLayout={setLayout}
                   base={{
                     side: "base",
                     path: basePathOf(m.view),
@@ -596,6 +644,9 @@ function DiffBody(props: {
   base: Pane;
   head: Pane;
   whole: boolean;
+  // The layout the user wants (URL, else pref), and a way to change it.
+  wanted: DiffLayout;
+  setLayout: (l: DiffLayout) => boolean;
   setHooks: (h: BodyHooks | undefined) => void;
   // True once: focus the grid when it is in (after Try again).
   takeFocus: () => boolean;
@@ -638,12 +689,11 @@ function DiffBody(props: {
   // Back came here before the highlight: once it comes, land again.
   let land: { row: number; col: number; side: DiffSessionSide } | undefined;
 
-  // Unified or side by side (D-344): the URL's, when it fits; else
-  // unified, with a note. Expansion is kept over a switch, and so is
-  // the cursor (carried by onLeave / start).
+  // Unified or side by side (D-344): the wanted one (URL, else pref),
+  // when it fits; else unified, with a note. Expansion is kept over a
+  // switch, and so is the cursor (carried by onLeave / start).
   const [shown, setShown] = createSignal(defaultShown(rows));
-  const wanted = (): DiffLayout =>
-    layoutFromSearch(location.search) ?? "unified";
+  const wanted = () => props.wanted;
   let wrap!: HTMLDivElement;
   let remProbe!: HTMLDivElement;
   const fits = createFits(
@@ -815,6 +865,13 @@ function DiffBody(props: {
     prev: key(hunks, -1),
     nextChange: key(blocks, 1),
     prevChange: key(blocks, -1),
+    // Flip what is wanted, even if too narrow to show it.
+    layout: () => {
+      const l: DiffLayout = wanted() === "split" ? "unified" : "split";
+      const words = l === "unified" ? texts.saidUnified : texts.saidSideBySide; // too narrow: the note says why
+      // A dropped layout= changes the URL, which clears the status.
+      return props.setLayout(l) ? { afterNav: words } : words;
+    },
   });
   // eslint-disable-next-line solid/reactivity -- given once
   props.setHooks({

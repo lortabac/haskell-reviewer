@@ -46,7 +46,7 @@ import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text)
 import HaskellReviewer.Core.CommitFiles (OutsideChanges (..))
-import HaskellReviewer.Core.Config (sidebarName, themeName)
+import HaskellReviewer.Core.Config (diffLayoutName, sidebarName, themeName)
 import HaskellReviewer.Core.Eol (Filtering (..))
 import HaskellReviewer.Core.FileContent
   ( FileContent (..),
@@ -526,7 +526,8 @@ encodeIndexing (Generation g) side p =
 -- | GET and POST api\/prefs: every preference, defaults filled in.
 --
 -- > {"theme":"system","exportedOnly":false,"sidebar":"auto",
--- >  "singleKeyShortcuts":true,"changedOnly":false}
+-- >  "singleKeyShortcuts":true,"changedOnly":false,
+-- >  "diffLayout":"unified"}
 --
 -- No generation: preferences don't belong to a snapshot (D-197).
 encodePrefs :: Effective -> LBS.ByteString
@@ -537,6 +538,7 @@ encodePrefs e =
       <> ("sidebar" .= sidebarName e.sidebar)
       <> ("singleKeyShortcuts" .= e.singleKeyShortcuts)
       <> ("changedOnly" .= e.changedOnly)
+      <> ("diffLayout" .= diffLayoutName e.diffLayout)
 
 -- | GET api\/search\/\<side>?q=…:
 --

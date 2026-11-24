@@ -1,5 +1,5 @@
 // The UI preferences (theme, exported only, sidebar view, single-key
-// shortcuts, changed only): kept in a signal each, changed
+// shortcuts, changed only, diff layout): kept in a signal each, changed
 // optimistically, saved with api/prefs (D-197, D-203). The first GET
 // happens in main.tsx, before render (so the theme is right from the
 // first paint); this provider only takes that value and keeps it in
@@ -18,6 +18,7 @@ import {
 import { postJson } from "../api/client";
 import {
   decodePrefs,
+  type DiffLayout,
   type Prefs,
   type SidebarView,
   type Theme,
@@ -35,6 +36,8 @@ export interface PrefsApi {
   setSingleKeyShortcuts: (v: boolean) => void;
   changedOnly: Accessor<boolean>;
   setChangedOnly: (v: boolean) => void;
+  diffLayout: Accessor<DiffLayout>;
+  setDiffLayout: (v: DiffLayout) => void;
   // A save failed: a polite status for the header's live region. Clears
   // once every key's latest save has succeeded.
   status: Accessor<string | undefined>;
@@ -47,6 +50,7 @@ const keys: readonly Key[] = [
   "sidebar",
   "singleKeyShortcuts",
   "changedOnly",
+  "diffLayout",
 ];
 
 const PrefsContext = createContext<PrefsApi>();
@@ -70,6 +74,9 @@ export function PrefsProvider(
   );
   const [changedOnly, setChangedOnlySignal] = createSignal(
     props.initial.changedOnly,
+  );
+  const [diffLayout, setDiffLayoutSignal] = createSignal(
+    props.initial.diffLayout,
   );
   const [status, setStatusSignal] = createSignal<string>();
 
@@ -107,6 +114,7 @@ export function PrefsProvider(
     sidebar: false,
     singleKeyShortcuts: false,
     changedOnly: false,
+    diffLayout: false,
   };
   // A plain promise, read once (not a reactive value): no effect
   // needed, but onMount gives eslint-plugin-solid the "one-time" scope
@@ -118,6 +126,7 @@ export function PrefsProvider(
       if (!touched.sidebar) setSidebarSignal(p.sidebar);
       if (!touched.singleKeyShortcuts) setShortcutsSignal(p.singleKeyShortcuts);
       if (!touched.changedOnly) setChangedOnlySignal(p.changedOnly);
+      if (!touched.diffLayout) setDiffLayoutSignal(p.diffLayout);
     });
   });
 
@@ -134,6 +143,7 @@ export function PrefsProvider(
     sidebar: 0,
     singleKeyShortcuts: 0,
     changedOnly: 0,
+    diffLayout: 0,
   };
   const failed: Record<Key, boolean> = {
     theme: false,
@@ -141,6 +151,7 @@ export function PrefsProvider(
     sidebar: false,
     singleKeyShortcuts: false,
     changedOnly: false,
+    diffLayout: false,
   };
   const updateStatus = (): void => {
     setStatus(
@@ -210,6 +221,13 @@ export function PrefsProvider(
       touched.changedOnly = true;
       setChangedOnlySignal(v);
       save("changedOnly", { changedOnly: v });
+    },
+    diffLayout,
+    setDiffLayout: (v) => {
+      if (v === diffLayout()) return;
+      touched.diffLayout = true;
+      setDiffLayoutSignal(v);
+      save("diffLayout", { diffLayout: v });
     },
     status,
   };

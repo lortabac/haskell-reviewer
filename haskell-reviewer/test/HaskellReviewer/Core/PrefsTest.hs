@@ -11,7 +11,8 @@ import Data.ByteString.Lazy qualified as LBS
 import Data.List (sort)
 import Data.Text (Text)
 import HaskellReviewer.Core.Config
-  ( SidebarView (..),
+  ( DiffLayout (..),
+    SidebarView (..),
     Theme (..),
     UiDefaults (..),
     builtinDefaults,
@@ -38,7 +39,8 @@ tests =
                   exportedOnly = True,
                   sidebar = SidebarFiles,
                   singleKeyShortcuts = True,
-                  changedOnly = False
+                  changedOnly = False,
+                  diffLayout = LayoutUnified
                 }
             configOff =
               UiDefaults
@@ -46,17 +48,26 @@ tests =
                   exportedOnly = True,
                   sidebar = SidebarFiles,
                   singleKeyShortcuts = False,
-                  changedOnly = True
+                  changedOnly = True,
+                  diffLayout = LayoutSplit
                 }
         effective builtinDefaults noPrefs @?= eff ThemeSystem False SidebarAuto
         effective configOff noPrefs
-          @?= changedEff True (shortcutsEff False (eff ThemeDark True SidebarFiles))
+          @?= layoutEff
+            LayoutSplit
+            (changedEff True (shortcutsEff False (eff ThemeDark True SidebarFiles)))
         effective
           configOff
           (withChangedOnly (Just False) (withShortcuts (Just True) noPrefs))
-          @?= eff ThemeDark True SidebarFiles
+          @?= layoutEff LayoutSplit (eff ThemeDark True SidebarFiles)
         effective config (withChangedOnly (Just True) noPrefs)
           @?= changedEff True (eff ThemeDark True SidebarFiles)
+        effective config (withLayout (Just LayoutSplit) noPrefs)
+          @?= layoutEff LayoutSplit (eff ThemeDark True SidebarFiles)
+        effective configOff (withLayout (Just LayoutUnified) noPrefs)
+          @?= layoutEff
+            LayoutUnified
+            (changedEff True (shortcutsEff False (eff ThemeDark True SidebarFiles)))
         effective config (withShortcuts (Just False) noPrefs)
           @?= shortcutsEff False (eff ThemeDark True SidebarFiles)
         effective config noPrefs @?= eff ThemeDark True SidebarFiles
@@ -82,7 +93,10 @@ tests =
         p4 <- decoded "{\"changedOnly\":true,\"theme\":\"dark\"}"
         patchPrefs p4
           @?= withChangedOnly (Just True) (prefsOf (Just ThemeDark) Nothing Nothing)
-        patchKeys p4 @?= ["theme", "changedOnly"],
+        patchKeys p4 @?= ["theme", "changedOnly"]
+        p5 <- decoded "{\"diffLayout\":\"split\"}"
+        patchPrefs p5 @?= withLayout (Just LayoutSplit) noPrefs
+        patchKeys p5 @?= ["diffLayout"],
       testCase "decodePatch: bad ones, with a reason" $
         mapM_
           ( \(body, why) ->
@@ -106,7 +120,10 @@ tests =
             ("{\"singleKeyShortcuts\":null}", badShortcuts),
             ("{\"singleKeyShortcuts\":0}", badShortcuts),
             ("{\"changedOnly\":\"yes\"}", "changedOnly: expected true or false"),
-            ("{\"changedOnly\":[]}", "changedOnly: expected true or false")
+            ("{\"changedOnly\":[]}", "changedOnly: expected true or false"),
+            ("{\"diffLayout\":\"wide\"}", badLayout),
+            ("{\"diffLayout\":\"Split\"}", badLayout),
+            ("{\"diffLayout\":true}", badLayout)
           ],
       testCase "ui.json: unknown keys and values we don't understand are kept" $
         decodePrefsFile
@@ -177,10 +194,11 @@ goldens =
         ( "full",
           PrefsFile
             { prefs =
-                withChangedOnly (Just True) $
-                  withShortcuts
-                    (Just False)
-                    (prefsOf (Just ThemeLight) (Just False) (Just SidebarModules)),
+                withLayout (Just LayoutSplit) $
+                  withChangedOnly (Just True) $
+                    withShortcuts
+                      (Just False)
+                      (prefsOf (Just ThemeLight) (Just False) (Just SidebarModules)),
               others =
                 KeyMap.fromList
                   [("zz", Aeson.Bool True), ("aa", Aeson.String "x"), ("mm", Aeson.Null)]
@@ -214,6 +232,7 @@ genFile = do
   sidebar <- Gen.maybe (Gen.element [SidebarAuto, SidebarModules, SidebarFiles])
   shortcuts <- Gen.maybe Gen.bool
   changed <- Gen.maybe Gen.bool
+  layout <- Gen.maybe (Gen.element [LayoutUnified, LayoutSplit])
   others <- Gen.list (Range.linear 0 5) ((,) <$> genKey <*> genValue)
   pure
     PrefsFile
@@ -223,7 +242,8 @@ genFile = do
               exportedOnly = exportedOnly,
               sidebar = sidebar,
               singleKeyShortcuts = shortcuts,
-              changedOnly = changed
+              changedOnly = changed,
+              diffLayout = layout
             },
         others = KeyMap.fromList [(Key.fromText k, v) | (k, v) <- others]
       }
@@ -239,7 +259,8 @@ genFile = do
         "exportedOnly",
         "sidebar",
         "singleKeyShortcuts",
-        "changedOnly"
+        "changedOnly",
+        "diffLayout"
       ]
     genValue =
       Gen.choice
@@ -268,13 +289,16 @@ badTheme = "theme: expected one of \"system\", \"light\", \"dark\""
 badSidebar :: Text
 badSidebar = "sidebar: expected one of \"auto\", \"modules\", \"files\""
 
+badLayout :: Text
+badLayout = "diffLayout: expected one of \"unified\", \"split\""
+
 badShortcuts :: Text
 badShortcuts = "singleKeyShortcuts: expected true or false"
 
 nums :: [Maybe Int]
 nums = [Just 1, Nothing]
 
--- | Shortcuts on and changed only off, the defaults.
+-- | Shortcuts on, changed only off, layout unified: the defaults.
 eff :: Theme -> Bool -> SidebarView -> Effective
 eff t e s =
   Effective
@@ -282,7 +306,8 @@ eff t e s =
       exportedOnly = e,
       sidebar = s,
       singleKeyShortcuts = True,
-      changedOnly = False
+      changedOnly = False,
+      diffLayout = LayoutUnified
     }
 
 shortcutsEff :: Bool -> Effective -> Effective
@@ -292,7 +317,8 @@ shortcutsEff k e =
       exportedOnly = e.exportedOnly,
       sidebar = e.sidebar,
       singleKeyShortcuts = k,
-      changedOnly = e.changedOnly
+      changedOnly = e.changedOnly,
+      diffLayout = e.diffLayout
     }
 
 changedEff :: Bool -> Effective -> Effective
@@ -302,11 +328,23 @@ changedEff c e =
       exportedOnly = e.exportedOnly,
       sidebar = e.sidebar,
       singleKeyShortcuts = e.singleKeyShortcuts,
-      changedOnly = c
+      changedOnly = c,
+      diffLayout = e.diffLayout
     }
 
--- | Prefs with these keys, shortcuts and changed only not set. Record updates would be
--- ambiguous here.
+layoutEff :: DiffLayout -> Effective -> Effective
+layoutEff l e =
+  Effective
+    { theme = e.theme,
+      exportedOnly = e.exportedOnly,
+      sidebar = e.sidebar,
+      singleKeyShortcuts = e.singleKeyShortcuts,
+      changedOnly = e.changedOnly,
+      diffLayout = l
+    }
+
+-- | Prefs with these keys; shortcuts, changed only and layout not set.
+-- Record updates would be ambiguous here.
 prefsOf :: Maybe Theme -> Maybe Bool -> Maybe SidebarView -> Prefs
 prefsOf t e s =
   Prefs
@@ -314,7 +352,8 @@ prefsOf t e s =
       exportedOnly = e,
       sidebar = s,
       singleKeyShortcuts = Nothing,
-      changedOnly = Nothing
+      changedOnly = Nothing,
+      diffLayout = Nothing
     }
 
 withShortcuts :: Maybe Bool -> Prefs -> Prefs
@@ -324,7 +363,8 @@ withShortcuts k p =
       exportedOnly = p.exportedOnly,
       sidebar = p.sidebar,
       singleKeyShortcuts = k,
-      changedOnly = p.changedOnly
+      changedOnly = p.changedOnly,
+      diffLayout = p.diffLayout
     }
 
 withChangedOnly :: Maybe Bool -> Prefs -> Prefs
@@ -334,5 +374,17 @@ withChangedOnly c p =
       exportedOnly = p.exportedOnly,
       sidebar = p.sidebar,
       singleKeyShortcuts = p.singleKeyShortcuts,
-      changedOnly = c
+      changedOnly = c,
+      diffLayout = p.diffLayout
+    }
+
+withLayout :: Maybe DiffLayout -> Prefs -> Prefs
+withLayout l p =
+  Prefs
+    { theme = p.theme,
+      exportedOnly = p.exportedOnly,
+      sidebar = p.sidebar,
+      singleKeyShortcuts = p.singleKeyShortcuts,
+      changedOnly = p.changedOnly,
+      diffLayout = l
     }

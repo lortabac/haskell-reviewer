@@ -3,5 +3,6 @@ exported-only: false
 sidebar: auto
 single-key-shortcuts: true
 changed-only: false
+diff-layout: unified
 == warnings
 config.toml:4:2: key "ui" is a table that is already closed; file ignored

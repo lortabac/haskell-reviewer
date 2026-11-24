@@ -34,7 +34,12 @@ import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
 import HaskellReviewer.Core.CommitFiles (OutsideChanges (..))
-import HaskellReviewer.Core.Config (SidebarView (..), Theme (..), UiDefaults (..))
+import HaskellReviewer.Core.Config
+  ( DiffLayout (..),
+    SidebarView (..),
+    Theme (..),
+    UiDefaults (..),
+  )
 import HaskellReviewer.Core.Eol (Filtering (..))
 import HaskellReviewer.Core.FileContent
   ( FileContent (..),
@@ -287,7 +292,8 @@ cases =
             exportedOnly = True,
             sidebar = SidebarModules,
             singleKeyShortcuts = False,
-            changedOnly = True
+            changedOnly = True,
+            diffLayout = LayoutSplit
           }
         (Left HomeUnset)
     answering r =

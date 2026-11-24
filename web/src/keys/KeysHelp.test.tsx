@@ -56,6 +56,10 @@ describe("the ? overlay", () => {
     );
     const rows = dialog()?.querySelectorAll("tbody tr") ?? [];
     expect(rows.length).toBe(keymap.length);
+    expect(rows.length).toBe(16);
+    const u = [...rows].find((r) => r.textContent?.includes("Unified or side"));
+    expect(u?.textContent).toContain("u");
+    expect(u?.textContent).toContain("Unified / Side by side buttons");
     expect(dialog()?.textContent).toContain("Go to definition");
   });
 

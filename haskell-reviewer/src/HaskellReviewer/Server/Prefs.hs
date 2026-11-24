@@ -125,7 +125,7 @@ warmUpPrefs = do
       ( "POST",
         json,
         "{\"theme\":\"light\",\"exportedOnly\":true,\"sidebar\":\"files\",\
-        \\"singleKeyShortcuts\":false,\"changedOnly\":true}"
+        \\"singleKeyShortcuts\":false,\"changedOnly\":true,\"diffLayout\":\"split\"}"
       ),
       ("POST", json, "{"),
       ("POST", json, "[]"),
@@ -135,6 +135,7 @@ warmUpPrefs = do
       ("POST", json, "{\"exportedOnly\":null}"),
       ("POST", json, "{\"singleKeyShortcuts\":\"no\"}"),
       ("POST", json, "{\"changedOnly\":1}"),
+      ("POST", json, "{\"diffLayout\":\"wide\"}"),
       ("POST", json, BS.replicate (prefsBodyLimit + 1) 32),
       ("POST", [], "{}"),
       ("PUT", json, "{}")
@@ -151,6 +152,7 @@ warmUpPrefs = do
     )
     [ "{\"version\":1,\"theme\":\"dark\",\"exportedOnly\":true,\
       \\"singleKeyShortcuts\":false,\"sidebar\":\"high\",\"changedOnly\":true,\
+      \\"diffLayout\":\"split\",\
       \\"other\":[1,\"x\",null,{},2.5]}",
       "",
       "[]",

@@ -4,6 +4,7 @@ module HaskellReviewer.Core.Config
   ( -- * Types
     Theme (..),
     SidebarView (..),
+    DiffLayout (..),
     UiDefaults (..),
     ParsedConfig (..),
     ConfigWarning (..),
@@ -26,6 +27,8 @@ module HaskellReviewer.Core.Config
     themeFromName,
     sidebarName,
     sidebarFromName,
+    diffLayoutName,
+    diffLayoutFromName,
   )
 where
 
@@ -59,6 +62,7 @@ has one table:
   sidebar = "auto"        # auto, modules or files
   single-key-shortcuts = true
   changed-only = false    # diff mode: only changed entries in the sidebar
+  diff-layout = "unified" # unified or split (side by side)
 
 These are defaults: what the user picks in the page (ui.json) wins.
 
@@ -93,6 +97,13 @@ data SidebarView
   | SidebarFiles
   deriving (Eq, Show)
 
+-- | How the diff view lays out its rows (D-345).
+data DiffLayout
+  = LayoutUnified
+  | -- | Side by side.
+    LayoutSplit
+  deriving (Eq, Show)
+
 -- | The @[ui]@ table: defaults for the page's preferences.
 data UiDefaults = UiDefaults
   { theme :: !Theme,
@@ -101,7 +112,9 @@ data UiDefaults = UiDefaults
     -- | Single-key shortcuts (@j@, @/@) on. SPEC §5.3, D-45.
     singleKeyShortcuts :: !Bool,
     -- | Diff mode: the sidebar shows only changed entries. D-336.
-    changedOnly :: !Bool
+    changedOnly :: !Bool,
+    -- | Diff view layout. D-345.
+    diffLayout :: !DiffLayout
   }
   deriving (Eq, Show)
 
@@ -129,7 +142,8 @@ builtinDefaults =
       exportedOnly = False,
       sidebar = SidebarAuto,
       singleKeyShortcuts = True,
-      changedOnly = False
+      changedOnly = False,
+      diffLayout = LayoutUnified
     }
 
 -- | The defaults from a config file, and its problems. See Note
@@ -209,6 +223,19 @@ sidebarFromName = \case
   "files" -> Just SidebarFiles
   _ -> Nothing
 
+-- | As in config.toml and on the wire.
+diffLayoutName :: DiffLayout -> Text
+diffLayoutName = \case
+  LayoutUnified -> "unified"
+  LayoutSplit -> "split"
+
+-- | The other way round.
+diffLayoutFromName :: Text -> Maybe DiffLayout
+diffLayoutFromName = \case
+  "unified" -> Just LayoutUnified
+  "split" -> Just LayoutSplit
+  _ -> Nothing
+
 -- * Internal
 
 -- | The defaults so far, and the warnings, in no order.
@@ -228,6 +255,8 @@ uiKey acc@(d, ws) key (keyPos, value) = case key of
   "exported-only" -> bool (\b -> d {exportedOnly = b})
   "single-key-shortcuts" -> bool (\b -> d {singleKeyShortcuts = b})
   "changed-only" -> bool (\b -> d {changedOnly = b})
+  "diff-layout" ->
+    enum diffLayoutFromName "unified or split" (\l -> d {diffLayout = l})
   _ -> case value of
     Table' _ _ -> warn acc keyPos ("unknown table [ui." <> key <> "]")
     _ -> warn acc keyPos ("unknown key " <> quoted ("ui." <> key))
