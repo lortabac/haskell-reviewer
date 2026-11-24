@@ -61,6 +61,11 @@ export function offsetOf(index: LineIndex, n: number, col: number): number {
   return Math.min(Math.max(start + col, start), end);
 }
 
+// The whole text without its BOM (what a copy of all of it gives).
+export function wholeText(text: string, index: LineIndex): string {
+  return text.slice(index.bom ? 1 : 0);
+}
+
 function columns(text: string, from: number, to: number): number {
   let col = 0;
   for (let i = from; i < to; i++) {

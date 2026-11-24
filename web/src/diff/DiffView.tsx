@@ -30,7 +30,9 @@ import { decodeFileView } from "../api/files";
 import { docsHref } from "../api/module";
 import { diffLayouts } from "../api/prefs";
 import type { LexedSource } from "../api/source";
+import { copyText } from "../copy/clipboard";
 import { CopyButton } from "../copy/CopyButton";
+import { location as locationText, targetCopyText } from "../copy/names";
 import {
   apiFileUrl,
   hrefFor,
@@ -40,6 +42,7 @@ import {
 } from "../files/paths";
 import {
   type KeyHandler,
+  useCopyLocation,
   useKeyActions,
   useKeys,
   useViewLinks,
@@ -49,7 +52,8 @@ import { declAtLine } from "../keys/outline";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
 import { usePrefs } from "../prefs/store";
-import { useSession } from "../session";
+import { indexRefs, useModules } from "../modules/store";
+import { usePageSide, useSession } from "../session";
 import type { DiffSessionSide } from "../sides";
 import { createSource } from "../source/createSource";
 import { highlightedLine } from "../source/decor";
@@ -58,6 +62,7 @@ import { type FindApi, FindBar, type FindHandle } from "../source/FindBar";
 import { type Highlight, highlightOf } from "../source/highlight";
 import { isCodeJump, shouldReland } from "../source/landing";
 import { jumpOf, linkInfos } from "../source/links";
+import { tokenAt } from "../source/refTarget";
 import {
   type Origin,
   onLeaveClick,
@@ -67,12 +72,8 @@ import {
 import { lineIndex, lineText } from "../source/lines";
 import { createDelay } from "../ui/focus";
 import { bringOnPage, inBox } from "../ui/scroll";
-import {
-  type DiffApi,
-  DiffGrid,
-  type GridState,
-  type SideText,
-} from "./DiffGrid";
+import { type DiffApi, DiffGrid, type GridState } from "./DiffGrid";
+import type { SideText } from "./copy";
 import { createFits } from "./fit";
 import {
   cellAt,
@@ -500,8 +501,9 @@ function DiffPage(props: { path: string }): JSX.Element {
       return true;
     },
     // After the bar's own Esc: a bar open while focus is elsewhere.
+    // Else the selection (and select-all) goes.
     escape: () => {
-      if (findBar?.isOpen() !== true) return false;
+      if (findBar?.isOpen() !== true) return hooks?.clearSelection() ?? false;
       findBar.close();
       return true;
     },
@@ -716,6 +718,8 @@ interface BodyHooks {
   stepChange: (dir: 1 | -1) => string | undefined;
   // The find bar's view of the grid, in the finder's lines.
   find: FindApi;
+  // Esc: the grid's clearSelection.
+  clearSelection: () => boolean;
 }
 
 // Each side's finder (find.ts), for the rows they were made with.
@@ -1044,8 +1048,70 @@ function DiffBody(props: {
       return r === true ? undefined : r;
     },
     find: findApi,
+    clearSelection: () => api?.clearSelection() ?? false,
   });
   onCleanup(() => props.setHooks(undefined));
+
+  // y: the name at the cursor, else its place. Copy location: the
+  // selected lines, else the cursor's line. A place is path:line on
+  // the cursor's side (base: the old path of a rename), no side
+  // prefix, not a URL (D-347).
+  const keys = useKeys();
+  const modules = useModules();
+  const pageSide = usePageSide();
+  // Module names by ref: the page side's tree, else the other one.
+  const otherRefs = createMemo(() => {
+    const t = modules.other();
+    return t === undefined ? undefined : indexRefs(t);
+  });
+  const refsOf = (s: DiffSessionSide) =>
+    s === pageSide() ? modules.byRef() : otherRefs();
+  // The cursor's side and line; a gap: head's first line.
+  const cursorLine = (): { side: DiffSessionSide; line: number } => {
+    const c = api?.cursor();
+    if (c === undefined) return { side: "head", line: 1 };
+    const side = c.gap ? "head" : c.side;
+    return { side, line: lineOn(rows, c.row, side) };
+  };
+  const here = () => {
+    const c = cursorLine();
+    return locationText(paneOf(c.side).path, c.line);
+  };
+  const nameAtCursor = (): string | undefined => {
+    const c = api?.cursor();
+    if (c === undefined || c.gap) return undefined;
+    const p = paneOf(c.side);
+    const h = p.hl();
+    const lexed = p.lexed();
+    if (h === undefined || lexed === undefined) return undefined;
+    const t = p.text;
+    const tok = tokenAt(
+      h.runs,
+      lexed.targets,
+      (n) => lineText(t.text, t.index, n),
+      { line: lineOn(rows, c.row, c.side), col: c.col },
+    );
+    const target = tok?.target;
+    if (tok === undefined || target === undefined) return undefined;
+    const refs = refsOf(c.side);
+    return targetCopyText(
+      tok.text,
+      target,
+      (ref) => refs?.get(ref)?.name ?? undefined,
+    );
+  };
+  useKeyActions({
+    copy: () => {
+      void copyText(nameAtCursor() ?? here(), keys?.say);
+      return true;
+    },
+  });
+  useCopyLocation(() => {
+    const r = api?.selectedRange();
+    return r === undefined
+      ? here()
+      : locationText(paneOf(r.side).path, r.from, r.to);
+  });
 
   // A same-file code link: the cursor goes to its target's column.
   const sameFileJump = (e: MouseEvent, a: HTMLAnchorElement) => {

@@ -21,14 +21,8 @@ const after: Point = { kind: "after" };
 // .code-row[data-line] > (.code-num, .code-cell). Rows are in line
 // order.
 export function domPoint(view: Element, node: Node, offset: number): Point {
-  if (!view.contains(node)) {
-    // Compare with the point just before the view.
-    const r = document.createRange();
-    r.setStartBefore(view);
-    r.collapse(true);
-    return r.comparePoint(node, offset) <= 0 ? before : after;
-  }
-  if (node === view) return offset === 0 ? before : after;
+  const out = outside(view, node, offset);
+  if (out !== undefined) return out === "before" ? before : after;
   const el = node instanceof Element ? node : node.parentElement;
   const cell = el?.closest(".code-cell");
   if (cell !== null && cell !== undefined) {
@@ -51,6 +45,24 @@ export function domPoint(view: Element, node: Node, offset: number): Point {
     return { kind: "at", line: lineOf(row), col: 0 };
   }
   return before;
+}
+
+// A point outside the view, or at its own ends: before or after it.
+// undefined: inside.
+export function outside(
+  view: Element,
+  node: Node,
+  offset: number,
+): "before" | "after" | undefined {
+  if (!view.contains(node)) {
+    // Compare with the point just before the view.
+    const r = document.createRange();
+    r.setStartBefore(view);
+    r.collapse(true);
+    return r.comparePoint(node, offset) <= 0 ? "before" : "after";
+  }
+  if (node === view) return offset === 0 ? "before" : "after";
+  return undefined;
 }
 
 // The code links of a cell, as stops for → and ←.
@@ -166,21 +178,51 @@ export function copiedText(
   index: LineIndex,
   sel: Selection,
 ): string | undefined {
+  return copiedWith(
+    sel,
+    (n, o) => domPoint(view, n, o),
+    (a, b) => textBetween(text, index, a, b),
+  );
+}
+
+// copiedText for any view: point maps a DOM point (before, after, or
+// "at" in the view), between gives the text from a to b (a first).
+export function copiedWith<P extends { kind: string }>(
+  sel: Selection,
+  point: (node: Node, offset: number) => P,
+  between: (a: P, b: P) => string,
+): string | undefined {
   const parts: string[] = [];
   let ours = false;
   for (let i = 0; i < sel.rangeCount; i++) {
     const r = sel.getRangeAt(i);
-    const a = domPoint(view, r.startContainer, r.startOffset);
-    const b = domPoint(view, r.endContainer, r.endOffset);
+    const a = point(r.startContainer, r.startOffset);
+    const b = point(r.endContainer, r.endOffset);
     if (a.kind === "at" || b.kind === "at" || a.kind !== b.kind) {
       ours = true;
-      parts.push(textBetween(text, index, a, b));
+      parts.push(between(a, b));
     } else {
       parts.push(r.toString());
     }
   }
   if (!ours || parts.every((p) => p === "")) return undefined;
   return parts.join("\n");
+}
+
+// A selection's first start and last end; undefined: none, or
+// collapsed.
+export function selectionEnds(
+  sel: Selection | null,
+): [Node, number, Node, number] | undefined {
+  if (sel === null || sel.isCollapsed || sel.rangeCount === 0) return undefined;
+  const first = sel.getRangeAt(0);
+  const last = sel.getRangeAt(sel.rangeCount - 1);
+  return [
+    first.startContainer,
+    first.startOffset,
+    last.endContainer,
+    last.endOffset,
+  ];
 }
 
 // The lines of the selection's anchor and focus that are in the view.
@@ -210,11 +252,10 @@ export function selectedLines(
   sel: Selection | null,
   lastLine: number,
 ): { from: number; to: number } | undefined {
-  if (sel === null || sel.isCollapsed || sel.rangeCount === 0) return undefined;
-  const first = sel.getRangeAt(0);
-  const last = sel.getRangeAt(sel.rangeCount - 1);
-  const a = domPoint(view, first.startContainer, first.startOffset);
-  const b = domPoint(view, last.endContainer, last.endOffset);
+  const ends = selectionEnds(sel);
+  if (ends === undefined) return undefined;
+  const a = domPoint(view, ends[0], ends[1]);
+  const b = domPoint(view, ends[2], ends[3]);
   if (a.kind !== "at" && a.kind === b.kind) return undefined;
   const from = a.kind === "at" ? a.line : a.kind === "before" ? 1 : lastLine;
   let to = b.kind === "at" ? b.line : b.kind === "before" ? 1 : lastLine;

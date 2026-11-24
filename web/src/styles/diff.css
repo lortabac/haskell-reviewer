@@ -261,6 +261,14 @@
   color: var(--color-fg);
 }
 
+/* Copy takes one side (diff/copy.ts, D-347): the other side's code
+   can't be selected, so it isn't painted as selected either. */
+.diff-select-base .diff-head .code-cell,
+.diff-select-head .diff-base .code-cell {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 /* Toolbar parts shown only with rows (DiffView): no box of their own. */
 .diff-tools {
   display: contents;

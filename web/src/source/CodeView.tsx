@@ -39,14 +39,16 @@ import {
 } from "./keys";
 import type { LineKind } from "./highlight";
 import type { CardText } from "./hover";
-import { type LineIndex, lineText } from "./lines";
+import { type LineIndex, lineText, wholeText } from "./lines";
 import { lineNodes } from "./paint";
 import {
   colIn,
+  copiedText,
   domPoint,
   linkStops,
   pointAt,
   selectedLines,
+  selectionLines,
 } from "./selection";
 import {
   createPendingFocus,
@@ -308,12 +310,11 @@ export function CodeView(props: CodeViewProps): JSX.Element {
   const copy = createCopy({
     view: () => box,
     rows: () => rowsEl,
-    // Read once (see CodeViewProps).
-    // eslint-disable-next-line solid/reactivity
-    text: props.text,
-    // eslint-disable-next-line solid/reactivity
-    index: props.index,
-    onSelectionLines: (ls) => {
+    // props.text and props.index never change (see CodeViewProps).
+    copied: (sel) => copiedText(box, props.text, props.index, sel),
+    all: () => wholeText(props.text, props.index),
+    onSelection: (sel) => {
+      const ls = selectionLines(box, sel);
       const cur = selLines();
       if (ls.length !== cur.length || ls.some((n, i) => n !== cur[i])) {
         setSelLines(ls);
