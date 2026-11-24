@@ -18,10 +18,14 @@ import { getCbor } from "../api/client";
 import { decodeFileView, type FileView as View } from "../api/files";
 import { docsHref } from "../api/module";
 import { type LexedSource, type OutlineEntry } from "../api/source";
+import { useDiffLink } from "../diff/link";
+import { stepTo } from "../diff/rows";
+import { stepTexts } from "../diff/words";
 import { bannerText } from "../modules/notices";
 import { useModules } from "../modules/store";
 import { declAtLine, outlineStep } from "../keys/outline";
 import {
+  type KeyHandler,
   useCopyLocation,
   useKeyActions,
   useKeys,
@@ -42,6 +46,7 @@ import {
   type LineMarks,
 } from "../source/CodeView";
 import { createSource } from "../source/createSource";
+import { changeStatus } from "../source/diffMarks";
 import { createFinder } from "../source/find";
 import { FindBar, type FindHandle } from "../source/FindBar";
 import { isCodeJump, shouldReland } from "../source/landing";
@@ -57,6 +62,12 @@ import { createDelay, focusInMain, focusLost } from "../ui/focus";
 import { bytes, limit } from "../ui/format";
 import { noteTexts } from "../ui/notes";
 import { bringOnPage } from "../ui/scroll";
+import {
+  changesNote,
+  changesTexts,
+  changesWhy,
+  createSourceChanges,
+} from "./sourceChanges";
 import {
   apiFileUrl,
   hrefFor,
@@ -117,8 +128,12 @@ function FilePage(props: { path: string }): JSX.Element {
   };
   // Set by FileText: the docs of the declaration at the cursor.
   let docsAt: (() => ViewTarget | undefined) | undefined;
+  // Set by FileText (diff mode): the diff at the cursor's line, and why
+  // there is none.
+  let diffHooks: DiffHooks | undefined;
   // Set by FileText: save the cursor's line in history (D-339).
   let leave: (() => void) | undefined;
+  const diffLink = useDiffLink();
   useViewLinks({
     current: "source",
     docs: () => {
@@ -128,7 +143,11 @@ function FilePage(props: { path: string }): JSX.Element {
       return r === undefined ? undefined : docsHref(side(), r);
     },
     source: () => hrefFor(side(), props.path),
-    at: (to) => (to === "docs" ? docsAt?.() : undefined),
+    diff: () => diffLink(side(), props.path),
+    at: (to) =>
+      to === "docs" ? docsAt?.() : to === "diff" ? diffHooks?.at() : undefined,
+    missing: (to) =>
+      to === "diff" ? (diffHooks?.why() ?? changesTexts.unchanged) : undefined,
     leave: () => leave?.(),
   });
   // A link in main (like a symlink target) took us here: its page is
@@ -174,6 +193,9 @@ function FilePage(props: { path: string }): JSX.Element {
                 docsAt = f;
               },
               (f) => {
+                diffHooks = f;
+              },
+              (f) => {
                 leave = f;
               },
             )
@@ -192,6 +214,7 @@ function body(
   path: string,
   source: () => LexedSource | undefined,
   setDocsAt: (f: (() => ViewTarget | undefined) | undefined) => void,
+  setDiffHooks: (f: DiffHooks | undefined) => void,
   setLeave: (f: (() => void) | undefined) => void,
 ): JSX.Element {
   switch (v.kind) {
@@ -201,7 +224,9 @@ function body(
           text={v.text}
           path={path}
           source={source()}
+          generation={v.generation}
           setDocsAt={setDocsAt}
+          setDiffHooks={setDiffHooks}
           setLeave={setLeave}
         />
       );
@@ -252,6 +277,14 @@ function Symlink(props: {
   );
 }
 
+// What the page tells the header's Diff link and `3`.
+interface DiffHooks {
+  // The diff at the cursor's line.
+  at: () => ViewTarget | undefined;
+  // Why there is no diff to show, if the state says.
+  why: () => string | undefined;
+}
+
 // The text in the source view. #L<n>[-L<m>] marks those lines and
 // scrolls the first one to the middle; again on a hash change, with no
 // refetch. Bad or out of range: nothing. An end past the end is cut.
@@ -260,13 +293,31 @@ function FileText(props: {
   text: string;
   path: string;
   source: LexedSource | undefined;
+  generation: number;
   setDocsAt?: (f: (() => ViewTarget | undefined) | undefined) => void;
+  setDiffHooks?: (f: DiffHooks | undefined) => void;
   setLeave?: (f: (() => void) | undefined) => void;
 }): JSX.Element {
   const side = usePageSide();
   const location = useLocation();
   const base = useResolvedPath(() => "/");
   const index = createMemo(() => lineIndex(props.text));
+  // Diff mode: the change signs, and n / p between them (D-348).
+  const diffLink = useDiffLink();
+  const changes = createSourceChanges({
+    // eslint-disable-next-line solid/reactivity -- fixed for this view
+    path: props.path,
+    lines: () => index().count,
+    // eslint-disable-next-line solid/reactivity -- fixed for this view
+    generation: props.generation,
+  });
+  const codeChanges = () => {
+    const side = changes.side();
+    const s = changes.state();
+    return side === undefined
+      ? undefined
+      : { side, marks: s.kind === "lines" ? s.changes : undefined };
+  };
   const hl = createMemo((): Highlight | undefined => {
     const s = props.source;
     if (s === undefined) return undefined;
@@ -423,6 +474,7 @@ function FileText(props: {
         lineDecor={lineDecor()}
         card={card}
         find={find()}
+        changes={codeChanges()}
         ref={(a) => {
           api = a;
           setApiSig(a);
@@ -547,9 +599,48 @@ function FileText(props: {
       return (api?.clearSelection() ?? false) || clearLanded();
     },
   });
+  const keys = useKeys();
+  // n / p and the buttons: this side's change lines (D-348). The first
+  // step forward on a fresh page may land on line 1. focus: into the
+  // view (keys); else the cursor moves and focus stays (buttons). The
+  // words to say, or true. Undefined: not in diff mode.
+  let stepped = false;
+  const stepChange = (
+    dir: 1 | -1,
+    focus: boolean,
+  ): string | true | undefined => {
+    const st = changes.state();
+    const why = changesWhy(st);
+    if (why !== undefined) return why;
+    const a = api;
+    const side = changes.side();
+    if (st.kind !== "lines" || a === undefined || side === undefined) {
+      return undefined;
+    }
+    const c = a.cursor().line;
+    const fresh = dir === 1 && !stepped && !a.hasFocus() && c === 1;
+    stepped = true;
+    const to = stepTo(st.changes.starts, fresh ? 0 : c, dir);
+    if (to === undefined) return stepTexts.noMore;
+    if (focus) a.focusLine(to);
+    else a.setCursor(to);
+    a.scrollToLine(to, "center");
+    return focus ? true : changeStatus(st.changes, to, side);
+  };
+  const changeKey =
+    (dir: 1 | -1): KeyHandler =>
+    () =>
+      stepChange(dir, true) ?? false;
+  useKeyActions({ nextChange: changeKey(1), prevChange: changeKey(-1) });
+  // "Show diff here (3)": the hint only with shortcuts on.
+  const diffButton = () =>
+    `Show diff here${prefs.singleKeyShortcuts() ? " (3)" : ""}`;
+  const clickChange = (dir: 1 | -1) => {
+    const r = stepChange(dir, false);
+    if (typeof r === "string") keys?.say(r);
+  };
   // y: the name at the cursor, else its place. Copy location: the
   // selected lines, else the cursor line.
-  const keys = useKeys();
   const modules = useModules();
   const here = () => locationText(props.path, api?.cursor().line ?? 1);
   const nameAtCursor = (): string | undefined => {
@@ -592,6 +683,24 @@ function FileText(props: {
     return { href: docsHref(side(), ref, e?.[1] ?? null) };
   });
   onCleanup(() => props.setDocsAt?.(undefined));
+  // 3: the diff at the cursor's line, on this side.
+  // eslint-disable-next-line solid/reactivity -- given once
+  props.setDiffHooks?.({
+    at: () => {
+      const ds = changes.side();
+      const a = api;
+      if (ds === undefined || a === undefined) return undefined;
+      const href = diffLink(side(), props.path, {
+        side: ds,
+        line: a.cursor().line,
+      });
+      return href === undefined
+        ? undefined
+        : { href, state: { codeJump: true } };
+    },
+    why: () => changesWhy(changes.state()),
+  });
+  onCleanup(() => props.setDiffHooks?.(undefined));
   let wrap!: HTMLDivElement;
   onMount(() => {
     // Native: before the router's click handler on the document.
@@ -604,6 +713,9 @@ function FileText(props: {
       <p class="sr-only" role="status">
         {hint()}
       </p>
+      <Show when={changesNote(changes.state())}>
+        {(n) => <p class="file-note">{n()}</p>}
+      </Show>
       <Show when={index().count > 0}>
         <FindBar
           finder={finder}
@@ -623,6 +735,19 @@ function FileText(props: {
             handle={(h) => (refsBar = h)}
             onLeave={() => saveCursor()}
           />
+          <Show when={changes.state().kind === "lines"}>
+            <button type="button" onClick={() => clickChange(-1)}>
+              {stepTexts.prevChange}
+            </button>
+            <button type="button" onClick={() => clickChange(1)}>
+              {stepTexts.nextChange}
+            </button>
+          </Show>
+          <Show when={changes.side() !== undefined}>
+            <button type="button" onClick={() => keys?.goView("diff")}>
+              {diffButton()}
+            </button>
+          </Show>
         </FindBar>
       </Show>
       {view}

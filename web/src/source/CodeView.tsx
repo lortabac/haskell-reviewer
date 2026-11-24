@@ -18,6 +18,7 @@ import {
   onCleanup,
   onMount,
 } from "solid-js";
+import type { DiffSessionSide } from "../sides";
 import { setVar } from "../ui/cssom";
 import { bringOnPage, inBox } from "../ui/scroll";
 import { createCopy } from "./copy";
@@ -25,6 +26,15 @@ import { createHoverCard } from "./createHoverCard";
 import { plainPieces } from "./display";
 import { focusKeepingSelection } from "./focus";
 import type { FindHits } from "./find";
+import {
+  addedLine,
+  changeWord,
+  edgeAbove,
+  edgeBelow,
+  modifiedLine,
+  removedLine,
+  type SideChanges,
+} from "./diffMarks";
 import { createFindDraw } from "./findDraw";
 import {
   isPlain,
@@ -143,6 +153,11 @@ export interface CodeViewProps {
   card?: ((link: number) => CardText | undefined) | undefined;
   // Hits to draw; undefined: none.
   find?: FindHits | undefined;
+  // Diff mode (D-348): this side, and its lines' change signs once
+  // known. The gutter has room for the signs whenever this is set, so
+  // the text doesn't move when they come.
+  changes?:
+    { side: DiffSessionSide; marks: SideChanges | undefined } | undefined;
   ref?: (api: CodeApi) => void;
 }
 
@@ -662,9 +677,29 @@ export function CodeView(props: CodeViewProps): JSX.Element {
     );
     const text = lineText(props.text, props.index, n);
     const decor = createMemo(() => props.lineDecor?.(n));
+    // The change word of the line, and its classes (the sign is CSS).
+    const word = () => {
+      const c = props.changes;
+      return c?.marks === undefined
+        ? undefined
+        : changeWord(c.marks, n, c.side);
+    };
+    const own = () => props.changes?.marks?.own[n] ?? 0;
+    const edge = () => props.changes?.marks?.edge[n] ?? 0;
     const classes = () => {
       const kind = decor()?.kind;
+      const o = own();
+      const e = edge();
       return {
+        "code-chg": o > 0,
+        "code-chg-added": o === addedLine,
+        "code-chg-removed": o === removedLine,
+        "code-chg-modified": o === modifiedLine,
+        "code-edge": e > 0,
+        "code-edge-below": (e & edgeBelow) !== 0,
+        "code-edge-above": (e & edgeAbove) !== 0,
+        // What the other side lost (head) or gained (base).
+        "code-edge-added": e > 0 && props.changes?.side === "base",
         "code-line-target": marked(n),
         "code-find-line": isFindLine(n),
         "code-cursor-line": isCursor(n),
@@ -674,7 +709,13 @@ export function CodeView(props: CodeViewProps): JSX.Element {
     };
     const label = () => {
       const kind = decor()?.kind;
-      return kind === undefined ? String(n) : `${n}, ${kindLabel[kind]}`;
+      return [
+        String(n),
+        word(),
+        kind === undefined ? undefined : kindLabel[kind],
+      ]
+        .filter((x) => x !== undefined)
+        .join(", ");
     };
     const row = (
       <div
@@ -819,6 +860,7 @@ export function CodeView(props: CodeViewProps): JSX.Element {
       <div
         ref={(el) => (box = el)}
         class="code-view"
+        classList={{ "code-view-changes": props.changes !== undefined }}
         role="grid"
         aria-readonly="true"
         // Firefox makes a scroll box a Tab stop of its own: the line is

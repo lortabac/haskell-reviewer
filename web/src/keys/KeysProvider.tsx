@@ -15,7 +15,9 @@ import {
   type ParentProps,
   useContext,
 } from "solid-js";
+import { notDiffMode } from "../diff/words";
 import { usePrefs } from "../prefs/store";
+import { useSession } from "../session";
 import { copyText } from "../copy/clipboard";
 import { createDispatcher } from "./dispatch";
 import type { ActionId } from "./keymap";
@@ -32,6 +34,8 @@ export type KeyActions = Partial<Record<ActionId, KeyHandler>>;
 
 export type ViewName = "docs" | "source" | "refs" | "diff";
 
+export type ToView = Exclude<ViewName, "refs">;
+
 export interface ViewTarget {
   // A router path (no base).
   href: string;
@@ -43,9 +47,14 @@ export interface ViewLinks {
   // Router paths. Undefined: this page has none.
   docs: () => string | undefined;
   source: () => string | undefined;
-  // Where 1 / 2 and the header links go: the same place in the other
-  // view. Undefined: docs() / source(). null: none here (said).
-  at?: (to: "docs" | "source") => ViewTarget | null | undefined;
+  // The diff of this page's file (diff mode only). Undefined: none.
+  diff?: () => string | undefined;
+  // Where 1 / 2 / 3 and the header links go: the same place in the
+  // other view. Undefined: docs() / source() / diff(). null: none here
+  // (said).
+  at?: (to: ToView) => ViewTarget | null | undefined;
+  // What to say when a view has no target here, if not the default.
+  missing?: (to: ToView) => string | undefined;
   // Called right before goView leaves this page.
   leave?: () => void;
 }
@@ -56,7 +65,7 @@ export type LocationText = string | { say: string };
 export interface KeysApi {
   links: Accessor<ViewLinks | undefined>;
   // Go to the other view, keeping the place.
-  goView: (to: "docs" | "source") => void;
+  goView: (to: ToView) => void;
   // opener: the button that opened it, to get focus back if nothing
   // else had it (WebKit doesn't focus a clicked button).
   openHelp: (opener?: HTMLElement) => void;
@@ -102,10 +111,12 @@ export function useCopyLocation(f: () => LocationText | undefined): void {
 const missingWords = {
   docs: "No docs for this page.",
   source: "No source for this page.",
+  diff: "No diff for this page.",
 };
 
 export function KeysProvider(props: ParentProps): JSX.Element {
   const prefs = usePrefs();
+  const session = useSession();
   const navigate = useNavigate();
   const [helpOpen, setHelpOpen] = createSignal(false);
   let opener: HTMLElement | undefined;
@@ -156,14 +167,18 @@ export function KeysProvider(props: ParentProps): JSX.Element {
     ),
   );
 
-  const goView = (to: "docs" | "source"): void => {
+  const goView = (to: ToView): void => {
     const l = links();
     if (l === undefined) return;
     if (l.current === to) return;
+    if (to === "diff" && session.mode !== "diff") {
+      say(notDiffMode);
+      return;
+    }
     const a = l.at?.(to);
-    const t = a === null ? undefined : (a ?? hrefOnly(l[to]()));
+    const t = a === null ? undefined : (a ?? hrefOnly(l[to]?.()));
     if (t === undefined) {
-      say(missingWords[to]);
+      say(l.missing?.(to) ?? missingWords[to]);
       return;
     }
     l.leave?.();
@@ -204,6 +219,9 @@ export function KeysProvider(props: ParentProps): JSX.Element {
         return true;
       case "sourceView":
         goView("source");
+        return true;
+      case "diffView":
+        goView("diff");
         return true;
       case "copy": {
         // A tree row, a refs row: the text is in the element.

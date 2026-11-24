@@ -18,6 +18,7 @@ import { getCbor } from "../api/client";
 import { decodeMarkdownPage, type MarkdownPage } from "../api/markdown";
 import type { Doc } from "../api/richtext";
 import { CopyButton } from "../copy/CopyButton";
+import { useDiffLink } from "../diff/link";
 import { type Links, LinksContext } from "../docs/links";
 import { anchorId, DocView } from "../docs/RichText";
 import {
@@ -69,10 +70,12 @@ function MarkdownPageView(props: { path: string }): JSX.Element {
     const r = result();
     return r?.kind === "ok" ? r.value : undefined;
   };
+  const diffLink = useDiffLink();
   useViewLinks({
     current: "docs",
     docs: () => mdHref(side(), props.path),
     source: () => hrefFor(side(), props.path),
+    diff: () => diffLink(side(), props.path),
   });
   // No lines here: the path.
   useCopyLocation(() => props.path);

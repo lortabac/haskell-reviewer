@@ -1,7 +1,7 @@
 // The single-key shortcuts (SPEC §5.3, D-297, D-298): one table for
 // the dispatcher and the ? overlay. Bindings are tinykeys strings,
 // matched by event.key. Shift is allowed only where the key itself
-// may need it on some layouts (? / 1 2).
+// may need it on some layouts (? / 1 2 3).
 
 export type ActionId =
   | "search"
@@ -18,6 +18,7 @@ export type ActionId =
   | "copy"
   | "docsView"
   | "sourceView"
+  | "diffView"
   | "escape"
   | "help";
 
@@ -65,7 +66,7 @@ export const keymap: readonly KeyRow[] = [
     bindings: ["n"],
     keys: ["n"],
     label: "Next change",
-    where: "Diff",
+    where: "Diff, source (diff mode)",
     control: "Next change button",
   },
   {
@@ -73,7 +74,7 @@ export const keymap: readonly KeyRow[] = [
     bindings: ["p"],
     keys: ["p"],
     label: "Previous change",
-    where: "Diff",
+    where: "Diff, source (diff mode)",
     control: "Previous change button",
   },
   {
@@ -147,6 +148,14 @@ export const keymap: readonly KeyRow[] = [
     label: "Source view",
     where: "Everywhere",
     control: "Source link in the header",
+  },
+  {
+    id: "diffView",
+    bindings: ["[Shift]+3"],
+    keys: ["3"],
+    label: "Diff view",
+    where: "Diff mode",
+    control: "Diff link in the header; Show diff here (source)",
   },
   {
     id: "escape",

@@ -290,17 +290,28 @@ export function buttonText(
   return { text: `${step}`, name: `${step} lines, ${range(x, y)}` };
 }
 
-// The first row of each change block (a run of removed and added
-// rows), in order.
-export function blockStarts(rows: Rows): number[] {
-  const out: number[] = [];
+// The change blocks (runs of removed and added rows), in order, as
+// [first row, row after the last].
+export function blocks(rows: Rows): [number, number][] {
+  const out: [number, number][] = [];
   const { kind, count } = rows;
-  for (let i = 0; i < count; i++) {
-    if (kind[i] !== equalRow && (i === 0 || kind[i - 1] === equalRow)) {
-      out.push(i);
+  let i = 0;
+  while (i < count) {
+    if (kind[i] === equalRow) {
+      i++;
+      continue;
     }
+    let j = i;
+    while (j < count && kind[j] !== equalRow) j++;
+    out.push([i, j]);
+    i = j;
   }
   return out;
+}
+
+// The first row of each change block, in order.
+export function blockStarts(rows: Rows): number[] {
+  return blocks(rows).map(([s]) => s);
 }
 
 // The first changed row of each hunk: blocks joined when at most

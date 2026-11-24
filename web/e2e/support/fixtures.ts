@@ -14,6 +14,7 @@ import {
   makeCabalProject,
   makeDocsProject,
   makeDiffViewProject,
+  makeMarksProject,
   makeEditsProject,
   makeHlProject,
   makeLinksProject,
@@ -105,6 +106,7 @@ interface WorkerFixtures {
   sidesProject: Project;
   editsProject: Project;
   diffviewProject: Project;
+  marksProject: Project;
 }
 
 export const test = base.extend<TestFixtures, WorkerFixtures>({
@@ -182,6 +184,16 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     // eslint-disable-next-line no-empty-pattern
     async ({}, use) => {
       const p = await makeDiffViewProject();
+      await use(p);
+      await p.remove();
+    },
+    { scope: "worker" },
+  ],
+
+  marksProject: [
+    // eslint-disable-next-line no-empty-pattern
+    async ({}, use) => {
+      const p = await makeMarksProject();
       await use(p);
       await p.remove();
     },

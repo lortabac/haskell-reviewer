@@ -5,6 +5,7 @@ import { mountAppAt, unmountApp } from "../../test/mount";
 import { diffSession } from "../../test/sessions";
 import { defaultPrefs, type Prefs } from "../api/prefs";
 import { texts } from "./DiffView";
+import { stepTexts } from "./words";
 
 // 21 lines a side; line 11 differs. Rows: 10 equal, 1 removed, 1
 // added, 10 equal.
@@ -568,7 +569,7 @@ describe("DiffView", () => {
     expect(focusedKey()).toBe("15");
     press("j");
     expect(focusedKey()).toBe("15");
-    expect(status()).toBe(texts.noMore);
+    expect(status()).toBe(stepTexts.noMore);
     press("k");
     expect(focusedKey()).toBe("0");
     press("n");
@@ -580,7 +581,7 @@ describe("DiffView", () => {
     press("p");
     press("p");
     expect(focusedKey()).toBe("0");
-    expect(status()?.trim()).toBe(texts.noMore);
+    expect(status()?.trim()).toBe(stepTexts.noMore);
   });
 
   it("2 and 1: source and docs at the cursor's side and line; Back first", async () => {
@@ -720,8 +721,8 @@ describe("DiffView", () => {
   it("change buttons: the cursor moves, focus stays, the row is said", async () => {
     const { main } = open("/tok/diff/src/A.hs", steps);
     await ready(main);
-    const next = button(main, texts.nextChange)!;
-    const prev = button(main, texts.prevChange)!;
+    const next = button(main, stepTexts.nextChange)!;
+    const prev = button(main, stepTexts.prevChange)!;
     next.focus();
     next.click();
     expect(document.activeElement).toBe(next);
@@ -730,7 +731,7 @@ describe("DiffView", () => {
     expect(status()).toBe("removed line 4");
     next.click();
     next.click();
-    expect(status()).toBe(texts.noMore);
+    expect(status()).toBe(stepTexts.noMore);
     prev.click();
     expect(status()).toBe("removed line 4");
     // The cursor is there: Tab into the grid lands on it.

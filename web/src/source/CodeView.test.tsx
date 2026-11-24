@@ -3,6 +3,8 @@ import { render } from "solid-js/web";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { webkitFocus } from "../../test/focus";
 import { fakeLayout } from "../../test/layout";
+import { rowsOf } from "../diff/rows";
+import { sideChanges } from "./diffMarks";
 import { plainPieces } from "./display";
 import { createFinder } from "./find";
 import { lineIndex } from "./lines";
@@ -1202,5 +1204,49 @@ describe("find", () => {
     dispose = undefined;
     expect(registry.size).toBe(0);
     void setFind;
+  });
+});
+
+describe("CodeView change signs (D-348)", () => {
+  it("classes, labels with the CPP kind, and the gutter class", () => {
+    const text = lines(4);
+    const changes = sideChanges(
+      rowsOf([
+        ["equal", 1],
+        ["insert", 1],
+        ["equal", 1],
+        ["delete", 1],
+        ["equal", 1],
+      ]),
+      "head",
+    );
+    const root = document.createElement("div");
+    document.body.append(root);
+    dispose = render(
+      () => (
+        <CodeView
+          text={text}
+          index={lineIndex(text)}
+          changes={{ side: "head", marks: changes }}
+          lineDecor={(n) => (n === 2 ? { kind: "directive" } : undefined)}
+        />
+      ),
+      root,
+    );
+    expect(view(root).classList.contains("code-view-changes")).toBe(true);
+    const row = (n: number) =>
+      root.querySelector<HTMLElement>(`.code-row[data-line="${n}"]`)!;
+    const label = (n: number) =>
+      row(n).querySelector(".code-num")?.getAttribute("aria-label");
+    expect(row(2).classList.contains("code-chg-added")).toBe(true);
+    expect(label(2)).toBe("2, added, CPP directive");
+    expect(row(3).classList.contains("code-edge-below")).toBe(true);
+    expect(label(3)).toBe("3, lines removed below");
+    expect(label(1)).toBe("1");
+  });
+
+  it("no changes: no gutter class", () => {
+    const { root } = mount("a\n");
+    expect(view(root).classList.contains("code-view-changes")).toBe(false);
   });
 });
