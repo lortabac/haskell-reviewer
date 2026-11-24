@@ -35,7 +35,7 @@ describe("keymap", () => {
     for (const k of ["/", "j", "k", "Enter", "g", "d", "r", "s", "f"]) {
       expect(keys).toContain(k);
     }
-    for (const k of ["1", "2", "3", "Esc", "?", "y", "n", "p"]) {
+    for (const k of ["1", "2", "3", "Esc", "?", "y", "n", "p", "b"]) {
       expect(keys).toContain(k);
     }
     expect(keymap.find((r) => r.id === "open")?.bindings).toEqual([]);

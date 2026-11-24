@@ -156,17 +156,25 @@ export interface DiffApi {
   // - side: the side of that row's line;
   // - lo, hi: the first and last unified rows of its display row (a
   //   split row may hold two);
+  // - cellSide: the cell's own side (split: an empty one's too);
   // - col: its column, 0 on a gap;
   // - gap: on a gap; first: on the first visible item.
   cursor: () => {
     row: number;
     side: DiffSessionSide;
+    cellSide: DiffSessionSide;
     lo: number;
     hi: number;
     col: number;
     gap: boolean;
     first: boolean;
   };
+  // Split: the cursor to the other cell of its row, at the goal
+  // column (D-349). focus: into the grid, else no focus change. False
+  // on an empty cell or a gap (nothing moves).
+  setSide: (side: DiffSessionSide, focus: boolean) => boolean;
+  // Where ↑ and ↓ aim (UTF-16).
+  goal: () => number;
   // The mounted element of a unified row, if any.
   rowEl: (row: number) => HTMLElement | undefined;
   // The lines the selection covers, for Copy location (copy.ts
@@ -481,11 +489,22 @@ export function DiffGrid(props: DiffGridProps): JSX.Element {
     const gap = isGapKey(c.key);
     const span = { lo: space.first(d), hi: space.last(d) };
     const first = curIdx() === 0;
-    if (gap) return { row: span.lo, side: c.side, ...span, col: 0, gap, first };
+    const cellSide = c.side;
+    if (gap) {
+      return {
+        row: span.lo,
+        side: c.side,
+        cellSide,
+        ...span,
+        col: 0,
+        gap,
+        first,
+      };
+    }
     const own = cellRow(c.key, c.side);
     const side = own >= 0 ? c.side : otherSide(c.side);
     const row = own >= 0 ? own : cellRow(c.key, side);
-    return { row, side, ...span, col: c.col, gap, first };
+    return { row, side, cellSide, ...span, col: c.col, gap, first };
   };
 
   // The cursor's side as y and Copy location see it: an empty cell's
@@ -560,6 +579,21 @@ export function DiffGrid(props: DiffGridProps): JSX.Element {
     reveal: doReveal,
     hasFocus: () => box.contains(document.activeElement),
     cursor: apiCursor,
+    setSide: (side, focus) => {
+      const c = cursor();
+      if (!split || isGapKey(c.key) || cellRow(c.key, side) < 0) return false;
+      if (focus) focusKey(c.key, side, goal, false);
+      else {
+        setCursor({
+          key: c.key,
+          side,
+          col: Math.min(goal, lineLength(c.key, side)),
+          link: false,
+        });
+      }
+      return true;
+    },
+    goal: () => goal,
     rowEl: (r) => rowByKey(keyOfRow(r)),
     selectedRange: () => {
       const sel = getSelection();

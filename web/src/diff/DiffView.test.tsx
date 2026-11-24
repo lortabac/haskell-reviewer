@@ -1348,3 +1348,187 @@ describe("DiffView", () => {
     });
   });
 });
+
+describe("b, the other side (D-349)", () => {
+  const press = (key: string, code = `Key${key.toUpperCase()}`) =>
+    (document.activeElement ?? document.body).dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key,
+        code,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  const status = () => document.querySelector(".keys-status")?.textContent;
+  const at = () => {
+    const c = document.activeElement?.closest<HTMLElement>(".code-cell");
+    return {
+      side: c?.dataset.side,
+      key: c?.closest(".code-row")?.getAttribute("data-key"),
+    };
+  };
+  const here = () => location.pathname + location.search + location.hash;
+  const otherButton = (main: HTMLElement) =>
+    [...main.querySelectorAll("button")].find((b) =>
+      b.textContent?.startsWith("Other side"),
+    );
+
+  it("unified: a removed row to the added one; the hash follows, replaced", async () => {
+    const { main } = open("/tok/diff/src/A.hs#base-L11");
+    await ready(main);
+    const n = history.length;
+    press("b");
+    await vi.waitFor(() => expect(here()).toBe("/tok/diff/src/A.hs#head-L11"));
+    expect(history.length).toBe(n);
+    expect(
+      document.activeElement
+        ?.closest(".code-row")
+        ?.querySelector('[role="rowheader"]')
+        ?.getAttribute("aria-label"),
+    ).toBe("added line 11");
+  });
+
+  it("unified: an equal row is said, nothing moves", async () => {
+    const { main } = open("/tok/diff/src/A.hs#head-L9");
+    await ready(main);
+    press("b");
+    expect(status()).toBe("Same line on both sides: base 9, head 9.");
+    expect(here()).toBe("/tok/diff/src/A.hs#head-L9");
+  });
+
+  it("no hash on the cursor: the URL stays", async () => {
+    const { main } = open("/tok/diff/src/A.hs#head-L9");
+    const g = await ready(main);
+    g.querySelector<HTMLElement>(
+      '.code-row[data-key="10"] .code-cell',
+    )!.focus();
+    press("b");
+    expect(here()).toBe("/tok/diff/src/A.hs#head-L9");
+    expect(
+      document.activeElement?.closest(".code-row")?.getAttribute("data-key"),
+    ).toBe("11");
+  });
+
+  it("split: the other cell, and back to the same link (goal column)", async () => {
+    const { main } = open("/tok/diff/src/A.hs?layout=split#base-L11");
+    await ready(main);
+    const base = main.querySelector<HTMLElement>(
+      '.code-row[data-key="10"] .code-cell[data-side="base"]',
+    )!;
+    await vi.waitFor(() =>
+      expect(base.querySelectorAll("a.code-link")).toHaveLength(2),
+    );
+    base.focus();
+    press("ArrowRight", "ArrowRight");
+    expect(document.activeElement?.textContent).toBe("old");
+    press("b");
+    expect(at()).toEqual({ side: "head", key: "10" });
+    await vi.waitFor(() =>
+      expect(here()).toBe("/tok/diff/src/A.hs?layout=split#head-L11"),
+    );
+    press("b");
+    expect(document.activeElement?.textContent).toBe("old");
+    await vi.waitFor(() =>
+      expect(here()).toBe("/tok/diff/src/A.hs?layout=split#base-L11"),
+    );
+  });
+
+  // Head: e1 e2 a1 a2 e3 e4; base: e1 e2 e3 e4.
+  const inserted = {
+    "/tok/api/diff/src/A.hs": [
+      200,
+      diffBody({
+        diff: {
+          kind: "lines",
+          runs: [
+            ["equal", 2],
+            ["insert", 2],
+            ["equal", 2],
+          ],
+          crlfLines: 0,
+          bom: null,
+        },
+      }),
+    ],
+    "/tok/api/file/base/src/A.hs": [200, file("e1\ne2\ne3\ne4\n")],
+    "/tok/api/file/head/src/A.hs": [200, file("e1\ne2\na1\na2\ne3\ne4\n")],
+  } satisfies Record<string, [number, unknown]>;
+
+  it("split, an empty cell: the nearest equal line", async () => {
+    const { main } = open("/tok/diff/src/A.hs?layout=split#head-L4", inserted);
+    await ready(main);
+    main
+      .querySelector<HTMLElement>(
+        '.code-row[data-key="3"] .code-cell[data-side="head"]',
+      )!
+      .focus();
+    press("b");
+    expect(at()).toEqual({ side: "base", key: "4" });
+    await vi.waitFor(() =>
+      expect(here()).toBe("/tok/diff/src/A.hs?layout=split#base-L3"),
+    );
+  });
+
+  // Base: e1 e2 d1 d2 e3 e4; head: e1 e2 e3 e4.
+  const removed = {
+    "/tok/api/diff/src/A.hs": [
+      200,
+      diffBody({
+        diff: {
+          kind: "lines",
+          runs: [
+            ["equal", 2],
+            ["delete", 2],
+            ["equal", 2],
+          ],
+          crlfLines: 0,
+          bom: null,
+        },
+      }),
+    ],
+    "/tok/api/file/base/src/A.hs": [200, file("e1\ne2\nd1\nd2\ne3\ne4\n")],
+    "/tok/api/file/head/src/A.hs": [200, file("e1\ne2\ne3\ne4\n")],
+  } satisfies Record<string, [number, unknown]>;
+
+  it("split, from an empty cell to the marked line: no navigation; a later landing works", async () => {
+    const { main } = open("/tok/diff/src/A.hs?layout=split#base-L4", removed);
+    await ready(main);
+    const cell = (k: number, side: string) =>
+      main.querySelector<HTMLElement>(
+        `.code-row[data-key="${k}"] .code-cell[data-side="${side}"]`,
+      )!;
+    cell(3, "head").focus();
+    expect(at()).toEqual({ side: "head", key: "3" });
+    const n = history.length;
+    press("b");
+    expect(at()).toEqual({ side: "base", key: "3" });
+    expect(here()).toBe("/tok/diff/src/A.hs?layout=split#base-L4");
+    expect(history.length).toBe(n);
+    press("ArrowDown", "ArrowDown");
+    expect(at()).toEqual({ side: "base", key: "4" });
+    // Forward to an entry at the same hash, from a code link: it lands.
+    history.pushState({ codeJump: true }, "", location.href);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    await vi.waitFor(() => expect(at()).toEqual({ side: "base", key: "3" }));
+  });
+
+  it("the button: focus stays, the cell is said after the hash change", async () => {
+    const { main } = open("/tok/diff/src/A.hs?layout=split#base-L11");
+    await ready(main);
+    const b = otherButton(main)!;
+    expect(b.textContent).toBe("Other side (b)");
+    b.focus();
+    b.click();
+    expect(document.activeElement).toBe(b);
+    await vi.waitFor(() =>
+      expect(here()).toBe("/tok/diff/src/A.hs?layout=split#head-L11"),
+    );
+    await vi.waitFor(() => expect(status()).toBe("added line 11"));
+  });
+
+  it("no header item on the diff page", async () => {
+    const { main } = open("/tok/diff/src/A.hs");
+    await ready(main);
+    expect(document.querySelector(".side-switch")).toBeNull();
+  });
+});

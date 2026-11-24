@@ -8,6 +8,7 @@ import { For, type JSX, Show } from "solid-js";
 import { withBase } from "../files/paths";
 import { useSession } from "../session";
 import { useKeys, type ToView, type ViewLinks } from "./KeysProvider";
+import { plainClick } from "./plainClick";
 
 interface Item {
   to: ToView;
@@ -45,13 +46,10 @@ function ViewItem(props: {
   const keys = useKeys();
   const base = useResolvedPath(() => "/");
   const current = () => props.links.current === props.to;
+  // Native: before the router's own click handler. The current view:
+  // nothing (no jump to the page's top).
   const onClick = (e: MouseEvent) => {
-    if (e.button !== 0) return;
-    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
-    // Native: before the router's own click handler. The current view:
-    // nothing (no jump to the page's top).
-    e.preventDefault();
-    if (!current()) keys?.goView(props.to);
+    if (plainClick(e) && !current()) keys?.goView(props.to);
   };
   return (
     <Show

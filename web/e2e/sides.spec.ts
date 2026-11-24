@@ -19,7 +19,8 @@ async function start(
 
 // Every in-app link in main, the sidebar and the search popup stays on
 // side. Hoogle links are left out. The sidebar's ghosts link to the
-// other side, and say so (D-337).
+// other side, and say so (D-337). So does the header's View on base /
+// head (D-349), outside the crawl: checked on its own.
 async function expectLinkSides(page: Page, side: "base" | "head") {
   const links = await page.evaluate(() => {
     const token = location.pathname.split("/")[1];
@@ -50,6 +51,12 @@ async function expectLinkSides(page: Page, side: "base" | "head") {
   for (const g of links.filter((l) => l.ghost)) {
     expect(g.side, g.href).toBe(other);
     expect(g.text, g.href).toContain(`(on ${other})`);
+  }
+  const sw = page.locator(".frame-header a.side-switch");
+  for (const a of await sw.all()) {
+    const href = (await a.getAttribute("href")) ?? "";
+    expect(href.split(/[/?#]/)[3], href).toBe(other);
+    await expect(a).toHaveText(`View on ${other}`);
   }
 }
 
@@ -91,6 +98,12 @@ test("links never switch side", async ({ page, startServer, sidesProject }) => {
     await expect(link).toHaveAttribute(
       "href",
       new RegExp(`/docs/${side}/${to}#val%3A${name}$`),
+    );
+    // A is on both sides: the header links to the other one.
+    const other = side === "base" ? "head" : "base";
+    await expect(page.locator(".frame-header a.side-switch")).toHaveAttribute(
+      "href",
+      new RegExp(`/docs/${other}/A$`),
     );
     await expectLinkSides(page, side);
     await link.click();

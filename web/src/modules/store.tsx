@@ -12,6 +12,7 @@ import {
 import { getJson, type Result } from "../api/client";
 import {
   decodeModuleTree,
+  type ModuleChange,
   type ModuleSource,
   type ModuleTree,
 } from "../api/modules";
@@ -57,6 +58,10 @@ export function indexSources(tree: ModuleTree): Map<string, SourceInfo> {
 export interface RefInfo {
   // The ref URLs use (the tree's, even when looked up by id).
   ref: string;
+  // The long form; pairs a module with the other side's (D-349).
+  id: string;
+  // Its diff marker; null: unchanged, or browse mode.
+  change: ModuleChange | null;
   // The module's name. Null: a loose file with no module name.
   name: string | null;
   // Null: no source.
@@ -77,6 +82,8 @@ export function indexRefs(tree: ModuleTree): Map<string, RefInfo> {
       for (const m of c.modules) {
         add([m.ref, m.id], {
           ref: m.ref,
+          id: m.id,
+          change: m.change,
           name: m.name,
           path: m.source.kind === "no-source" ? null : m.source.path,
           groups: [packageKey(p.cabalFile), componentKey(p.cabalFile, c.name)],
@@ -88,6 +95,8 @@ export function indexRefs(tree: ModuleTree): Map<string, RefInfo> {
     if (o.kind !== "module") continue;
     add([o.ref, o.id], {
       ref: o.ref,
+      id: o.id,
+      change: o.change,
       name: o.name,
       path: o.path,
       groups: [otherKey],
@@ -137,6 +146,8 @@ export interface Modules {
   other: () => ModuleTree | undefined;
   // The other side's tree couldn't be loaded.
   otherFailed: () => boolean;
+  // indexRefs of other(), made once.
+  otherByRef: () => ReadonlyMap<string, RefInfo> | undefined;
 }
 
 const ModulesContext = createContext<Modules>();
@@ -196,6 +207,14 @@ export function ModulesProvider(props: ParentProps): JSX.Element {
     const want = wantOther();
     return want !== undefined && r?.side === want ? r.got : undefined;
   };
+  const other = (): ModuleTree | undefined => {
+    const r = otherResult();
+    return r?.kind === "ok" ? r.value : undefined;
+  };
+  const otherByRef = createMemo(() => {
+    const t = other();
+    return t === undefined ? undefined : indexRefs(t);
+  });
   const value: Modules = {
     tree,
     loading: () => answer.loading || tree() === undefined,
@@ -204,14 +223,12 @@ export function ModulesProvider(props: ParentProps): JSX.Element {
     byRef,
     names,
     hasModules,
-    other: () => {
-      const r = otherResult();
-      return r?.kind === "ok" ? r.value : undefined;
-    },
+    other,
     otherFailed: () => {
       const r = otherResult();
       return r !== undefined && r.kind !== "ok";
     },
+    otherByRef,
   };
   return (
     <ModulesContext.Provider value={value}>

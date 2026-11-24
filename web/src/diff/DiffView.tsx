@@ -41,10 +41,12 @@ import {
   mdHref,
 } from "../files/paths";
 import {
+  type Done,
   type KeyHandler,
   useCopyLocation,
   useKeyActions,
   useKeys,
+  useSideTarget,
   useViewLinks,
   type ToView,
   type ViewLinks,
@@ -53,9 +55,9 @@ import { declAtLine } from "../keys/outline";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
 import { usePrefs } from "../prefs/store";
-import { indexRefs, useModules } from "../modules/store";
+import { useModules } from "../modules/store";
 import { usePageSide, useSession } from "../session";
-import type { DiffSessionSide } from "../sides";
+import { type DiffSessionSide, otherSide } from "../sides";
 import { createSource } from "../source/createSource";
 import { highlightedLine } from "../source/decor";
 import { createFinder, type Finder, noMatches } from "../source/find";
@@ -76,6 +78,8 @@ import { bringOnPage, inBox } from "../ui/scroll";
 import { type DiffApi, DiffGrid, type GridState } from "./DiffGrid";
 import type { SideText } from "./copy";
 import { createFits } from "./fit";
+import { OtherSideButton } from "./OtherSideButton";
+import { mapLine } from "./mapLine";
 import {
   cellAt,
   cellLine,
@@ -91,6 +95,7 @@ import {
   blockStarts,
   countsMatch,
   defaultShown,
+  equalRow,
   hunkStarts,
   type Rows,
   rowLabel,
@@ -102,6 +107,7 @@ import {
   lineOn,
   sideOfRow,
   type Split,
+  splitCellLabel,
   splitOf,
 } from "./split";
 import {
@@ -135,7 +141,18 @@ export const texts = {
   saidUnified: "Unified.",
   saidSideBySide: "Side by side.",
   layoutGroup: "Layout",
+  noLines: "No lines here.",
+  gapSame: "Hidden lines: the same on both sides.",
 };
+
+// b on an equal row in unified (D-349).
+export function sameLine(base: number, head: number): string {
+  return `Same line on both sides: base ${base}, head ${head}.`;
+}
+
+export function noLinesOn(side: DiffSessionSide): string {
+  return `No lines on ${side}.`;
+}
 
 const layoutLabels: Record<DiffLayout, string> = {
   unified: "Unified",
@@ -530,6 +547,11 @@ function DiffPage(props: { path: string }): JSX.Element {
     leave: () => hooks?.leave(),
   });
 
+  // b: the other column or side, in this page (D-349).
+  useSideTarget(() => ({
+    kind: "here",
+    run: (fromKey) => hooks?.otherSide(fromKey) ?? texts.noLines,
+  }));
   // Try again: say if it is still too slow; else focus goes to the
   // grid once it is in, or to the heading.
   let heading!: HTMLHeadingElement;
@@ -608,6 +630,7 @@ function DiffPage(props: { path: string }): JSX.Element {
                 >
                   {texts.wholeFile}
                 </button>
+                <OtherSideButton />
               </Show>
             </span>
             <button type="button" aria-pressed={ws()} onClick={toggleWs}>
@@ -720,6 +743,9 @@ interface BodyHooks {
   find: FindApi;
   // Esc: the grid's clearSelection.
   clearSelection: () => boolean;
+  // b and the Other side button (D-349). fromKey: focus goes into the
+  // grid; else it stays and the cell is said.
+  otherSide: (fromKey: boolean) => Done;
 }
 
 // Each side's finder (find.ts), for the rows they were made with.
@@ -772,6 +798,7 @@ function DiffBody(props: {
   onLayout: (l: DiffLayout) => void;
 }): JSX.Element {
   const location = useLocation();
+  const navigate = useNavigate();
   // Read once: DiffPage makes a new body for new rows.
   const { rows, rowsSplit, base, head } = untrack(() => ({
     rows: props.rows,
@@ -805,8 +832,8 @@ function DiffBody(props: {
   const paneOf = (s: DiffSessionSide) => (s === "base" ? base : head);
   let api: DiffApi | undefined;
   // A same-file link was followed: where the cursor goes, once the
-  // hash changes.
-  let jump: { row: number; col: number } | undefined;
+  // hash changes. stay: b moved it there already (keep the column).
+  let jump: { row: number; col: number; stay?: boolean } | undefined;
   // Back came here before the highlight: once it comes, land again.
   let land: { row: number; col: number; side: DiffSessionSide } | undefined;
 
@@ -870,10 +897,14 @@ function DiffBody(props: {
       const r = m?.row ?? (origin === undefined ? undefined : 0);
       if (r === undefined || a === undefined) return;
       const side = m?.side ?? sideOfRow(rows, r);
-      // Back to a gap: the gap, kept closed.
-      if (origin?.gap !== true) a.reveal(r);
       const j = jump;
       jump = undefined;
+      if (j?.stay === true && j.row === r) {
+        land = undefined;
+        return;
+      }
+      // Back to a gap: the gap, kept closed.
+      if (origin?.gap !== true) a.reveal(r);
       land = undefined;
       // A link of another file took us here: focus the line.
       const codeJump = isCodeJump(state);
@@ -953,6 +984,16 @@ function DiffBody(props: {
     }),
   );
 
+  // The hash marks the cursor: its row (unified: either side's hash
+  // of an equal row), its side too in split.
+  const hashAt = (c: { row: number; side: DiffSessionSide }): boolean => {
+    const m = untrack(marked);
+    return (
+      m !== undefined &&
+      m.row === c.row &&
+      (untrack(layout) === "unified" || m.side === c.side)
+    );
+  };
   // Before we leave for a link or by 1 / 2: Back comes to the cursor
   // (D-339, D-342). to: where the link goes.
   const saveCursor = (to?: string) => {
@@ -960,13 +1001,7 @@ function DiffBody(props: {
     if (a === undefined) return;
     const c = a.cursor();
     const origin: Origin = c.gap ? { col: 0, gap: true } : { col: c.col };
-    // The hash marks the cursor already: its row (unified: either
-    // side's hash of an equal row), its side too in split.
-    const m = untrack(marked);
-    const here =
-      m !== undefined &&
-      m.row === c.row &&
-      (untrack(layout) === "unified" || m.side === c.side);
+    const here = hashAt(c);
     saveOrigin(
       diffHash({ side: c.side, line: lineOn(rows, c.row, c.side) }),
       origin,
@@ -1039,8 +1074,49 @@ function DiffBody(props: {
       return props.setLayout(l) ? { afterNav: words } : words;
     },
   });
+  // b (D-349). Split: the other cell of the row; an empty one: the
+  // mapped line. Unified: a changed row to the mapped row. A hash on
+  // the cursor follows (replaced, no history entry).
+  const switchSide = (fromKey: boolean): Done => {
+    const a = api;
+    if (a === undefined) return texts.noLines;
+    const c = a.cursor();
+    if (c.gap) return texts.gapSame;
+    const split = untrack(layout) === "split";
+    if (!split && rows.kind[c.row] === equalRow) {
+      return sameLine(lineOn(rows, c.row, "base"), lineOn(rows, c.row, "head"));
+    }
+    const to = otherSide(c.cellSide);
+    const marks = hashAt(c);
+    const moved = split && a.setSide(to, fromKey);
+    if (!moved) {
+      const m = mapLine(rows, c.side, lineOn(rows, c.row, c.side));
+      if (m === undefined) return noLinesOn(to);
+      const r = paneOf(to).lineRow[m.line] ?? 0;
+      const col = a.goal();
+      a.reveal(r);
+      if (fromKey) a.focusRow(r, col, to);
+      else a.setCursorRow(r, to, col);
+      a.scrollToRow(r, "auto");
+    }
+    const n = a.cursor();
+    const words = split
+      ? splitCellLabel(rows, n.row, n.side)
+      : rowLabel(rows, n.row);
+    // Already marked (from an empty cell to its line): no navigation,
+    // so no jump either.
+    if (!marks || hashAt(n)) return fromKey ? true : words;
+    jump = { row: n.row, col: n.col, stay: true };
+    const hash = diffHash({ side: n.side, line: lineOn(rows, n.row, n.side) });
+    navigate(diffHref(props.path) + location.search + hash, {
+      replace: true,
+      scroll: false,
+    });
+    return fromKey ? true : { afterNav: words };
+  };
   // eslint-disable-next-line solid/reactivity -- given once
   props.setHooks({
+    otherSide: switchSide,
     at,
     leave: () => saveCursor(),
     stepChange: (dir) => {
@@ -1060,12 +1136,8 @@ function DiffBody(props: {
   const modules = useModules();
   const pageSide = usePageSide();
   // Module names by ref: the page side's tree, else the other one.
-  const otherRefs = createMemo(() => {
-    const t = modules.other();
-    return t === undefined ? undefined : indexRefs(t);
-  });
   const refsOf = (s: DiffSessionSide) =>
-    s === pageSide() ? modules.byRef() : otherRefs();
+    s === pageSide() ? modules.byRef() : modules.otherByRef();
   // The cursor's side and line; a gap: head's first line.
   const cursorLine = (): { side: DiffSessionSide; line: number } => {
     const c = api?.cursor();

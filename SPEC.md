@@ -299,6 +299,15 @@ The UI has a fixed **frame** and one **main view** at a time.
     ROOT" ("100+" when the count was cut), a link to Home, with the
     first 10 paths in a tip. Hidden when there are none or the count
     isn't known (working tree).
+  - "View on base" / "View on head", diff mode only, after the view
+    switch (§5.1, D-349). On every docs, source, Markdown, refs and
+    text search page, a view's own not-found page too (the URL may be
+    on the other side); not on the diff page (its toolbar has "Other
+    side"), Home or the top-level not-found page. A link to the other
+    side's page; a plain
+    click (or `b`) goes to the same place there. When the location is
+    only on this side it is disabled but still focusable, with the
+    reason in a tip and said when used ("Only on head.").
 - **Sidebar**: the module tree, grouped by package and component. In diff
   mode every module carries a change marker (added / removed / modified /
   renamed, and "settings changed" for its parse settings or role; from
@@ -513,6 +522,9 @@ The whole file, syntax-highlighted (§5.6), with line numbers.
   Next change buttons. The gutter has room for the sign from the start.
   Too slow or not text: no markers, with a note. The button stays
   enabled on an unchanged file and says "No changes in this file."
+- In diff mode `b` (and the header's "View on base / head") opens the
+  same code on the other side, the line mapped through the diff (§5.1,
+  D-349).
 
 ### 4.5 Diff view
 
@@ -585,7 +597,9 @@ Available in diff mode only. It shows the textual diff file by file.
   change block; "No more changes." at the ends. "Previous change" and
   "Next change" toolbar buttons do the same as `p`/`n`, with focus kept
   on the button. `1`/`2` open the docs or source of the cursor's side
-  and line (D-342).
+  and line (D-342). `b` and the "Other side" toolbar button switch the
+  cursor's side (§5.1, D-349); the button keeps focus and says the
+  line.
 
 ### 4.6 Expanded (semantic) diff view
 
@@ -732,6 +746,30 @@ In diff mode every location belongs to a side. Following a link never
 switches sides silently. The header shows the current side, and a "view
 on other side" action is available wherever the location exists on both.
 
+The action is the header's "View on base / head" item and `b` (D-349).
+Back returns to where it was used. Per view:
+- **Source**: the same file (a renamed one: its other path), at the
+  same code. An unchanged file keeps the line, with no diff fetch.
+  Else the line goes through the diff rows: an unchanged line is
+  exact; in a change block with lines on both sides the i-th line goes
+  to the i-th one there (the last one if there are fewer); in a block
+  with lines on one side only, to the nearest unchanged line (above on
+  a tie). When it isn't exact the status says so ("Line 4 isn't on
+  base: nearest line 5."). With no rows (too slow, not text, failed):
+  the file's top, and why.
+- **Docs**: the same module (by id, else through a file rename), at the
+  declaration with focus, else the first on screen. One missing there
+  gets the usual "No declaration …" notice at the module top.
+- **Markdown**: the same file, the hash kept. **Refs**: the same
+  declaration's references. **Text search**: the same search.
+- **Diff view**: side by side, `b` moves the cursor to the other cell
+  of the row (an empty one: the mapped line); unified, a changed line
+  goes to the mapped line, and an unchanged one says both numbers. The
+  `#<side>-L<n>` hash follows when it marked the cursor (replaced, no
+  history entry).
+- A file or module only on this side, or still loading: disabled, with
+  the reason ("Only on head.", "Loading changes…").
+
 ### 5.2 Snapshots and reload
 
 Each side is a **snapshot** taken at start-up; it never changes while being
@@ -772,7 +810,7 @@ are off (D-297, D-298).
 | `f` | Find in file (source and diff views) |
 | `1` `2` `3` `4` | Docs · Source · Diff · Expanded diff (`3`/`4` diff mode only). `3` goes to the diff at the cursor's line from the source view, and to the top of the diff from docs, Markdown and refs pages (at the line: M4) |
 | `u` | Toggle unified / side-by-side (diff view). Saves the preference; when the window is too narrow it flips the preference and says so (D-345) |
-| `b` | Switch side (base/head) |
+| `b` | View on the other side (base/head), at the same place (§5.1, D-349). Diff mode only |
 | `a` | Ask the LLM about the focus/selection |
 | `y` | Copy the focused item's primary identifier (§5.7) |
 | `Esc` | Close the hover card if one shows; else close the overlay/panel; clear the selection |

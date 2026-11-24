@@ -19,6 +19,7 @@ import { notDiffMode } from "../diff/words";
 import { usePrefs } from "../prefs/store";
 import { useSession } from "../session";
 import { copyText } from "../copy/clipboard";
+import type { DiffSessionSide } from "../sides";
 import { createDispatcher } from "./dispatch";
 import type { ActionId } from "./keymap";
 import { KeysHelp } from "./KeysHelp";
@@ -28,7 +29,9 @@ import { KeysHelp } from "./KeysHelp";
 // (the status is cleared by then); dropped after 1 s, or by any key.
 // False: nothing to do here, the key
 // goes on.
-export type KeyHandler = () => boolean | string | { afterNav: string };
+export type Done = true | string | { afterNav: string };
+
+export type KeyHandler = () => false | Done;
 
 export type KeyActions = Partial<Record<ActionId, KeyHandler>>;
 
@@ -62,6 +65,29 @@ export interface ViewLinks {
 // What Copy location copies: a text, or words to say instead.
 export type LocationText = string | { say: string };
 
+// Where b goes, with the line or declaration. Words: said there.
+export interface SideGo {
+  href: string;
+  state?: unknown;
+  words?: string;
+}
+
+// View on base / head and b (D-349). go: top is the other page's top
+// (the header link); at, only on use: the exact place (else top).
+// off: why not. here: the page does it (the diff view).
+export type SideTarget =
+  | {
+      kind: "go";
+      side: DiffSessionSide;
+      top: string;
+      at?: () => SideGo;
+      leave?: () => void;
+    }
+  | { kind: "off"; side: DiffSessionSide; why: string }
+  | { kind: "here"; run: (fromKey: boolean) => Done };
+
+export const noOtherSide = "No other side for this page.";
+
 export interface KeysApi {
   links: Accessor<ViewLinks | undefined>;
   // Go to the other view, keeping the place.
@@ -76,9 +102,13 @@ export interface KeysApi {
   // The view's Copy location, if it has one (the header button).
   location: Accessor<(() => LocationText | undefined) | undefined>;
   copyLocation: () => void;
+  // The page's side switch, if it has one (the header item).
+  sideTarget: Accessor<(() => SideTarget | undefined) | undefined>;
+  goSide: (fromKey?: boolean) => void;
   register: (actions: KeyActions) => () => void;
   addLinks: (links: ViewLinks) => () => void;
   addLocation: (f: () => LocationText | undefined) => () => void;
+  addSideTarget: (f: () => SideTarget | undefined) => () => void;
 }
 
 export const KeysContext = createContext<KeysApi>();
@@ -108,6 +138,13 @@ export function useCopyLocation(f: () => LocationText | undefined): void {
   onCleanup(keys.addLocation(f));
 }
 
+// The page's side switch, while it lives.
+export function useSideTarget(f: () => SideTarget | undefined): void {
+  const keys = useKeys();
+  if (keys === undefined) return;
+  onCleanup(keys.addSideTarget(f));
+}
+
 const missingWords = {
   docs: "No docs for this page.",
   source: "No source for this page.",
@@ -127,6 +164,10 @@ export function KeysProvider(props: ParentProps): JSX.Element {
     readonly (() => LocationText | undefined)[]
   >([]);
   const locationFn = () => locationList().at(-1);
+  const [sideList, setSideList] = createSignal<
+    readonly (() => SideTarget | undefined)[]
+  >([]);
+  const sideTarget = () => sideList().at(-1);
 
   // The same text again isn't read: it gets a no-break space at the
   // end, or loses it (as in FindBar). Cleared after a while.
@@ -185,7 +226,7 @@ export function KeysProvider(props: ParentProps): JSX.Element {
     navigate(t.href, { state: t.state });
   };
 
-  const done = (r: boolean | string | { afterNav: string }): boolean => {
+  const done = (r: false | Done): boolean => {
     if (typeof r === "string") {
       say(r);
       return true;
@@ -196,6 +237,32 @@ export function KeysProvider(props: ParentProps): JSX.Element {
       return true;
     }
     return r;
+  };
+
+  const goSide = (fromKey = false): void => {
+    if (session.mode !== "diff") {
+      say(notDiffMode);
+      return;
+    }
+    const t = sideTarget()?.();
+    if (t === undefined) {
+      say(noOtherSide);
+      return;
+    }
+    switch (t.kind) {
+      case "off":
+        say(t.why);
+        return;
+      case "here":
+        done(t.run(fromKey));
+        return;
+      case "go": {
+        const g = t.at?.() ?? { href: t.top };
+        t.leave?.();
+        if (g.words !== undefined) done({ afterNav: g.words });
+        navigate(g.href, { state: g.state });
+      }
+    }
   };
 
   const run = (id: ActionId): boolean => {
@@ -222,6 +289,9 @@ export function KeysProvider(props: ParentProps): JSX.Element {
         return true;
       case "diffView":
         goView("diff");
+        return true;
+      case "otherSide":
+        goSide(true);
         return true;
       case "copy": {
         // A tree row, a refs row: the text is in the element.
@@ -275,6 +345,8 @@ export function KeysProvider(props: ParentProps): JSX.Element {
     say,
     location: locationFn,
     copyLocation,
+    sideTarget,
+    goSide,
     register: (a) => {
       setActions((l) => [...l, a]);
       return () => setActions((l) => l.filter((x) => x !== a));
@@ -286,6 +358,10 @@ export function KeysProvider(props: ParentProps): JSX.Element {
     addLocation: (f) => {
       setLocationList((xs) => [...xs, f]);
       return () => setLocationList((xs) => xs.filter((x) => x !== f));
+    },
+    addSideTarget: (f) => {
+      setSideList((xs) => [...xs, f]);
+      return () => setSideList((xs) => xs.filter((x) => x !== f));
     },
   };
 
