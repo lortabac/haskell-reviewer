@@ -3,6 +3,8 @@
 .code-wrap {
   position: relative;
   font-size: 0.9rem;
+  /* The bar by the current find hit's row (here and in diff.css). */
+  --code-find-bar: inset 3px 0 0 var(--color-focus);
 }
 
 /* Find (source/FindBar.tsx): the button and the hint, then the bar. */
@@ -235,7 +237,7 @@
 
 /* The row of the current hit: a bar by the code, in the focus colour. */
 .code-find-line > .code-mark {
-  box-shadow: inset 3px 0 0 var(--color-focus);
+  box-shadow: var(--code-find-bar);
 }
 
 .code-view ::selection {

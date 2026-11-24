@@ -53,6 +53,8 @@ import { useSession } from "../session";
 import type { DiffSessionSide } from "../sides";
 import { createSource } from "../source/createSource";
 import { highlightedLine } from "../source/decor";
+import { createFinder, type Finder, noMatches } from "../source/find";
+import { type FindApi, FindBar, type FindHandle } from "../source/FindBar";
 import { type Highlight, highlightOf } from "../source/highlight";
 import { isCodeJump, shouldReland } from "../source/landing";
 import { jumpOf, linkInfos } from "../source/links";
@@ -64,7 +66,7 @@ import {
 } from "../source/origin";
 import { lineIndex, lineText } from "../source/lines";
 import { createDelay } from "../ui/focus";
-import { bringOnPage } from "../ui/scroll";
+import { bringOnPage, inBox } from "../ui/scroll";
 import {
   type DiffApi,
   DiffGrid,
@@ -72,6 +74,16 @@ import {
   type SideText,
 } from "./DiffGrid";
 import { createFits } from "./fit";
+import {
+  cellAt,
+  cellLine,
+  type CellSpace,
+  type DiffFinder,
+  diffFinder,
+  type DiffHits,
+  diffStatus,
+  isFor,
+} from "./find";
 import { diffNotes } from "./notes";
 import {
   blockStarts,
@@ -83,7 +95,13 @@ import {
   rowsOf,
   stepTo,
 } from "./rows";
-import { type DiffLayout, lineOn, sideOfRow } from "./split";
+import {
+  type DiffLayout,
+  lineOn,
+  sideOfRow,
+  type Split,
+  splitOf,
+} from "./split";
 import {
   diffHash,
   diffHref,
@@ -103,7 +121,6 @@ export const texts = {
   empty: "Both sides are empty.",
   emptyAdded: "Empty file added.",
   emptyRemoved: "Empty file removed.",
-  hint: "Browser find sees only the lines on screen.",
   ws: "Ignore whitespace",
   wholeFile: "Show whole file",
   prevChange: "Previous change",
@@ -255,7 +272,15 @@ type Model =
   | { kind: "error" }
   | { kind: "mismatch" }
   | { kind: "no-lines" }
-  | { kind: "lines"; view: View; rows: Rows; base: SideText; head: SideText };
+  | {
+      kind: "lines";
+      view: View;
+      rows: Rows;
+      // The rows side by side (split.ts), made once for all users.
+      split: Split;
+      base: SideText;
+      head: SideText;
+    };
 
 // Base's path: the old one of a rename.
 function basePathOf(v: View): string {
@@ -331,7 +356,14 @@ function DiffPage(props: { path: string }): JSX.Element {
       );
       return { kind: "mismatch" };
     }
-    return { kind: "lines", view: v, rows, base: bt, head: ht };
+    return {
+      kind: "lines",
+      view: v,
+      rows,
+      split: splitOf(rows),
+      base: bt,
+      head: ht,
+    };
   });
   const lines = createMemo(
     () => {
@@ -438,6 +470,42 @@ function DiffPage(props: { path: string }): JSX.Element {
   // Set by DiffBody while the grid lives.
   let hooks: BodyHooks | undefined;
   const keys = useKeys();
+
+  // Find (D-346): one finder per side's file, kept while a new diff
+  // loads (ws); the diff's finder for the body's layout on top.
+  const [bodyLayout, setBodyLayout] = createSignal<DiffLayout>("unified");
+  const sideFinders = createMemo((last: SideFinders | undefined) => {
+    const m = lines();
+    if (m === undefined) return last;
+    return {
+      rows: m.rows,
+      split: m.split,
+      base: createFinder(m.base.text, m.base.index),
+      head: createFinder(m.head.text, m.head.index),
+    };
+  }, undefined);
+  // No rows yet (too slow): the bar is off and finds nothing.
+  const finder = createMemo((): DiffFinder => {
+    const f = sideFinders();
+    if (f === undefined) return noDiffFinder;
+    const split = bodyLayout() === "split" ? f.split : undefined;
+    return diffFinder(f.rows, f.base, f.head, split);
+  });
+  const [find, setFind] = createSignal<DiffHits>();
+  let findBar: FindHandle | undefined;
+  useKeyActions({
+    find: () => {
+      if (findBar === undefined || !rowsShown()) return false;
+      findBar.open();
+      return true;
+    },
+    // After the bar's own Esc: a bar open while focus is elsewhere.
+    escape: () => {
+      if (findBar?.isOpen() !== true) return false;
+      findBar.close();
+      return true;
+    },
+  });
   const stepChange = (dir: 1 | -1) => {
     const r = hooks?.stepChange(dir);
     if (r !== undefined) keys?.say(r);
@@ -498,47 +566,73 @@ function DiffPage(props: { path: string }): JSX.Element {
             {props.path}
           </h1>
         </div>
+        {/* One toolbar for rows and no rows (too slow, -w): a flip
+            keeps "Ignore whitespace", and focus on it. */}
         <Show when={toolbarShown()}>
-          <div class="code-toolbar">
-            <Show when={rowsShown()}>
-              <button type="button" onClick={() => stepChange(-1)}>
-                {texts.prevChange}
-              </button>
-              <button type="button" onClick={() => stepChange(1)}>
-                {texts.nextChange}
-              </button>
-              <button
-                type="button"
-                aria-pressed={whole()}
-                onClick={() => setWhole(!whole())}
-              >
-                {texts.wholeFile}
-              </button>
-            </Show>
+          <FindBar
+            off={!rowsShown()}
+            finder={finder}
+            api={() => hooks?.find}
+            status={(m, i) => diffStatus(untrack(finder), m, i)}
+            onFind={(h) =>
+              setFind(
+                h === undefined ? undefined : { ...h, finder: untrack(finder) },
+              )
+            }
+            handle={(h) => {
+              findBar = h;
+              // Under the bar's owner: it goes with the bar.
+              onCleanup(() => {
+                findBar = undefined;
+                setFind(undefined);
+              });
+            }}
+            keyHint={prefs.singleKeyShortcuts() ? "(f)" : undefined}
+          >
+            {/* In boxes of their own (display: contents): the bar's
+                children stay put, so the ws button is never moved. */}
+            <span class="diff-tools">
+              <Show when={rowsShown()}>
+                <button type="button" onClick={() => stepChange(-1)}>
+                  {texts.prevChange}
+                </button>
+                <button type="button" onClick={() => stepChange(1)}>
+                  {texts.nextChange}
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={whole()}
+                  onClick={() => setWhole(!whole())}
+                >
+                  {texts.wholeFile}
+                </button>
+              </Show>
+            </span>
             <button type="button" aria-pressed={ws()} onClick={toggleWs}>
               {texts.ws}
             </button>
-            <Show when={rowsShown()}>
-              <div
-                class="diff-layout"
-                role="group"
-                aria-label={texts.layoutGroup}
-              >
-                <For each={diffLayouts}>
-                  {(l) => (
-                    <button
-                      type="button"
-                      aria-pressed={wanted() === l}
-                      onClick={() => setLayout(l)}
-                    >
-                      {layoutLabels[l]}
-                    </button>
-                  )}
-                </For>
-              </div>
-              <span class="code-hint">{texts.hint}</span>
-            </Show>
-          </div>
+            <span class="diff-tools">
+              <Show when={rowsShown()}>
+                <div
+                  class="diff-layout"
+                  role="group"
+                  aria-label={texts.layoutGroup}
+                >
+                  <For each={diffLayouts}>
+                    {(l) => (
+                      <button
+                        type="button"
+                        aria-pressed={wanted() === l}
+                        onClick={() => setLayout(l)}
+                      >
+                        {layoutLabels[l]}
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </span>
+          </FindBar>
         </Show>
         <For each={notes()}>{(n) => <p class="file-note">{n}</p>}</For>
         <Show when={tooSlow()}>
@@ -571,6 +665,7 @@ function DiffPage(props: { path: string }): JSX.Element {
                 <DiffBody
                   path={props.path}
                   rows={m.rows}
+                  split={m.split}
                   whole={whole()}
                   wanted={wanted()}
                   setLayout={setLayout}
@@ -592,6 +687,8 @@ function DiffPage(props: { path: string }): JSX.Element {
                   }}
                   setHooks={(h) => (hooks = h)}
                   takeFocus={takeFocus}
+                  find={find()}
+                  onLayout={setBodyLayout}
                 />
               </Show>
             )}
@@ -617,7 +714,21 @@ interface BodyHooks {
   // The change buttons: the cursor goes there, focus stays. What to
   // say: the row, or "No more changes.".
   stepChange: (dir: 1 | -1) => string | undefined;
+  // The find bar's view of the grid, in the finder's lines.
+  find: FindApi;
 }
+
+// Each side's finder (find.ts), for the rows they were made with.
+interface SideFinders {
+  rows: Rows;
+  split: Split;
+  base: Finder;
+  head: Finder;
+}
+
+// Before any rows: no hits.
+const noHits: Finder = { search: () => noMatches };
+const noDiffFinder = diffFinder(rowsOf([]), noHits, noHits, undefined);
 
 // One side as the grid uses it. lineRow: the row of each line.
 interface Pane {
@@ -641,6 +752,8 @@ function renderOf(p: Pane) {
 function DiffBody(props: {
   path: string;
   rows: Rows;
+  // The rows' Split. Read once.
+  split: Split;
   base: Pane;
   head: Pane;
   whole: boolean;
@@ -650,11 +763,15 @@ function DiffBody(props: {
   setHooks: (h: BodyHooks | undefined) => void;
   // True once: focus the grid when it is in (after Try again).
   takeFocus: () => boolean;
+  // Find hits to show, and where the layout goes.
+  find: DiffHits | undefined;
+  onLayout: (l: DiffLayout) => void;
 }): JSX.Element {
   const location = useLocation();
   // Read once: DiffPage makes a new body for new rows.
-  const { rows, base, head } = untrack(() => ({
+  const { rows, rowsSplit, base, head } = untrack(() => ({
     rows: props.rows,
+    rowsSplit: props.split,
     base: props.base,
     head: props.head,
   }));
@@ -704,6 +821,12 @@ function DiffBody(props: {
     wanted() === "split" && fits() ? "split" : "unified",
   );
   const narrow = () => wanted() === "split" && !fits();
+  // How find counts the cells in this layout (diff/find.ts).
+  const cells = (): CellSpace => ({
+    rows,
+    split: untrack(layout) === "split" ? rowsSplit : undefined,
+  });
+  createEffect(() => props.onLayout(layout()));
   let carry: GridState | undefined;
   const grid = (
     <Show when={layout()} keyed>
@@ -717,12 +840,14 @@ function DiffBody(props: {
             base={base.text}
             head={head.text}
             layout={l}
+            split={rowsSplit}
             shown={shown()}
             setShown={setShown}
             renderBase={renderBase()}
             renderHead={renderHead()}
             whole={props.whole}
             marked={marked()}
+            find={props.find}
             start={start}
             onLeave={(s) => (carry = s)}
             ref={(a) => (api = a)}
@@ -769,6 +894,43 @@ function DiffBody(props: {
       onCleanup(() => cancelAnimationFrame(frame));
     }),
   );
+  // A new find hit: open its gap and move the cursor there, as for a
+  // hash above; scroll only if its row isn't on screen. No focus
+  // change. Hits for other rows or another layout: wait for new ones.
+  createEffect(
+    on(
+      () => props.find,
+      (f) => {
+        const a = api;
+        if (f === undefined || a === undefined || f.current < 0) return;
+        if (!isFor(f.finder, cells())) return;
+        const { row, side } = cellAt(f.finder, f.matches.line[f.current]!);
+        if (row < 0) return;
+        a.reveal(row);
+        a.setCursorRow(row, side, f.matches.from[f.current]);
+        const el = a.rowEl(row);
+        const box = el?.closest(".code-view");
+        if (el === undefined || box == null || !inBox(el, box)) {
+          a.scrollToRow(row, "center");
+        }
+      },
+    ),
+  );
+  // The find bar's view: the cursor's cell as a finder line, and back,
+  // for this grid's layout (the page's finder is made for it).
+  const findApi: FindApi = {
+    cursor: () => {
+      const c = api?.cursor();
+      if (c === undefined) return undefined;
+      const n = cellLine(cells(), c.row, c.side);
+      return n < 0 ? undefined : { line: n, col: c.col };
+    },
+    focusAt: (line, col) => {
+      const { row, side } = cellAt(cells(), line);
+      if (row >= 0) api?.focusRow(row, col, side);
+    },
+  };
+
   // The highlight came after Back landed: land again, on its link.
   createEffect(
     on([base.hl, head.hl], () => {
@@ -881,6 +1043,7 @@ function DiffBody(props: {
       const r = go(blocks, dir, false);
       return r === true ? undefined : r;
     },
+    find: findApi,
   });
   onCleanup(() => props.setHooks(undefined));
 

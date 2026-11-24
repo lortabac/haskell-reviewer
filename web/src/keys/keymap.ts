@@ -121,7 +121,7 @@ export const keymap: readonly KeyRow[] = [
     bindings: ["f"],
     keys: ["f"],
     label: "Find in file",
-    where: "Source",
+    where: "Source, diff",
     control: "Find button",
   },
   {

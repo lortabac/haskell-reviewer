@@ -42,6 +42,7 @@ import {
   type LineMarks,
 } from "../source/CodeView";
 import { createSource } from "../source/createSource";
+import { createFinder } from "../source/find";
 import { FindBar, type FindHandle } from "../source/FindBar";
 import { isCodeJump, shouldReland } from "../source/landing";
 import { onLeaveClick, originOf, saveOrigin } from "../source/origin";
@@ -320,6 +321,7 @@ function FileText(props: {
   let refsBar: RefsHandle | undefined;
   const prefs = usePrefs();
   const [find, setFind] = createSignal<FindHits>();
+  const finder = createMemo(() => createFinder(props.text, index()));
   // A same-file link was followed: where the cursor goes, once the
   // hash changes (D-284).
   let jump: { line: number; col: number } | undefined;
@@ -604,8 +606,7 @@ function FileText(props: {
       </p>
       <Show when={index().count > 0}>
         <FindBar
-          text={props.text}
-          index={index()}
+          finder={finder}
           api={() => api}
           onFind={setFind}
           onOpen={() => refsBar?.closeQuietly()}

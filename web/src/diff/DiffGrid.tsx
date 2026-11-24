@@ -27,6 +27,7 @@ import {
 import { setVar } from "../ui/cssom";
 import { bringOnPage } from "../ui/scroll";
 import { plainPieces } from "../source/display";
+import { createFindDraw } from "../source/findDraw";
 import { focusKeepingSelection } from "../source/focus";
 import {
   createPendingFocus,
@@ -58,6 +59,7 @@ import {
   overscan,
   withPins,
 } from "../source/virtual";
+import { type CellSpace, cellLine, type DiffHits, isFor } from "./find";
 import { plainScroll, sharedScroll, type SideScroll } from "./hscroll";
 import {
   allShown,
@@ -88,10 +90,13 @@ import {
   type RowSpace,
   sideOfRow,
   splitCellLabel,
-  splitOf,
+  type Split,
   splitSpace,
   unifiedSpace,
 } from "./split";
+
+const diffSides: readonly DiffSessionSide[] = ["base", "head"];
+const noClip = { left: -Infinity, right: Infinity };
 
 // One side's text and its lines.
 export interface SideText {
@@ -129,8 +134,9 @@ export interface DiffApi {
   // and bring it into view. A hidden row: its gap. side: split only;
   // default from the row (removed: base, else head).
   focusRow: (row: number, col: number, side?: DiffSessionSide) => void;
-  // Move the cursor, no focus change and no scroll.
-  setCursorRow: (row: number, side?: DiffSessionSide) => void;
+  // Move the cursor, no focus change and no scroll. col: on the row's
+  // line (0 on a gap).
+  setCursorRow: (row: number, side?: DiffSessionSide, col?: number) => void;
   scrollToRow: (row: number, align?: "auto" | "center" | "start") => void;
   // Show a hidden row and a few around it.
   reveal: (row: number) => void;
@@ -163,6 +169,8 @@ export interface DiffGridProps {
   head: SideText;
   // Read once: a new layout is a new grid.
   layout: DiffLayout;
+  // The rows' Split (split.ts splitOf). Read once.
+  split: Split;
   // Shown unified rows (rows.ts); kept by the page over layout
   // switches.
   shown: Uint8Array;
@@ -177,6 +185,8 @@ export interface DiffGridProps {
   // The row and side of the hash, if any. Unified marks the row,
   // split the cell's half.
   marked?: { row: number; side: DiffSessionSide } | undefined;
+  // Find hits to draw (diff/find.ts); others' rows or layout: none.
+  find?: DiffHits | undefined;
   // Where the cursor starts (after a layout switch). Read once.
   start?: GridState | undefined;
   // When the grid goes: where its cursor was.
@@ -191,13 +201,19 @@ export function DiffGrid(props: DiffGridProps): JSX.Element {
   const owner = getOwner();
   // Read once: a new diff or layout needs a new grid. DiffView mounts
   // it only with rows, so the visible list is never empty.
-  const { rows, layout, carried } = untrack(() => ({
+  const { rows, layout, carried, rowsSplit } = untrack(() => ({
     rows: props.rows,
     layout: props.layout,
     carried: props.start,
+    rowsSplit: props.split,
   }));
   const space: RowSpace =
-    layout === "split" ? splitSpace(splitOf(rows)) : unifiedSpace(rows);
+    layout === "split" ? splitSpace(rowsSplit) : unifiedSpace(rows);
+  // How find counts this grid's cells (diff/find.ts).
+  const cells: CellSpace = {
+    rows,
+    split: layout === "split" ? rowsSplit : undefined,
+  };
   const split = space.split;
   // Unified: numbers, sign, code. Split: number and code a side.
   const colCount = split ? 4 : 3;
@@ -464,15 +480,12 @@ export function DiffGrid(props: DiffGridProps): JSX.Element {
       const k = keyOfRow(r);
       focusKey(k, sideAt(k, side ?? sideOfRow(rows, r)), col);
     },
-    setCursorRow: (r, side) => {
-      goal = 0;
+    setCursorRow: (r, side, col = 0) => {
       const k = keyOfRow(r);
-      setCursor({
-        key: k,
-        side: sideAt(k, side ?? sideOfRow(rows, r)),
-        col: 0,
-        link: false,
-      });
+      const s = sideAt(k, side ?? sideOfRow(rows, r));
+      const c = isGapKey(k) ? 0 : Math.min(col, lineLength(k, s));
+      goal = c;
+      setCursor({ key: k, side: s, col: c, link: false });
     },
     scrollToRow: (r, align = "center") =>
       scrollToIdx(indexOfRow(vis(), space.displayOf(r)), align),
@@ -628,6 +641,16 @@ export function DiffGrid(props: DiffGridProps): JSX.Element {
     rowHeight.observe(probe);
     box.addEventListener("focusin", onFocusIn);
     hx = split ? sharedScroll(box, rowsEl) : plainScroll(box);
+    // The hit's outline is cut to its cell's view: again on a sideways
+    // scroll (split: after sharedScroll moved the cells).
+    let x = box.scrollLeft;
+    const onScroll = () => {
+      if (box.scrollLeft === x) return;
+      x = box.scrollLeft;
+      draw.outline();
+    };
+    box.addEventListener("scroll", onScroll, { passive: true });
+    onCleanup(() => box.removeEventListener("scroll", onScroll));
   });
   onCleanup(() => {
     const at = apiCursor();
@@ -651,6 +674,7 @@ export function DiffGrid(props: DiffGridProps): JSX.Element {
     box: () => box,
     rows: () => rowsEl,
     v,
+    after: () => repaintSoon(),
   });
   createEffect(() => {
     const n = Math.max(rows.baseCount, rows.headCount);
@@ -692,6 +716,16 @@ export function DiffGrid(props: DiffGridProps): JSX.Element {
     cellId(cursor().key, cursor().side),
   );
   const onLink = createMemo(() => cursor().link);
+  // Find: hits made for these rows and this layout only.
+  const hits = createMemo(() => {
+    const f = props.find;
+    return f !== undefined && isFor(f.finder, cells) ? f : undefined;
+  });
+  // The current hit's cell line; 0: none.
+  const isFindLine = createSelector(() => {
+    const f = hits();
+    return f === undefined ? 0 : (f.matches.line[f.current] ?? 0);
+  });
 
   // A code cell: drawn by hand, its stop kept on a redraw. r: the
   // unified row shown; -1: an empty split cell (named, no text).
@@ -772,6 +806,7 @@ export function DiffGrid(props: DiffGridProps): JSX.Element {
           "diff-insert": kind === insertRow,
           "code-cursor-line": isCursor(r),
           "code-line-target": props.marked?.row === r,
+          "code-find-line": isFindLine(cellLine(cells, r, sideOfRow(rows, r))),
         }}
         role="row"
         aria-rowindex={idx() + 1}
@@ -810,6 +845,7 @@ export function DiffGrid(props: DiffGridProps): JSX.Element {
             "diff-cursor-half": isCursorCell(cellId(d, side)),
             "code-line-target":
               r >= 0 && props.marked?.row === r && props.marked.side === side,
+            "code-find-line": r >= 0 && isFindLine(cellLine(cells, r, side)),
           }}
         >
           <div
@@ -922,7 +958,63 @@ export function DiffGrid(props: DiffGridProps): JSX.Element {
       { defer: true },
     ),
   );
-  createEffect(on(keys, () => pendingFocus.retry(), { defer: true }));
+  // Find: the hits of the mounted cells. Again when rows come or
+  // redraw, or the hits change.
+  const draw = createFindDraw({
+    box: () => box,
+    cells: function* () {
+      for (const k of keys()) {
+        if (isGapKey(k)) continue;
+        for (const side of split ? diffSides : [sideOfKey(k)]) {
+          const r = cellRow(k, side);
+          if (r < 0) continue;
+          const cell = cellOf(k, side);
+          const line = cellLine(cells, r, side);
+          if (cell !== undefined && line > 0) yield { cell, line };
+        }
+      }
+    },
+    find: hits,
+    reveal: revealIn,
+    // Not over the sticky gutter, nor past the cell's view.
+    clip: (cell) => hx?.bounds(cell) ?? noClip,
+  });
+  // Rows are placed (--code-y) by their own effects, which may run
+  // after ours: draw once they have, in a microtask.
+  let queued = false;
+  let alive = true;
+  onCleanup(() => (alive = false));
+  const repaintSoon = () => {
+    if (queued) return;
+    queued = true;
+    queueMicrotask(() => {
+      queued = false;
+      if (alive) draw.repaint();
+    });
+  };
+  createEffect(
+    on(
+      keys,
+      () => {
+        pendingFocus.retry();
+        repaintSoon();
+      },
+      { defer: true },
+    ),
+  );
+  // After a side redrew (render effects run first).
+  createEffect(
+    on([() => props.renderBase, () => props.renderHead], repaintSoon, {
+      defer: true,
+    }),
+  );
+  // A new hit: draw it, and bring it into view sideways once drawn.
+  createEffect(
+    on(hits, (f) => {
+      if (f !== undefined && f.current >= 0) draw.revealNext();
+      repaintSoon();
+    }),
+  );
   // After a layout switch: the cursor's row where it was on screen, and
   // focus back if the grid had it. After mountRows: the row is in.
   onMount(() => {

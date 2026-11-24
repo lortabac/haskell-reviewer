@@ -1,32 +1,44 @@
 // The find toolbar above the source view (T09, G11): the Find button,
 // the hint and, when open, the bar. Enter in the input moves to the
 // next hit and stays in the input; Esc or Close puts focus on the
-// current hit. The count goes to a live region.
+// current hit. The count goes to a live region. The diff view uses it
+// too, with its own Finder (diff/find.ts).
 import {
+  createComputed,
+  createEffect,
   createMemo,
   createSignal,
   createUniqueId,
   type JSX,
+  on,
   onCleanup,
+  untrack,
 } from "solid-js";
-import type { CodeApi, FindHits } from "./CodeView";
 import {
-  createFinder,
+  type Finder,
+  type FindHits,
   type Matches,
   nearest,
   noMatches,
-  status,
+  status as lineStatus,
   step,
 } from "./find";
-import type { LineIndex } from "./lines";
 
 // Typing: say the count this long after the last key.
 export const typingDelay = 500;
 
+// What the bar needs from the view, in the finder's lines.
+export interface FindApi {
+  cursor: () => { line: number; col: number } | undefined;
+  focusAt: (line: number, col: number) => void;
+}
+
 export interface FindBarProps {
-  text: string;
-  index: LineIndex;
-  api: () => CodeApi | undefined;
+  // A new finder while open: the same query again, from the cursor.
+  finder: () => Finder;
+  api: () => FindApi | undefined;
+  // For the live region; default: "Match 3 of 12, line 40".
+  status?: ((m: Matches, i: number) => string) | undefined;
   // The hits to draw; undefined when the bar is closed.
   onFind: (hits: FindHits | undefined) => void;
   // More for the toolbar, after the Find button (the references bar).
@@ -37,6 +49,9 @@ export interface FindBarProps {
   handle?: (h: FindHandle) => void;
   // Shown after "Find" in the hint, like "(f)".
   keyHint?: string | undefined;
+  // Only the children show: no button, bar or hint (a diff with no
+  // rows). The toolbar stays, so focus on a child stays too.
+  off?: boolean | undefined;
 }
 
 export interface FindHandle {
@@ -51,11 +66,10 @@ export interface FindHandle {
 
 export function FindBar(props: FindBarProps): JSX.Element {
   const barId = createUniqueId();
+  let root!: HTMLDivElement;
   let button!: HTMLButtonElement;
+  let barEl!: HTMLDivElement;
   let input!: HTMLInputElement;
-  // The file never changes here: a new text is a new FindBar.
-  // eslint-disable-next-line solid/reactivity
-  const finder = createFinder(props.text, props.index);
   const [open, setOpen] = createSignal(false);
   const [query, setQuery] = createSignal("");
   const [matches, setMatches] = createSignal<Matches>(noMatches);
@@ -90,7 +104,7 @@ export function FindBar(props: FindBarProps): JSX.Element {
   };
   const sayNow = (m: Matches, cur: number) => {
     clearTimeout(timer);
-    say(query() === "" ? "" : status(m, cur));
+    say(query() === "" ? "" : (props.status ?? lineStatus)(m, cur));
   };
   onCleanup(() => {
     clearTimeout(timer);
@@ -98,12 +112,29 @@ export function FindBar(props: FindBarProps): JSX.Element {
 
   const find = (q: string) => {
     setQuery(q);
-    const m = finder.search(q);
+    const m = props.finder().search(q);
     const cur = nearest(m, origin.line, origin.col);
     publish(m, cur);
     clearTimeout(timer);
     timer = setTimeout(() => sayNow(m, cur), typingDelay);
   };
+  // A new finder (the diff's layout or rows changed): search again.
+  // Open: from the cursor, and say the count. Closed: only the hits.
+  createEffect(
+    on(
+      () => props.finder(),
+      (f) => {
+        if (!open()) {
+          setMatches(f.search(query()));
+          return;
+        }
+        const c = props.api()?.cursor();
+        if (c !== undefined) origin = c;
+        find(query());
+      },
+      { defer: true },
+    ),
+  );
   const move = (d: 1 | -1) => {
     const m = matches();
     if (m.count === 0) return;
@@ -115,8 +146,7 @@ export function FindBar(props: FindBarProps): JSX.Element {
   const show = () => {
     props.onOpen?.();
     const c = props.api()?.cursor();
-    origin =
-      c === undefined ? { line: 1, col: 0 } : { line: c.line, col: c.col };
+    origin = c ?? { line: 1, col: 0 };
     setOpen(true);
     // The old query stays: its hits again, from the cursor.
     const m = matches();
@@ -131,22 +161,24 @@ export function FindBar(props: FindBarProps): JSX.Element {
     const cur = current();
     clearTimeout(timer);
     // Focus first: it must not be in a hidden bar.
-    if (cur >= 0 && cur < m.count) {
-      props.api()?.focusAt(m.line[cur]!, m.from[cur]!);
+    const api = props.api();
+    if (api !== undefined && cur >= 0 && cur < m.count) {
+      api.focusAt(m.line[cur]!, m.from[cur]!);
     } else button.focus();
+    say("");
+    setOpen(false);
+    props.onFind(undefined);
+  };
+  const quiet = () => {
+    if (!open()) return;
+    clearTimeout(timer);
     say("");
     setOpen(false);
     props.onFind(undefined);
   };
   // eslint-disable-next-line solid/reactivity -- given once
   props.handle?.({
-    closeQuietly: () => {
-      if (!open()) return;
-      clearTimeout(timer);
-      say("");
-      setOpen(false);
-      props.onFind(undefined);
-    },
+    closeQuietly: quiet,
     open: () => {
       if (open()) {
         input.focus();
@@ -159,6 +191,29 @@ export function FindBar(props: FindBarProps): JSX.Element {
     },
   });
   const toggle = () => (open() ? close() : show());
+  // Off: close if open. Focus in what goes (the button, the bar) moves
+  // to the first child button still shown. Read before the parts hide.
+  let lost = false;
+  createComputed(
+    on(
+      () => props.off === true,
+      (off) => {
+        const a = document.activeElement;
+        lost = off && a !== null && (a === button || barEl.contains(a));
+      },
+      { defer: true },
+    ),
+  );
+  createEffect(() => {
+    if (props.off !== true) return;
+    untrack(quiet);
+    if (!lost) return;
+    lost = false;
+    const to = [...root.querySelectorAll("button")].find(
+      (b) => b !== button && !b.hidden && !barEl.contains(b),
+    );
+    to?.focus();
+  });
 
   const onInputKey = (e: KeyboardEvent) => {
     // 229: Safari's end of a composition (isComposing is already false).
@@ -179,11 +234,12 @@ export function FindBar(props: FindBarProps): JSX.Element {
   };
 
   return (
-    <div class="code-toolbar">
+    <div class="code-toolbar" ref={(el) => (root = el)}>
       <button
         ref={(el) => (button = el)}
         type="button"
         class="code-find-button"
+        hidden={props.off}
         aria-expanded={open()}
         aria-controls={barId}
         onClick={toggle}
@@ -192,11 +248,12 @@ export function FindBar(props: FindBarProps): JSX.Element {
       </button>
       {props.children}
       <div
+        ref={(el) => (barEl = el)}
         id={barId}
         class="code-find-bar"
         role="search"
         aria-label="Find in file"
-        hidden={!open()}
+        hidden={!open() || props.off === true}
         onKeyDown={onBarKey}
       >
         <label>
@@ -233,7 +290,7 @@ export function FindBar(props: FindBarProps): JSX.Element {
           Close
         </button>
       </div>
-      <span class="code-hint">
+      <span class="code-hint" hidden={props.off}>
         {`Browser find sees only visible lines — use Find${
           props.keyHint === undefined ? "" : ` ${props.keyHint}`
         } to search the whole file`}

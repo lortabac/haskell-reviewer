@@ -19,13 +19,13 @@ import {
   onMount,
 } from "solid-js";
 import { setVar } from "../ui/cssom";
-import { bringOnPage } from "../ui/scroll";
+import { bringOnPage, inBox } from "../ui/scroll";
 import { createCopy } from "./copy";
 import { createHoverCard } from "./createHoverCard";
 import { plainPieces } from "./display";
 import { focusKeepingSelection } from "./focus";
-import { inLine, type Matches } from "./find";
-import { createPaint, maxRangesPerRow } from "./findPaint";
+import type { FindHits } from "./find";
+import { createFindDraw } from "./findDraw";
 import {
   isPlain,
   isSelectAll,
@@ -45,8 +45,6 @@ import {
   colIn,
   domPoint,
   linkStops,
-  nodeAt,
-  nodesAt,
   pointAt,
   selectedLines,
 } from "./selection";
@@ -126,12 +124,7 @@ const kindLabel: Record<Exclude<LineKind, "code">, string> = {
   directive: "CPP directive",
 };
 
-// The hits of find (T09). current: the one to show (-1: none). A new
-// object moves the view to the current hit, even if it is the same one.
-export interface FindHits {
-  matches: Matches;
-  current: number;
-}
+export type { FindHits } from "./find";
 
 // text and index are read once: a new file needs a new view.
 export interface CodeViewProps {
@@ -642,7 +635,7 @@ export function CodeView(props: CodeViewProps): JSX.Element {
     box: () => box,
     rows: () => rowsEl,
     v,
-    after: () => repaint(),
+    after: () => draw.repaint(),
   });
   createEffect(() => {
     setVar(box, "--code-digits", String(String(count()).length));
@@ -746,94 +739,17 @@ export function CodeView(props: CodeViewProps): JSX.Element {
   // redraw (from the effects below), or the hits change. The place
   // matters: a separate effect on lines made the Ctrl+A e2e fail once
   // (cause not found).
-  const paint = createPaint();
-  onCleanup(paint.clear);
-  // The outline of the current hit: boxes in the scroll box, outside
-  // the cells (so not in a copy), in content coordinates.
-  const boxes = document.createElement("div");
-  boxes.className = "code-find-boxes";
-  boxes.setAttribute("aria-hidden", "true");
-  const outline = (r: Range | undefined) => {
-    boxes.replaceChildren();
-    if (r === undefined || typeof r.getClientRects !== "function") return;
-    // One box: rows don't wrap. The union of the rects with a width
-    // (a hit that starts on a token border gives an empty one, and a
-    // link gives its own rect too).
-    let left = Infinity;
-    let top = Infinity;
-    let right = -Infinity;
-    let bottom = -Infinity;
-    for (const q of r.getClientRects()) {
-      if (q.width <= 0) continue;
-      left = Math.min(left, q.left);
-      top = Math.min(top, q.top);
-      right = Math.max(right, q.right ?? q.left + q.width);
-      bottom = Math.max(bottom, q.bottom ?? q.top + q.height);
-    }
-    if (left === Infinity) return;
-    const b = box.getBoundingClientRect();
-    const el = document.createElement("div");
-    el.className = "code-find-box";
-    const x = left - b.left - box.clientLeft + box.scrollLeft;
-    const y = top - b.top - box.clientTop + box.scrollTop;
-    setVar(el, "--box-x", `${x}px`);
-    setVar(el, "--box-y", `${y}px`);
-    setVar(el, "--box-w", `${right - left}px`);
-    setVar(el, "--box-h", `${bottom - top}px`);
-    boxes.append(el);
-  };
-  onMount(() => box.append(boxes));
-  // The view moves to the current hit, once its row is drawn.
-  let reveal = false;
-  const repaint = () => {
-    const f = props.find;
-    if (f === undefined) {
-      paint.clear();
-      outline(undefined);
-      return;
-    }
-    const m = f.matches;
-    const ranges: Range[] = [];
-    let cur: Range | undefined;
-    const range = (a: [Node, number], z: [Node, number]) => {
-      const r = document.createRange();
-      r.setStart(...a);
-      r.setEnd(...z);
-      return r;
-    };
-    for (const n of lines()) {
-      const cell = cellOf(n);
-      if (cell === undefined) continue;
-      const [lo, hi] = inLine(m, n);
-      const end = Math.min(hi, lo + maxRangesPerRow);
-      const cols: number[] = [];
-      for (let i = lo; i < end; i++) cols.push(m.from[i]!, m.to[i]!);
-      const at = nodesAt(cell, cols);
-      for (let i = lo; i < end; i++) {
-        const r = range(at[2 * (i - lo)]!, at[2 * (i - lo) + 1]!);
-        if (i === f.current) cur = r;
-        else ranges.push(r);
+  const draw = createFindDraw({
+    box: () => box,
+    cells: function* () {
+      for (const n of lines()) {
+        const cell = cellOf(n);
+        if (cell !== undefined) yield { cell, line: n };
       }
-      // The current one is always drawn, past the cap too.
-      if (f.current >= end && f.current < hi) {
-        cur = range(
-          nodeAt(cell, m.from[f.current]!),
-          nodeAt(cell, m.to[f.current]!),
-        );
-      }
-    }
-    paint.set(ranges, cur);
-    outline(cur);
-    if (reveal && cur !== undefined) {
-      reveal = false;
-      const cell = cellOf(m.line[f.current]!);
-      if (cell !== undefined) {
-        scrollToReveal(cell, cur.getBoundingClientRect());
-        // It may have moved the view: the boxes again.
-        outline(cur);
-      }
-    }
-  };
+    },
+    find: () => props.find,
+    reveal: scrollToReveal,
+  });
   // A focus that waited for its row or the cell's tabindex (user
   // effects run after the DOM ones).
   const retryFocus = pendingFocus.retry;
@@ -855,7 +771,7 @@ export function CodeView(props: CodeViewProps): JSX.Element {
       () => {
         retryFocus();
         copy.afterMount();
-        repaint();
+        draw.repaint();
       },
       { defer: true },
     ),
@@ -866,7 +782,7 @@ export function CodeView(props: CodeViewProps): JSX.Element {
       () => props.renderLine,
       () => {
         hover.relink();
-        repaint();
+        draw.repaint();
       },
       { defer: true },
     ),
@@ -880,7 +796,7 @@ export function CodeView(props: CodeViewProps): JSX.Element {
       (f) => {
         const i = f?.current ?? -1;
         if (f === undefined || i < 0) {
-          repaint();
+          draw.repaint();
           return;
         }
         const line = f.matches.line[i]!;
@@ -888,18 +804,11 @@ export function CodeView(props: CodeViewProps): JSX.Element {
         clearTimeout(upTimer);
         goal = col;
         setCursor({ line, col, link: false });
-        reveal = true;
+        draw.revealNext();
         // Centre only if the row isn't on screen already.
         const r = row(line);
-        const b = box.getBoundingClientRect();
-        const rr = r?.getBoundingClientRect();
-        // Inside the borders and the scrollbar.
-        const top = b.top + box.clientTop;
-        const bottom = top + box.clientHeight;
-        if (rr === undefined || rr.top < top || rr.bottom > bottom) {
-          scrollToLine(line, "center");
-        }
-        repaint();
+        if (r === undefined || !inBox(r, box)) scrollToLine(line, "center");
+        draw.repaint();
       },
     ),
   );
