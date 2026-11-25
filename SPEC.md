@@ -1909,8 +1909,15 @@ the search box's 8 results, on a large project once the store is loaded
   generation finish against it. Unchanged blobs hit the shared parse
   results (§11.4.4), so a reload re-parses only what changed. A dirty
   file is read from disk, so it is parsed again, and so is every file in
-  browse mode (no blob ids). The swap must drop the shared results and
-  texts no generation uses any more (T16b).
+  browse mode (no blob ids). With `--diff REV`, head is listed again and
+  base keeps its listing and project (its commit can't change; listed
+  again if it failed, or its project read crashed or could not read a
+  file); both snapshots are built again, and so are the pairing, the
+  markers and the outside count (D-352). If pairing fails on a reload,
+  the swap still happens, as at start-up: the POST gets 200 and
+  `api/diff-files` a 500 until the next reload. Between the old
+  workers' end and the new ones' start, the shared parse results and
+  texts drop what the new snapshots don't use.
 - **GC.** Big indexes may cause long GC pauses. Benchmarks pick the fix:
   compact regions or the non-moving GC (Q-GC). M1 and M2 keep the copying
   GC with the D-162 defaults: pauses are well under target (D-219, D-305).
@@ -2019,7 +2026,8 @@ a framework would cost more than it saves.
   stays in both), 503 if the server is stopping or reload is no longer
   available. POSTs that come
   during a reload wait for the next one, so many POSTs cost one more
-  reload at most. Browse mode only; a plain 404 in diff mode.
+  reload at most. Browse mode and `--diff REV`; a plain 404 for a
+  commit range (D-352).
 - **Push** (D-52): **one SSE connection per browser**, held by a
   **SharedWorker** that passes events on to all tabs.
   - Why: browsers allow about 6 HTTP/1.1 connections per origin, and
