@@ -23,12 +23,15 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Builder (Builder, byteString, word64Dec)
 import Data.ByteString.Char8 qualified as Char8
+import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.Maybe (isNothing)
 import Data.Text qualified as Text
+import HaskellReviewer.Core.Sides (Side)
 import HaskellReviewer.Effects.Clock (Microseconds (..))
 import HaskellReviewer.Effects.Log (Logger, logVerbose)
 import HaskellReviewer.Server.Security (methodNotAllowed)
-import HaskellReviewer.Server.Wire (encodeIndexing, helloPayload)
+import HaskellReviewer.Server.Wire (encodeGeneration, encodeIndexing, helloPayload)
 import HaskellReviewer.Session.Clients
   ( Clients,
     EventId (..),
@@ -36,7 +39,8 @@ import HaskellReviewer.Session.Clients
     openCount,
     withClient,
   )
-import HaskellReviewer.Session.Snapshot (IndexingState (..))
+import HaskellReviewer.Session.Live (LiveIndexing (..))
+import HaskellReviewer.Session.Snapshot (Generation, IndexingState (..))
 import Network.HTTP.Types (hContentType, methodGet, status200)
 import Network.Wai (Application, Request (..), responseStream)
 import Network.Wai.Handler.Warp qualified as Warp
@@ -60,6 +64,15 @@ Framing:
   changes all the time can't starve the other. We send the state, not
   each step, so the last state always gets there and a slow client
   never piles up a backlog. Never for a side whose listing failed.
+- `generation`, with {"generation":n} (encodeGeneration), when the
+  generation changes: a reload swapped in a new one (D-351). It comes right before
+  that generation's `indexing` events, in the same flush. The
+  generation and the states are read in one transaction, so no state
+  of the old generation comes after it. Not on open: `hello` already
+  means "fetch again", and the `indexing` events carry the generation.
+  The stream reads the generation before it writes `hello`, so a swap
+  just after the client's refetch still gets its event.
+  Two swaps within one gap give one event, for the last one.
 - Every keepAliveInterval (15 s) we send the comment ": keep-alive".
 - Last-Event-ID is ignored. There is no replay: after a reconnect the
   client fetches what it shows again (SPEC §11.6.2). The indexing
@@ -89,13 +102,30 @@ data EventStream = EventStream
   { clients :: Clients,
     -- | Time between two keep-alives. 'keepAliveInterval' in real use.
     keepAlive :: Microseconds,
-    -- | The indexing progress of every side listed now, head first
-    -- ('indexingStates'). Doesn't wait.
-    indexing :: STM [IndexingState],
+    -- | The current generation, and the indexing progress of every
+    -- side listed now, head first ('indexingNow' in
+    -- "HaskellReviewer.Session.Live"). Doesn't wait.
+    current :: STM LiveIndexing,
     -- | Least time between two @indexing@ events. 'indexingGap' in real
     -- use.
     minGap :: Microseconds,
     logger :: Logger
+  }
+
+-- | What a stream sent last.
+data Sent = Sent
+  { generation :: Generation,
+    -- | The last state sent, by side.
+    states :: Map Side IndexingState
+  }
+
+-- | What changed since 'Sent'.
+data Changes = Changes
+  { -- | The generation, if it is new.
+    newGeneration :: Maybe Generation,
+    now :: Sent,
+    -- | The states that differ from what was sent.
+    fresh :: [IndexingState]
   }
 
 -- | 15 s. See Note [Event stream].
@@ -117,41 +147,61 @@ eventsApp es req respond
             Warp.pauseTimeout req
             let stream = withClient es.clients $ do
                   logCount "event stream opened"
+                  -- Before hello: a swap after this read gets its event,
+                  -- even if the client's refetch on hello saw the old
+                  -- generation. At worst one event too many.
+                  start <- atomically es.current
                   hello <- nextEventId es.clients
                   write (renderEvent hello "hello" helloPayload)
                   flush
                   timer <- registerDelay delay
-                  loop write flush timer Map.empty
+                  let none = Sent {generation = start.generation, states = Map.empty}
+                  loop write flush timer none
             stream `finally` logCount "event stream closed"
   where
     Microseconds delay = es.keepAlive
     Microseconds gap = es.minGap
-    -- Waits for a new indexing state or the keep-alive timer, whichever
-    -- comes first. Never returns: a failed write ends it.
+    -- Waits for a new state or the keep-alive timer, whichever comes
+    -- first. Never returns: a failed write ends it.
     loop write flush timer sent = do
       next <-
         atomically $
           (Left <$> changed sent) <|> (Right () <$ (readTVar timer >>= check))
       case next of
-        Left (now, fresh) -> do
-          forM_ fresh $ \st -> do
+        Left c -> do
+          forM_ c.newGeneration $ \g -> do
+            i <- nextEventId es.clients
+            write (renderEvent i "generation" (encodeGeneration g))
+          forM_ c.fresh $ \st -> do
             i <- nextEventId es.clients
             let payload = encodeIndexing st.generation st.side st.progress
             write (renderEvent i "indexing" payload)
           flush
           threadDelay gap
-          loop write flush timer now
+          loop write flush timer c.now
         Right () -> do
           write keepAliveFrame
           flush
           timer' <- registerDelay delay
           loop write flush timer' sent
-    -- The states now, and the ones that differ from what we sent.
+    -- What changed since we last sent. Retries if nothing did.
     changed sent = do
-      states <- es.indexing
-      let fresh = [st | st <- states, Map.lookup st.side sent /= Just st]
-      when (null fresh) retry
-      pure (Map.fromList [(st.side, st) | st <- states], fresh)
+      now <- es.current
+      let fresh = [st | st <- now.states, Map.lookup st.side sent.states /= Just st]
+          newGeneration
+            | now.generation /= sent.generation = Just now.generation
+            | otherwise = Nothing
+      when (null fresh && isNothing newGeneration) retry
+      pure
+        Changes
+          { newGeneration = newGeneration,
+            now =
+              Sent
+                { generation = now.generation,
+                  states = Map.fromList [(st.side, st) | st <- now.states]
+                },
+            fresh = fresh
+          }
     logCount what = do
       n <- openCount es.clients
       logVerbose es.logger (what <> " (" <> Text.pack (show n) <> " open)")

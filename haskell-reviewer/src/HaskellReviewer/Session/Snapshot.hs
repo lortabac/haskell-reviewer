@@ -10,9 +10,11 @@ module HaskellReviewer.Session.Snapshot
     -- * Operations
     newSessionShare,
     firstGeneration,
+    nextGeneration,
     newSnapshotSlot,
     fillSnapshot,
     awaitSnapshot,
+    awaitSnapshotSTM,
     snapshotSTM,
     indexingStates,
   )
@@ -41,8 +43,9 @@ import HaskellReviewer.Session.Index (Index, Pool, Progress, newPool, readProgre
 import HaskellReviewer.Session.Resolve (Resolver)
 import HaskellReviewer.Session.TextStore (BlobTexts, TextStore, newBlobTexts)
 
--- | Which snapshot a response comes from. Goes up on reload (later); the
--- client caches by it (SPEC §11.6.2).
+-- | Which snapshot a response comes from. One counter for the session:
+-- each reload makes the next one, for every side (D-351). The client
+-- caches by it (SPEC §11.6.2).
 newtype Generation = Generation Word64
   deriving (Eq, Show)
 
@@ -60,10 +63,13 @@ newSessionShare = do
   blobTexts <- newBlobTexts
   pure SessionShare {pool = pool, blobTexts = blobTexts}
 
--- | The generation of the first snapshot. The only one for now: there
--- is no reload yet.
+-- | The generation of the first snapshots.
 firstGeneration :: Generation
 firstGeneration = Generation 1
+
+-- | The generation after this one, for a reload.
+nextGeneration :: Generation -> Generation
+nextGeneration (Generation g) = Generation (g + 1)
 
 -- | One snapshot. Never changes once made, apart from the slots in its
 -- index. Forced before requests see it: see Note [Forced snapshot] in
@@ -108,7 +114,11 @@ fillSnapshot (SnapshotSlot v) s = atomically (tryPutTMVar v s)
 
 -- | Wait until the slot is filled.
 awaitSnapshot :: SnapshotSlot -> IO (Either ListError Snapshot)
-awaitSnapshot (SnapshotSlot v) = atomically (readTMVar v)
+awaitSnapshot = atomically . awaitSnapshotSTM
+
+-- | Like 'awaitSnapshot', in STM: retries until the slot is filled.
+awaitSnapshotSTM :: SnapshotSlot -> STM (Either ListError Snapshot)
+awaitSnapshotSTM (SnapshotSlot v) = readTMVar v
 
 -- | What the slot holds now, if it's filled.
 snapshotSTM :: SnapshotSlot -> STM (Maybe (Either ListError Snapshot))

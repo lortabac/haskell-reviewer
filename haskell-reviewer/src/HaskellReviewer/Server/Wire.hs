@@ -22,6 +22,8 @@ module HaskellReviewer.Server.Wire
     encodeModuleNotFound,
     encodeFileNotFound,
     encodeIndexing,
+    encodeGeneration,
+    encodeReloaded,
     encodePrefs,
     encodeSearch,
     encodeRefs,
@@ -522,6 +524,18 @@ encodeIndexing (Generation g) side p =
       <> ("total" .= p.total)
       <> ("ready" .= p.ready)
       <> ("failed" .= p.failed)
+
+-- | The data of the @generation@ event, after a reload (D-351):
+--
+-- > {"generation":2}
+encodeGeneration :: Generation -> ByteString
+encodeGeneration = LBS.toStrict . encodeReloaded
+
+-- | The answer to POST api\/reload: the new generation, as in
+-- 'encodeGeneration'.
+encodeReloaded :: Generation -> LBS.ByteString
+encodeReloaded (Generation g) =
+  Encoding.encodingToLazyByteString (Aeson.pairs ("generation" .= g))
 
 -- | GET and POST api\/prefs: every preference, defaults filled in.
 --

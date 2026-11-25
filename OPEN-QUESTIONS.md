@@ -45,6 +45,35 @@ is updated if needed (§10.3).
   segfaulted (7 in ~357 runs; gdb: a worker inside the test's static
   closure). Duplicate removed (D-235). It broke D-125's rule (inputs
   forced before a timed parse).
+  M3/T16a (9.12.4 only): the RunTest "many threads while 20 reloads run"
+  test (16 request threads, 20 reloads, workers cancelled each time)
+  crashes the RTS now and then: SIGSEGV or SIGABRT. Debug RTS messages:
+  `internal error: invalid closure, info=0xaaaaaaaaaaaaaaaa` (also
+  `info=(nil)` and other bad pointers), and assertions in
+  `rts/sm/Sanity.c` line 421 and `rts/include/rts/storage/Block.h` line
+  197. gdb: the GC scavenges an `EAGER_BLACKHOLE` whose owner TSO points
+  to freed memory (0xaa fill); the stacks around it are `AP_STACK`s
+  frozen by async exceptions in the timer manager (`timeout`,
+  `registerDelay`, `threadDelay`). Not our FFI (fd fixes found on the
+  way are T23). Crashes:
+
+  | Build | Crashes / runs |
+  |---|---|
+  | T16a, 9.12.4, debug RTS | 7/56 to 28/128 |
+  | master, 9.12.4, debug RTS | 0/56 |
+  | T16a, 9.10.3 and 9.14.1, debug RTS | 0/128 each |
+  | T16a without that test, 9.12.4, debug RTS | 0/96 |
+  | T16a, 9.12.4, release | 4/420 |
+
+  Production: a 9.12-built server under concurrent requests and reloads
+  may hit it too (same timer manager, same cancels). Workaround: that
+  test is skipped on 9.12 (`skipOnGhc912` in RunTest), so CI stays
+  green; 9.10 and 9.14 still run it. GHC 9.12.4 RTS bug, likely
+  https://gitlab.haskell.org/ghc/ghc/-/issues/27432 (fixed in 9.12.5 by
+  MR !16249: 9.12.4 shipped without the #26495 fix). A standalone repro
+  crashes 9.12.4 every run, never 9.10.3, 9.12.2 or 9.14.1 (dev notes:
+  `haskell-reviewer-dev/goals/m3-plans/ghc-rts-ticket/ticket.md`).
+  Re-enable the test on 9.12 once 9.12.5 is the tested 9.12.
 - **Q-OLD-SYNTAX**: closed (D-217): no shim in v1; reopen on user
   reports. How real is "the newest parser rejects old code"? The
   known cases (e.g. changes to `forall`/`!`/`~` lexing, `NoStarIsType`) need

@@ -38,6 +38,7 @@ module ApiSupport
     sendApi,
     goodOrigin,
     callApp,
+    callAppBody,
     apiToken,
 
     -- * Bodies as JSON
@@ -129,7 +130,7 @@ import HaskellReviewer.Core.Root (CanonicalRoot (..))
 import HaskellReviewer.Core.Sides (Pair (..), Side (..), Sides (..), lookupSide)
 import HaskellReviewer.Core.Xdg (XdgProblem (..))
 import HaskellReviewer.Effects.Clock (Microseconds (..))
-import HaskellReviewer.Effects.FileSystem (ListError, ReadError (..))
+import HaskellReviewer.Effects.FileSystem (ListError (..), ReadError (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), Logger, newLogger)
 import HaskellReviewer.Effects.Parser (parseGuarded)
 import HaskellReviewer.Effects.Source (EntrySource (..))
@@ -148,8 +149,16 @@ import HaskellReviewer.Server.Wire (SessionInfo (..), encodeSession)
 import HaskellReviewer.Session.Clients (newClients)
 import HaskellReviewer.Session.Diff (DiffProblem, DiffReady (..), fillDiff, newDiffSlot)
 import HaskellReviewer.Session.Index (IndexDeps (..), IndexJob (..), runWorkers)
+import HaskellReviewer.Session.Live (DiffLive (DiffLive), LiveIndexing (LiveIndexing))
 import HaskellReviewer.Session.Prefs (PrefsStore (..), newPrefsStore)
-import HaskellReviewer.Session.Snapshot (Snapshot (files, index, side), newSessionShare)
+import HaskellReviewer.Session.Reload (ReloadOutcome)
+import HaskellReviewer.Session.Snapshot
+  ( Snapshot (files, index, side),
+    fillSnapshot,
+    firstGeneration,
+    newSessionShare,
+    newSnapshotSlot,
+  )
 import Network.HTTP.Types (Header, Status (..))
 import Network.Wai
   ( Application,
@@ -192,7 +201,9 @@ data TestApi = TestApi
     -- | The diff route's line diff. By default as in production.
     lineDiff :: Whitespace -> Pair Text -> IO GuardedDiff,
     -- | What api/session says. Browse by default.
-    session :: SessionInfo
+    session :: SessionInfo,
+    -- | What POST api/reload does. 'Nothing' (a 404) by default.
+    reload :: Maybe (IO ReloadOutcome)
   }
 
 -- | The tree snapshot of a browse-mode api.
@@ -537,7 +548,8 @@ apiFor snap =
         newPrefsStore silent builtinDefaults (Left HomeUnset),
       diff = Nothing,
       lineDiff = guardedLineDiff diffTimeLimit,
-      session = BrowseSession
+      session = BrowseSession,
+      reload = Nothing
     }
 
 silent :: Logger
@@ -569,7 +581,7 @@ newSnapshot :: CanonicalRoot -> FileList -> Project -> IO Snapshot
 newSnapshot root fl project = do
   share <- newSessionShare
   let modules = buildModuleIndex project fl
-  Api.newSnapshot TreeSide share (DiskEntries root) fl modules Map.empty
+  Api.newSnapshot firstGeneration TreeSide share (DiskEntries root) fl modules Map.empty
 
 fixtureSnapshot :: IO Snapshot
 fixtureSnapshot =
@@ -1244,16 +1256,29 @@ sendApiQuery ::
 sendApiQuery method headers reqBody query api path = do
   listed <- sequence api.sides
   prefsStore <- api.prefs
+  slots <- forM listed $ \snap -> do
+    slot <- newSnapshotSlot
+    _ <- fillSnapshot slot snap
+    pure slot
   diffRoutes <- forM api.diff $ \ready -> do
     slot <- newDiffSlot
     _ <- fillDiff slot ready
-    pure DiffRoutes {slot = slot, lineDiff = api.lineDiff}
+    -- A browse api with a diff (api/diff-files tests): no sides to diff.
+    sidePair <- case slots of
+      DiffSides p -> pure p
+      BrowseSides _ -> do
+        none <- newSnapshotSlot
+        _ <- fillSnapshot none (Left (ListCrashed "no diff sides"))
+        pure Pair {head = none, base = none}
+    -- Positional: its field names clash with TestApi's.
+    let live = DiffLive slot sidePair
+    pure DiffRoutes {current = pure live, lineDiff = api.lineDiff}
   clients <- newClients
   let events =
         EventStream
           { clients = clients,
             keepAlive = Microseconds 1_000_000,
-            indexing = pure [],
+            current = pure (LiveIndexing firstGeneration []),
             minGap = Microseconds 0,
             logger = newLogger LevelInfo (\_ -> pure ())
           }
@@ -1271,7 +1296,8 @@ sendApiQuery method headers reqBody query api path = do
             files = files,
             prefs = prefsStore,
             diff = diffRoutes,
-            session = encodeSession api.session
+            session = encodeSession api.session,
+            reload = api.reload
           }
       app = application (Port 8080) apiToken routes
       call = do

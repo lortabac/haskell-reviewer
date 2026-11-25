@@ -144,8 +144,10 @@ library
     HaskellReviewer.Session.Clients
     HaskellReviewer.Session.Diff
     HaskellReviewer.Session.Index
+    HaskellReviewer.Session.Live
     HaskellReviewer.Session.Prefs
     HaskellReviewer.Session.Project
+    HaskellReviewer.Session.Reload
     HaskellReviewer.Session.Resolve
     HaskellReviewer.Session.Snapshot
     HaskellReviewer.Session.TextStore
@@ -153,6 +155,7 @@ library
     -- Server
     HaskellReviewer.Server.Api
     HaskellReviewer.Server.Assets
+    HaskellReviewer.Server.Body
     HaskellReviewer.Server.Cbor
     HaskellReviewer.Server.CborJson
     HaskellReviewer.Server.Diff
@@ -161,6 +164,7 @@ library
     HaskellReviewer.Server.Listen
     HaskellReviewer.Server.Prefs
     HaskellReviewer.Server.Refs
+    HaskellReviewer.Server.Reload
     HaskellReviewer.Server.Router
     HaskellReviewer.Server.Search
     HaskellReviewer.Server.Security
@@ -360,7 +364,9 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Server.TextSearchTest
     HaskellReviewer.Session.ClientsTest
     HaskellReviewer.Session.IndexTest
+    HaskellReviewer.Session.LiveTest
     HaskellReviewer.Session.PrefsTest
+    HaskellReviewer.Session.ReloadTest
     HaskellReviewer.Session.ResolveTest
     HaskellReviewer.Session.SnapshotTest
     HaskellReviewer.Session.TextStoreTest

@@ -2,7 +2,6 @@
 module HaskellReviewer.Server.Prefs
   ( -- * Route
     prefsApp,
-    prefsBodyLimit,
 
     -- * Warm-up
     warmUpPrefs,
@@ -13,11 +12,8 @@ import Control.Exception (evaluate)
 import Control.Monad (void)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
-import Data.ByteString.Builder qualified as Builder
 import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Lazy qualified as LBS
-import Data.Char (toLower)
-import Data.IORef (atomicModifyIORef', modifyIORef', newIORef, readIORef)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
@@ -36,6 +32,14 @@ import HaskellReviewer.Core.Prefs
   )
 import HaskellReviewer.Core.Xdg (XdgProblem (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), newLogger)
+import HaskellReviewer.Server.Body
+  ( bodyLimit,
+    callOnce,
+    isJson,
+    plain,
+    readBody,
+    tooLarge,
+  )
 import HaskellReviewer.Server.Security (methodNotAllowed)
 import HaskellReviewer.Server.Wire (encodePrefs)
 import HaskellReviewer.Session.Prefs (PrefsStore (..), newPrefsStore)
@@ -47,7 +51,6 @@ import Network.HTTP.Types
     methodPost,
     status200,
     status400,
-    status413,
     status415,
   )
 import Network.Wai
@@ -55,13 +58,8 @@ import Network.Wai
     Request (..),
     RequestBodyLength (..),
     Response,
-    defaultRequest,
-    getRequestBodyChunk,
     responseLBS,
-    responseToStream,
-    setRequestBodyChunks,
   )
-import Network.Wai.Internal (ResponseReceived (..))
 
 {- Note [Prefs route]
 
@@ -93,7 +91,7 @@ prefsApp store req respond
   where
     post
       | KnownLength n <- req.requestBodyLength,
-        n > fromIntegral prefsBodyLimit =
+        n > fromIntegral bodyLimit =
           respond tooLarge
       | not (isJson (lookup hContentType req.requestHeaders)) =
           respond (plain status415 "the body must be application/json")
@@ -103,12 +101,7 @@ prefsApp store req respond
             Just body -> case decodePatch body of
               Left why -> respond (plain status400 (textBytes (renderPatchError why)))
               Right patch -> respond . json =<< store.update patch
-    tooLarge = plain status413 "the body is over 4 KiB"
     json e = withLength status200 "application/json" (encodePrefs e)
-
--- | The biggest POST body we take, in bytes: 4 KiB.
-prefsBodyLimit :: Int
-prefsBodyLimit = 4 * 1024
 
 -- | Run this route once of each kind (GET, a good POST, each error)
 -- on fake requests, against a store in memory, and read the ui.json
@@ -136,7 +129,7 @@ warmUpPrefs = do
       ("POST", json, "{\"singleKeyShortcuts\":\"no\"}"),
       ("POST", json, "{\"changedOnly\":1}"),
       ("POST", json, "{\"diffLayout\":\"wide\"}"),
-      ("POST", json, BS.replicate (prefsBodyLimit + 1) 32),
+      ("POST", json, BS.replicate (bodyLimit + 1) 32),
       ("POST", [], "{}"),
       ("PUT", json, "{}")
     ]
@@ -162,47 +155,9 @@ warmUpPrefs = do
   where
     json = [(hContentType, "application/json")]
     darkPatch = decodePatch "{\"theme\":\"dark\"}"
-    once store (method, headers, body) = do
-      chunks <- newIORef [body]
-      let next = atomicModifyIORef' chunks $ \case
-            [] -> ([], BS.empty)
-            b : rest -> (rest, b)
-          req =
-            setRequestBodyChunks next $
-              defaultRequest
-                { requestMethod = method,
-                  requestHeaders = headers,
-                  requestBodyLength = KnownLength (fromIntegral (BS.length body))
-                }
-      ResponseReceived <- prefsApp store req $ \resp -> do
-        let (_, _, withBody) = responseToStream resp
-        out <- newIORef mempty
-        withBody $ \streaming ->
-          streaming (\b -> modifyIORef' out (<> b)) (pure ())
-        void (evaluate . LBS.length . Builder.toLazyByteString =<< readIORef out)
-        pure ResponseReceived
-      pure ()
+    once store (method, headers, body) = callOnce (prefsApp store) method headers body
 
 -- * Internal
-
--- | Up to the limit. 'Nothing' if there is more.
-readBody :: Request -> IO (Maybe ByteString)
-readBody req = go 0 []
-  where
-    go size acc = do
-      chunk <- getRequestBodyChunk req
-      next (size + BS.length chunk) chunk acc
-    next size chunk acc
-      | BS.null chunk = pure (Just (BS.concat (reverse acc)))
-      | size > prefsBodyLimit = pure Nothing
-      | otherwise = go size (chunk : acc)
-
--- | @application/json@, maybe with parameters.
-isJson :: Maybe ByteString -> Bool
-isJson = \case
-  Nothing -> False
-  Just ct ->
-    Char8.map toLower (Char8.strip (Char8.takeWhile (/= ';') ct)) == "application/json"
 
 -- | With a Content-Length, so warp doesn't send it chunked.
 withLength :: Status -> ByteString -> LBS.ByteString -> Response
@@ -213,9 +168,6 @@ withLength st contentType body =
       (hContentLength, Char8.pack (show (LBS.length body)))
     ]
     body
-
-plain :: Status -> LBS.ByteString -> Response
-plain st = responseLBS st [(hContentType, "text/plain; charset=utf-8")]
 
 textBytes :: Text -> LBS.ByteString
 textBytes = LBS.fromStrict . Text.Encoding.encodeUtf8

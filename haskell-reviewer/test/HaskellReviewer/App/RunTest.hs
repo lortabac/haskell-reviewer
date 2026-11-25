@@ -1,8 +1,17 @@
 module HaskellReviewer.App.RunTest (tests) where
 
-import ApiSupport (ApiResult (..), callApp)
+import ApiSupport (ApiResult (..), RequestBody (..), callApp, callAppBody)
+import Control.Applicative ((<|>))
 import Control.Concurrent (forkIO, killThread, threadDelay)
-import Control.Concurrent.Async (async, poll, wait, withAsync)
+import Control.Concurrent.Async
+  ( async,
+    asyncThreadId,
+    concurrently,
+    forConcurrently,
+    poll,
+    wait,
+    withAsync,
+  )
 import Control.Concurrent.MVar
   ( MVar,
     isEmptyMVar,
@@ -12,8 +21,25 @@ import Control.Concurrent.MVar
     takeMVar,
     tryPutMVar,
   )
-import Control.Exception (AsyncException (..), Exception, evaluate, throwIO, try)
-import Control.Monad (forM_, forever, void, when)
+import Control.Concurrent.STM
+  ( atomically,
+    newTVarIO,
+    readTVar,
+    readTVarIO,
+    writeTVar,
+  )
+import Control.Concurrent.STM qualified as STM
+import Control.Exception
+  ( AsyncException (..),
+    Exception,
+    evaluate,
+    finally,
+    throwIO,
+    try,
+  )
+import Control.Monad (forM_, forever, unless, void, when)
+import Data.Aeson qualified as Aeson
+import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString qualified as BS
 import Data.ByteString.Builder qualified as Builder
 import Data.ByteString.Char8 qualified as Char8
@@ -33,6 +59,8 @@ import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
 import Data.Time.Calendar (fromGregorian)
 import Data.Time.Clock (UTCTime (..))
+import Data.Version (versionBranch)
+import GHC.Conc (BlockReason (..), ThreadStatus (..), threadStatus)
 import HaskellReviewer.App.Run (Deps (..), run)
 import HaskellReviewer.Core.Address (Port (..), Token, tokenFromBytes, tokenText)
 import HaskellReviewer.Core.Config (builtinDefaults)
@@ -105,14 +133,16 @@ import HaskellReviewer.Effects.Trace (Span (..), TraceFileError (..), Tracer (..
 import HaskellReviewer.Server.CborJson (cborToJson)
 import HaskellReviewer.Server.Listen (ListenError (..), Listener (..))
 import HaskellReviewer.Session.Project qualified as Session.Project
+import Network.HTTP.Types (Header)
 import Network.Wai (Application, Request (..), defaultRequest, responseToStream)
 import Network.Wai.Internal (ResponseReceived (..))
 import System.Directory qualified as Dir
 import System.Exit (ExitCode (..))
 import System.FilePath ((</>))
+import System.Info (compilerVersion)
 import System.Posix.Resource (ResourceLimit (..))
 import System.Timeout (timeout)
-import Test.Tasty (TestTree, testGroup, withResource)
+import Test.Tasty (TestName, TestTree, testGroup, withResource)
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 import TestSupport (fixtureRepo, gitOut, gitSetup, realGitAt, withCanonicalTemp)
@@ -238,6 +268,7 @@ tests =
         readIORef steps >>= (@?= ["root", "config", "git"]),
       listingTests,
       indexingTests,
+      reloadTests,
       diffTests,
       cabalChangeTests,
       renamesTests,
@@ -609,6 +640,400 @@ indexingTests =
         readIORef asked >>= (@?= False)
     ]
 
+-- * Reload
+
+-- | POST api/reload in browse mode (D-351). Gates are MVars and TVars,
+-- never sleeps.
+reloadTests :: TestTree
+reloadTests =
+  testGroup
+    "Reload"
+    [ testCase "browse: edit, POST, generation 2 with the new text, event" $
+        withCanonicalTemp $ \tmp -> do
+          dir <- makeProject (tmp </> "p") ["A"]
+          let real d = d {readEntry = readSourceEntry}
+          let args = reloadArgs <> ["--trace-file", "t.jsonl"]
+          withRunningArgs args real (const (diskAt dir)) $ \fake app -> do
+            ok <- waitFor 5 (any isIndexed <$> readIORef fake.console)
+            assertBool "not indexed" ok
+            opened <- newEmptyMVar
+            seen <- newIORef BS.empty
+            withAsync (recordStream app opened seen) $ \_ -> do
+              takeMVar opened
+              writeFile (dir </> "src" </> "A.hs") "module A where\nb = 2\n"
+              writeFile (dir </> "New.txt") "new\n"
+              r <- reload app
+              (r.status, r.body) @?= (200, "{\"generation\":2}")
+              files <- getFiles app
+              generationOf files @?= Just 2
+              assertBool (show files.body) ("New.txt" `inBody` files)
+              f <- getSidePath app ["file", "tree", "src", "A.hs"]
+              generationOf f @?= Just 2
+              assertBool (show f.body) ("b = 2" `inJson` f)
+              let event = "event: generation\ndata: {\"generation\":2}\n"
+                  indexing = "\"generation\":2,\"side\":\"tree\""
+                  -- Each write is kept on its own: wait for the indexing
+                  -- event after the generation one too.
+                  both bytes =
+                    let (_, after) = BS.breakSubstring event bytes
+                     in event `BS.isPrefixOf` after && indexing `BS.isInfixOf` after
+              streamed <- waitFor 5 (both <$> readIORef seen)
+              bytes <- readIORef seen
+              assertBool (show bytes) streamed
+              -- The generation, then its indexing: nothing of gen 2 before.
+              let (before, _) = BS.breakSubstring event bytes
+              assertBool (show before) (not ("\"generation\":2" `BS.isInfixOf` before))
+            -- Logged after the answer: wait for it. The span comes first.
+            let reloaded = any ("reload: generation 2 in " `Text.isPrefixOf`)
+            logged <- waitFor 5 (reloaded <$> readIORef fake.console)
+            out <- readIORef fake.console
+            assertBool (show out) logged
+            names <- map (.name) <$> readIORef fake.spans
+            assertBool (show names) ("reload" `elem` names),
+      testCase "route: methods, Origin, type, size, body" $
+        withRunning (const oneLister) $ \_ app -> do
+          let post headers body = postReload app headers body
+              json = [ourOrigin, jsonType]
+              check what r (st, body) =
+                (what, r.status, r.body) @?= (what :: Text, st, body)
+              typeError = (415, "the body must be application/json")
+              bodyError = (400, "the body must be {}")
+          forM_ ["GET", "HEAD", "PUT"] $ \m -> do
+            r <-
+              callAppBody app m [ourOrigin] NoBody "" "127.0.0.1:4321" reloadPath
+            (m, r.status, lookup "Allow" r.headers) @?= (m, 405, Just "POST")
+          post [jsonType] (Sized "{}") >>= \r -> r.status @?= 403
+          post [("Origin", "http://evil.com"), jsonType] (Sized "{}")
+            >>= \r -> r.status @?= 403
+          post [ourOrigin] (Sized "{}") >>= \r -> check "no type" r typeError
+          post [ourOrigin, ("Content-Type", "text/plain")] (Sized "{}")
+            >>= \r -> check "text" r typeError
+          post json (Sized (BS.replicate 4097 32))
+            >>= \r -> check "length" r (413, "the body is over 4 KiB")
+          post json (Chunked (replicate 5 (BS.replicate 1000 32)))
+            >>= \r -> check "chunked" r (413, "the body is over 4 KiB")
+          forM_ ["[]", "{\"a\":1}", "{", "", "null"] $ \b ->
+            post json (Sized b) >>= \r -> check (Text.Encoding.decodeUtf8 b) r bodyError
+          post json (Sized "{}") >>= \r -> check "ok" r (200, "{\"generation\":2}")
+          let withCharset = ("Content-Type", "application/json; charset=utf-8")
+          post [ourOrigin, withCharset] (Sized " { } ")
+            >>= \r -> check "spaces" r (200, "{\"generation\":3}"),
+      testCase "diff mode: 404 after the method check" $ do
+        let one = fakeLister (pure (Right oneModule))
+            listers _ = DiffSides Pair {head = one, base = one}
+        withRunningSides ["--idle-exit", "0"] id listers $ \_ app -> do
+          r <- reload app
+          (r.status, r.body) @?= (404, "not found")
+          g <- callAppBody app "GET" [ourOrigin] NoBody "" "127.0.0.1:4321" reloadPath
+          g.status @?= 405,
+      testCase "coalesced: two POSTs during a build share the next one" $ do
+        calls <- newIORef (0 :: Int)
+        building <- newEmptyMVar
+        release <- newEmptyMVar
+        let lister _ = fakeLister $ do
+              n <- atomicModifyIORef' calls (\c -> (c + 1, c + 1))
+              when (n == 2) (putMVar building () >> readMVar release)
+              pure (Right oneModule)
+        withRunningArgs reloadArgs id lister $ \fake app -> do
+          firstPost <- async (reload app)
+          takeMVar building
+          others <- mapM (const (async (reload app))) [1 :: Int, 2]
+          -- All three are in the queue: the first one taken, two waiting.
+          let queuedLines = length . filter (== "reload: queued")
+          queued <- waitFor 5 ((== 3) . queuedLines <$> readIORef fake.console)
+          assertBool "not queued" queued
+          putMVar release ()
+          r1 <- timeout 5_000_000 (wait firstPost)
+          fmap (.body) r1 @?= Just "{\"generation\":2}"
+          rs <- timeout 5_000_000 (mapM wait others)
+          fmap (map (.body)) rs @?= Just ["{\"generation\":3}", "{\"generation\":3}"]
+          readIORef calls >>= (@?= 3),
+      testCase "listing fails: 500, generation 1 kept, next reload is 2" $ do
+        calls <- newIORef (0 :: Int)
+        let lister _ = fakeLister $ do
+              n <- atomicModifyIORef' calls (\c -> (c + 1, c + 1))
+              pure (if n == 2 then Left (ListCrashed "boom") else Right oneModule)
+        withRunning lister $ \fake app -> do
+          before <- getFiles app
+          generationOf before @?= Just 1
+          r <- reload app
+          (r.status, r.body) @?= (500, "cannot list files")
+          after <- getFiles app
+          (after.status, generationOf after) @?= (200, Just 1)
+          m <- getSidePath app ["module", "tree", "A"]
+          (m.status, generationOf m) @?= (200, Just 1)
+          out <- readIORef fake.console
+          assertBool (show out) ("haskell-reviewer: cannot list files: boom" `elem` out)
+          again <- reload app
+          (again.status, again.body) @?= (200, "{\"generation\":2}"),
+      testCase "lister throws on reload: 500, no hang" $ do
+        calls <- newIORef (0 :: Int)
+        let lister _ = fakeLister $ do
+              n <- atomicModifyIORef' calls (\c -> (c + 1, c + 1))
+              when (n == 2) (ioError (userError "boom"))
+              pure (Right oneModule)
+        withRunning lister $ \_ app -> do
+          r <- timeout 5_000_000 (reload app)
+          fmap (\x -> (x.status, x.body)) r @?= Just (500, "cannot list files")
+          files <- getFiles app
+          generationOf files @?= Just 1,
+      testCase "stop during a reload: the POST gets 503, exit 0" $ do
+        fake <- newFake
+        stop <- newEmptyMVar
+        appVar <- newEmptyMVar
+        calls <- newIORef (0 :: Int)
+        building <- newEmptyMVar
+        let serve ready app = ready >> putMVar appVar app >> blockForever
+            lister = fakeLister $ do
+              n <- atomicModifyIORef' calls (\c -> (c + 1, c + 1))
+              when (n == 2) (putMVar building () >> blockForever)
+              pure (Right oneModule)
+            deps =
+              (idleDeps fake stop serve)
+                { probeFiles = \_ _ _ -> pure (Right (fakeProbe (BrowseSides lister)))
+                }
+        withAsync (run deps ["--idle-exit", "0"]) $ \running -> do
+          ready <- timeout 5_000_000 (takeMVar appVar)
+          app <- maybe (assertFailure "not ready") pure ready
+          -- After the first listing: a reload is taken only then.
+          _ <- getFiles app
+          posted <- async (reload app)
+          started <- timeout 5_000_000 (takeMVar building)
+          started @?= Just ()
+          putMVar stop ()
+          code <- timeout 5_000_000 (wait running)
+          code @?= Just ExitSuccess
+          r <- timeout 5_000_000 (wait posted)
+          fmap (\x -> (x.status, x.body)) r @?= Just (503, "the server is stopping")
+          late <- timeout 5_000_000 (reload app)
+          fmap (.status) late @?= Just 503,
+      testCase "while indexing: old run stopped first, old modules failed" $ do
+        blocking <- newTVarIO True
+        inFlight <- newIORef (0 :: Int, 0 :: Int)
+        let three =
+              mkFileList
+                FromDisk
+                0
+                [ (p, EntryFile)
+                | n <- ["A.hs", "B.hs", "C.hs"],
+                  Just p <- [relPathFromBytes n]
+                ]
+            counted = do
+              atomicModifyIORef' inFlight (\(n, m) -> ((n + 1, max m (n + 1)), ()))
+              atomically (readTVar blocking >>= STM.check . not)
+            parse _ _ = do
+              (counted >> pure textOnly)
+                `finally` atomicModifyIORef' inFlight (\(n, m) -> ((n - 1, m), ()))
+            change d = d {parse = parse, indexWorkers = pure 2}
+            lister _ = fakeLister (pure (Right three))
+        withRunningArgs reloadArgs change lister $ \fake app -> do
+          busy <- waitFor 5 ((== 2) . fst <$> readIORef inFlight)
+          assertBool "workers not busy" busy
+          -- Waits for C on generation 1: both workers hold a module.
+          oldPage <- async (getSidePath app ["module", "tree", "C"])
+          let waiting =
+                (== ThreadBlocked BlockedOnSTM) <$> threadStatus (asyncThreadId oldPage)
+          onSlot <- waitFor 5 waiting
+          assertBool "the request is not waiting" onSlot
+          r <- reload app
+          (r.status, r.body) @?= (200, "{\"generation\":2}")
+          old <- timeout 5_000_000 (wait oldPage)
+          fmap (\x -> (x.status, x.body)) old @?= Just (500, "cannot index module")
+          atomically (writeTVar blocking False)
+          done <- waitFor 5 (any isIndexed <$> readIORef fake.console)
+          assertBool "gen 2 not indexed" done
+          page <- getSidePath app ["module", "tree", "C"]
+          (page.status, generationOf page) @?= (200, Just 2)
+          (_, most) <- readIORef inFlight
+          assertBool ("in flight: " <> show most) (most <= 2)
+          out <- readIORef fake.console
+          -- Gen 1 never finished: one done line, gen 2's.
+          length (filter isIndexed out) @?= 1,
+      testCase "listing thread crashes: a line, 503, the server goes on" $ do
+        armed <- newIORef False
+        -- The clock throws once armed: the next reload's first call.
+        let crashing d =
+              d
+                { clock =
+                    Clock
+                      { now = do
+                          on <- readIORef armed
+                          when on (ioError (userError "boom"))
+                          d.clock.now,
+                        monotonic = d.clock.monotonic
+                      }
+                }
+        withRunningArgs reloadArgs crashing (const oneLister) $ \fake app -> do
+          -- Indexed: nothing else reads the clock now.
+          done <- waitFor 5 (any isIndexed <$> readIORef fake.console)
+          assertBool "not indexed" done
+          writeIORef armed True
+          r <- timeout 5_000_000 (reload app)
+          fmap (\x -> (x.status, x.body)) r
+            @?= Just (503, "reload is not available: user error (boom)")
+          out <- readIORef fake.console
+          let crashed = "haskell-reviewer: the listing thread crashed: user error (boom)"
+          assertBool (show out) (crashed `elem` out)
+          again <- reload app
+          (again.status, again.body)
+            @?= (503, "reload is not available: user error (boom)")
+          files <- getFiles app
+          (files.status, generationOf files) @?= (200, Just 1)
+          page <- getSidePath app ["module", "tree", "A"]
+          (page.status, generationOf page) @?= (200, Just 1),
+      testCase "stopped before the old workers ran: old modules still fail" $ do
+        calls <- newIORef (0 :: Int)
+        held <- newEmptyMVar
+        -- The first indexing waits before runWorkers, until the reload
+        -- stops it.
+        let workers = do
+              n <- atomicModifyIORef' calls (\c -> (c + 1, c + 1))
+              when (n == 1) (putMVar held () >> blockForever)
+              pure 1
+            change d = d {indexWorkers = workers}
+        withRunningWith change (const oneLister) $ \_ app -> do
+          takeMVar held
+          oldPage <- async (getSidePath app ["module", "tree", "A"])
+          let waiting =
+                (== ThreadBlocked BlockedOnSTM) <$> threadStatus (asyncThreadId oldPage)
+          onSlot <- waitFor 5 waiting
+          assertBool "the request is not waiting" onSlot
+          r <- reload app
+          (r.status, r.body) @?= (200, "{\"generation\":2}")
+          old <- timeout 5_000_000 (wait oldPage)
+          fmap (\x -> (x.status, x.body)) old @?= Just (500, "cannot index module")
+          page <- getSidePath app ["module", "tree", "A"]
+          (page.status, generationOf page) @?= (200, Just 2),
+      testCase "a request started before the swap answers from its generation" $ do
+        armed <- newIORef True
+        entered <- newEmptyMVar
+        release <- newEmptyMVar
+        let files =
+              mkFileList
+                FromDisk
+                0
+                [(p, EntryFile) | n <- ["A.hs", "B.txt"], Just p <- [relPathFromBytes n]]
+            readEntry _ p _
+              | relPathText p == "B.txt" = do
+                  hold <- atomicModifyIORef' armed (False,)
+                  when hold (putMVar entered () >> readMVar release)
+                  pure (Right (TextContent (if hold then "old" else "new")))
+              | otherwise = pure (Right (TextContent "module A where\n"))
+            change d = d {readEntry = readEntry}
+        withRunningWith change (\_ -> fakeLister (pure (Right files))) $ \_ app -> do
+          oldRead <- async (getSidePath app ["file", "tree", "B.txt"])
+          takeMVar entered
+          r <- reload app
+          (r.status, r.body) @?= (200, "{\"generation\":2}")
+          putMVar release ()
+          old <- timeout 5_000_000 (wait oldRead)
+          fmap (\x -> (x.status, generationOf x)) old @?= Just (200, Just 1)
+          assertBool "old text" (maybe False ("old" `inJson`) old)
+          new <- getSidePath app ["file", "tree", "B.txt"]
+          (new.status, generationOf new) @?= (200, Just 2),
+      skipOnGhc912 "many threads while 20 reloads run: well formed, never going down" $
+        withCanonicalTemp $ \tmp -> do
+          dir <- makeProject (tmp </> "p") ["A", "B", "C"]
+          let real d = d {readEntry = readSourceEntry, indexWorkers = pure 2}
+          withRunningArgs ["--idle-exit", "0"] real (const (diskAt dir)) $ \_ app -> do
+            stopFlag <- newTVarIO False
+            let routes =
+                  [ (["files", "tree"], ""),
+                    (["modules", "tree"], ""),
+                    (["module", "tree", "A"], ""),
+                    (["source", "tree", "src", "B.hs"], ""),
+                    (["file", "tree", "src", "C.hs"], ""),
+                    (["search", "tree"], "?q=A"),
+                    (["indexing", "tree"], "")
+                  ]
+                hammer k = go (0 :: Int) (0 :: Int)
+                  where
+                    go seen n = do
+                      let (path, q) = routes !! ((k + n) `mod` length routes)
+                      r <-
+                        callAppBody app "GET" [] NoBody q "127.0.0.1:4321" $
+                          tokenText fakeToken : "api" : path
+                      g <- case (r.status, generationOf r) of
+                        (200, Just g) -> pure g
+                        (500, _) | r.body == "cannot index module" -> pure seen
+                        other -> assertFailure (show (path, other, r.body))
+                      unless (g >= seen) $
+                        assertFailure ("went down: " <> show (path, seen, g))
+                      finished <- readTVarIO stopFlag
+                      if finished then pure (n + 1) else go g (n + 1)
+                reloads = do
+                  forM_ [2 .. 21 :: Int] $ \g -> do
+                    r <- reload app
+                    (r.status, generationOf r) @?= (200, Just g)
+                  atomically (writeTVar stopFlag True)
+            result <-
+              timeout 60_000_000 $
+                concurrently reloads (forConcurrently [0 .. 15] hammer)
+            case result of
+              Nothing -> assertFailure "did not end"
+              Just (_, counts) -> assertBool (show counts) (all (> 0) counts)
+    ]
+  where
+    isIndexed = ("indexing: done" `Text.isPrefixOf`)
+
+-- | Verbose and debug: the done lines and "reload: queued".
+reloadArgs :: [String]
+reloadArgs = ["--idle-exit", "0", "--verbose", "--debug"]
+
+reloadPath :: [Text]
+reloadPath = [tokenText fakeToken, "api", "reload"]
+
+-- | The page's own Origin, as a browser sends it on POST.
+ourOrigin :: Header
+ourOrigin = ("Origin", "http://127.0.0.1:4321")
+
+jsonType :: Header
+jsonType = ("Content-Type", "application/json")
+
+-- | POST api/reload with these headers and body.
+postReload :: Application -> [Header] -> RequestBody -> IO ApiResult
+postReload app headers body =
+  callAppBody app "POST" headers body "" "127.0.0.1:4321" reloadPath
+
+-- | POST api/reload as the client does.
+reload :: Application -> IO ApiResult
+reload app = postReload app [ourOrigin, jsonType] (Sized "{}")
+
+-- | The generation of a JSON or CBOR body.
+generationOf :: ApiResult -> Maybe Int
+generationOf r = case Aeson.decode r.body <|> fromCbor of
+  Just (Aeson.Object o) -> case KeyMap.lookup "generation" o of
+    Just (Aeson.Number n) -> Just (round n)
+    _ -> Nothing
+  _ -> Nothing
+  where
+    fromCbor = either (const Nothing) Aeson.decode (cborToJson r.body)
+
+-- | The text is in the body, as JSON (a CBOR body is turned to JSON).
+inJson :: BS.ByteString -> ApiResult -> Bool
+inJson needle r = case cborToJson r.body of
+  Right j -> needle `BS.isInfixOf` LBS.toStrict j
+  Left _ -> needle `BS.isInfixOf` LBS.toStrict r.body
+
+-- | Open the event stream and keep what it writes. The MVar is filled
+-- at the first write (hello).
+recordStream :: Application -> MVar () -> IORef BS.ByteString -> IO ()
+recordStream app opened seen = do
+  let req =
+        defaultRequest
+          { requestMethod = "GET",
+            requestHeaderHost = Just "127.0.0.1:4321",
+            pathInfo = [tokenText fakeToken, "api", "events"]
+          }
+      write b = do
+        modifyIORef' seen (<> LBS.toStrict (Builder.toLazyByteString b))
+        void (tryPutMVar opened ())
+  ResponseReceived <- app req $ \resp -> do
+    let (_, _, withBody) = responseToStream resp
+    withBody (\body -> body write (pure ()))
+    pure ResponseReceived
+  pure ()
+
 -- | A lister of 'oneModule'.
 oneLister :: Lister
 oneLister = fakeLister (pure (Right oneModule))
@@ -975,8 +1400,11 @@ diffTests =
       _ -> False
     isDone = ("indexing: done" `Text.isPrefixOf`)
     allDone = "indexing: done, 4 modules (4 ready, 0 failed, 4 text only) in 0 ms"
-    diskAt dir =
-      diskLister quiet (CanonicalRoot dir (Char8.pack dir)) (ListFromDisk NotInRepo)
+
+-- | A disk lister of this dir, not in a repo.
+diskAt :: FilePath -> Lister
+diskAt dir =
+  diskLister quiet (CanonicalRoot dir (Char8.pack dir)) (ListFromDisk NotInRepo)
 
 -- | A real diff session on @cabal-change.sh@, through the real probe,
 -- one worker (D-317). Built once for the group.
@@ -1124,6 +1552,9 @@ runRenamesWith extra diff tweak more = withCanonicalTemp $ \tmp -> do
     r <- getSidePath app ["diff-files"]
     h <- getSide app "modules" "head"
     b <- getSide app "modules" "base"
+    -- The pairing line and span come after the fill, so maybe after the
+    -- answers. The workers start after them: wait for the done line.
+    _ <- waitFor 10 (any ("indexing: done" `Text.isPrefixOf`) <$> readIORef fake.console)
     out <- readIORef fake.console
     names <- map (.name) <$> readIORef fake.spans
     pure . (,extraResult) $
@@ -1409,6 +1840,16 @@ waitFor secs check = go (ceiling (secs * 50) :: Int)
       ok <- check
       if ok || n <= 0 then pure ok else threadDelay 20_000 >> go (n - 1)
 
+-- | Skipped on GHC 9.12: a 9.12.4 RTS bug crashes it now and then
+-- (Q-RTS-BLACKHOLE), likely
+-- https://gitlab.haskell.org/ghc/ghc/-/issues/27432 (fixed in 9.12.5).
+-- Re-enable on 9.12 once 9.12.5 is the tested 9.12. 9.10 and 9.14 run it.
+skipOnGhc912 :: TestName -> Assertion -> TestTree
+skipOnGhc912 name body
+  | versionBranch compilerVersion == [9, 12] =
+      testCase (name <> " (skipped on GHC 9.12, Q-RTS-BLACKHOLE)") (pure ())
+  | otherwise = testCase name body
+
 blockForever :: IO ()
 blockForever = forever (threadDelay 1_000_000)
 
@@ -1457,7 +1898,7 @@ newFake = do
   let tick = atomicModifyIORef' ticks (\t -> (t + 4000, MonotonicTime t))
       tracer =
         Tracer
-          { record = \s -> modifyIORef' spans (<> [s]),
+          { record = \s -> atomicModifyIORef' spans (\ss -> (ss <> [s], ())),
             close = modifyIORef' closed (const True)
           }
       listener =
@@ -1471,7 +1912,8 @@ newFake = do
           }
       deps =
         Deps
-          { console = \t -> modifyIORef' console (<> [t]),
+          { -- Atomic: request threads and the listing thread log at once.
+            console = \t -> atomicModifyIORef' console (\ls -> (ls <> [t], ())),
             clock = Clock {now = pure fakeWallTime, monotonic = tick},
             checkRoot = \p -> pure (Right (Root ("/abs/" <> p))),
             openTracer = \_ _ -> pure (Right tracer),

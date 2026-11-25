@@ -16,12 +16,12 @@ import Network.HTTP.Types (methodGet)
 import Network.Wai (Application, Request (..))
 
 -- | The method first, then the mode: browse mode ('Nothing') is a plain
--- 404. Waits for the pairing.
-diffFilesApp :: Maybe DiffSlot -> Application
+-- 404. Waits for the current generation's pairing.
+diffFilesApp :: Maybe (IO DiffSlot) -> Application
 diffFilesApp slot req respond
   | req.requestMethod /= methodGet = respond (methodNotAllowed "GET")
-  | Just s <- slot =
-      awaitDiff s >>= \case
+  | Just current <- slot =
+      current >>= awaitDiff >>= \case
         Right ready -> respond (json ready.body)
         Left DiffNotListed -> respond (serverError "cannot list files")
         Left (DiffNotPaired _) -> respond (serverError "cannot pair files")

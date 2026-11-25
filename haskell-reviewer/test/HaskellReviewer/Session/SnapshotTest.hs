@@ -93,6 +93,7 @@ emptySnapshot side = do
   share <- newSessionShare
   let fl = mkFileList FromDisk 0 []
   newSnapshot
+    (Generation 1)
     side
     share
     (DiskEntries (CanonicalRoot "/x" "/x"))

@@ -7,6 +7,7 @@ module HaskellReviewer.Server.ApiGoldenTest (tests) where
 import ApiSupport
   ( ApiResult (..),
     DiffFile (..),
+    RequestBody (..),
     TestApi (..),
     diffReady,
     diffRouteApi,
@@ -14,6 +15,7 @@ import ApiSupport
     gatedOn,
     getApi,
     getApiQuery,
+    goodOrigin,
     implicitApi,
     indexed,
     pageApi,
@@ -21,6 +23,7 @@ import ApiSupport
     refsApi,
     refsGatedOn,
     searchApi,
+    sendApi,
     sourceApi,
     textSearchApi,
   )
@@ -90,6 +93,7 @@ import HaskellReviewer.Server.Wire
     DiffFiles (..),
     SessionInfo (..),
     encodeDiffFiles,
+    encodeGeneration,
     encodeIndexing,
     encodeModuleTree,
     helloPayload,
@@ -97,6 +101,7 @@ import HaskellReviewer.Server.Wire
 import HaskellReviewer.Server.Wire.Source (coveringView, encodeSource)
 import HaskellReviewer.Session.Index (Progress (..))
 import HaskellReviewer.Session.Prefs (newPrefsStore)
+import HaskellReviewer.Session.Reload (ReloadOutcome (..))
 import HaskellReviewer.Session.Snapshot (Generation (..), Snapshot (..))
 import System.Directory qualified as Dir
 import Test.Tasty (TestTree, testGroup)
@@ -146,6 +151,9 @@ cases =
     json
       "events-indexing"
       (pure (event (encodeIndexing (Generation 1) HeadSide halfway))),
+    -- After a reload (D-351).
+    json "events-generation" (pure (event (encodeGeneration (Generation 2)))),
+    json "reload" okReload,
     -- Done, with a failed module (a loose file readEntry doesn't have).
     json "indexing" (okJson (indexed projectApi) ["api", "indexing", "tree"]),
     json "files" (okJson fixtureApi ["api", "files", "tree"]),
@@ -518,6 +526,22 @@ noStale = do
 -- | GET through the real app; must be a 200 with JSON.
 okJson :: TestApi -> [Text] -> IO LBS.ByteString
 okJson api path = (<> "\n") <$> answer 200 "application/json" api path
+
+-- | POST api/reload, answered with generation 2; must be a 200 with
+-- JSON.
+okReload :: IO LBS.ByteString
+okReload = do
+  let api = fixtureApi {reload = Just (pure (Reloaded (Generation 2))), workers = 0}
+  r <-
+    sendApi
+      "POST"
+      [goodOrigin, ("Content-Type", "application/json")]
+      (Sized "{}")
+      api
+      ["api", "reload"]
+  r.status @?= 200
+  lookup "Content-Type" r.headers @?= Just "application/json"
+  pure (r.body <> "\n")
 
 -- | GET api/search/tree with this query string; must be a 200 with
 -- JSON.

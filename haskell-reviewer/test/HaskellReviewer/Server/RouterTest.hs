@@ -24,6 +24,8 @@ import HaskellReviewer.Server.Router (Routes (..), application, compressible)
 import HaskellReviewer.Server.Security (addSecurityHeaders, contentSecurityPolicy)
 import HaskellReviewer.Server.Wire (SessionInfo (..), encodeSession)
 import HaskellReviewer.Session.Clients (newClients)
+import HaskellReviewer.Session.Live (LiveIndexing (..))
+import HaskellReviewer.Session.Snapshot (firstGeneration)
 import Network.HTTP.Types (Header, Status (..), hContentType, status500)
 import Network.Wai
   ( Request (..),
@@ -299,7 +301,7 @@ call req = do
         EventStream
           { clients = clients,
             keepAlive = Microseconds 1000000,
-            indexing = pure [],
+            current = pure LiveIndexing {generation = firstGeneration, states = []},
             minGap = Microseconds 0,
             logger = newLogger LevelInfo (\_ -> pure ())
           }
@@ -309,7 +311,8 @@ call req = do
             files = noFiles,
             prefs = fixedPrefs,
             diff = Nothing,
-            session = encodeSession BrowseSession
+            session = encodeSession BrowseSession,
+            reload = Nothing
           }
   saved <- newIORef Nothing
   ResponseReceived <-
