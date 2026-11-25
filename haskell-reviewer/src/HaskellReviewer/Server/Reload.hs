@@ -53,13 +53,14 @@ import Network.Wai.Handler.Warp qualified as Warp
 POST api/reload, body {} (D-351). Lists the files again, builds a new
 generation, swaps it in (Note [Live] in "HaskellReviewer.Session.Live")
 and answers {"generation":n} once the new workers are started. Browse
-mode only: not in diff mode.
+mode and --diff REV; not a commit range, where nothing can change
+(D-352).
 
 Answers, in this order (the Origin check comes before, Note [Request
 checks] in "HaskellReviewer.Server.Security"):
 
 - 405 with Allow: POST for any other method, HEAD too;
-- 404 in a mode without reload (diff mode);
+- 404 in a mode without reload (a commit range);
 - 413 if Content-Length is over 4 KiB (the body isn't read);
 - 415 if the Content-Type isn't application/json;
 - 413 if the body is over 4 KiB after all (chunked);

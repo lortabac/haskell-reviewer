@@ -131,8 +131,8 @@ Paths below are what the router sees, after the token.
   "HaskellReviewer.Server.Prefs"); 405 otherwise, HEAD too.
 - api/reload: list the files again and swap in a new generation
   (D-351, Note [Reload route] in "HaskellReviewer.Server.Reload").
-  POST only, body {} (405 otherwise, HEAD too), then a plain 404 in
-  diff mode.
+  POST only, body {} (405 otherwise, HEAD too), then a plain 404 for
+  a commit range.
 - Anything else: 404. index.html itself is not served under its name.
   So are api, api/x and api/events/x: the api/ namespace has only the
   routes listed here.

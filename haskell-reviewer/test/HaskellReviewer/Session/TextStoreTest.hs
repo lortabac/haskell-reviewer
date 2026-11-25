@@ -10,6 +10,7 @@ import Data.ByteString (ByteString)
 import Data.IORef (atomicModifyIORef', newIORef, readIORef)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Set qualified as Set
 import Data.Vector qualified as Vector
 import HaskellReviewer.Core.FileContent
   ( FileContent (..),
@@ -35,14 +36,16 @@ import HaskellReviewer.Session.TextStore
     TextFile (..),
     TextFiles (..),
     awaitTextFiles,
+    blobTextKeys,
     loadTextFiles,
     newBlobTexts,
     newTextStore,
+    pruneBlobTexts,
     storeBytes,
   )
 import System.Timeout (timeout)
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 tests :: TestTree
 tests =
@@ -125,7 +128,20 @@ tests =
         (alone, _) <- loadWith maxBound
         let load = const (loadShared maxBound table blobOf)
         rs <- within (mapConcurrently load [1 :: Int, 2])
-        map (summary . fst) rs @?= [summary alone, summary alone]
+        map (summary . fst) rs @?= [summary alone, summary alone],
+      testCase "prune: only the live blobs stay; a later load reads the rest (D-352)" $ do
+        table <- newBlobTexts
+        _ <- loadShared maxBound table blobOf
+        let blob t = ObjectId ("blob-" <> t)
+        Set.toList <$> blobTextKeys table >>= (@?= [blob "a.txt", blob "c.txt"])
+        pruneBlobTexts table (Set.fromList [blob "c.txt", blob "x.txt"]) >>= (@?= 1)
+        Set.toList <$> blobTextKeys table >>= (@?= [blob "c.txt"])
+        (alone, _) <- loadWith maxBound
+        (again, asked) <- loadShared maxBound table blobOf
+        summary again @?= summary alone
+        -- c.txt is still there; a.txt is read again.
+        assertBool (show asked) ("a.txt" `elem` map relPathText asked)
+        assertBool (show asked) ("c.txt" `notElem` map relPathText asked)
     ]
   where
     -- Every file has a blob but b.txt.

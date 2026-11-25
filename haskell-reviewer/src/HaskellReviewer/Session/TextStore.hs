@@ -19,6 +19,10 @@ module HaskellReviewer.Session.TextStore
     loadTextFiles,
     textStoreBudget,
     storeBytes,
+    pruneBlobTexts,
+
+    -- * Internal, for tests
+    blobTextKeys,
   )
 where
 
@@ -38,6 +42,8 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.Set (Set)
+import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text.Encoding qualified as Text.Encoding
 import Data.Vector qualified as Vector
@@ -78,10 +84,13 @@ search and kept for the snapshot's life.
   large files are not in it: they are read and counted each time. The
   budget and the counts are each store's own, as without sharing, so
   a store's files don't depend on which side loaded first. Only bytes
-  a store keeps go in the table. A reload must drop the blobs no
-  store uses any more; reload doesn't do it yet. A reload makes new
-  snapshots, so new stores: they load again on their first text
-  search (D-351).
+  a store keeps go in the table. A reload makes new snapshots, so new
+  stores: they load again on their first text search (D-351).
+- Reload (D-352): at the swap, 'pruneBlobTexts' drops the blobs that
+  no file of the new snapshots has. Not by the loaded stores: the new
+  ones are empty, so that would drop base's bytes just before its next
+  search needs them. Known small leak: an old store still loading can
+  add old blobs after the prune; the next reload drops them.
 
 Loading: the first request finds the store Idle, sets it Loading and
 starts the load in a thread of its own, so a request that goes away
@@ -258,3 +267,19 @@ loadTextFiles budget (BlobTexts table) blobOf readOne list =
 -- | How many bytes of text the store holds.
 storeBytes :: TextFiles -> Int
 storeBytes fs = Vector.foldl' (\n f -> n + BS.length f.bytes) 0 fs.files
+
+-- | Keep only these blobs' bytes. Gives how many were dropped. See
+-- Note [Text store].
+pruneBlobTexts :: BlobTexts -> Set ObjectId -> IO Int
+pruneBlobTexts (BlobTexts table) live = do
+  -- Built before the transaction (Q-RTS-BLACKHOLE).
+  _ <- evaluate (Set.size live)
+  atomically $ do
+    m <- readTVar table
+    let kept = Map.restrictKeys m live
+    writeTVar table $! kept
+    pure $! Map.size m - Map.size kept
+
+-- | The blobs in the table.
+blobTextKeys :: BlobTexts -> IO (Set ObjectId)
+blobTextKeys (BlobTexts table) = Map.keysSet <$> readTVarIO table

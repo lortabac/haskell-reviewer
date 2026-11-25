@@ -237,6 +237,10 @@ postPrefs server body =
         <> Char8.pack (show (BS.length body))
         <> "\r\n"
 
+-- | The server's own Origin, as a browser sends it.
+ourOrigin :: Server -> ByteString
+ourOrigin server = "http://127.0.0.1:" <> Char8.pack (show server.port)
+
 -- | POST api/reload with body {}, from this origin.
 reloadRequest :: Server -> ByteString -> ByteString
 reloadRequest server origin =
@@ -561,8 +565,7 @@ filesTests =
             writeFile (dir </> "b.hs") ""
             evil <- rawHttp server.port (reloadRequest server "http://evil.com")
             evil.status @?= 403
-            let ours = "http://127.0.0.1:" <> Char8.pack (show server.port)
-            r <- rawHttp server.port (reloadRequest server ours)
+            r <- rawHttp server.port (reloadRequest server (ourOrigin server))
             (r.status, r.body) @?= (200, "{\"generation\":2}")
             after <- getPath server "api/files/tree"
             after.body
@@ -1004,6 +1007,27 @@ diffTests =
             assertContains "head: working tree\n" err
             assertContains ("base: HEAD = " <> short <> "\n") err
             assertContains "changed: 3 on head, 2 on base, indexed first\n" err,
+        testCase "--diff HEAD: reload, both sides at generation 2, the new change" $
+          withCanonicalTemp $ \tmp -> do
+            -- Its own copy: the shared one must not change.
+            let root = tmp </> "edits"
+            fixtureRepo "edits" [root]
+            withServer id ["--verbose", root, "--diff", "HEAD"] $ \server -> do
+              waitForLine server ("indexing: done, " `isPrefixOf`)
+              let gen2 = "{\"generation\":2,"
+              writeFile (root </> "src" </> "B.hs") "module B (b) where\n\nb = 7\n"
+              r <- rawHttp server.port (reloadRequest server (ourOrigin server))
+              (r.status, r.body) @?= (200, "{\"generation\":2}")
+              forM_ ["api/files/head", "api/files/base", "api/diff-files"] $ \p -> do
+                x <- getPath server p
+                (p, x.status) @?= (p, 200)
+                assertBool (show x.body) (gen2 `BS.isPrefixOf` x.body)
+              files <- getPath server "api/diff-files"
+              assertContains "\"path\":\"src/B.hs\"" (Char8.unpack files.body)
+              -- Logged after the answer: wait for it.
+              waitForLine server ("reload: generation 2 in " `isPrefixOf`)
+              (_, err) <- stopServer server sigTERM
+              assertContains "base: files: 6 kept\n" err,
         testCase "BASE..HEAD: both sides served, tree 404, one done line" $ do
           t <- get
           let root = t </> "repo" </> "pkg"
@@ -1037,10 +1061,11 @@ diffTests =
               \\"status\":\"renamed\",\"similarity\":60,\"note\":null}"
               body
             assertContains "\"outside\":{\"total\":3," body
+            -- A commit range has no reload (D-352).
+            noReload <- rawHttp server.port (reloadRequest server (ourOrigin server))
+            noReload.status @?= 404
             let origin =
-                  "Origin: http://127.0.0.1:"
-                    <> Char8.pack (show server.port)
-                    <> "\r\nContent-Length: 0\r\n"
+                  "Origin: " <> ourOrigin server <> "\r\nContent-Length: 0\r\n"
                 path = tokenPath server <> "api/diff-files"
             post <-
               rawHttp server.port (requestBytes "POST" (goodHost server) path origin)

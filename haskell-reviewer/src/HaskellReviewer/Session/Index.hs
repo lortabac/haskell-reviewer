@@ -33,6 +33,7 @@ module HaskellReviewer.Session.Index
     withRequest,
     failUnfinished,
     bigFileSize,
+    pruneCache,
 
     -- * Reading
     readProgress,
@@ -44,6 +45,7 @@ module HaskellReviewer.Session.Index
     -- * Internal, for tests
     requestCount,
     isRequested,
+    cacheKeys,
   )
 where
 
@@ -209,9 +211,12 @@ Each claim has its own token (a fresh TVar), not its slot's: a slot
 put back and claimed again is a new owner, which the first claim's
 'finally' must not drop.
 
-The cache lives as long as the pool. A reload must drop the keys of
-indexes no longer in use, else old results stay alive; reload doesn't
-do it yet. A browse reload has no keys: it parses everything again.
+The cache lives as long as the pool. A reload drops the keys no live
+index uses ('pruneCache', D-352), else old results stay alive. It runs
+after the old workers ended and before the new ones start, so no
+worker writes the cache meanwhile. It keeps Owned entries anyway (there
+should be none). A browse reload has no keys: it parses everything
+again.
 
 Reload (D-351): the listing thread stops the old 'runWorkers' with
 'StopWorkers' and waits for it to end before it starts the new one, so
@@ -559,6 +564,39 @@ failUnfinished index why = do
       writeTVar slot.state (Failed why')
       modifyTVar' index.progress (\p -> p {failed = p.failed + 1})
 
+-- | Drop the cache entries that none of these indexes uses: a blob and
+-- settings no slot has. Owned entries stay. Gives how many results
+-- were dropped. Only between two 'runWorkers': see Note [Indexing].
+pruneCache :: Pool -> [Index] -> IO Int
+pruneCache pool live = do
+  -- Built in full before the transaction (Q-RTS-BLACKHOLE).
+  wanted <- evaluate (Map.fromListWith (<>) keys)
+  _ <- evaluate (size wanted)
+  atomically $ do
+    m <- readTVar pool.cache
+    let kept = Map.mapMaybeWithKey (keep wanted) m
+    -- A strict map: '$!' builds it, and each list, in full
+    -- (Q-RTS-BLACKHOLE).
+    writeTVar pool.cache $! kept
+    pure $! size m - size kept
+  where
+    keys =
+      [ (b, [slot.key.settings])
+      | index <- live,
+        slot <- Map.elems index.slots,
+        Just b <- [slot.key.blob]
+      ]
+    size :: Map ObjectId [a] -> Int
+    size = Map.foldl' (\n l -> n + length l) 0
+    keep wanted b vs =
+      let settings = Map.findWithDefault [] b wanted
+       in case filter (used settings) vs of
+            [] -> Nothing
+            vs' -> foldr seq () vs' `seq` Just vs'
+    used settings v = case v.entry of
+      Owned _ -> True
+      Shared _ -> v.settings `elem` settings
+
 -- * Reading
 
 -- | The progress now.
@@ -587,6 +625,10 @@ shareCounts index = readTVar index.pool.counts
 -- | Requests in 'withRequest' now, on any index of the pool.
 requestCount :: Index -> STM Int
 requestCount index = readTVar index.pool.requests
+
+-- | The cache's blobs, with how many results each has.
+cacheKeys :: Pool -> STM (Map ObjectId Int)
+cacheKeys pool = Map.map length <$> readTVar pool.cache
 
 -- | A request asked for this module. False if it has no slot.
 isRequested :: Index -> ModuleId -> STM Bool

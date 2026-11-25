@@ -53,7 +53,7 @@ import Data.IORef
     writeIORef,
   )
 import Data.List (elemIndex)
-import Data.Maybe (isNothing)
+import Data.Maybe (fromMaybe, isNothing)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
@@ -78,7 +78,13 @@ import HaskellReviewer.Core.ModuleModel
     TextOnlyReason (..),
     textOnlyModule,
   )
-import HaskellReviewer.Core.Project (GhcVersion (..))
+import HaskellReviewer.Core.Project
+  ( BrokenPackage (..),
+    CabalProblem (..),
+    FileProblem (..),
+    GhcVersion (..),
+    Project (..),
+  )
 import HaskellReviewer.Core.RelPath (relPathFromBytes, relPathText)
 import HaskellReviewer.Core.Renames (RenameLimit (..), Settings (..), defaultSettings)
 import HaskellReviewer.Core.Revspec
@@ -88,6 +94,7 @@ import HaskellReviewer.Core.Revspec
     Range (..),
     RangeForm (..),
     Revspec (..),
+    WorkTreeInfo (..),
   )
 import HaskellReviewer.Core.Root (CanonicalRoot (..), Root (..))
 import HaskellReviewer.Core.Sides (Pair (..), Sides (..))
@@ -718,7 +725,7 @@ reloadTests =
           let withCharset = ("Content-Type", "application/json; charset=utf-8")
           post [ourOrigin, withCharset] (Sized " { } ")
             >>= \r -> check "spaces" r (200, "{\"generation\":3}"),
-      testCase "diff mode: 404 after the method check" $ do
+      testCase "commit range: 404 after the method check" $ do
         let one = fakeLister (pure (Right oneModule))
             listers _ = DiffSides Pair {head = one, base = one}
         withRunningSides ["--idle-exit", "0"] id listers $ \_ app -> do
@@ -931,6 +938,184 @@ reloadTests =
           assertBool "old text" (maybe False ("old" `inJson`) old)
           new <- getSidePath app ["file", "tree", "B.txt"]
           (new.status, generationOf new) @?= (200, Just 2),
+      testCase "--diff HEAD: base kept, only dirty modules parsed, caches pruned" $ do
+        parses <- newIORef (0 :: Int)
+        let count = atomicModifyIORef' parses (\n -> (n + 1, ()))
+            counting d = d {parse = \st t -> count >> d.parse st t}
+        withDiffRepo "edits" [] "" counting $ \repo fake app -> do
+          -- A, S (index), B, New on head; A, S on base (B shared).
+          readIORef parses >>= (@?= 6)
+          -- Loads head's text store: its clean files go in the shared table.
+          t <- textSearch app "head" "module"
+          t.status @?= 200
+          writeFile (repo </> "src" </> "S.hs") "module S (s) where\n\ns :: Int\ns = 3\n"
+          r <- reload app
+          (r.status, r.body) @?= (200, "{\"generation\":2}")
+          -- Logged after the done line: wait for it.
+          let parsed = "indexing: 9 parsed, 5 shared"
+          done <- waitFor 10 (elem parsed <$> readIORef fake.console)
+          assertBool "gen 2 not indexed" done
+          -- Read from disk: A, S and New. The rest are cache hits.
+          readIORef parses >>= (@?= 9)
+          forM_ [["files", "head"], ["files", "base"], ["diff-files"]] $ \route -> do
+            x <- getSidePath app route
+            (route, x.status, generationOf x) @?= (route, 200, Just 2)
+          d <- getSidePath app ["diff", "src", "S.hs"]
+          (d.status, generationOf d) @?= (200, Just 2)
+          assertBool (show d.body) ("\"status\":\"modified\"" `inJson` d)
+          f <- getSidePath app ["file", "head", "src", "S.hs"]
+          (f.status, generationOf f) @?= (200, Just 2)
+          assertBool (show f.body) ("s = 3\\n" `inJson` f)
+          out <- readIORef fake.console
+          let has l = assertBool (show (l, out)) (l `elem` out)
+          -- S's index blob: no live file has it now.
+          has "reload: dropped 1 parse results and 1 texts"
+          has "base: files: 6 kept"
+          -- Base's project is read once, head's twice.
+          let logged p = length (filter (p `Text.isPrefixOf`) out)
+          (logged "base: ghc: ", logged "head: ghc: ") @?= (1, 2)
+          length (filter (== "changed: 3 on head, 2 on base, indexed first") out) @?= 2,
+      testCase "--diff HEAD: an edit outside ROOT counts after a reload" $
+        withDiffRepo "renames" ["sha1", "worktree"] "pkg" id $ \repo _ app -> do
+          let total n = "\"outside\":{\"total\":" <> n <> ","
+          before <- getSidePath app ["diff-files"]
+          assertBool (show before.body) (total "4" `inBody` before)
+          appendFile (repo </> "other" </> "keep") "more\n"
+          r <- reload app
+          (r.status, r.body) @?= (200, "{\"generation\":2}")
+          after <- getSidePath app ["diff-files"]
+          (after.status, generationOf after) @?= (200, Just 2)
+          assertBool (show after.body) (total "5" `inBody` after),
+      testCase "--diff HEAD: a diff started before the swap stays on its generation" $ do
+        armed <- newIORef False
+        entered <- newEmptyMVar
+        release <- newEmptyMVar
+        let holding d =
+              d
+                { readEntry = \src p k -> do
+                    hold <- case src of
+                      CommitEntries _
+                        | relPathText p == "src/A.hs" -> atomicModifyIORef' armed (False,)
+                      _ -> pure False
+                    when hold (putMVar entered () >> readMVar release)
+                    d.readEntry src p k
+                }
+        withDiffRepo "edits" [] "" holding $ \repo _ app -> do
+          writeIORef armed True
+          old <- async (getSidePath app ["diff", "src", "A.hs"])
+          takeMVar entered
+          writeFile (repo </> "src" </> "B.hs") "module B (b) where\n\nb :: Int\nb = 2\n"
+          r <- reload app
+          (r.status, r.body) @?= (200, "{\"generation\":2}")
+          putMVar release ()
+          o <- timeout 5_000_000 (wait old)
+          fmap (\x -> (x.status, generationOf x)) o @?= Just (200, Just 1)
+          -- The new generation: every route agrees, B is modified now.
+          new <- getSidePath app ["diff", "src", "A.hs"]
+          (new.status, generationOf new) @?= (200, Just 2)
+          forM_ [["files", "head"], ["modules", "base"], ["diff-files"]] $ \route -> do
+            x <- getSidePath app route
+            (route, x.status, generationOf x) @?= (route, 200, Just 2)
+          files <- getSidePath app ["diff-files"]
+          assertBool (show files.body) ("\"path\":\"src/B.hs\"" `inBody` files),
+      testCase "--diff HEAD: base is listed again only if it failed" $ do
+        headCalls <- newIORef (0 :: Int)
+        baseCalls <- newIORef (0 :: Int)
+        let counted ref ok = fakeLister $ do
+              n <- atomicModifyIORef' ref (\c -> (c + 1, c + 1))
+              pure (if ok n then Right oneModule else Left (ListCrashed "boom"))
+            listers =
+              Pair
+                { head = counted headCalls (const True),
+                  base = counted baseCalls (> 1)
+                }
+            change _ d = d {probeFiles = \_ _ _ -> pure (Right (fakeRevProbe listers))}
+        withRunningProbe ["--idle-exit", "0"] change $ \_ app -> do
+          b1 <- getSide app "files" "base"
+          b1.status @?= 500
+          r <- reload app
+          (r.status, r.body) @?= (200, "{\"generation\":2}")
+          b2 <- getSide app "files" "base"
+          (b2.status, generationOf b2) @?= (200, Just 2)
+          r3 <- reload app
+          (r3.status, r3.body) @?= (200, "{\"generation\":3}")
+          b3 <- getSide app "files" "base"
+          (b3.status, generationOf b3) @?= (200, Just 3)
+          m <- getSidePath app ["module", "base", "A"]
+          (m.status, generationOf m) @?= (200, Just 3)
+          -- Base: failed, then listed again once, then kept.
+          (,) <$> readIORef headCalls <*> readIORef baseCalls >>= (@?= (3, 2)),
+      testCase "--diff HEAD: base is read again if its project read crashed" $ do
+        projectReads <- newIORef (0 :: Int)
+        baseCalls <- newIORef (0 :: Int)
+        let one = fakeLister (pure (Right oneModule))
+            baseLister = fakeLister $ do
+              atomicModifyIORef' baseCalls (\c -> (c + 1, ()))
+              pure (Right oneModule)
+            -- Head is read first: the second read is base's.
+            crashOnce d =
+              d
+                { readProject = \src fl p g -> do
+                    n <- atomicModifyIORef' projectReads (\c -> (c + 1, c + 1))
+                    when (n == 2) (ioError (userError "boom"))
+                    d.readProject src fl p g
+                }
+            probe = fakeRevProbe Pair {head = one, base = baseLister}
+            change _ d = crashOnce d {probeFiles = \_ _ _ -> pure (Right probe)}
+        withRunningProbe ["--idle-exit", "0"] change $ \fake app -> do
+          _ <- getSide app "modules" "base"
+          let line = "haskell-reviewer: base: cannot read the project: user error (boom)"
+          logged <- waitFor 5 (elem line <$> readIORef fake.console)
+          assertBool "no crash line" logged
+          forM_ [2, 3 :: Int] $ \g -> do
+            r <- reload app
+            (r.status, generationOf r) @?= (200, Just g)
+          -- Gen 2 reads base again; gen 3 keeps it.
+          (,) <$> readIORef projectReads <*> readIORef baseCalls >>= (@?= (5, 2))
+          m <- getSidePath app ["module", "base", "A"]
+          (m.status, generationOf m) @?= (200, Just 3),
+      testCase "--diff HEAD: base is read again if a project file could not be read" $
+        withCanonicalTemp $ \tmp -> do
+          headDir <- makeProject (tmp </> "head") ["A"]
+          baseDir <- makeProject (tmp </> "base") ["A"]
+          projectReads <- newIORef (0 :: Int)
+          let cabal = fromMaybe (error "path") (relPathFromBytes "p.cabal")
+              -- Head is read first: base's first read can't read p.cabal,
+              -- as a one-off git read error would.
+              failOnce d =
+                d
+                  { readEntry = readSourceEntry,
+                    readProject = \src fl p g -> do
+                      n <- atomicModifyIORef' projectReads (\c -> (c + 1, c + 1))
+                      proj <- d.readProject src fl p g
+                      pure $
+                        if n /= 2
+                          then proj
+                          else
+                            proj
+                              { packages = [],
+                                brokenPackages =
+                                  [ BrokenPackage
+                                      { cabalFile = cabal,
+                                        problem = CabalUnreadable (CantRead "boom")
+                                      }
+                                  ]
+                              }
+                  }
+              probe = fakeRevProbe Pair {head = diskAt headDir, base = diskAt baseDir}
+              change _ d = failOnce d {probeFiles = \_ _ _ -> pure (Right probe)}
+          withRunningProbe ["--idle-exit", "0"] change $ \_ app -> do
+            let package = "\"name\":\"p\""
+            m1 <- getSide app "modules" "base"
+            assertBool (show m1.body) (not (package `inBody` m1))
+            forM_ [2, 3 :: Int] $ \g -> do
+              r <- reload app
+              (r.status, generationOf r) @?= (200, Just g)
+            -- Gen 2 reads base again; gen 3 keeps it.
+            readIORef projectReads >>= (@?= 5)
+            m3 <- getSide app "modules" "base"
+            (m3.status, generationOf m3) @?= (200, Just 3)
+            assertBool (show m3.body) (package `inBody` m3),
       skipOnGhc912 "many threads while 20 reloads run: well formed, never going down" $
         withCanonicalTemp $ \tmp -> do
           dir <- makeProject (tmp </> "p") ["A", "B", "C"]
@@ -973,8 +1158,10 @@ reloadTests =
               Nothing -> assertFailure "did not end"
               Just (_, counts) -> assertBool (show counts) (all (> 0) counts)
     ]
-  where
-    isIndexed = ("indexing: done" `Text.isPrefixOf`)
+
+-- | The indexing done line.
+isIndexed :: Text -> Bool
+isIndexed = ("indexing: done" `Text.isPrefixOf`)
 
 -- | Verbose and debug: the done lines and "reload: queued".
 reloadArgs :: [String]
@@ -998,6 +1185,40 @@ postReload app headers body =
 -- | POST api/reload as the client does.
 reload :: Application -> IO ApiResult
 reload app = postReload app [ourOrigin, jsonType] (Sized "{}")
+
+-- | GET api/text-search/<side>?q=<q>.
+textSearch :: Application -> Text -> BS.ByteString -> IO ApiResult
+textSearch app side q =
+  callAppBody app "GET" [] NoBody ("?q=" <> q) "127.0.0.1:4321" $
+    [tokenText fakeToken, "api", "text-search", side]
+
+-- | A fixture repo with these args, served with @--diff HEAD@ at this
+-- folder of it (\"\" for the top), through the real probe, verbose.
+-- Runs the action once indexing is done, with the repo's path.
+withDiffRepo ::
+  String ->
+  [String] ->
+  FilePath ->
+  (Deps -> Deps) ->
+  (FilePath -> Fake -> Application -> IO a) ->
+  IO a
+withDiffRepo name extra sub tweak action = withCanonicalTemp $ \tmp -> do
+  let repo = tmp </> "repo"
+  fixtureRepo name (repo : extra)
+  Dir.createDirectory (tmp </> "home")
+  setup <- gitSetup (tmp </> "home") gitProbeTimeLimit
+  let change _ d =
+        tweak
+          d
+            { checkRoot = \p -> pure (Right (Root p)),
+              probeFiles = probeFilesWith setup,
+              readEntry = readSourceEntry
+            }
+      args = [repo </> sub, "--idle-exit", "0", "--verbose", "--diff", "HEAD"]
+  withRunningProbe args change $ \fake app -> do
+    ok <- waitFor 10 (any isIndexed <$> readIORef fake.console)
+    assertBool "not indexed" ok
+    action repo fake app
 
 -- | The generation of a JSON or CBOR body.
 generationOf :: ApiResult -> Maybe Int
@@ -1819,6 +2040,13 @@ fakeProbe = \case
             sides = Pair {head = oid "1", base = oid "2"},
             baseFrom = BaseTyped
           }
+
+-- | A probe for @--diff HEAD@ with these listers, at a made-up commit.
+fakeRevProbe :: Pair Lister -> Probe
+fakeRevProbe p = DiffProbe info (\k -> k p)
+  where
+    commit = ObjectId (Text.replicate 40 "2")
+    info = WorkTreeDiff WorkTreeInfo {rev = "HEAD", base = commit}
 
 -- | A listing that never ends.
 neverDone :: IO (Either ListError FileList)

@@ -78,9 +78,11 @@ import HaskellReviewer.Session.Index
     SlotState (..),
     awaitModule,
     bigFileSize,
+    cacheKeys,
     newIndex,
     newPool,
     prioritise,
+    pruneCache,
     readNames,
     readProgress,
     readStates,
@@ -787,7 +789,40 @@ shareTests =
         within (runWorkers 1 [IndexJob (blobReads fake hf) h2])
         Map.elems <$> atomically (readStates h2) >>= (@?= [Ready textOnlyResult])
         readTVarIO fake.parsed >>= (@?= ["x", "x"]),
-      testProperty "random keys: one parse per key, same results" shareProperty
+      testProperty "random keys: one parse per key, same results" shareProperty,
+      testCase "prune: only the live indexes' blobs and settings stay (D-352)" $ do
+        fake <- newFake []
+        pool <- newPool
+        let hf = [("A.hs", Just "x"), ("B.hs", Just "y"), ("C.hs", Nothing)]
+            bf = [("A.lhs", Just "x"), ("D.hs", Just "z")]
+        h <- indexBlobs pool hf
+        b <- indexBlobs pool bf
+        within (runWorkers 1 (headBase (blobReads fake (hf <> bf)) h b))
+        let keys = Map.toList <$> atomically (cacheKeys pool)
+        keys >>= (@?= [(ObjectId "x", 2), (ObjectId "y", 1), (ObjectId "z", 1)])
+        -- The next generation: head's A edited (no blob now), B kept;
+        -- base as it was, in a new index.
+        let hf2 = [("A.hs", Nothing), ("B.hs", Just "y")]
+        h2 <- indexBlobs pool hf2
+        b2 <- indexBlobs pool bf
+        pruneCache pool [h2, b2] >>= (@?= 1)
+        keys >>= (@?= [(ObjectId "x", 1), (ObjectId "y", 1), (ObjectId "z", 1)])
+        -- The kept results are hits: only A is parsed again.
+        within (runWorkers 1 (headBase (blobReads fake (hf2 <> bf)) h2 b2))
+        sort <$> readTVarIO fake.parsed >>= (@?= ["A", "C", "x", "x", "y", "z"])
+        pruneCache pool [] >>= (@?= 3)
+        keys >>= (@?= []),
+      testCase "prune: an Owned key stays" $ do
+        fake <- newFake ["x"]
+        pool <- newPool
+        let hf = [("A.hs", Just "x")]
+        h <- indexBlobs pool hf
+        withAsync (runWorkers 1 [IndexJob (blobReads fake hf) h]) $ \_ -> do
+          waitState h (m "A") isParsing
+          pruneCache pool [] >>= (@?= 0)
+          Map.toList <$> atomically (cacheKeys pool) >>= (@?= [(ObjectId "x", 1)])
+          release fake "x"
+          waitDone h
     ]
 
 -- | The fake's deps, reading each file's blob as its text, or its
