@@ -8,7 +8,7 @@ import { usePrefs } from "../prefs/store";
 import { usePageSide } from "../session";
 import { otherSide, type Side } from "../sides";
 import { type Current, ModuleTree } from "./ModuleTree";
-import { useModules } from "./store";
+import { loadingModulesText, useModules } from "./store";
 import { changedModules, isEmptyView, unionModules } from "./union";
 
 // The Modules view of the sidebar. In diff mode, with ghosts from the
@@ -61,7 +61,7 @@ export function ModulesPanel(): JSX.Element {
   return (
     <Switch>
       <Match when={modules.loading()}>
-        <p>Loading modules…</p>
+        <p>{loadingModulesText}</p>
       </Match>
       <Match when={view()}>
         {(v) => (

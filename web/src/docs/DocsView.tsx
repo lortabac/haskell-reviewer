@@ -36,6 +36,7 @@ import {
 import {
   useCopyLocation,
   useKeyActions,
+  useFileSteps,
   useKeys,
   useViewLinks,
 } from "../keys/KeysProvider";
@@ -45,8 +46,9 @@ import { pushOrigin } from "../source/origin";
 import { CopyButton } from "../copy/CopyButton";
 import { location as locationText } from "../copy/names";
 import { declCopyText, declLine } from "./copyText";
-import { useModules } from "../modules/store";
+import { loadingModulesText, useModules } from "../modules/store";
 import { useModuleSide } from "../modules/otherModule";
+import { moduleOrder, moduleStep, moduleStepTexts } from "../modules/order";
 import { firstCodeLine } from "./source";
 import { NotFound } from "../NotFound";
 import { PageTitle } from "../PageTitle";
@@ -150,6 +152,16 @@ function DocsPage(props: { moduleRef: string }): JSX.Element {
       const path = pagePath();
       return path == null ? undefined : diffLink(side(), path);
     },
+  });
+  // ] and [: this side's changed modules, at their top (D-350).
+  useFileSteps((dir) => {
+    const t = modules.ok();
+    if (t === undefined) {
+      return modules.loading() ? loadingModulesText : moduleStepTexts.failed;
+    }
+    const s = side();
+    const ref = modules.byRef().get(props.moduleRef)?.ref ?? props.moduleRef;
+    return moduleStep(moduleOrder(t), ref, dir, (r) => docsHref(s, r));
   });
   // b: the module on the other side (ModulePage adds the
   // declaration).

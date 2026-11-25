@@ -99,3 +99,8 @@ export function DiffFilesNotes(props: { loading: boolean }): JSX.Element {
     </>
   );
 }
+
+// Why the list isn't there: call it only then.
+export function filesWhy(d: DiffFilesApi): string {
+  return d.failed() ? failedText : loadingText;
+}

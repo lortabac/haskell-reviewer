@@ -46,6 +46,7 @@ import {
   useCopyLocation,
   useKeyActions,
   useKeys,
+  useFileSteps,
   useSideTarget,
   useViewLinks,
   type ToView,
@@ -79,6 +80,9 @@ import { type DiffApi, DiffGrid, type GridState } from "./DiffGrid";
 import type { SideText } from "./copy";
 import { createFits } from "./fit";
 import { OtherSideButton } from "./OtherSideButton";
+import { FileStepButtons } from "./FileStepButtons";
+import { diffOrder, fileStep } from "./fileOrder";
+import { filesWhy, useDiffFiles } from "./store";
 import { mapLine } from "./mapLine";
 import {
   cellAt,
@@ -552,6 +556,18 @@ function DiffPage(props: { path: string }): JSX.Element {
     kind: "here",
     run: (fromKey) => hooks?.otherSide(fromKey) ?? texts.noLines,
   }));
+  // ] and [: the changed files, in this view, ws and layout kept
+  // (D-350). A rename's base path counts as its head path.
+  const diffFiles = useDiffFiles();
+  useFileSteps((dir) => {
+    const f = diffFiles.files();
+    if (f === undefined) return filesWhy(diffFiles);
+    const o = diffOrder(f);
+    const layout = layoutFromSearch(location.search);
+    return fileStep(o.paths, o.heads.get(props.path) ?? props.path, dir, (p) =>
+      diffHref(p, { ws: ws(), layout }),
+    );
+  });
   // Try again: say if it is still too slow; else focus goes to the
   // grid once it is in, or to the heading.
   let heading!: HTMLHeadingElement;
@@ -616,6 +632,7 @@ function DiffPage(props: { path: string }): JSX.Element {
             {/* In boxes of their own (display: contents): the bar's
                 children stay put, so the ws button is never moved. */}
             <span class="diff-tools">
+              <FileStepButtons />
               <Show when={rowsShown()}>
                 <button type="button" onClick={() => stepChange(-1)}>
                   {stepTexts.prevChange}

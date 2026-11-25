@@ -1526,6 +1526,37 @@ describe("b, the other side (D-349)", () => {
     await vi.waitFor(() => expect(status()).toBe("added line 11"));
   });
 
+  it("the button keeps the goal column on a short line, like b", async () => {
+    const short = [...same, "n", ...after].join("\n") + "\n";
+    const { main } = open("/tok/diff/src/A.hs#base-L11", {
+      "/tok/api/file/head/src/A.hs": [200, file(short)],
+    });
+    await ready(main);
+    const cell = main.querySelector<HTMLElement>(
+      '.code-row[data-key="10"] .code-cell',
+    )!;
+    await vi.waitFor(() =>
+      expect(cell.querySelectorAll("a.code-link")).toHaveLength(2),
+    );
+    cell.focus();
+    for (
+      let i = 0;
+      i < 5 && document.activeElement?.textContent !== "foo";
+      i++
+    ) {
+      press("ArrowRight", "ArrowRight");
+    }
+    expect(document.activeElement?.textContent).toBe("foo");
+    const b = otherButton(main)!;
+    b.focus();
+    b.click();
+    await vi.waitFor(() => expect(here()).toBe("/tok/diff/src/A.hs#head-L11"));
+    // Back with b: the goal is still at foo's column, not "n"'s end.
+    press("b");
+    await vi.waitFor(() => expect(here()).toBe("/tok/diff/src/A.hs#base-L11"));
+    expect(document.activeElement?.textContent).toBe("foo");
+  });
+
   it("no header item on the diff page", async () => {
     const { main } = open("/tok/diff/src/A.hs");
     await ready(main);
