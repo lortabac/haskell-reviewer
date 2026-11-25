@@ -127,9 +127,9 @@ import HaskellReviewer.Session.Resolve
     resolveModuleWith,
   )
 import HaskellReviewer.Session.Snapshot
-  ( SessionShare (..),
+  ( Generation,
+    SessionShare (..),
     Snapshot (..),
-    firstGeneration,
   )
 import HaskellReviewer.Session.TextStore (newTextStore)
 import Network.HTTP.Types
@@ -201,7 +201,10 @@ gzip path gets the same before warp listens (Note [Compression] in
 (warmUpSearch in "HaskellReviewer.Server.Search"). The listing thread
 runs the refs route too (warmUpRefs in "HaskellReviewer.Server.Refs"),
 and the text search route runs before warp listens (warmUpTextSearch in
-"HaskellReviewer.Server.TextSearch").
+"HaskellReviewer.Server.TextSearch"), as does the reload route
+(warmUpReload in "HaskellReviewer.Server.Reload"). A reload builds its
+snapshots on the listing thread too, forced before the swap; the
+warm-ups don't run again.
 
 What the workers put in the slots is forced before it gets there (Note
 [Indexing] in "HaskellReviewer.Session.Index").
@@ -215,6 +218,7 @@ What the workers put in the slots is forced before it gets there (Note
 -- the session's other snapshots (D-320). Fully built before it
 -- returns. See Note [Forced snapshot].
 newSnapshot ::
+  Generation ->
   Side ->
   SessionShare ->
   EntrySource ->
@@ -222,9 +226,9 @@ newSnapshot ::
   ModuleIndex ->
   Map ModuleId Marker ->
   IO Snapshot
-newSnapshot side share source fl modules markers = do
-  let fileListJson = encodeFileList firstGeneration fl
-      moduleTreeJson = encodeModuleTree firstGeneration markers modules
+newSnapshot gen side share source fl modules markers = do
+  let fileListJson = encodeFileList gen fl
+      moduleTreeJson = encodeModuleTree gen markers modules
   forceSnapshot modules fileListJson moduleTreeJson
   searchModules <- evaluate (moduleCandidates modules)
   _ <- evaluate (forceCandidates searchModules)
@@ -232,8 +236,8 @@ newSnapshot side share source fl modules markers = do
     [ evaluate (LBS.length body)
     | n <- [unfiltered, FileNotes {filtered = Filtered}],
       body <-
-        encodeFileNotLocal firstGeneration n
-          : map (encodeFileView firstGeneration n) cborWarmUp
+        encodeFileNotLocal gen n
+          : map (encodeFileView gen n) cborWarmUp
     ]
   warmUpMarkdown
   -- Slots read only files of the list (indexAndReport in
@@ -246,7 +250,7 @@ newSnapshot side share source fl modules markers = do
   textStore <- newTextStore share.blobTexts
   pure
     Snapshot
-      { generation = firstGeneration,
+      { generation = gen,
         side = side,
         source = source,
         files = fl,

@@ -17,6 +17,7 @@ module HaskellReviewer.Session.Index
     ShareCounts (..),
     IndexDeps (..),
     IndexJob (..),
+    StopWorkers (..),
 
     -- * Building
     newPool,
@@ -60,8 +61,11 @@ import Control.Concurrent.STM
   )
 import Control.Exception
   ( ErrorCall (..),
+    Exception (..),
     SomeAsyncException,
     SomeException,
+    asyncExceptionFromException,
+    asyncExceptionToException,
     bracket_,
     catch,
     evaluate,
@@ -206,7 +210,15 @@ put back and claimed again is a new owner, which the first claim's
 'finally' must not drop.
 
 The cache lives as long as the pool. A reload must drop the keys of
-indexes no longer in use, else old results stay alive.
+indexes no longer in use, else old results stay alive; reload doesn't
+do it yet. A browse reload has no keys: it parses everything again.
+
+Reload (D-351): the listing thread stops the old 'runWorkers' with
+'StopWorkers' and waits for it to end before it starts the new one, so
+there is still one per pool. The old modules not done fail with
+"replaced by a reload" (the listing thread fails them again after the
+wait, for a stop that came before 'runWorkers' ran); requests still on
+the old generation get a 500 for them.
 
 Q-RTS-BLACKHOLE: request threads read what workers write, and workers
 share the queue. So nothing shared holds a thunk. The two counts are
@@ -479,20 +491,29 @@ prioritise index ids =
 bigFileSize :: FileSize
 bigFileSize = FileSize 262_144
 
+-- | Thrown to the thread of 'runWorkers' to stop it: the modules not
+-- done fail with this message. A reload uses it ("replaced by a
+-- reload"). An async exception, so catch-alls let it through.
+newtype StopWorkers = StopWorkers Text
+  deriving (Show)
+
+instance Exception StopWorkers where
+  toException = asyncExceptionToException
+  fromException = asyncExceptionFromException
+  displayException (StopWorkers why) = Text.unpack why
+
 -- | Run this many workers over these indexes until every module is
 -- done. Earlier indexes go first within a priority. All of them must
 -- share one pool, else it throws; one call per pool at a time. If the
 -- workers die (a bug, or a heap overflow) or are stopped, every module
--- not done yet, in every index, fails, then the exception goes on. See
--- Note [Indexing].
+-- not done yet, in every index, fails, then the exception goes on.
+-- 'StopWorkers' gives the message. See Note [Indexing].
 runWorkers :: Int -> [IndexJob] -> IO ()
 runWorkers n0 work = case work of
   [] -> pure ()
   first : _ ->
     run first.index.pool `catch` \e -> do
-      why <- case fromException e of
-        Just AsyncCancelled -> pure "indexing was stopped"
-        Nothing -> safeMessage e
+      why <- stopMessage e
       forM_ work $ \job -> failUnfinished job.index (IndexCrashed why)
       throwIO (e :: SomeException)
   where
@@ -505,6 +526,14 @@ runWorkers n0 work = case work of
       -- Before the workers share them. See Note [Indexing].
       forM_ work $ \job -> evaluate job.deps
       replicateConcurrently_ n (worker n pool work)
+
+-- | What the modules not done fail with, when 'runWorkers' ends on
+-- this exception.
+stopMessage :: SomeException -> IO Text
+stopMessage e
+  | Just AsyncCancelled <- fromException e = pure "indexing was stopped"
+  | Just (StopWorkers why) <- fromException e = pure why
+  | otherwise = safeMessage e
 
 -- | Run a request's compute. A worker parks meanwhile. Not around a wait
 -- for a slot. See Note [Indexing].

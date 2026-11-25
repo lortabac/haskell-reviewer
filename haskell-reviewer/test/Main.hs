@@ -111,6 +111,7 @@ import HaskellReviewer.Server.PageTest qualified
 import HaskellReviewer.Server.Prefs (warmUpPrefs)
 import HaskellReviewer.Server.Refs (warmUpRefs)
 import HaskellReviewer.Server.RefsTest qualified
+import HaskellReviewer.Server.Reload (warmUpReload)
 import HaskellReviewer.Server.Router (warmUpGzip)
 import HaskellReviewer.Server.RouterTest qualified
 import HaskellReviewer.Server.Search (warmUpSearch)
@@ -122,7 +123,9 @@ import HaskellReviewer.Server.Wire.Page (warmUpPages)
 import HaskellReviewer.Server.Wire.Source (warmUpSource)
 import HaskellReviewer.Session.ClientsTest qualified
 import HaskellReviewer.Session.IndexTest qualified
+import HaskellReviewer.Session.LiveTest qualified
 import HaskellReviewer.Session.PrefsTest qualified
+import HaskellReviewer.Session.ReloadTest qualified
 import HaskellReviewer.Session.Resolve (warmUpResolve)
 import HaskellReviewer.Session.ResolveTest qualified
 import HaskellReviewer.Session.SnapshotTest qualified
@@ -182,10 +185,10 @@ main = do
         Bench.TargetsTest.tests,
         Bench.UrlTest.tests,
         HaskellReviewer.App.CliTest.tests,
-        -- Each test runs serve, which runs warmUpGzip and warmUpPrefs:
-        -- tests in parallel would build their shared values at once
-        -- (Q-RTS-BLACKHOLE). Built once here first.
-        withResource (warmUpGzip >> warmUpPrefs) (const (pure ())) $ \_ ->
+        -- Each test runs serve, which runs warmUpGzip, warmUpPrefs and
+        -- warmUpReload: tests in parallel would build their shared
+        -- values at once (Q-RTS-BLACKHOLE). Built once here first.
+        withResource serveWarmUps (const (pure ())) $ \_ ->
           HaskellReviewer.App.RunTest.tests,
         HaskellReviewer.Core.AddressTest.tests,
         HaskellReviewer.Core.BlobIdTest.tests,
@@ -341,6 +344,10 @@ main = do
         HaskellReviewer.Server.RouterTest.tests,
         HaskellReviewer.Session.ClientsTest.tests,
         HaskellReviewer.Session.IndexTest.tests,
+        HaskellReviewer.Session.LiveTest.tests,
+        -- The route decodes JSON: aeson's shared values first.
+        withResource warmUpReload (const (pure ())) $ \_ ->
+          HaskellReviewer.Session.ReloadTest.tests,
         HaskellReviewer.Session.SnapshotTest.tests,
         HaskellReviewer.Session.TextStoreTest.tests,
         ExeTest.tests,
@@ -348,3 +355,7 @@ main = do
         after AllFinish "!/LineDiff/ && !/Linear time/" $
           testCase "LineDiff gate" (pure ())
       ]
+
+-- | What serve warms up and the tests run in parallel.
+serveWarmUps :: IO ()
+serveWarmUps = warmUpGzip >> warmUpPrefs >> warmUpReload

@@ -72,7 +72,8 @@ sends our origin. More than one Origin header: 403 too. On top of it,
 POST routes take only JSON bodies (application/json), which a
 cross-site page can send only after a CORS
 preflight, and we never answer preflights (OPTIONS has a foreign
-Origin: 403). Bodies are capped (4 KiB for api/prefs).
+Origin: 403). Bodies are capped at 4 KiB (api/prefs, api/reload:
+"HaskellReviewer.Server.Body").
 
 pathInfo is percent-decoded, so /%41bc.../ matches a token starting with
 "Abc". Harmless: you still need the token.

@@ -11,11 +11,13 @@ module HaskellReviewer.Session.Diff
     newDiffSlot,
     fillDiff,
     awaitDiff,
+    awaitDiffSTM,
   )
 where
 
 import Control.Concurrent.STM
-  ( TMVar,
+  ( STM,
+    TMVar,
     atomically,
     newEmptyTMVarIO,
     readTMVar,
@@ -56,4 +58,8 @@ fillDiff (DiffSlot v) x = atomically (tryPutTMVar v x)
 
 -- | Wait until the slot is filled.
 awaitDiff :: DiffSlot -> IO (Either DiffProblem DiffReady)
-awaitDiff (DiffSlot v) = atomically (readTMVar v)
+awaitDiff = atomically . awaitDiffSTM
+
+-- | Like 'awaitDiff', in STM.
+awaitDiffSTM :: DiffSlot -> STM (Either DiffProblem DiffReady)
+awaitDiffSTM (DiffSlot v) = readTMVar v

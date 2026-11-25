@@ -13,7 +13,14 @@ module HaskellReviewer.App.Run
 where
 
 import Control.Concurrent (getNumCapabilities)
-import Control.Concurrent.Async (forConcurrently, race, withAsync)
+import Control.Concurrent.Async
+  ( Async,
+    AsyncCancelled (..),
+    cancelWith,
+    forConcurrently,
+    race,
+    withAsync,
+  )
 import Control.Concurrent.MVar
   ( newEmptyMVar,
     newMVar,
@@ -29,6 +36,7 @@ import Control.Exception
     evaluate,
     finally,
     fromException,
+    onException,
     throwIO,
     try,
   )
@@ -199,6 +207,7 @@ import HaskellReviewer.Server.Listen
   )
 import HaskellReviewer.Server.Prefs (warmUpPrefs)
 import HaskellReviewer.Server.Refs (warmUpRefs)
+import HaskellReviewer.Server.Reload (warmUpReload)
 import HaskellReviewer.Server.Router (Routes (..), application, warmUpGzip)
 import HaskellReviewer.Server.Search (warmUpSearch)
 import HaskellReviewer.Server.TextSearch (warmUpTextSearch)
@@ -227,6 +236,7 @@ import HaskellReviewer.Session.Index
     Progress (..),
     ShareCounts (..),
     SlotState (..),
+    StopWorkers (..),
     failUnfinished,
     prioritise,
     readProgress,
@@ -234,19 +244,41 @@ import HaskellReviewer.Session.Index
     runWorkers,
     shareCounts,
   )
+import HaskellReviewer.Session.Live
+  ( Current (..),
+    DiffLive (..),
+    Live,
+    LiveSlots (..),
+    awaitSideSTM,
+    indexingNow,
+    newLive,
+    readCurrent,
+    swapLive,
+  )
 import HaskellReviewer.Session.Prefs (newPrefsStore)
 import HaskellReviewer.Session.Project qualified as Session.Project
+import HaskellReviewer.Session.Reload
+  ( Batch,
+    ReloadOutcome (..),
+    ReloadQueue,
+    answerReloads,
+    closeReloads,
+    newReloadQueue,
+    requestReload,
+    takeReloads,
+  )
 import HaskellReviewer.Session.Resolve (warmUpResolve)
 import HaskellReviewer.Session.Snapshot
-  ( SessionShare,
+  ( Generation (..),
+    SessionShare,
     Snapshot (..),
     SnapshotSlot,
     awaitSnapshot,
     fillSnapshot,
     firstGeneration,
-    indexingStates,
     newSessionShare,
     newSnapshotSlot,
+    nextGeneration,
     snapshotSTM,
   )
 import System.Environment (getArgs, getEnvironment)
@@ -317,6 +349,10 @@ forever anyway.
 The browser opener is never waited for or killed (see
 HaskellReviewer.Effects.Browser).
 
+A POST api/reload still waiting, or one that comes later, gets 503:
+the listing thread answers every waiter on its way out (Note [Reload
+queue] in "HaskellReviewer.Session.Reload").
+
 With --verbose, each step of the way out logs a "stop: ..." line, so a
 hang shows where it is. The signal handler writes its own line straight
 to fd 2, past the logger.
@@ -326,7 +362,7 @@ to fd 2, past the logger.
 
 Before the URL line we only do quick things (SPEC §10.1): check ROOT,
 open the trace file, read config.toml (one small file), check git,
-listen, warm up the gzip, prefs and search code, the side names
+listen, warm up the gzip, prefs, reload and search code, the side names
 (warmUpSideNames in "HaskellReviewer.Server.Api"), commit listing,
 commit reads and the working-tree rules (warmUpListing, warmUpObjects,
 warmUpWorkTree in "HaskellReviewer.Effects.Source"). In diff mode, the revisions are
@@ -366,14 +402,15 @@ early request is just slower. Each snapshot is fully built before the
 routes see it (Note [Forced snapshot] in "HaskellReviewer.Server.Api"),
 and the warm-ups run once, before any slot is filled.
 
-Once every slot is filled, the same thread runs the parse workers, one
-per capability, in one pool over every listed side's index, head first
-(Note [Indexing] in "HaskellReviewer.Session.Index"). A request
-computing parks one of them, never the last. So parsing never delays
-the URL either. No workers if no side was listed: there is nothing to
-index. However the thread ends (a crash, or a cancel at shutdown),
-every slot (the diff slot too) is filled and the modules not done are
-set Failed, so no request waits for ever.
+Once every slot is filled, the parse workers run in a child of this
+thread, one per capability, in one pool over every listed side's
+index, head first (Note [Indexing] in "HaskellReviewer.Session.Index").
+A request computing parks one of them, never the last. So parsing
+never delays the URL either. No workers if no side was listed: there
+is nothing to index. However the thread ends (a crash, or a cancel at
+shutdown), every slot of the current generation (the diff slot too) is
+filled and the modules not done are set Failed, so no request waits
+for ever.
 
 If reading the project crashes (a bug), the snapshot gets no packages
 and a warning, logged and shown in the module tree. The file routes
@@ -382,6 +419,37 @@ still work.
 The thread lives as long as the server (withAsync): on exit it is
 cancelled, with the workers, and a git it runs is killed (Note [Git
 hardening] in "HaskellReviewer.Effects.Git").
+
+Reload (D-351, browse mode for now). Once the first generation is
+built, the same thread waits for POST api/reload (Note [Reload queue]
+in "HaskellReviewer.Session.Reload"). For each batch it lists again,
+with the same listers, and builds the next generation into new slots
+that no request sees, while the old workers go on. No warm-ups: they
+ran at start-up. If a side can't be listed or built, the old
+generation stays and the batch gets a 500. Else:
+
+1. the changed modules go first, as above, and every slot is filled;
+2. the new generation is swapped in (Note [Live] in
+   "HaskellReviewer.Session.Live"): new requests see it, old ones keep
+   their snapshot;
+3. the old workers are stopped and we wait for them to end (one
+   runWorkers per pool, D-314); their modules not done fail with
+   "replaced by a reload";
+4. the old modules not done are failed again: a stop that came before
+   the old runWorkers ran failed nothing;
+5. the new workers are started, then the batch gets 200 with the new
+   generation.
+
+A build that is cancelled fills its own slots too (D-313). A build
+that crashes (a bug) gets 500 "cannot reload".
+
+If the thread itself crashes (a bug outside the steps above), it logs
+a line and the server goes on without indexing or reloads: POSTs get
+503 "reload is not available: <why>".
+
+A browse reload parses every module again: browse mode has no blob
+ids to share parses by (Note [Indexing] in
+"HaskellReviewer.Session.Index").
 -}
 
 -- | Everything 'run' needs from the outside world. Tests plug in fakes.
@@ -648,15 +716,15 @@ serveSides deps logger opts root defaults langs listers tracer shutdown t0 w0 = 
           warmUpObjects
           warmUpWorkTree
           warmUpRenames
+          warmUpReload
           -- On this thread, before warp: see Note [Forced snapshot] in
           -- "HaskellReviewer.Server.Api".
           session <- newSessionWork listers
-          let sides = sessionSides session
-          slots <- strictSides ((.slot) <$> sides)
-          diffSlot <- forcedMaybe (sessionDiffSlot session)
+          live <- newLive =<< currentOf firstGeneration session
           let sessionBody = encodeSession (sessionInfo session)
           _ <- evaluate (LBS.length sessionBody)
           share <- newSessionShare
+          reloads <- newReloadQueue
           -- Filled by ready: the listing starts after the URL line.
           start <- newEmptyMVar
           let url = sessionUrl listener.port token
@@ -677,28 +745,41 @@ serveSides deps logger opts root defaults langs listers tracer shutdown t0 w0 = 
                 EventStream
                   { clients = clients,
                     keepAlive = keepAliveInterval,
-                    indexing = indexingStates slots,
+                    current = indexingNow live,
                     minGap = indexingGap,
                     logger = logger
                   }
               files =
                 FilesApi
-                  { snapshotOn = \s -> awaitSnapshot . (.slot) <$> lookupSide s sides,
+                  { snapshotOn = \s -> case lookupSide s (sessionSides session) of
+                      Nothing -> Nothing
+                      -- The sides never change: every generation has it.
+                      Just _ -> Just (awaitSide live s),
                     readEntry = \snap -> deps.readEntry snap.source,
                     fileNotes = \snap -> fileNotes snap.source,
                     langs = langs,
                     logger = logger
                   }
-              diffRoutes =
-                (\s -> DiffRoutes {slot = s, lineDiff = guardedLineDiff diffTimeLimit})
-                  <$> diffSlot
+              diffRoutes = case session of
+                BrowseWork _ -> Nothing
+                DiffModeWork _ _ ->
+                  Just
+                    DiffRoutes
+                      { current = diffCurrent live,
+                        lineDiff = guardedLineDiff diffTimeLimit
+                      }
               routes =
                 Routes
                   { events = events,
                     files = files,
                     prefs = prefs,
                     diff = diffRoutes,
-                    session = sessionBody
+                    session = sessionBody,
+                    reload = case session of
+                      BrowseWork _ ->
+                        Just (requestReload reloads (logDebug logger "reload: queued"))
+                      -- Not in diff mode (D-351).
+                      DiffModeWork _ _ -> Nothing
                   }
               app = application listener.port token routes
               waitStop = do
@@ -713,23 +794,43 @@ serveSides deps logger opts root defaults langs listers tracer shutdown t0 w0 = 
                 pure why
               -- Shutdown steps, for --verbose: a hang shows where it is.
               step msg = logVerbose logger ("stop: " <> msg)
+              driver =
+                Driver
+                  { builder =
+                      Builder
+                        { deps = deps,
+                          logger = logger,
+                          tracer = tracer,
+                          share = share,
+                          cliGhc = opts.ghc
+                        },
+                    live = live,
+                    reloads = reloads,
+                    listers = listers
+                  }
               -- Scoped: on the way out it's cancelled, and git with it.
               -- The finally covers a cancel anywhere once the thread
-              -- runs: every slot is filled.
+              -- runs: every slot is filled, every reload answered.
               listing =
-                ( takeMVar start
-                    >> runListing deps logger tracer share session opts.ghc
-                    >>= runIndexing deps logger tracer
-                )
-                  `finally` stopIndexing session
+                ((takeMVar start >> runDriver driver session) `catch` driverCrashed)
+                  `finally` stopAll
+              -- A bug: the server goes on, without indexing or reloads.
+              driverCrashed e
+                | Just AsyncCancelled <- fromException e = throwIO e
+                | otherwise = do
+                    let msg = exceptionMessage e
+                    logInfo logger $
+                      "haskell-reviewer: the listing thread crashed: " <> msg
+                    closeReloads reloads (ReloadUnavailable msg)
+              stopAll = stopIndexing live >> closeReloads reloads ReloadStopping
               serving _ = do
                 r <- race waitStop (listener.serve ready app)
                 step "warp stopped, stopping the listing"
                 pure r
               closing = step "closing the socket" >> listener.close
-          -- stopIndexing again: a cancel can come before the listing
-          -- thread runs at all, and then its finally never does.
-          result <- withAsync listing serving `finally` (stopIndexing session >> closing)
+          -- stopAll again: a cancel can come before the listing thread
+          -- runs at all, and then its finally never does.
+          result <- withAsync listing serving `finally` (stopAll >> closing)
           step "socket closed, exiting"
           case result of
             Left StopSignal -> pure ExitSuccess
@@ -737,6 +838,116 @@ serveSides deps logger opts root defaults langs listers tracer shutdown t0 w0 = 
               deps.console (idleExitMessage m)
               pure ExitSuccess
             Right () -> throwIO (userError "the HTTP server stopped")
+
+-- | What building a generation needs.
+data Builder = Builder
+  { deps :: Deps,
+    logger :: Logger,
+    tracer :: Tracer,
+    share :: SessionShare,
+    cliGhc :: Maybe GhcVersion
+  }
+
+-- | What the listing thread needs. See Note [Listing after the URL].
+data Driver = Driver
+  { builder :: Builder,
+    live :: Live,
+    reloads :: ReloadQueue,
+    -- | To make each generation's sides.
+    listers :: Listers
+  }
+
+-- | A generation swapped in by a reload, to answer once its workers
+-- are started.
+data Swapped = Swapped
+  { generation :: Generation,
+    snapshots :: [Snapshot],
+    batch :: Batch,
+    -- | When the reload started, wall clock (the trace span).
+    startWall :: UTCTime,
+    -- | When the reload started, monotonic (its duration).
+    startMono :: MonotonicTime
+  }
+
+-- | The listing thread: build the first generation and index it, then
+-- serve reloads one at a time. See Note [Listing after the URL].
+runDriver :: Driver -> SessionWork -> IO ()
+runDriver d session = do
+  built <- firstListing d.builder session
+  loop firstGeneration built Nothing
+  where
+    b = d.builder
+    -- One runWorkers at a time: 'waitReload' stops the old one before
+    -- it returns, and only then the next one starts.
+    loop gen snaps swapped = do
+      next <- withAsync (runIndexing b.deps b.logger b.tracer snaps) $ \indexing -> do
+        forM_ swapped (answerSwapped d)
+        waitReload d gen snaps indexing
+      loop next.generation next.snapshots (Just next)
+
+-- | Wait for reload requests, build the next generation off to the
+-- side, swap it in, stop the old workers. If the build fails, answer
+-- at once, keep the old generation and wait again. See Note [Reload
+-- queue] in "HaskellReviewer.Session.Reload".
+waitReload :: Driver -> Generation -> [Snapshot] -> Async () -> IO Swapped
+waitReload d gen old indexing = do
+  batch <- atomically (takeReloads d.reloads)
+  t0 <- b.deps.clock.monotonic
+  w0 <- b.deps.clock.now
+  let next = nextGeneration gen
+  work <- newSessionWork d.listers
+  built <- reloadListing b next work `onException` stopWork work
+  case built of
+    Left failure -> do
+      answerReloads d.reloads batch $ case failure of
+        SideFailed -> ReloadFailed
+        BuildCrashed msg -> ReloadCrashed msg
+      catchCrash (const ()) . logVerbose b.logger $
+        "reload: failed, generation " <> generationText gen <> " kept"
+      waitReload d gen old indexing
+    Right snaps -> do
+      c <- currentOf next work
+      swapLive d.live c
+      -- Its modules not done fail; then the pool is free for the new
+      -- workers (D-313, D-314). Then again: a stop that came before
+      -- runWorkers ran failed nothing. In a finally: a cancel here
+      -- (shutdown) must not leave them Pending either.
+      cancelWith indexing (StopWorkers replaced)
+        `finally` forM_ old (\snap -> failUnfinished snap.index (IndexCrashed replaced))
+      pure
+        Swapped
+          { generation = next,
+            snapshots = snaps,
+            batch = batch,
+            startWall = w0,
+            startMono = t0
+          }
+  where
+    b = d.builder
+    replaced = "replaced by a reload"
+
+-- | Tell the waiters, then log and trace the reload.
+answerSwapped :: Driver -> Swapped -> IO ()
+answerSwapped d sw = do
+  answerReloads d.reloads sw.batch (Reloaded sw.generation)
+  -- A trace or log write that throws must not end the listing thread.
+  catchCrash (const ()) $ do
+    t1 <- b.deps.clock.monotonic
+    let took = elapsed sw.startMono t1
+        Nanoseconds ns = took
+    b.tracer.record Span {name = "reload", start = sw.startWall, duration = took}
+    logVerbose b.logger $
+      "reload: generation "
+        <> generationText sw.generation
+        <> " in "
+        <> showText (ns `div` 1_000_000)
+        <> " ms"
+  where
+    b = d.builder
+
+-- | For log lines.
+generationText :: Generation -> Text
+generationText (Generation g) = showText g
 
 -- | One side of the session: how to list it, and its slot.
 data SideWork = SideWork
@@ -791,18 +1002,36 @@ sessionInfo = \case
   BrowseWork _ -> BrowseSession
   DiffModeWork d _ -> DiffSession d.info
 
--- | The same sides, with no thunk left in the structure: request
--- threads read it (Q-RTS-BLACKHOLE). Not the values' insides.
-strictSides :: Sides a -> IO (Sides a)
-strictSides = \case
-  BrowseSides a -> do
-    a' <- evaluate a
-    pure $! BrowseSides a'
-  DiffSides p -> do
-    h <- evaluate p.head
-    b <- evaluate p.base
-    pair <- evaluate Pair {head = h, base = b}
-    pure $! DiffSides pair
+-- | A generation's slots, with no thunk left in the structure: request
+-- threads read it (Q-RTS-BLACKHOLE).
+currentOf :: Generation -> SessionWork -> IO Current
+currentOf gen work = do
+  slots <- case work of
+    BrowseWork w -> BrowseSlots <$!> evaluate w.slot
+    DiffModeWork d p -> do
+      h <- evaluate p.head.slot
+      b <- evaluate p.base.slot
+      sides <- evaluate Pair {head = h, base = b}
+      DiffSlots <$!> evaluate DiffLive {pairing = d.slot, sides = sides}
+  evaluate Current {generation = gen, slots = slots}
+
+-- | The current generation's snapshot of a side the session has. Waits
+-- until it's listed.
+awaitSide :: Live -> Side -> IO (Either ListError Snapshot)
+awaitSide live s =
+  atomically (awaitSideSTM live s) >>= \case
+    Just r -> pure r
+    -- The sides never change, and the route checked this one.
+    Nothing -> throwIO (userError "awaitSide: not a side of the session")
+
+-- | The current generation's pairing and sides, in diff mode.
+diffCurrent :: Live -> IO DiffLive
+diffCurrent live = do
+  c <- readCurrent live
+  case c.slots of
+    DiffSlots d -> pure d
+    -- The mode never changes: only diff mode has the route.
+    BrowseSlots _ -> throwIO (userError "diffCurrent: not a diff session")
 
 -- | The value and what is in it, to WHNF: no thunk goes in a slot
 -- (Q-RTS-BLACKHOLE).
@@ -811,13 +1040,6 @@ forcedEither x =
   evaluate x >>= \case
     Left a -> Left <$!> evaluate a
     Right b -> Right <$!> evaluate b
-
--- | Like 'forcedEither'.
-forcedMaybe :: Maybe a -> IO (Maybe a)
-forcedMaybe x =
-  evaluate x >>= \case
-    Nothing -> pure Nothing
-    Just a -> Just <$!> evaluate a
 
 -- | When a step started, and how long it took.
 data Timing = Timing
@@ -868,80 +1090,45 @@ data SideDone a = SideDone
     result :: SideResult a
   }
 
--- | Make every side's file list, read its project, pair the files in
--- diff mode, fill the slots, report. Gives back the snapshots in the
--- slots, head first. See Note [Listing after the URL].
+-- | Whether a build runs the warm-ups: once, at start-up.
+data WarmUps = WithWarmUps | NoWarmUps
+
+-- | Why a reload built no generation. Logged already.
+data ReloadFailure
+  = -- | A side was not listed, or not built.
+    SideFailed
+  | -- | A crash outside the steps of one side (a bug), with the
+    -- message.
+    BuildCrashed Text
+
+-- | List every side, read its project, pair the files in diff mode,
+-- build the snapshots. Nothing is filled yet. Listed at once, built one
+-- at a time, head first: building reads the project and forces shared
+-- values (Q-RTS-BLACKHOLE). A side's crash fails that side only.
+buildSides :: Builder -> Generation -> SessionWork -> IO (Paired, [SideDone Built])
+buildSides b gen session = do
+  let work = toList (sessionSides session)
+  listings <- forConcurrently work (listSide b.deps)
+  prepared <- mapM (uncurry (prepareSide b.deps b.logger b.cliGhc)) (zip work listings)
+  -- Before the snapshots: they encode the module trees with the
+  -- markers.
+  paired <- case session of
+    DiffModeWork d _ -> pairSides b.deps b.logger gen prepared d
+    BrowseWork _ -> pure PairNotRun
+  done <- mapM (buildSide b.deps b.share gen (markersOf paired)) prepared
+  pure (paired, done)
+
+-- | The first generation: build it, fill the slots, report. Gives back
+-- the snapshots in the slots, head first. See Note [Listing after the
+-- URL].
 --
 -- Every slot is filled here, or by 'stopIndexing' on a cancel: else
 -- requests would wait for ever.
-runListing ::
-  Deps ->
-  Logger ->
-  Tracer ->
-  SessionShare ->
-  SessionWork ->
-  Maybe GhcVersion ->
-  IO [Snapshot]
-runListing deps logger tracer share session cliGhc = do
+firstListing :: Builder -> SessionWork -> IO [Snapshot]
+firstListing b session = do
   result <- try @SomeException $ do
-    -- Listed at once, built one at a time, head first: building reads
-    -- the project and forces shared values (Q-RTS-BLACKHOLE).
-    listings <- forConcurrently work (listSide deps)
-    prepared <- mapM (uncurry (prepareSide deps logger cliGhc)) (zip work listings)
-    -- Before the snapshots: they encode the module trees with the
-    -- markers.
-    paired <- case session of
-      DiffModeWork d _ -> pairSides deps logger prepared d
-      BrowseWork _ -> pure PairNotRun
-    done <- mapM (buildSide deps share (markersOf paired)) prepared
-    -- Before the warm-ups and the fill: no worker or request runs yet.
-    changedFirst logger done
-    t2 <- deps.clock.monotonic
-    w2 <- deps.clock.now
-    let built = [b.snapshot | SideDone {result = SideOk b} <- done]
-    -- Warm up once, before any fill: requests parse. See Note [Forced
-    -- snapshot] in "HaskellReviewer.Server.Api".
-    unless (null built) (runWarmUp deps logger)
-    t3 <- deps.clock.monotonic
-    -- The diff route's shared values, before its slot is filled.
-    diffWarmUp <- case session of
-      DiffModeWork _ _ -> Just <$> timedWarmUp
-      BrowseWork _ -> pure Nothing
-    forM_ done $ \d -> do
-      -- No thunk goes in a slot (Q-RTS-BLACKHOLE).
-      v <- forcedEither (slotValue d.result)
-      fillSnapshot d.work.slot v
-    case session of
-      DiffModeWork d _ -> do
-        v <- forcedEither (diffBody paired)
-        void (fillDiff d.slot v)
-      BrowseWork _ -> pure ()
-    -- After the fill: a slow trace file can't hold up requests.
-    forM_ done $ \d -> case d.result of
-      SideOk b -> do
-        tracer.record (timed "files" d.work.side b.prepared.files)
-        tracer.record (timed "project" d.work.side b.project)
-      SideNotListed _ files -> tracer.record (timed "files" d.work.side files)
-      SideCrashed _ -> pure ()
-    unless (null built) $
-      tracer.record
-        Span {name = "parser-warm-up", start = w2, duration = elapsed t2 t3}
-    forM_ done $ \d -> case d.result of
-      SideOk b -> do
-        reportFiles d.work.side b.snapshot.files b.prepared.files.duration
-        reportProject d.work.side b.snapshot.modules b.project.duration
-      SideNotListed e _ -> reportError d.work.side e
-      SideCrashed msg -> reportError d.work.side (ListCrashed msg)
-    unless (null built) (reportWarmUp (elapsed t2 t3))
-    forM_ diffWarmUp $ \(Nanoseconds ns) ->
-      logVerbose logger ("diff warm-up: " <> showText (ns `div` 1_000) <> " us")
-    case paired of
-      PairedOk o -> do
-        tracer.record (pairingSpan o.timing)
-        logVerbose logger o.report
-      PairFailed _ t -> tracer.record (pairingSpan t)
-      PairNotRun -> pure ()
-    pure built
+    (paired, done) <- buildSides b firstGeneration session
+    fillAndReport b WithWarmUps session paired done
   case result of
     Right built -> pure built
     Left e
@@ -951,7 +1138,7 @@ runListing deps logger tracer share session cliGhc = do
           let err = ListCrashed (exceptionMessage e)
           forM_ work $ \w -> do
             filled <- fillSnapshot w.slot (Left err)
-            when filled (reportError w.side err)
+            when filled (reportError b.logger w.side err)
           -- A crash in pairing is caught there: this one is in the
           -- listing (or after the fill, and then this does nothing).
           forM_ (sessionDiffSlot session) $ \slot -> fillDiff slot (Left DiffNotListed)
@@ -961,77 +1148,184 @@ runListing deps logger tracer share session cliGhc = do
           pure [snap | Right snap <- slots]
   where
     work = toList (sessionSides session)
+
+-- | A reload's generation, into slots no request sees yet: build it,
+-- fill the slots, report. No warm-ups: they ran at start-up. If a side
+-- is not built, or the build crashes, the caller keeps the old
+-- generation. The slots are filled anyway (D-313). A cancel goes
+-- through.
+reloadListing ::
+  Builder -> Generation -> SessionWork -> IO (Either ReloadFailure [Snapshot])
+reloadListing b gen work = do
+  result <- try @SomeException $ do
+    (paired, done) <- buildSides b gen work
+    if all (sideOk . (.result)) done
+      then Right <$> fillAndReport b NoWarmUps work paired done
+      else do
+        forM_ done $ \d -> case d.result of
+          SideOk _ -> pure ()
+          SideNotListed e _ -> reportError b.logger d.work.side e
+          SideCrashed msg -> reportError b.logger d.work.side (ListCrashed msg)
+        pure (Left SideFailed)
+  case result of
+    Right (Right snaps) -> pure (Right snaps)
+    Right (Left failure) -> stopWork work >> pure (Left failure)
+    Left e
+      | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
+      | otherwise -> do
+          let msg = exceptionMessage e
+          logInfo b.logger ("haskell-reviewer: reload crashed: " <> msg)
+          stopWork work
+          pure (Left (BuildCrashed msg))
+  where
+    sideOk = \case
+      SideOk _ -> True
+      _ -> False
+
+-- | Fill the slots with the built sides, then report: trace spans and
+-- log lines. Gives back the snapshots, head first. With 'WithWarmUps',
+-- the warm-ups run before the fill.
+fillAndReport ::
+  Builder -> WarmUps -> SessionWork -> Paired -> [SideDone Built] -> IO [Snapshot]
+fillAndReport b warmUps session paired done = do
+  -- Before the warm-ups and the fill: no worker or request runs yet.
+  changedFirst b.logger done
+  t2 <- b.deps.clock.monotonic
+  w2 <- b.deps.clock.now
+  let built = [x.snapshot | SideDone {result = SideOk x} <- done]
+      warm = case warmUps of
+        WithWarmUps -> not (null built)
+        NoWarmUps -> False
+  -- Warm up once, before any fill: requests parse. See Note [Forced
+  -- snapshot] in "HaskellReviewer.Server.Api".
+  when warm (runWarmUp b.deps b.logger)
+  t3 <- b.deps.clock.monotonic
+  -- The diff route's shared values, before its slot is filled.
+  diffWarmUp <- case (session, warmUps) of
+    (DiffModeWork _ _, WithWarmUps) -> Just <$> timedDiffWarmUp b
+    _ -> pure Nothing
+  forM_ done $ \d -> do
+    -- No thunk goes in a slot (Q-RTS-BLACKHOLE).
+    v <- forcedEither (slotValue d.result)
+    fillSnapshot d.work.slot v
+  case session of
+    DiffModeWork d _ -> do
+      v <- forcedEither (diffBody paired)
+      void (fillDiff d.slot v)
+    BrowseWork _ -> pure ()
+  -- After the fill: a slow trace file can't hold up requests.
+  forM_ done $ \d -> case d.result of
+    SideOk x -> do
+      b.tracer.record (timed "files" d.work.side x.prepared.files)
+      b.tracer.record (timed "project" d.work.side x.project)
+    SideNotListed _ files -> b.tracer.record (timed "files" d.work.side files)
+    SideCrashed _ -> pure ()
+  when warm $
+    b.tracer.record
+      Span {name = "parser-warm-up", start = w2, duration = elapsed t2 t3}
+  forM_ done $ \d -> case d.result of
+    SideOk x -> do
+      reportFiles b.logger d.work.side x.snapshot.files x.prepared.files.duration
+      reportProject b.logger d.work.side x.snapshot.modules x.project.duration
+    SideNotListed e _ -> reportError b.logger d.work.side e
+    SideCrashed msg -> reportError b.logger d.work.side (ListCrashed msg)
+  when warm $ do
+    let Nanoseconds ns = elapsed t2 t3
+    logVerbose b.logger ("parser warm-up: " <> showText (ns `div` 1_000) <> " us")
+  forM_ diffWarmUp $ \(Nanoseconds ns) ->
+    logVerbose b.logger ("diff warm-up: " <> showText (ns `div` 1_000) <> " us")
+  case paired of
+    PairedOk o -> do
+      b.tracer.record (pairingSpan o.timing)
+      logVerbose b.logger o.report
+    PairFailed _ t -> b.tracer.record (pairingSpan t)
+    PairNotRun -> pure ()
+  pure built
+  where
     slotValue = \case
-      SideOk b -> Right b.snapshot
+      SideOk x -> Right x.snapshot
       SideNotListed e _ -> Left e
       SideCrashed msg -> Left (ListCrashed msg)
     diffBody = \case
       PairedOk o -> Right DiffReady {body = o.body, changes = o.changes}
       PairFailed problem _ -> Left problem
       PairNotRun -> Left DiffNotListed
-    markersOf paired side = case paired of
-      PairedOk o | Just m <- onSide side o.markers -> m
-      _ -> Map.empty
     pairingSpan t = Span {name = "pairing", start = t.start, duration = t.duration}
-    -- A crash only logs a line, as 'runWarmUp'.
-    timedWarmUp = do
-      t0 <- deps.clock.monotonic
-      try @SomeException deps.diffWarmUp >>= \case
-        Right () -> pure ()
-        Left e
-          | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
-          | otherwise ->
-              logInfo logger $
-                "haskell-reviewer: diff warm-up failed: " <> exceptionMessage e
-      t1 <- deps.clock.monotonic
-      pure (elapsed t0 t1)
     timed what side t =
       Span {name = spanName what side, start = t.start, duration = t.duration}
-    reportError side e =
-      logInfo logger $
-        "haskell-reviewer: " <> sideTag side <> "cannot list files: " <> renderListError e
-    reportFiles side fl (Nanoseconds ns) = do
-      when (fl.skippedNames > 0) $
-        logInfo logger $
-          "haskell-reviewer: "
-            <> sideTag side
-            <> "skipped "
-            <> showText fl.skippedNames
-            <> " file name(s) that are not UTF-8"
-      when fl.truncated $
-        logInfo logger $
-          "haskell-reviewer: "
-            <> sideTag side
-            <> "more than "
-            <> showText fileListCap
-            <> " files under ROOT; listing the first "
-            <> showText fileListCap
-      let from = case fl.source of
-            FromGit -> "git"
-            FromDisk -> "disk"
-      logVerbose logger $
-        sideTag side
-          <> "files: "
-          <> showText (length fl.entries)
-          <> " from "
-          <> from
-          <> " in "
-          <> showText (ns `div` 1_000_000)
-          <> " ms"
-    reportProject side idx (Nanoseconds ns) =
-      logVerbose logger $
-        sideTag side
-          <> "project: "
-          <> showText (length idx.packages)
-          <> " packages, "
-          <> showText (sum [length c.modules | p <- idx.packages, c <- p.components])
-          <> " modules, "
-          <> showText (length idx.other)
-          <> " other files in "
-          <> showText (ns `div` 1_000_000)
-          <> " ms"
-    reportWarmUp (Nanoseconds ns) =
-      logVerbose logger ("parser warm-up: " <> showText (ns `div` 1_000) <> " us")
+
+-- | One side's markers, from the pairing. None if it didn't run.
+markersOf :: Paired -> Side -> Map ModuleId Marker
+markersOf paired side = case paired of
+  PairedOk o | Just m <- onSide side o.markers -> m
+  _ -> Map.empty
+
+-- | The diff route's warm-up, timed. A crash only logs a line, as
+-- 'runWarmUp'.
+timedDiffWarmUp :: Builder -> IO Nanoseconds
+timedDiffWarmUp b = do
+  t0 <- b.deps.clock.monotonic
+  try @SomeException b.deps.diffWarmUp >>= \case
+    Right () -> pure ()
+    Left e
+      | Just (_ :: SomeAsyncException) <- fromException e -> throwIO e
+      | otherwise ->
+          logInfo b.logger $
+            "haskell-reviewer: diff warm-up failed: " <> exceptionMessage e
+  t1 <- b.deps.clock.monotonic
+  pure (elapsed t0 t1)
+
+-- | A side that could not be listed.
+reportError :: Logger -> Side -> ListError -> IO ()
+reportError logger side e =
+  logInfo logger $
+    "haskell-reviewer: " <> sideTag side <> "cannot list files: " <> renderListError e
+
+-- | A side's file list: warnings, and a verbose line.
+reportFiles :: Logger -> Side -> FileList -> Nanoseconds -> IO ()
+reportFiles logger side fl (Nanoseconds ns) = do
+  when (fl.skippedNames > 0) $
+    logInfo logger $
+      "haskell-reviewer: "
+        <> sideTag side
+        <> "skipped "
+        <> showText fl.skippedNames
+        <> " file name(s) that are not UTF-8"
+  when fl.truncated $
+    logInfo logger $
+      "haskell-reviewer: "
+        <> sideTag side
+        <> "more than "
+        <> showText fileListCap
+        <> " files under ROOT; listing the first "
+        <> showText fileListCap
+  let from = case fl.source of
+        FromGit -> "git"
+        FromDisk -> "disk"
+  logVerbose logger $
+    sideTag side
+      <> "files: "
+      <> showText (length fl.entries)
+      <> " from "
+      <> from
+      <> " in "
+      <> showText (ns `div` 1_000_000)
+      <> " ms"
+
+-- | A side's project, a verbose line.
+reportProject :: Logger -> Side -> ModuleIndex -> Nanoseconds -> IO ()
+reportProject logger side idx (Nanoseconds ns) =
+  logVerbose logger $
+    sideTag side
+      <> "project: "
+      <> showText (length idx.packages)
+      <> " packages, "
+      <> showText (sum [length c.modules | p <- idx.packages, c <- p.components])
+      <> " modules, "
+      <> showText (length idx.other)
+      <> " other files in "
+      <> showText (ns `div` 1_000_000)
+      <> " ms"
 
 -- | A diff side's value of a pair. 'Nothing' for the browse side, which
 -- has no pair.
@@ -1098,8 +1392,8 @@ data PairOutput = PairOutput
 -- (D-325, D-326). All forced: request threads share them
 -- (Q-RTS-BLACKHOLE). A crash logs a line; then api/diff-files is a 500
 -- and the markers are null. A cancel goes through.
-pairSides :: Deps -> Logger -> [SideDone Prepared] -> DiffWork -> IO Paired
-pairSides deps logger done diff = case (lookup HeadSide ready, lookup BaseSide ready) of
+pairSides :: Deps -> Logger -> Generation -> [SideDone Prepared] -> DiffWork -> IO Paired
+pairSides deps logger g done diff = case (lookup HeadSide ready, lookup BaseSide ready) of
   (Just h, Just b) -> do
     t0 <- deps.clock.monotonic
     w0 <- deps.clock.now
@@ -1152,7 +1446,7 @@ pairSides deps logger done diff = case (lookup HeadSide ready, lookup BaseSide r
                 outside = outsideChanges <$> traverse sideOutside sources,
                 truncated = fp.cut
               }
-          body = encodeDiffFiles firstGeneration files
+          body = encodeDiffFiles g files
       _ <- evaluate (LBS.length body)
       changes <- evaluate (changeIndex p.changes)
       _ <- evaluate (forceChangeIndex changes)
@@ -1229,10 +1523,11 @@ prepareSide deps logger cliGhc w listing =
 buildSide ::
   Deps ->
   SessionShare ->
+  Generation ->
   (Side -> Map ModuleId Marker) ->
   SideDone Prepared ->
   IO (SideDone Built)
-buildSide deps share markersOn d =
+buildSide deps share gen markersOn d =
   SideDone d.work <$> case d.result of
     SideNotListed e files -> pure (SideNotListed e files)
     SideCrashed msg -> pure (SideCrashed msg)
@@ -1240,7 +1535,14 @@ buildSide deps share markersOn d =
       t1 <- deps.clock.monotonic
       let side = d.work.side
       snap <-
-        newSnapshot side share p.listed.source p.listed.files p.modules (markersOn side)
+        newSnapshot
+          gen
+          side
+          share
+          p.listed.source
+          p.listed.files
+          p.modules
+          (markersOn side)
       t2 <- deps.clock.monotonic
       let Nanoseconds before = p.project.duration
           Nanoseconds after = elapsed t1 t2
@@ -1321,8 +1623,9 @@ modulesOf deps logger side listed cliGhc = do
 
 -- | Run the parse workers until every module of every side is done,
 -- then report. A crash (even before the workers start) fails the
--- modules not done; a cancel goes on to 'stopIndexing'. Nothing to do
--- if no side was listed. See Note [Listing after the URL].
+-- modules not done; an async exception (a cancel, 'StopWorkers') goes
+-- on to the caller. Nothing to do if no side was listed. See Note
+-- [Listing after the URL].
 runIndexing :: Deps -> Logger -> Tracer -> [Snapshot] -> IO ()
 runIndexing deps logger tracer = \case
   [] -> pure ()
@@ -1334,16 +1637,29 @@ runIndexing deps logger tracer = \case
         forM_ snaps $ \snap -> failUnfinished snap.index (IndexCrashed msg)
         logInfo logger ("haskell-reviewer: indexing crashed: " <> msg)
 
--- | However the listing thread ends, every slot is filled (the diff
--- slot too) and no module is left Pending or Parsing: requests would
--- wait for ever. For a cancel (shutdown) anywhere, or a crash after
--- the fill. A slot filled already keeps what it has.
-stopIndexing :: SessionWork -> IO ()
-stopIndexing session = do
-  forM_ (sessionDiffSlot session) $ \slot -> fillDiff slot (Left DiffNotListed)
-  forM_ (sessionSides session) $ \w -> do
-    _ <- fillSnapshot w.slot (Left (ListCrashed "the listing was stopped"))
-    atomically (snapshotSTM w.slot) >>= \case
+-- | However the listing thread ends, every slot of the current
+-- generation is filled (the diff slot too) and no module is left
+-- Pending or Parsing: requests would wait for ever. For a cancel
+-- (shutdown) anywhere, or a crash after the fill. A slot filled already
+-- keeps what it has. Older generations were stopped by the reload
+-- that replaced them.
+stopIndexing :: Live -> IO ()
+stopIndexing live =
+  (.slots) <$> readCurrent live >>= \case
+    BrowseSlots s -> stopSlots (BrowseSides s) Nothing
+    DiffSlots d -> stopSlots (DiffSides d.sides) (Just d.pairing)
+
+-- | 'stopSlots' for a generation not swapped in (D-313).
+stopWork :: SessionWork -> IO ()
+stopWork work = stopSlots ((.slot) <$> sessionSides work) (sessionDiffSlot work)
+
+-- | 'stopIndexing' for these slots.
+stopSlots :: Sides SnapshotSlot -> Maybe DiffSlot -> IO ()
+stopSlots sides diff = do
+  forM_ diff $ \slot -> fillDiff slot (Left DiffNotListed)
+  forM_ sides $ \slot -> do
+    _ <- fillSnapshot slot (Left (ListCrashed "the listing was stopped"))
+    atomically (snapshotSTM slot) >>= \case
       Just (Right snap) ->
         failUnfinished snap.index (IndexCrashed "indexing was stopped")
       _ -> pure ()

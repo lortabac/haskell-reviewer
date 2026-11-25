@@ -66,7 +66,7 @@ import HaskellReviewer.Core.Renames
     ModifiedFile (..),
     RenamedFile (..),
   )
-import HaskellReviewer.Core.Sides (Pair (..), Side (..))
+import HaskellReviewer.Core.Sides (Pair (..))
 import HaskellReviewer.Core.Similarity (Score (..))
 import HaskellReviewer.Effects.Clock (Microseconds (..))
 import HaskellReviewer.Effects.FileSystem (ReadError (..))
@@ -87,11 +87,15 @@ import HaskellReviewer.Server.Wire.Diff
 import HaskellReviewer.Session.Diff
   ( DiffProblem (..),
     DiffReady (..),
-    DiffSlot,
     awaitDiff,
   )
 import HaskellReviewer.Session.Index (withRequest)
-import HaskellReviewer.Session.Snapshot (Snapshot (..), firstGeneration)
+import HaskellReviewer.Session.Live (DiffLive (..))
+import HaskellReviewer.Session.Snapshot
+  ( Snapshot (..),
+    awaitSnapshot,
+    firstGeneration,
+  )
 import Network.HTTP.Types
   ( hContentType,
     methodGet,
@@ -125,8 +129,11 @@ GET api/diff/<path…>[?ws=ignore]: the diff of one file, as CBOR (Note
   type-changed. A mode-only change shows as unchanged (the list has no
   exec bit).
 - Base is read, then head, each from its own snapshot; the first
-  problem stops. Gone: the 404. A read error: logged, 500 "cannot read
-  file". A blob missing from a partial clone: the side is not-local.
+  problem stops. The pairing and both snapshots come from one read of
+  the current generation, so they always match (Note [Live] in
+  "HaskellReviewer.Session.Live"). Gone: the 404. A read error:
+  logged, 500 "cannot read file". A blob missing from a partial clone:
+  the side is not-local.
 - Text is diffed: a file's text, a symlink's target, "" for a side
   without the file. Anything else (binary, too large, submodule, not
   local) on either side: not-text.
@@ -157,7 +164,10 @@ them.
 
 -- | What the diff route needs, in diff mode.
 data DiffRoutes = DiffRoutes
-  { slot :: DiffSlot,
+  { -- | The current generation's pairing and sides, read at once: a
+    -- request never mixes two generations (Note [Live] in
+    -- "HaskellReviewer.Session.Live").
+    current :: IO DiffLive,
     -- | Production: 'guardedLineDiff' 'diffTimeLimit'.
     lineDiff :: Whitespace -> Pair Text -> IO GuardedDiff
   }
@@ -187,22 +197,20 @@ diffApp :: FilesApi -> Maybe DiffRoutes -> [Text] -> Application
 diffApp api routes segs req respond
   | req.requestMethod /= methodGet = respond (methodNotAllowed "GET")
   | Nothing <- routes = respond notFound
-  | Just r <- routes =
-      awaitDiff r.slot >>= \case
+  | Just r <- routes = do
+      live <- r.current
+      awaitDiff live.pairing >>= \case
         Left DiffNotListed -> respond cannotList
         Left (DiffNotPaired _) -> respond (serverError "cannot pair files")
         Right ready -> case whitespaceParam req.rawQueryString of
           Nothing -> respond (badRequest "bad ws")
-          Just ws -> case (api.snapshotOn HeadSide, api.snapshotOn BaseSide) of
-            (Just getHead, Just getBase) -> do
-              h <- getHead
-              b <- getBase
-              case (h, b) of
-                (Right hs, Right bs) ->
-                  respond =<< answer api r ws ready Pair {head = hs, base = bs} segs
-                _ -> respond cannotList
-            -- A diff session has both sides.
-            _ -> respond notFound
+          Just ws -> do
+            h <- awaitSnapshot live.sides.head
+            b <- awaitSnapshot live.sides.base
+            case (h, b) of
+              (Right hs, Right bs) ->
+                respond =<< answer api r ws ready Pair {head = hs, base = bs} segs
+              _ -> respond cannotList
 
 -- | Built before the fill: every value of the body, the line diff, the
 -- ws parse and the 404 body (Q-RTS-BLACKHOLE). Run before the slot is

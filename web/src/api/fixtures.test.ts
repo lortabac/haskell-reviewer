@@ -4,7 +4,13 @@
 import { describe, expect, it } from "vitest";
 import { fromCbor } from "./client";
 import { DecodeError } from "./decode";
-import { decodeHello, decodeIndexing, parseEventData } from "./events";
+import {
+  decodeGeneration,
+  decodeHello,
+  decodeIndexing,
+  parseEventData,
+} from "./events";
+import { decodeReloaded } from "./reload";
 import {
   decodeFileList,
   decodeFileView,
@@ -86,6 +92,8 @@ import {
 const decoders: Record<string, (value: unknown) => unknown> = {
   "events-hello": decodeHello,
   "events-indexing": decodeIndexing,
+  "events-generation": decodeGeneration,
+  reload: decodeReloaded,
   indexing: decodeIndexing,
   files: decodeFileList,
   "file-text": decodeFileView,
@@ -1119,6 +1127,29 @@ describe("decoders reject bad shapes", () => {
     expect(textSearchUrl("tree", "where", 8)).toBe(
       "/api/text-search/tree?q=where&limit=8",
     );
+  });
+
+  it("generation and reload: the fixtures, and bad payloads", () => {
+    expect(decodeGeneration(fixture("events-generation"))).toEqual({
+      generation: 2,
+    });
+    expect(decodeReloaded(fixture("reload"))).toEqual({ generation: 2 });
+    for (const bad of [
+      null,
+      [],
+      {},
+      { generation: 0 },
+      { generation: -1 },
+      { generation: 1.5 },
+      { generation: "2" },
+    ]) {
+      expect(() => decodeGeneration(bad), JSON.stringify(bad)).toThrow(
+        DecodeError,
+      );
+      expect(() => decodeReloaded(bad), JSON.stringify(bad)).toThrow(
+        DecodeError,
+      );
+    }
   });
 
   it("hello", () => {

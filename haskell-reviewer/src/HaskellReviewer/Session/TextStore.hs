@@ -79,7 +79,9 @@ search and kept for the snapshot's life.
   budget and the counts are each store's own, as without sharing, so
   a store's files don't depend on which side loaded first. Only bytes
   a store keeps go in the table. A reload must drop the blobs no
-  store uses any more.
+  store uses any more; reload doesn't do it yet. A reload makes new
+  snapshots, so new stores: they load again on their first text
+  search (D-351).
 
 Loading: the first request finds the store Idle, sets it Loading and
 starts the load in a thread of its own, so a request that goes away

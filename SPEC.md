@@ -778,7 +778,8 @@ Each side is a **snapshot** taken at start-up; it never changes while being
 read. Revision sides (commits) are immutable anyway. For the working-tree
 side there is no file watching. Instead:
 - A **Reload** action in the header re-reads the working tree and the HIE
-  files, then re-indexes.
+  files, then re-indexes. The server side is `POST api/reload` (§11.6.2,
+  D-351); M3 has no HIE files yet, so it re-reads the files only.
 - After a reload, the current location is preserved by *(module,
   declaration)* when possible. If it no longer exists, the user lands at the
   nearest enclosing module with a notice.
@@ -1877,10 +1878,13 @@ the search box's 8 results, on a large project once the store is loaded
 ### 11.5 State and concurrency
 
 (D-60)
-- **Snapshot generations.** Each side has a current *generation*: an
-  immutable file list, plus one slot per module we parse (`pending`,
-  `parsing`, `ready`, `failed`). Slots are held in STM. A request reads one
-  generation from start to end, so it never sees a mix of two.
+- **Snapshot generations.** Each side's snapshot carries the session's
+  current *generation*: one counter for the session, up by one on each
+  reload, for every side (D-351). A snapshot is an immutable file list,
+  plus one slot per module we parse (`pending`, `parsing`, `ready`,
+  `failed`). Slots are held in STM. The current generation's slots sit
+  in one STM variable; a request reads it once and keeps that generation
+  from start to end, so it never sees a mix of two.
 - **Scheduler.** A priority queue feeds a pool of parse workers (about one
   per core, `-threaded`). The priorities are: modules a request is waiting
   for, then changed modules in diff mode, then the rest. A request for a
@@ -1898,11 +1902,15 @@ the search box's 8 results, on a large project once the store is loaded
   parse instead of doing its own (D-320).
 - **Sources.** Each side's snapshot reads its files from one source:
   the disk (ROOT as it is now) or a commit's blobs (D-313).
-- **Reload** (§5.2) builds a new generation and swaps it in atomically.
-  Unchanged blobs hit the shared parse results (§11.4.4), so a reload
-  re-parses only what changed. A dirty file is read from disk, so it is
-  parsed again. The swap must drop the shared results and texts no
-  generation uses any more (T16).
+- **Reload** (§5.2) builds a new generation off to the side and swaps it
+  in atomically (D-351). Then the old workers are stopped, their modules
+  not done fail ("replaced by a reload"), and the new workers start: one
+  set of workers per pool at a time. Requests still on the old
+  generation finish against it. Unchanged blobs hit the shared parse
+  results (§11.4.4), so a reload re-parses only what changed. A dirty
+  file is read from disk, so it is parsed again, and so is every file in
+  browse mode (no blob ids). The swap must drop the shared results and
+  texts no generation uses any more (T16b).
 - **GC.** Big indexes may cause long GC pauses. Benchmarks pick the fix:
   compact regions or the non-moving GC (Q-GC). M1 and M2 keep the copying
   GC with the D-162 defaults: pauses are well under target (D-219, D-305).
@@ -1927,7 +1935,7 @@ following:
   page's own (`http://127.0.0.1:<port>` or `http://localhost:<port>`),
   else 403. `POST` bodies must be `application/json` (so a cross-site
   page would need a CORS preflight, which is never answered) and are
-  size-capped (D-198);
+  size-capped at 4 KiB (`api/prefs`, `api/reload`; D-198);
 - sets the security headers: the CSP and `Referrer-Policy` of §9.2,
   `X-Content-Type-Options: nosniff`, and `Cache-Control: no-store` for API
   responses. Static assets also live under the token path, and their
@@ -2004,7 +2012,14 @@ a framework would cost more than it saves.
   body (D-166, D-265);
   other errors are plain text.
 - **Actions** (ask, stop, reload, set preference, …) are `POST` requests
-  with JSON bodies.
+  with JSON bodies. `POST api/reload` (D-351) takes the body `{}` and
+  answers `{"generation":n}` once the new generation is in and its
+  workers are started; 500 "cannot list files" if a side can't be
+  listed, 500 "cannot reload" if the build crashed (the old generation
+  stays in both), 503 if the server is stopping or reload is no longer
+  available. POSTs that come
+  during a reload wait for the next one, so many POSTs cost one more
+  reload at most. Browse mode only; a plain 404 in diff mode.
 - **Push** (D-52): **one SSE connection per browser**, held by a
   **SharedWorker** that passes events on to all tabs.
   - Why: browsers allow about 6 HTTP/1.1 connections per origin, and
@@ -2015,8 +2030,10 @@ a framework would cost more than it saves.
     (once that side is listed; never for a side whose listing failed).
   - Events: indexing progress (`indexing`, the same JSON as
     `GET api/indexing/<side>`, with a `side` field; at most one per side
-    per 100 ms, always the latest state, D-315), generation changes, LLM
-    stream updates, notices. The client keeps the latest `indexing` of
+    per 100 ms, always the latest state, D-315), generation changes
+    (`generation`, `{"generation":n}`, when the generation changes,
+    right before that generation's `indexing` events, never on open,
+    D-351), LLM stream updates, notices. The client keeps the latest `indexing` of
     each side; a page follows its own side, the header shows the sum
     (D-333).
   - Fallback: without SharedWorker, each tab opens its own stream, and a

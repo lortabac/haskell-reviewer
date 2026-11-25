@@ -37,6 +37,7 @@ import HaskellReviewer.Server.DiffFiles (diffFilesApp)
 import HaskellReviewer.Server.Events (EventStream, eventsApp)
 import HaskellReviewer.Server.Prefs (prefsApp)
 import HaskellReviewer.Server.Refs (refsApp)
+import HaskellReviewer.Server.Reload (reloadApp)
 import HaskellReviewer.Server.Search (searchApp)
 import HaskellReviewer.Server.Security
   ( checkAccess,
@@ -45,7 +46,9 @@ import HaskellReviewer.Server.Security
     withSecurityHeaders,
   )
 import HaskellReviewer.Server.TextSearch (textSearchApp)
+import HaskellReviewer.Session.Live (DiffLive (..))
 import HaskellReviewer.Session.Prefs (PrefsStore)
+import HaskellReviewer.Session.Reload (ReloadOutcome)
 import Network.HTTP.Types
   ( Header,
     hCacheControl,
@@ -126,6 +129,10 @@ Paths below are what the router sees, after the token.
 - api/prefs: the UI preferences, as JSON. GET, and POST with an
   application/json body (Note [Prefs route] in
   "HaskellReviewer.Server.Prefs"); 405 otherwise, HEAD too.
+- api/reload: list the files again and swap in a new generation
+  (D-351, Note [Reload route] in "HaskellReviewer.Server.Reload").
+  POST only, body {} (405 otherwise, HEAD too), then a plain 404 in
+  diff mode.
 - Anything else: 404. index.html itself is not served under its name.
   So are api, api/x and api/events/x: the api/ namespace has only the
   routes listed here.
@@ -166,7 +173,10 @@ data Routes = Routes
     diff :: Maybe DiffRoutes,
     -- | The api/session body. Built and forced once, before serving
     -- (Q-RTS-BLACKHOLE).
-    session :: LBS.ByteString
+    session :: LBS.ByteString,
+    -- | Ask for a reload and wait for it. 'Nothing': the mode has no
+    -- reload.
+    reload :: Maybe (IO ReloadOutcome)
   }
 
 -- | The whole app. Paths are relative to the token: the router never
@@ -245,9 +255,11 @@ router shell routes req respond = case req.pathInfo of
   ["api", "search", side] -> searchApp routes.files side req respond
   ["api", "refs", side] -> refsApp routes.files side req respond
   ["api", "text-search", side] -> textSearchApp routes.files side req respond
-  ["api", "diff-files"] -> diffFilesApp ((.slot) <$> routes.diff) req respond
+  ["api", "diff-files"] ->
+    diffFilesApp (fmap (.pairing) . (.current) <$> routes.diff) req respond
   "api" : "diff" : path -> diffApp routes.files routes.diff path req respond
   ["api", "prefs"] -> prefsApp routes.prefs req respond
+  ["api", "reload"] -> reloadApp routes.reload req respond
   ["api", "session"] -> getOnly (json routes.session)
   _ -> respond notFound
   where

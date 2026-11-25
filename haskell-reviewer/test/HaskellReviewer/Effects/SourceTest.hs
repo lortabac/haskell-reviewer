@@ -63,7 +63,7 @@ import HaskellReviewer.Session.Index
     shareCounts,
   )
 import HaskellReviewer.Session.Project (readProject, readProjectFile)
-import HaskellReviewer.Session.Snapshot (Snapshot (..), newSessionShare)
+import HaskellReviewer.Session.Snapshot (Snapshot (..), firstGeneration, newSessionShare)
 import System.Directory qualified as Dir
 import System.FilePath ((</>))
 import System.IO.Temp (createTempDirectory, getCanonicalTemporaryDirectory)
@@ -196,7 +196,15 @@ tests =
               project <- readProject l.source l.files hostPlatform Nothing
               share <- newSessionShare
               let modules = buildModuleIndex project l.files
-              snap <- newSnapshot TreeSide share l.source l.files modules Map.empty
+              snap <-
+                newSnapshot
+                  firstGeneration
+                  TreeSide
+                  share
+                  l.source
+                  l.files
+                  modules
+                  Map.empty
               let deps =
                     IndexDeps
                       { readModule = \p -> readSourceEntry l.source p EntryFile,
@@ -283,7 +291,7 @@ parsingTests =
           project <- readProject l.source l.files hostPlatform Nothing
           share <- newSessionShare
           let modules = buildModuleIndex project l.files
-          newSnapshot TreeSide share l.source l.files modules Map.empty
+          newSnapshot firstGeneration TreeSide share l.source l.files modules Map.empty
     apiOn snap =
       indexed
         searchApi

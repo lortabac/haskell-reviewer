@@ -36,9 +36,15 @@ import HaskellReviewer.Server.Api (FilesApi (..))
 import HaskellReviewer.Server.Events (EventStream (..), keepAliveFrame, renderEvent)
 import HaskellReviewer.Server.Router (Routes (..), application)
 import HaskellReviewer.Server.Security (contentSecurityPolicy)
-import HaskellReviewer.Server.Wire (SessionInfo (..), encodeIndexing, encodeSession)
+import HaskellReviewer.Server.Wire
+  ( SessionInfo (..),
+    encodeGeneration,
+    encodeIndexing,
+    encodeSession,
+  )
 import HaskellReviewer.Session.Clients (EventId (..), newClients, openCount)
 import HaskellReviewer.Session.Index (Progress (..))
+import HaskellReviewer.Session.Live (LiveIndexing (LiveIndexing))
 import HaskellReviewer.Session.Snapshot (Generation (..), IndexingState (..))
 import Network.HTTP.Types (Header, Status (..))
 import Network.Socket qualified as Socket
@@ -200,6 +206,46 @@ inProcessTests =
             final = indexingEvent (fromIntegral count + 1) 50
         assertBool ("events: " <> show count) (count <= 20)
         assertBool (show body) (final `LBS.isSuffixOf` body),
+      testCase "generation: after a swap, then its indexing, in one flush" $ do
+        state <- newTVarIO (Generation 1, [at 0])
+        events <- newEventsCurrent long (Microseconds 0) (readTVar state)
+        body <- streamBody events 3 $ \case
+          2 -> atomically (writeTVar state (Generation 2, [atGen 2 0]))
+          _ -> pure ()
+        -- The third flush has both: the stream stops at it.
+        body
+          @?= hello
+            <> indexingEvent 2 0
+            <> generationEvent 3 2
+            <> genEvent 4 2 TreeSide 0,
+      testCase "generation: a swap right after hello is announced" $ do
+        state <- newTVarIO (Generation 1, [at 0])
+        events <- newEventsCurrent long (Microseconds 0) (readTVar state)
+        -- The client's refetch on hello could still see generation 1.
+        body <- streamBody events 2 $ \case
+          1 -> atomically (writeTVar state (Generation 2, [atGen 2 0]))
+          _ -> pure ()
+        body @?= hello <> generationEvent 2 2 <> genEvent 3 2 TreeSide 0,
+      testCase "generation: none on open" $ do
+        state <- newTVarIO (Generation 2, [atGen 2 0])
+        events <- newEventsCurrent (Microseconds 10_000) (Microseconds 0) (readTVar state)
+        body <- streamBody events 3 (\_ -> pure ())
+        body @?= hello <> genEvent 2 2 TreeSide 0 <> keepAlives 1,
+      testCase "generation: both sides of the new one, after it" $ do
+        state <- newTVarIO (Generation 1, [on HeadSide 0, on BaseSide 0])
+        events <- newEventsCurrent long (Microseconds 0) (readTVar state)
+        body <- streamBody events 3 $ \case
+          2 ->
+            atomically $
+              writeTVar state (Generation 2, [onGen 2 HeadSide 0, onGen 2 BaseSide 0])
+          _ -> pure ()
+        body
+          @?= hello
+            <> sideEvent 2 HeadSide 0
+            <> sideEvent 3 BaseSide 0
+            <> generationEvent 4 2
+            <> genEvent 5 2 HeadSide 0
+            <> genEvent 6 2 BaseSide 0,
       testCase "renderEvent: one data line per line" $ do
         render (renderEvent (EventId 7) "x" "a\nb")
           @?= "id: 7\nevent: x\ndata: a\ndata: b\n\n"
@@ -207,6 +253,10 @@ inProcessTests =
           @?= "id: 8\nevent: y\ndata: \n\n"
         render keepAliveFrame @?= ": keep-alive\n\n"
     ]
+
+-- | A keep-alive interval no test waits for.
+long :: Microseconds
+long = Microseconds 10_000_000
 
 hello :: LBS.ByteString
 hello = "id: 1\nevent: hello\ndata: {}\n\n"
@@ -227,9 +277,31 @@ sideEvent i side n =
       "indexing"
       (encodeIndexing (Generation 1) side (progressAt n))
 
+-- | A generation event with this id.
+generationEvent :: Word64 -> Word64 -> LBS.ByteString
+generationEvent i g =
+  render (renderEvent (EventId i) "generation" (encodeGeneration (Generation g)))
+
+-- | An indexing event of this generation.
+genEvent :: Word64 -> Word64 -> Side -> Int -> LBS.ByteString
+genEvent i g side n =
+  render $
+    renderEvent
+      (EventId i)
+      "indexing"
+      (encodeIndexing (Generation g) side (progressAt n))
+
 -- | Tree, generation 1, 100 modules, this many ready.
 at :: Int -> IndexingState
 at = on TreeSide
+
+-- | Like 'at', in this generation.
+atGen :: Word64 -> Int -> IndexingState
+atGen g = onGen g TreeSide
+
+-- | Like 'on', in this generation.
+onGen :: Word64 -> Side -> Int -> IndexingState
+onGen g side n = (on side n) {generation = Generation g}
 
 -- | Generation 1, 100 modules, this many ready, on this side.
 on :: Side -> Int -> IndexingState
@@ -470,7 +542,8 @@ routesFor events =
           },
       prefs = fixedPrefs,
       diff = Nothing,
-      session = encodeSession BrowseSession
+      session = encodeSession BrowseSession,
+      reload = Nothing
     }
 
 -- | No indexing event ever.
@@ -484,13 +557,22 @@ newEventsWith keepAlive = newEventsGap keepAlive (Microseconds 0)
 -- | With this indexing state and gap between events.
 newEventsGap ::
   Microseconds -> Microseconds -> STM [IndexingState] -> IO EventStream
-newEventsGap keepAlive gap indexing = do
+newEventsGap keepAlive gap indexing =
+  newEventsCurrent keepAlive gap ((Generation 1,) <$> indexing)
+
+-- | With this generation and indexing state, and this gap.
+newEventsCurrent ::
+  Microseconds ->
+  Microseconds ->
+  STM (Generation, [IndexingState]) ->
+  IO EventStream
+newEventsCurrent keepAlive gap current = do
   clients <- newClients
   pure
     EventStream
       { clients = clients,
         keepAlive = keepAlive,
-        indexing = indexing,
+        current = uncurry LiveIndexing <$> current,
         minGap = gap,
         logger = newLogger LevelInfo (\_ -> pure ())
       }

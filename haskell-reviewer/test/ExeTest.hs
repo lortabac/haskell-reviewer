@@ -237,6 +237,16 @@ postPrefs server body =
         <> Char8.pack (show (BS.length body))
         <> "\r\n"
 
+-- | POST api/reload with body {}, from this origin.
+reloadRequest :: Server -> ByteString -> ByteString
+reloadRequest server origin =
+  requestBytes "POST" (goodHost server) (tokenPath server <> "api/reload") extra <> "{}"
+  where
+    extra =
+      "Origin: "
+        <> origin
+        <> "\r\nContent-Type: application/json\r\nContent-Length: 2\r\n"
+
 -- * Runs that exit at once
 
 quickExitTests :: TestTree
@@ -539,6 +549,26 @@ filesTests =
               @?= "{\"generation\":1,\"source\":\"git\",\"entries\":[\
                   \{\"path\":\".gitignore\",\"kind\":\"file\"},\
                   \{\"path\":\"a.hs\",\"kind\":\"file\"}],\
+                  \\"skippedNames\":0,\"truncated\":false}",
+      testCase "reload: a new file, POST from our origin, generation 2" $
+        withCanonicalTemp $ \dir -> do
+          git dir ["init", "-q"]
+          writeFile (dir </> "a.hs") ""
+          withServer id [dir] $ \server -> do
+            before <- getPath server "api/files/tree"
+            let first = "{\"generation\":1,"
+            assertBool (show before.body) (first `BS.isPrefixOf` before.body)
+            writeFile (dir </> "b.hs") ""
+            evil <- rawHttp server.port (reloadRequest server "http://evil.com")
+            evil.status @?= 403
+            let ours = "http://127.0.0.1:" <> Char8.pack (show server.port)
+            r <- rawHttp server.port (reloadRequest server ours)
+            (r.status, r.body) @?= (200, "{\"generation\":2}")
+            after <- getPath server "api/files/tree"
+            after.body
+              @?= "{\"generation\":2,\"source\":\"git\",\"entries\":[\
+                  \{\"path\":\"a.hs\",\"kind\":\"file\"},\
+                  \{\"path\":\"b.hs\",\"kind\":\"file\"}],\
                   \\"skippedNames\":0,\"truncated\":false}",
       testCase "module tree: stack.yaml only gives the stack notice" $
         withCanonicalTemp $ \dir -> do

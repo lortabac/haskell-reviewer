@@ -1,6 +1,6 @@
 // Payloads of the event stream (SPEC §11.6.2).
 import { sides, type Side } from "../sides";
-import { DecodeError, field, nat, object, oneOf } from "./decode";
+import { DecodeError, field, nat, object, oneOf, positive } from "./decode";
 
 // The hello event: an empty object for now.
 export type Hello = Record<string, never>;
@@ -43,4 +43,13 @@ export function decodeIndexing(value: unknown, path = "$"): Indexing {
     throw new DecodeError(path, "ready + failed <= total");
   }
   return indexing;
+}
+
+// The generation event: a reload swapped in a new generation (D-351).
+// It comes before that generation's indexing events.
+export type GenerationEvent = { generation: number };
+
+export function decodeGeneration(value: unknown, path = "$"): GenerationEvent {
+  const o = object(value, path);
+  return { generation: field(o, "generation", path, positive) };
 }
