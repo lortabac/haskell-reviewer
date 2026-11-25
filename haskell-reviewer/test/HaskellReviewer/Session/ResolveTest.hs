@@ -26,9 +26,12 @@ import Data.Maybe (isJust, isNothing)
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Text.Encoding qualified as Text.Encoding
 import GHC.Clock (getMonotonicTime)
+import HaskellReviewer.Core.BlobId (blobId)
 import HaskellReviewer.Core.FileContent (FileContent (..))
 import HaskellReviewer.Core.FileList (EntryKind (..), ListSource (..), mkFileList)
+import HaskellReviewer.Core.Git (ObjectFormat (..))
 import HaskellReviewer.Core.ModuleGraph (ImportTarget (..), mapImport)
 import HaskellReviewer.Core.ModuleModel (Extensions (..), ParsedModule (..))
 import HaskellReviewer.Core.ModuleModel qualified as Model (Import (..), Located (..))
@@ -473,7 +476,8 @@ newWorld held mods = do
               -- text only (too slow), and the results would change.
               parseWithin 60_000_000 s t,
             logger = newLogger LevelInfo (\_ -> pure ()),
-            label = ""
+            label = "",
+            textKey = blobId Sha1 . Text.Encoding.encodeUtf8
           }
   pool <- newPool
   index <- newIndex pool (const Nothing) idx

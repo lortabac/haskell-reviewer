@@ -574,8 +574,9 @@ indexingTests =
             args = ["--idle-exit", "0", "--verbose", "--trace-file", "t.jsonl"]
         withRunningArgs args marking (\_ -> fakeLister (pure (Right oneModule))) $
           \fake _ -> do
-            let isDone = ("indexing: done" `Text.isPrefixOf`)
-            ok <- waitFor 5 (any isDone <$> readIORef fake.console)
+            -- The parsed line comes right after the done line: wait for it.
+            let counts = "indexing: 1 parsed, 0 shared"
+            ok <- waitFor 5 (elem counts <$> readIORef fake.console)
             out <- readIORef fake.console
             assertBool (show out) ok
             let url = "haskell-reviewer: serving at " <> fakeUrl
@@ -584,7 +585,8 @@ indexingTests =
             indexing
               @?= [ "indexing: 1 modules, 1 workers",
                     "indexing: 1/1",
-                    "indexing: done, 1 modules (1 ready, 0 failed, 1 text only) in 0 ms"
+                    "indexing: done, 1 modules (1 ready, 0 failed, 1 text only) in 0 ms",
+                    "indexing: 1 parsed, 0 shared"
                   ]
             spans <- readIORef fake.spans
             assertBool (show spans) ("indexing" `elem` map (.name) spans),
@@ -697,6 +699,35 @@ reloadTests =
             assertBool (show out) logged
             names <- map (.name) <$> readIORef fake.spans
             assertBool (show names) ("reload" `elem` names),
+      testCase "browse: a reload parses only the edited module (D-353)" $ do
+        parses <- newIORef (0 :: Int)
+        let count = atomicModifyIORef' parses (\n -> (n + 1, ()))
+            counting d =
+              d {readEntry = readSourceEntry, parse = \st t -> count >> d.parse st t}
+        withCanonicalTemp $ \tmp -> do
+          dir <- makeProject (tmp </> "p") ["A", "B", "C"]
+          withRunningArgs reloadArgs counting (const (diskAt dir)) $ \fake app -> do
+            -- Logged after the done line: wait for the line itself.
+            let waitLine l = do
+                  ok <- waitFor 10 (elem l <$> readIORef fake.console)
+                  out <- readIORef fake.console
+                  assertBool (show (l, out)) ok
+            waitLine "indexing: 3 parsed, 0 shared"
+            writeFile (dir </> "src" </> "A.hs") "module A where\na = 2\n"
+            r <- reload app
+            (r.status, r.body) @?= (200, "{\"generation\":2}")
+            -- A's old result stays until the next reload.
+            waitLine "reload: dropped 0 parse results and 0 texts"
+            waitLine "indexing: 4 parsed, 2 shared"
+            readIORef parses >>= (@?= 4)
+            f <- getSidePath app ["file", "tree", "src", "A.hs"]
+            assertBool (show f.body) ("a = 2" `inJson` f)
+            -- No edit: no parse, and A's old result goes.
+            r2 <- reload app
+            (r2.status, r2.body) @?= (200, "{\"generation\":3}")
+            waitLine "reload: dropped 1 parse results and 0 texts"
+            waitLine "indexing: 4 parsed, 5 shared"
+            readIORef parses >>= (@?= 4),
       testCase "route: methods, Origin, type, size, body" $
         withRunning (const oneLister) $ \_ app -> do
           let post headers body = postReload app headers body
@@ -952,11 +983,12 @@ reloadTests =
           r <- reload app
           (r.status, r.body) @?= (200, "{\"generation\":2}")
           -- Logged after the done line: wait for it.
-          let parsed = "indexing: 9 parsed, 5 shared"
+          let parsed = "indexing: 7 parsed, 7 shared"
           done <- waitFor 10 (elem parsed <$> readIORef fake.console)
           assertBool "gen 2 not indexed" done
-          -- Read from disk: A, S and New. The rest are cache hits.
-          readIORef parses >>= (@?= 9)
+          -- Only S is parsed. A and New are read from disk too, but
+          -- their text didn't change: hits by text hash (D-353).
+          readIORef parses >>= (@?= 7)
           forM_ [["files", "head"], ["files", "base"], ["diff-files"]] $ \route -> do
             x <- getSidePath app route
             (route, x.status, generationOf x) @?= (route, 200, Just 2)
@@ -975,6 +1007,25 @@ reloadTests =
           let logged p = length (filter (p `Text.isPrefixOf`) out)
           (logged "base: ghc: ", logged "head: ghc: ") @?= (1, 2)
           length (filter (== "changed: 3 on head, 2 on base, indexed first") out) @?= 2,
+      testCase "--diff HEAD: a file edited back to its committed text: no parse" $ do
+        parses <- newIORef (0 :: Int)
+        let count = atomicModifyIORef' parses (\n -> (n + 1, ()))
+            counting d = d {parse = \st t -> count >> d.parse st t}
+        withDiffRepo "edits" [] "" counting $ \repo fake app -> do
+          readIORef parses >>= (@?= 6)
+          -- S's index has s = 2; on disk it goes back to HEAD's s = 1.
+          -- So it is read from disk, and its text is base's blob.
+          writeFile (repo </> "src" </> "S.hs") "module S (s) where\n\ns :: Int\ns = 1\n"
+          r <- reload app
+          (r.status, r.body) @?= (200, "{\"generation\":2}")
+          let parsed = "indexing: 6 parsed, 8 shared"
+          done <- waitFor 10 (elem parsed <$> readIORef fake.console)
+          out <- readIORef fake.console
+          assertBool (show out) done
+          readIORef parses >>= (@?= 6)
+          f <- getSidePath app ["file", "head", "src", "S.hs"]
+          (f.status, generationOf f) @?= (200, Just 2)
+          assertBool (show f.body) ("s = 1\\n" `inJson` f),
       testCase "--diff HEAD: an edit outside ROOT counts after a reload" $
         withDiffRepo "renames" ["sha1", "worktree"] "pkg" id $ \repo _ app -> do
           let total n = "\"outside\":{\"total\":" <> n <> ","
@@ -1265,7 +1316,8 @@ oneModule =
   mkFileList FromDisk 0 [(p, EntryFile) | Just p <- [relPathFromBytes "A.hs"]]
 
 textOnly :: ModuleParse
-textOnly = TextOnly (textOnlyModule TooSlow [])
+-- Not TooSlow: a reload drops those (D-353).
+textOnly = TextOnly (textOnlyModule (Preprocessed "fake") [])
 
 -- | Run with this lister until the action is done, then stop with a
 -- signal. The action gets the app warp would serve.

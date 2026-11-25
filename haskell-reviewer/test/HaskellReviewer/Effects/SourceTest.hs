@@ -9,6 +9,7 @@ import Data.ByteString (ByteString)
 import Data.Map.Strict qualified as Map
 import Data.Set qualified as Set
 import Data.Text qualified as Text
+import HaskellReviewer.Core.BlobId (blobId)
 import HaskellReviewer.Core.CommitFiles (BlobRef (..), linkTargetCap)
 import HaskellReviewer.Core.Eol (CleanEol (..), Filtering (..))
 import HaskellReviewer.Core.FileContent
@@ -50,6 +51,8 @@ import HaskellReviewer.Effects.Source
     readSourceEntry,
     sharedBlob,
     sourceBlob,
+    textKeyOf,
+    workTreeLister,
   )
 import HaskellReviewer.Server.Api (newSnapshot)
 import HaskellReviewer.Session.Index
@@ -143,6 +146,8 @@ tests =
             both l.source "a.hs" @?= (known, known)
             both l.source "nope.hs" @?= (Nothing, Nothing)
             both (DiskEntries canon) "a.hs" @?= (Nothing, Nothing)
+            -- Browse mode: SHA-256, not SHA-1 (D-353).
+            textKeyOf (DiskEntries canon) "x" @?= blobId Sha256 "x"
             let o = ObjectId "0123"
                 disk b =
                   FromDisk DiskFile {blob = b, eol = KeepRaw, filtered = Unfiltered}
@@ -166,6 +171,20 @@ tests =
             both wt "dirty.hs" @?= (Just o, Nothing)
             both wt "new.hs" @?= (Nothing, Nothing)
             both wt "nope.hs" @?= (Nothing, Nothing),
+        testCase "text key: a clean file's text gives its blob id (sha256, D-353)" $ do
+          r <- get
+          let proj = r.sha256 </> "proj"
+          g <- realGitAt r.home proj
+          info <- repoInfo g >>= either (assertFailure . show) pure
+          canon <- canonicalRoot (Root proj)
+          withObjectReader quiet defaultReaderSettings g $ \reader -> do
+            let lister = workTreeLister quiet g info reader canon
+            l <- lister.list >>= either (assertFailure . show) pure
+            let o = sharedBlob l.source (rel "a.hs")
+            assertBool "a.hs is clean" (o /= Nothing)
+            readSourceEntry l.source (rel "a.hs") EntryFile >>= \case
+              Right (TextContent t) -> Just (textKeyOf l.source t) @?= o
+              other -> assertFailure (show other),
         testCase "a symlink module with a file's blob gets no shared result" $
           withCanonicalTemp $ \tmp -> do
             -- L.hs links to A.hs; B.hs holds the text "A.hs": the same
@@ -210,7 +229,8 @@ tests =
                       { readModule = \p -> readSourceEntry l.source p EntryFile,
                         parse = \_ _ -> pure (TextOnly (textOnlyModule TooSlow [])),
                         logger = quiet,
-                        label = ""
+                        label = "",
+                        textKey = textKeyOf l.source
                       }
               runWorkers 1 [IndexJob deps snap.index]
               -- Slots: A (a loose module) and B.

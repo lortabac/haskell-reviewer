@@ -173,6 +173,7 @@ import HaskellReviewer.Effects.Source
     renderProbeError,
     sharedBlob,
     sourceBlob,
+    textKeyOf,
     warmUpListing,
     warmUpObjects,
     warmUpWorkTree,
@@ -241,6 +242,7 @@ import HaskellReviewer.Session.Index
     ShareCounts (..),
     SlotState (..),
     StopWorkers (..),
+    carrySeen,
     failUnfinished,
     prioritise,
     pruneCache,
@@ -452,7 +454,8 @@ gets a 500. Else:
    "replaced by a reload";
 4. the old modules not done are failed again: a stop that came before
    the old runWorkers ran failed nothing;
-5. the parse cache and the shared texts drop what the new snapshots
+5. the new snapshots get the text hashes the old ones read, then the
+   parse cache and the shared texts drop what the new snapshots
    don't use (Note [Indexing] in "HaskellReviewer.Session.Index",
    Note [Text store] in "HaskellReviewer.Session.TextStore"); no
    worker runs now;
@@ -466,11 +469,10 @@ If the thread itself crashes (a bug outside the steps above), it logs
 a line and the server goes on without indexing or reloads: POSTs get
 503 "reload is not available: <why>".
 
-A browse reload parses every module again: browse mode has no blob
-ids to share parses by (Note [Indexing] in
-"HaskellReviewer.Session.Index"). With --diff REV, only the files read
-from disk (dirty or untracked) are parsed again: the rest hit the
-cache.
+A reload parses only what changed. A file with no blob (browse mode,
+dirty or untracked) is still read, then hashed, and parsed only if its
+text is new (D-353, Note [Indexing] in
+"HaskellReviewer.Session.Index").
 -}
 
 -- | Everything 'run' needs from the outside world. Tests plug in fakes.
@@ -939,7 +941,7 @@ waitReload d gen old indexing = do
           old.snapshots
           (\snap -> failUnfinished snap.index (IndexCrashed replaced))
       -- No worker runs now: nobody writes the caches.
-      pruneShared b made.snapshots
+      pruneShared b old.snapshots made.snapshots
       pure
         Swapped
           { generation = next,
@@ -994,16 +996,18 @@ keptSides listers made = case listers of
   BrowseListers _ -> []
 
 -- | Drop the parse results and the texts the new snapshots don't use
--- (D-352). Only between the old workers' end and the new ones' start:
--- then nobody writes them. A crash only logs a line.
-pruneShared :: Builder -> [Snapshot] -> IO ()
-pruneShared b snaps = do
+-- (D-352). First the new snapshots get the text hashes the old ones
+-- read, by side (D-353). Only between the old workers' end and the new
+-- ones' start: then nobody writes them. A crash only logs a line.
+pruneShared :: Builder -> [Snapshot] -> [Snapshot] -> IO ()
+pruneShared b old new = do
   r <- catchCrash Left $ do
-    parses <- pruneCache b.share.pool [snap.index | snap <- snaps]
+    sequence_ [carrySeen o.index n.index | o <- old, n <- new, o.side == n.side]
+    parses <- pruneCache b.share.pool [snap.index | snap <- new]
     let blobs =
           Set.fromList
             [ o
-            | snap <- snaps,
+            | snap <- new,
               (p, EntryFile) <- Map.toList snap.files.entries,
               Just o <- [sharedBlob snap.source p]
             ]
@@ -1846,14 +1850,14 @@ indexAndReport deps logger tracer snaps = do
       <> " text only) in "
       <> showText (ns `div` 1_000_000)
       <> " ms"
-  -- Diff mode: how much the sides shared (D-320). All indexes are in
-  -- one pool, so any of them has the counts.
+  -- How much was shared, across sides and reloads (D-320, D-353). All
+  -- indexes are in one pool, so any of them has the counts.
   case snaps of
-    snap : _ | any (\s -> s.side /= TreeSide) snaps -> do
+    snap : _ -> do
       k <- atomically (shareCounts snap.index)
       logVerbose logger $
         "indexing: " <> showText k.parses <> " parsed, " <> showText k.shares <> " shared"
-    _ -> pure ()
+    [] -> pure ()
   where
     indexDeps snap =
       IndexDeps
@@ -1863,7 +1867,8 @@ indexAndReport deps logger tracer snaps = do
             _ -> pure (Left ReadGone),
           parse = deps.parse,
           logger = logger,
-          label = sideTag snap.side
+          label = sideTag snap.side,
+          textKey = textKeyOf snap.source
         }
     textOnly = \case
       Ready (IndexedTextOnly _) -> True
