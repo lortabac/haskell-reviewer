@@ -787,20 +787,25 @@ side there is no file watching. Instead:
   in browse mode and with `--diff REV` (`r`, §5.3). While it waits it is
   aria-disabled and says "Reloading…"; errors: "Couldn't list the files.
   See the terminal." (500), "The server can't reload now. See the
-  terminal." (503), "Reload isn't available in this session." (404),
-  else "Couldn't reload: <message>.". Every new generation is applied
-  at once, whoever started it (another tab too), with one polite
-  "Files reloaded.". The page mounts again at its place, with no new
-  history entry: docs keep the declaration with focus, else the first
-  on screen (a removed one: the module and its "No declaration…"
-  notice; a refs page goes to that docs page); source and diff keep the
-  cursor's line number (T17b: the same code line); other pages keep the
-  URL. A docs page still at its top stays at the top. Focus moves only
-  if it was in main, and only on that landing (not on a later Back). A
-  module or file that is gone has no enclosing module: Home, with
-  "`<what>` is not in the files any more.", also said. The sidebar, the changed files and the
-  header search refetch in place; the find bar, the selection, the
-  hover card and open diff gaps are lost.
+  terminal." (503), "Reload isn't available in this session." (404), else
+  "Couldn't reload: <message>.". Every new generation is applied at once,
+  whoever started it (another tab too), with one polite "Files reloaded.".
+  The page mounts again at its place, with no new history entry: docs keep
+  the declaration with focus, else the first on screen (a removed one: the
+  module and its "No declaration…" notice; a refs page goes to that docs
+  page); source and diff keep the same code line (D-356); other pages keep
+  the URL. Source: the cursor, the marked lines and the top line on
+  screen, each by its outline declaration plus the offset in it, clamped
+  to it (a line above the first declaration, or one whose declaration is
+  gone: the same line, clamped to the file); no hash stays no hash. Diff:
+  base lines stay (base is a commit); a head line goes through base
+  (`mapLine`) plus its offset, clamped (an added file: the same line,
+  clamped; head gone: that base line). A docs page still at its top stays
+  at the top. Focus moves only if it was in main, and only on that landing
+  (not on a later Back). A module or file that is gone has no enclosing
+  module: Home, with "`<what>` is not in the files any more.", also said.
+  The sidebar, the changed files and the header search refetch in place;
+  the find bar, the selection, the hover card and open diff gaps are lost.
 - LLM threads carry the snapshot they were asked against. Threads from an
   older snapshot are marked *stale* (§6.6).
 

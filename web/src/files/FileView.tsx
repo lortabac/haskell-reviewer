@@ -56,6 +56,7 @@ import { createSource } from "../source/createSource";
 import { changeStatus } from "../source/diffMarks";
 import { createFinder } from "../source/find";
 import { FindBar, type FindHandle } from "../source/FindBar";
+import { createKeepLanding } from "../source/createKeepLanding";
 import { isCodeJump, shouldReland } from "../source/landing";
 import { onLeaveClick, originOf, saveOrigin } from "../source/origin";
 import { RefsBar, type RefsHandle } from "../source/RefsBar";
@@ -80,6 +81,7 @@ import {
   apiFileUrl,
   hrefFor,
   isMarkdownPath,
+  lineHash,
   lineHref,
   mdHref,
   parseLineHash,
@@ -159,16 +161,9 @@ function FilePage(props: { path: string }): JSX.Element {
     missing: (to) =>
       to === "diff" ? (diffHooks?.why() ?? changesTexts.unchanged) : undefined,
     leave: () => leave?.(),
-    // A reload: the cursor's line (D-354). T17b keeps the code line.
-    here: () => {
-      const c = diffHooks?.cursor();
-      return c === undefined
-        ? undefined
-        : {
-            href: lineHref(side(), props.path, c.line),
-            state: { origin: { col: c.col } },
-          };
-    },
+    // A reload: the cursor, the marks and the top line, by
+    // declaration (D-354, D-356).
+    here: () => diffHooks?.here(),
   });
   // b: the path only (FileText adds the line). Also binary files,
   // symlinks and not found (it may be on the other side).
@@ -314,13 +309,13 @@ function Symlink(props: {
 }
 
 // What the text tells the page: for the header's Diff link and `3`,
-// and the cursor (where a reload lands, D-354).
+// and where a reload lands (D-354, D-356).
 interface DiffHooks {
   // The diff at the cursor's line.
   at: () => ViewTarget | undefined;
   // Why there is no diff to show, if the state says.
   why: () => string | undefined;
-  cursor: () => { line: number; col: number } | undefined;
+  here: () => ViewTarget | undefined;
 }
 
 // The text in the source view. #L<n>[-L<m>] marks those lines and
@@ -423,7 +418,7 @@ function FileText(props: {
     if (a === undefined) return;
     const c = a.cursor();
     saveOrigin(
-      `#L${c.line}`,
+      lineHash(c.line),
       { col: c.col },
       untrack(marks)?.from === c.line,
       c.line === 1,
@@ -501,6 +496,15 @@ function FileText(props: {
     setFind(undefined);
     return true;
   };
+  // A reload landing (D-356).
+  const keepLanding = createKeepLanding({
+    api: () => api,
+    outline,
+    hl,
+    marks,
+    count: () => index().count,
+    href: () => hrefFor(side(), props.path),
+  });
   // Made before the effect below: its effects (the virtualiser's set
   // up) must run first.
   const view = (
@@ -526,6 +530,7 @@ function FileText(props: {
     // hash, new state) is a new landing.
     on([marks, () => location.state], ([marked]) => {
       const a = api;
+      if (a !== undefined && keepLanding.land(a)) return;
       // Back to an origin with no hash: line 1 (D-339).
       const m =
         marked ??
@@ -760,10 +765,7 @@ function FileText(props: {
         : { href, state: { codeJump: true } };
     },
     why: () => changesWhy(changes.state()),
-    cursor: () => {
-      const c = api?.cursor();
-      return c === undefined ? undefined : { line: c.line, col: c.col };
-    },
+    here: keepLanding.here,
   });
   onCleanup(() => props.setDiffHooks?.(undefined));
   let wrap!: HTMLDivElement;

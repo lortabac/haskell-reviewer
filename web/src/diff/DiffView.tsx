@@ -34,7 +34,11 @@ import { copyText } from "../copy/clipboard";
 import { CopyButton } from "../copy/CopyButton";
 import { location as locationText, targetCopyText } from "../copy/names";
 import { useAnswerGeneration } from "../events/generation";
-import { useGoneHome, useQuietReload } from "../events/ReloadApply";
+import {
+  useGoneHome,
+  useQuietReload,
+  useReloadKeep,
+} from "../events/ReloadApply";
 import {
   apiFileUrl,
   hrefFor,
@@ -86,6 +90,12 @@ import { FileStepButtons } from "./FileStepButtons";
 import { diffOrder, fileStep } from "./fileOrder";
 import { filesWhy, useDiffFiles } from "./store";
 import { mapLine } from "./mapLine";
+import {
+  diffLineOf,
+  diffPlaceFrom,
+  type DiffPlace,
+  diffPlaceOf,
+} from "./keepLine";
 import {
   cellAt,
   cellLine,
@@ -556,14 +566,14 @@ function DiffPage(props: { path: string }): JSX.Element {
     diff: () => diffHref(props.path),
     at: (to) => (to === "diff" ? undefined : hooks?.at(to)),
     leave: () => hooks?.leave(),
-    // A reload: the cursor's side and line (D-354). T17b maps head
-    // lines.
+    // A reload: the cursor's side and line (D-354), head kept
+    // through base (D-356).
     here: () => {
       const h = hooks?.here();
       if (h === undefined) return undefined;
       return {
         href: diffHref(props.path) + location.search + h.hash,
-        state: { origin: h.origin },
+        state: { origin: h.origin, keep: h.keep },
       };
     },
   });
@@ -770,8 +780,9 @@ interface BodyHooks {
   at: (to: Exclude<ToView, "diff">) => ReturnType<NonNullable<ViewLinks["at"]>>;
   // Back comes to the cursor (D-339).
   leave: () => void;
-  // Where a reload lands: the cursor's hash and origin (D-354).
-  here: () => { hash: string; origin: Origin } | undefined;
+  // Where a reload lands: the cursor's hash and origin (D-354), and
+  // its place (D-356).
+  here: () => { hash: string; origin: Origin; keep: DiffPlace } | undefined;
   // The change buttons: the cursor goes there, focus stays. What to
   // say: the row, or "No more changes.".
   stepChange: (dir: 1 | -1) => string | undefined;
@@ -835,6 +846,7 @@ function DiffBody(props: {
 }): JSX.Element {
   const location = useLocation();
   const quietReload = useQuietReload();
+  const reloadKeep = useReloadKeep();
   const navigate = useNavigate();
   // Read once: DiffPage makes a new body for new rows.
   const { rows, rowsSplit, base, head } = untrack(() => ({
@@ -873,6 +885,11 @@ function DiffBody(props: {
   let jump: { row: number; col: number; stay?: boolean } | undefined;
   // Back came here before the highlight: once it comes, land again.
   let land: { row: number; col: number; side: DiffSessionSide } | undefined;
+  // A reload landing: the old page's place (D-356). Used once.
+  const keys = useKeys();
+  let keep: DiffPlace | undefined = diffPlaceFrom(
+    reloadKeep(untrack(() => location.state))?.keep,
+  );
 
   // Unified or side by side (D-344): the wanted one (URL, else pref),
   // when it fits; else unified, with a note. Expansion is kept over a
@@ -929,6 +946,21 @@ function DiffBody(props: {
     on([marked, () => location.state], ([m]) => {
       const a = api;
       const state: unknown = untrack(() => location.state);
+      // A reload landing (D-356): first the line in these rows.
+      const k = keep;
+      keep = undefined;
+      if (k !== undefined && reloadKeep(state) !== undefined) {
+        const hash = diffHash(diffLineOf(k, rows));
+        if (hash !== location.hash) {
+          keys?.keepStatus();
+          navigate(diffHref(props.path) + location.search + hash, {
+            replace: true,
+            scroll: false,
+            state,
+          });
+          return;
+        }
+      }
       const origin = originOf(state);
       // Back to an origin with no hash: the first row (D-342).
       const r = m?.row ?? (origin === undefined ? undefined : 0);
@@ -1162,6 +1194,7 @@ function DiffBody(props: {
       return {
         hash: cursorHash(c),
         origin: c.gap ? { col: 0, gap: true } : { col: c.col },
+        keep: diffPlaceOf(rows, c.side, lineOn(rows, c.row, c.side)),
       };
     },
     stepChange: (dir) => {
@@ -1177,7 +1210,6 @@ function DiffBody(props: {
   // selected lines, else the cursor's line. A place is path:line on
   // the cursor's side (base: the old path of a rename), no side
   // prefix, not a URL (D-347).
-  const keys = useKeys();
   const modules = useModules();
   const pageSide = usePageSide();
   // Module names by ref: the page side's tree, else the other one.

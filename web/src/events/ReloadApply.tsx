@@ -62,6 +62,21 @@ export function useReloadLanding(): (state: unknown) => ReloadMark | undefined {
   return useContext(LandingContext);
 }
 
+// What the page kept for its reload landing (state.keep, D-356), and
+// whether the landing takes focus, if state is the landing of the
+// last apply.
+export function useReloadKeep(): (
+  state: unknown,
+) => { keep: unknown; focus: boolean } | undefined {
+  const landing = useReloadLanding();
+  return (state) => {
+    const m = landing(state);
+    return m === undefined
+      ? undefined
+      : { keep: asObject(state)?.keep, focus: m.focus };
+  };
+}
+
 // A reload landing with focus outside main: move the cursor, not focus.
 export function useQuietReload(): (state: unknown) => boolean {
   const landing = useReloadLanding();
@@ -84,9 +99,10 @@ export function ReloadApply(
       gen.applied,
       (a) => {
         if (a === undefined) return;
+        // The URL as it is: not the keep of an older landing.
         const t = keys?.links()?.here?.() ?? {
           href: currentPath(),
-          state: location.state,
+          state: { ...asObject(location.state), keep: undefined },
         };
         waiting = a;
         navigate(t.href, {

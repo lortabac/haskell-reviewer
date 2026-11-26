@@ -19,6 +19,7 @@ import {
 } from "./events/generation";
 import type { Status } from "./events/protocol";
 import { reloadTexts } from "./header/ReloadButton";
+import { fallbackRowHeight } from "./source/virtual";
 
 const pageAt = (generation: number) =>
   cbor({ ...(fixture("module-page") as object), generation });
@@ -372,5 +373,293 @@ describe("applying a reload (D-354)", () => {
     await vi.waitFor(() => expect(status()).toBe(reloadTexts.done));
     expect(location.pathname + location.hash).toBe("/tok/src/tree/a.hs#L2");
     expect(calls("/tok/api/file/tree/a.hs")).toBe(2);
+  });
+});
+
+// The code line kept (D-356): by declaration in the source view.
+describe("reload: the same code line (D-356)", () => {
+  // tail: more lines at the end, for a page that scrolls.
+  const lines = (above: number, tail = 0) =>
+    [
+      "module A where",
+      ...Array<string>(above).fill("-- new"),
+      "",
+      "f :: Int",
+      "f =",
+      "  1",
+      "",
+      "g = 2",
+      ...Array<string>(tail).fill("-- end"),
+    ].join("\n") + "\n";
+  const at = (
+    generation: number,
+    above: number,
+    tail = 0,
+  ): Record<string, [number, unknown]> => ({
+    "/tok/api/file/tree/a.hs": [
+      200,
+      cbor({
+        generation,
+        kind: "text",
+        text: lines(above, tail),
+        filtered: false,
+      }),
+    ],
+    "/tok/api/source/tree/a.hs": [
+      200,
+      cbor({
+        generation,
+        path: "a.hs",
+        ref: "A",
+        tier: { kind: "syntactic", reason: "no-hie" },
+        partial: false,
+        filtered: false,
+        highlight: "lexed",
+        runs: [],
+        regions: [],
+        targets: [],
+        outline: [
+          ["value", "val:f", "f", 3 + above, 3 + above, 5 + above],
+          ["value", "val:g", "g", 7 + above, 7 + above, 7 + above],
+        ],
+      }),
+    ],
+  });
+  const cursorCell = () =>
+    document.querySelector<HTMLElement>('.code-cell[tabindex="0"]');
+  const cursorLine = () =>
+    cursorCell()?.closest<HTMLElement>(".code-row")?.dataset.line;
+  const box = () => document.querySelector<HTMLElement>(".code-view");
+  const outlineIn = () =>
+    vi.waitFor(() =>
+      expect(document.querySelector(".code-outline")).not.toBeNull(),
+    );
+
+  // The page at generation 1, with its outline.
+  async function mountAt(url: string, tail = 0) {
+    stub(at(1, 0, tail));
+    const { gen } = mountWith(url);
+    await outlineIn();
+    return gen;
+  }
+  // Generation 2: above new lines at the top.
+  async function reload(gen: GenerationState, above: number, tail = 0) {
+    stub(at(2, above, tail));
+    gen.seen(1);
+    gen.seen(2);
+    await vi.waitFor(() => expect(calls("/tok/api/source/tree/a.hs")).toBe(1));
+  }
+  // The same, but api/source waits for answer().
+  async function reloadLate(gen: GenerationState, above: number, tail = 0) {
+    stub(at(2, above, tail));
+    let answer: (() => void) | undefined;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL) => {
+      if (input === "/tok/api/source/tree/a.hs") {
+        return new Promise<Response>((resolve) => {
+          answer = () => resolve(gets(input));
+        });
+      }
+      return gets(input);
+    });
+    gen.seen(1);
+    gen.seen(2);
+    await vi.waitFor(() => expect(answer).toBeDefined());
+    return async () => {
+      answer?.();
+      await outlineIn();
+      await flush();
+    };
+  }
+
+  it("lines put in above: the cursor's line moves with its declaration", async () => {
+    await reload(await mountAt("/tok/src/tree/a.hs#L4"), 3);
+    await vi.waitFor(() => expect(location.hash).toBe("#L7"));
+    expect(cursorLine()).toBe("7");
+    // Fixing the line keeps the words.
+    expect(status()).toBe(reloadTexts.done);
+  });
+
+  it("a range: both ends kept", async () => {
+    await reload(await mountAt("/tok/src/tree/a.hs#L3-L5"), 2);
+    await vi.waitFor(() => expect(location.hash).toBe("#L5-L7"));
+    expect(cursorLine()).toBe("5");
+  });
+
+  it("no hash: none after the reload either (T17a review N3)", async () => {
+    await reload(await mountAt("/tok/src/tree/a.hs"), 2);
+    await outlineIn();
+    await flush();
+    expect(location.hash).toBe("");
+    expect(cursorLine()).toBe("1");
+  });
+
+  it("no hash, scrolled: the same top line, by declaration", async () => {
+    const gen = await mountAt("/tok/src/tree/a.hs", 200);
+    const b = box()!;
+    // Line 41 at the top (rows of fallbackRowHeight px).
+    b.scrollTop = 40 * fallbackRowHeight;
+    b.dispatchEvent(new Event("scroll"));
+    await flush();
+    await reload(gen, 3, 200);
+    await outlineIn();
+    await vi.waitFor(() =>
+      expect(box()?.scrollTop).toBe(43 * fallbackRowHeight),
+    );
+    expect(location.hash).toBe("");
+  });
+
+  it("the cursor moved before the outline came: it stays", async () => {
+    const answer = await reloadLate(await mountAt("/tok/src/tree/a.hs#L4"), 3);
+    expect(location.hash).toBe("#L4");
+    // Down one line, by key.
+    cursorCell()?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+    );
+    await vi.waitFor(() => expect(cursorLine()).toBe("5"));
+    await answer();
+    expect(location.hash).toBe("#L4");
+    expect(cursorLine()).toBe("5");
+  });
+
+  it("the outline late, focus gone out of the view: the line moves, focus stays out", async () => {
+    const gen = await mountAt("/tok/src/tree/a.hs#L4");
+    cursorCell()?.focus();
+    const answer = await reloadLate(gen, 3);
+    await vi.waitFor(() =>
+      expect(box()?.contains(document.activeElement)).toBe(true),
+    );
+    const h1 = document.querySelector<HTMLElement>("main h1")!;
+    h1.focus();
+    await answer();
+    expect(location.hash).toBe("#L7");
+    expect(cursorLine()).toBe("7");
+    expect(document.activeElement).toBe(h1);
+  });
+
+  it("the outline late, focus still in the view: it goes with the line", async () => {
+    const gen = await mountAt("/tok/src/tree/a.hs#L4");
+    cursorCell()?.focus();
+    const answer = await reloadLate(gen, 3);
+    await vi.waitFor(() =>
+      expect(box()?.contains(document.activeElement)).toBe(true),
+    );
+    await answer();
+    expect(location.hash).toBe("#L7");
+    await vi.waitFor(() => expect(document.activeElement).toBe(cursorCell()));
+    expect(cursorLine()).toBe("7");
+  });
+
+  it("the outline late, the view scrolled meanwhile: no scroll back", async () => {
+    const gen = await mountAt("/tok/src/tree/a.hs#L4", 200);
+    cursorCell()?.focus();
+    const answer = await reloadLate(gen, 3, 200);
+    const b = box()!;
+    b.scrollTop = 100 * fallbackRowHeight;
+    b.dispatchEvent(new Event("scroll"));
+    await flush();
+    await answer();
+    await vi.waitFor(() => expect(location.hash).toBe("#L7"));
+    await flush();
+    expect(box()?.scrollTop).toBe(100 * fallbackRowHeight);
+    expect(cursorLine()).toBe("7");
+  });
+
+  it("another reload before the outline came: still by declaration", async () => {
+    const gen = await mountAt("/tok/src/tree/a.hs#L4");
+    await reloadLate(gen, 3);
+    expect(location.hash).toBe("#L4");
+    // A third generation (r again, or another tab), the same text;
+    // api/source answers now.
+    stub(at(3, 3));
+    gen.seen(3);
+    await vi.waitFor(() => expect(location.hash).toBe("#L7"));
+    expect(cursorLine()).toBe("7");
+  });
+
+  it("the declaration gone: the same line, clamped to the file", async () => {
+    const gen = await mountAt("/tok/src/tree/a.hs#L7");
+    stub({
+      "/tok/api/file/tree/a.hs": [
+        200,
+        cbor({ generation: 2, kind: "text", text: "x\ny\n", filtered: false }),
+      ],
+      "/tok/api/source/tree/a.hs": [404, "not found"],
+    });
+    gen.seen(1);
+    gen.seen(2);
+    await vi.waitFor(() => expect(location.hash).toBe("#L2"));
+    expect(cursorLine()).toBe("2");
+  });
+});
+
+// The diff view: base lines stay, head lines go through base (D-356).
+describe("reload: the same diff line (D-356)", () => {
+  const same = Array.from({ length: 10 }, (_, i) => `e${i + 1}`);
+  const after = Array.from({ length: 10 }, (_, i) => `e${i + 12}`);
+  const baseText = [...same, "old", ...after].join("\n") + "\n";
+  const headText = (above: number) =>
+    [...Array<string>(above).fill("new top"), ...same, "new", ...after].join(
+      "\n",
+    ) + "\n";
+  const diffAt = (generation: number, above: number) =>
+    cbor({
+      generation,
+      path: "src/A.hs",
+      oldPath: null,
+      status: "modified",
+      similarity: null,
+      note: null,
+      ignoreWhitespace: false,
+      base: { kind: "text" },
+      head: { kind: "text" },
+      diff: {
+        kind: "lines",
+        runs: [
+          ...(above > 0 ? [["insert", above]] : []),
+          ["equal", 10],
+          ["delete", 1],
+          ["insert", 1],
+          ["equal", 10],
+        ],
+        crlfLines: 0,
+        bom: null,
+      },
+    });
+  const file = (text: string, generation: number) =>
+    cbor({ generation, filtered: false, kind: "text", text });
+  const at = (
+    generation: number,
+    above: number,
+  ): Record<string, [number, unknown]> => ({
+    "/tok/api/diff/src/A.hs": [200, diffAt(generation, above)],
+    "/tok/api/file/base/src/A.hs": [200, file(baseText, 1)],
+    "/tok/api/file/head/src/A.hs": [200, file(headText(above), generation)],
+  });
+
+  async function reloadFrom(url: string) {
+    stub(at(1, 0));
+    const { gen } = mountWith(url, diffSession);
+    await vi.waitFor(() =>
+      expect(document.querySelector('[role="grid"]')).not.toBeNull(),
+    );
+    stub(at(2, 3));
+    gen.seen(1);
+    gen.seen(2);
+    await vi.waitFor(() => expect(calls("/tok/api/diff/src/A.hs")).toBe(1));
+  }
+
+  it("a head line below new lines: the same code", async () => {
+    await reloadFrom("/tok/diff/src/A.hs#head-L15");
+    await vi.waitFor(() => expect(location.hash).toBe("#head-L18"));
+    await vi.waitFor(() => expect(status()).toBe(reloadTexts.done));
+  });
+
+  it("a base line stays", async () => {
+    await reloadFrom("/tok/diff/src/A.hs#base-L11");
+    await vi.waitFor(() =>
+      expect(document.querySelector('[role="grid"]')).not.toBeNull(),
+    );
+    await flush();
+    expect(location.hash).toBe("#base-L11");
   });
 });

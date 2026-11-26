@@ -106,6 +106,9 @@ export interface KeysApi {
   say: (text: string) => void;
   // Say it once the navigation about to start has changed the URL.
   sayAfterNav: (text: string) => void;
+  // The navigation about to start keeps the status line as it is (a
+  // reload landing that fixes its line, D-356).
+  keepStatus: () => void;
   // The view's Copy location, if it has one (the header button).
   location: Accessor<(() => LocationText | undefined) | undefined>;
   copyLocation: () => void;
@@ -224,12 +227,18 @@ export function KeysProvider(props: ParentProps): JSX.Element {
     afterNav = undefined;
   };
   onCleanup(() => clearTimeout(afterNavTimer));
+  // Only set right before a navigation that changes the URL.
+  let keepNextStatus = false;
   // A new page: the old words are about the old one.
   const location = useLocation();
   createEffect(
     on(
       () => [location.pathname, location.search, location.hash],
       () => {
+        if (keepNextStatus) {
+          keepNextStatus = false;
+          return;
+        }
         clearTimeout(timer);
         const words = afterNav;
         dropAfterNav();
@@ -430,6 +439,9 @@ export function KeysProvider(props: ParentProps): JSX.Element {
     status,
     say,
     sayAfterNav: (text) => done({ afterNav: text }),
+    keepStatus: () => {
+      keepNextStatus = true;
+    },
     location: locationFn,
     copyLocation,
     sideTarget,

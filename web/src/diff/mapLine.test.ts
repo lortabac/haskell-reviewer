@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { randomRuns, rng } from "../../test/random";
 import type { DiffRun } from "../api/diff";
 import type { DiffSessionSide } from "../sides";
 import { mapLine } from "./mapLine";
@@ -59,27 +60,6 @@ describe("mapLine on marks.sh", () => {
     expect(mapLine(r, "head", 4)).toEqual({ line: 2, how: "nearest" });
   });
 });
-
-// A small seeded generator (mulberry32).
-function rng(seed: number): () => number {
-  let a = seed;
-  return () => {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function randomRuns(next: () => number): DiffRun[] {
-  const ops = ["equal", "delete", "insert"] as const;
-  const out: DiffRun[] = [];
-  const n = Math.floor(next() * 8);
-  for (let i = 0; i < n; i++) {
-    out.push([ops[Math.floor(next() * 3)]!, 1 + Math.floor(next() * 4)]);
-  }
-  return out;
-}
 
 const sides: DiffSessionSide[] = ["base", "head"];
 
