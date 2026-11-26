@@ -1,11 +1,16 @@
 -- | Percent-encoding for the URLs the bench asks for.
 module Bench.Url
   ( -- * API paths
+    modulesPath,
     modulePath,
     sourcePath,
     searchPath,
     refsPath,
     textSearchPath,
+    indexingPath,
+    filesPath,
+    sessionPath,
+    diffFilesPath,
 
     -- * Encoding
     encodePath,
@@ -13,6 +18,7 @@ module Bench.Url
   )
 where
 
+import Bench.Mode (Side, sideText)
 import Bench.Queries (RefsQuery (..))
 import Data.ByteString qualified as BS
 import Data.Char (chr)
@@ -22,31 +28,62 @@ import Data.Text.Encoding qualified as Text.Encoding
 import Data.Word (Word8)
 import Numeric (showHex)
 
--- | A module page (D-124), under the token.
-modulePath :: Text -> String
-modulePath ref = "api/module/tree/" <> encodePath ref
+-- | The module tree of a side (D-124), under the token. Like every
+-- path here: no leading @/@.
+modulesPath :: Side -> String
+modulesPath side = "api/modules/" <> seg side
 
--- | A source page, by file path (relative to the root), under the
--- token.
-sourcePath :: FilePath -> String
-sourcePath p = "api/source/tree/" <> encodePath (Text.pack p)
+-- | A module page (D-124).
+modulePath :: Side -> Text -> String
+modulePath side ref = "api/module/" <> seg side <> "/" <> encodePath ref
 
--- | A search (D-207), under the token.
-searchPath :: Text -> String
-searchPath q = "api/search/tree?q=" <> encodeQueryValue q
+-- | A source page, by file path (relative to the root).
+sourcePath :: Side -> FilePath -> String
+sourcePath side p = "api/source/" <> seg side <> "/" <> encodePath (Text.pack p)
 
--- | Find references (D-294), under the token.
-refsPath :: RefsQuery -> String
-refsPath q =
-  "api/refs/tree?module="
+-- | A search (D-207).
+searchPath :: Side -> Text -> String
+searchPath side q = "api/search/" <> seg side <> "?q=" <> encodeQueryValue q
+
+-- | Find references (D-294).
+refsPath :: Side -> RefsQuery -> String
+refsPath side q =
+  "api/refs/"
+    <> seg side
+    <> "?module="
     <> encodeQueryValue q.moduleRef
     <> "&decl="
     <> encodeQueryValue q.decl
 
--- | A text search (D-307) with a limit, under the token.
-textSearchPath :: Text -> Int -> String
-textSearchPath q limit =
-  "api/text-search/tree?q=" <> encodeQueryValue q <> "&limit=" <> show limit
+-- | A text search (D-307) with a limit.
+textSearchPath :: Side -> Text -> Int -> String
+textSearchPath side q limit =
+  "api/text-search/"
+    <> seg side
+    <> "?q="
+    <> encodeQueryValue q
+    <> "&limit="
+    <> show limit
+
+-- | How far indexing is on a side (D-160).
+indexingPath :: Side -> String
+indexingPath side = "api/indexing/" <> seg side
+
+-- | The file list of a side.
+filesPath :: Side -> String
+filesPath side = "api/files/" <> seg side
+
+-- | The session: browse or diff, and the commits (D-332).
+sessionPath :: String
+sessionPath = "api/session"
+
+-- | The changed files, diff mode only (D-325).
+diffFilesPath :: String
+diffFilesPath = "api/diff-files"
+
+-- | A side as a path segment.
+seg :: Side -> String
+seg = Text.unpack . sideText
 
 -- | A path (a module ref, say), as UTF-8 with every byte but the
 -- unreserved ones and @/@ encoded. @/@ stays: it splits segments, as a

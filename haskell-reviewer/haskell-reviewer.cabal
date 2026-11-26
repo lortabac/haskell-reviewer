@@ -250,6 +250,8 @@ test-suite haskell-reviewer-test
     Bench.GcLogTest
     Bench.IndexLog
     Bench.IndexLogTest
+    Bench.Mode
+    Bench.ModeTest
     Bench.ModuleList
     Bench.ModuleListTest
     Bench.Path
@@ -262,6 +264,8 @@ test-suite haskell-reviewer-test
     Bench.RefsTest
     Bench.RtsStats
     Bench.RtsStatsTest
+    Bench.Session
+    Bench.SessionTest
     Bench.Shell
     Bench.ShellTest
     Bench.Stats
@@ -437,6 +441,7 @@ benchmark haskell-reviewer-bench
     Bench.Http
     Bench.IndexLog
     Bench.Machine
+    Bench.Mode
     Bench.ModuleList
     Bench.Path
     Bench.Projects
@@ -444,9 +449,11 @@ benchmark haskell-reviewer-bench
     Bench.Refs
     Bench.RefsDuring
     Bench.Report
+    Bench.Report.Json
     Bench.RtsStats
     Bench.Run
     Bench.SearchDuring
+    Bench.Session
     Bench.Shell
     Bench.Startup
     Bench.Stats

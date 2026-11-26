@@ -103,7 +103,8 @@ is updated if needed (§10.3).
   index. Options then: compact regions for finished module models, or the
   non-moving collector (§11.5). M2 reference run: wire-server max major
   pause after indexing 18 ms, idle-gap navigation p95 12.1 ms (module) and
-  13.6 ms (source).
+  13.6 ms (source). T18b: re-check on the range runs, both sides
+  indexed (D-357).
 - **Q-OPENAI-COMPAT**: Check that the `openai` package's raw stream and our
   delta decoder work with Ollama, llama.cpp and vLLM, not only OpenAI
   (§11.6.3).

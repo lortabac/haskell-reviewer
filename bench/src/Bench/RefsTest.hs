@@ -1,5 +1,6 @@
 module Bench.RefsTest (tests) where
 
+import Bench.Mode (Side (..))
 import Bench.Queries (RefsQuery (..))
 import Bench.Refs
   ( RefsSummary (..),
@@ -45,11 +46,18 @@ tests =
         slowdownPercent 200 100 @?= Just (-50)
         slowdownPercent 0 100 @?= Nothing,
       testCase "the stale query message" $ do
-        staleQueryMessage a (Just "decl")
+        staleQueryMessage Tree a (Just "decl")
           @?= "refs query Data.Id type:UserId: 404 (what: decl); \
               \update refsQueries in bench/src/Bench/Queries.hs"
-        staleQueryMessage b Nothing
+        staleQueryMessage Tree b Nothing
           @?= "refs query Data.Qualified val:tSplit: 404 (what: ?); \
+              \update refsQueries in bench/src/Bench/Queries.hs"
+        staleQueryMessage Base b Nothing
+          @?= "refs query Data.Qualified val:tSplit on base: 404 (what: ?); \
+              \update refsQueries in bench/src/Bench/Queries.hs \
+              \(one list for both sides: pick a name on both, or move the base)"
+        staleQueryMessage Head b Nothing
+          @?= "refs query Data.Qualified val:tSplit on head: 404 (what: ?); \
               \update refsQueries in bench/src/Bench/Queries.hs",
       testCase "warnings: partial or total 0, once per query" $
         refsWarnings
@@ -60,6 +68,11 @@ tests =
           @?= [ "refs query Data.Id type:UserId: partial after indexing",
                 "refs query Data.Id type:UserId: total 0 after indexing"
               ],
+      testCase "warnings: per side" $
+        refsWarnings [(time a 1 0) {side = Head}, (time a 2 0) {side = Base}]
+          @?= [ "refs query Data.Id type:UserId on head: total 0 after indexing",
+                "refs query Data.Id type:UserId on base: total 0 after indexing"
+              ],
       testCase "warnings: none for good answers" $
         refsWarnings [time a 1 3, time b 2 5] @?= []
     ]
@@ -68,7 +81,8 @@ tests =
     b = RefsQuery "Data.Qualified" "val:tSplit"
     time q us total =
       RefsTime
-        { query = q,
+        { side = Tree,
+          query = q,
           us = us,
           startUs = 0,
           partial = False,

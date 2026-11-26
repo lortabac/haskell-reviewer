@@ -1,8 +1,9 @@
--- | The project's modules, from @api\/modules\/tree@ (D-124): which ones
--- get a parse, in which order, and which ones the bench asks for.
+-- | The project's modules, from @api\/modules\/\<side\>@ (D-124): which
+-- ones get a parse, in which order, and which ones the bench asks for.
 module Bench.ModuleList
   ( -- * Types
     ModuleItem (..),
+    SideModules (..),
     Source (..),
     SampleKind (..),
     Sample (..),
@@ -16,21 +17,28 @@ module Bench.ModuleList
     -- * Reading
     parseModuleList,
     isSlot,
+    isChanged,
     queueOrder,
+    diffQueueOrder,
+    modeQueueOrder,
 
     -- * Picking
     pickSamples,
+    pickDiffSamples,
     sampleKindText,
     onDemandStatus,
     idlePlan,
   )
 where
 
+import Bench.Mode (Side (..))
 import Data.Aeson ((.:))
 import Data.Aeson qualified as Aeson
 import Data.Aeson.Types qualified as Aeson.Types
 import Data.ByteString (ByteString)
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
+import Data.Maybe (isJust)
 import Data.Ord (Down (..))
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -40,7 +48,19 @@ import Data.Text qualified as Text
 -- | One listed module.
 data ModuleItem = ModuleItem
   { ref :: Text,
-    source :: Source
+    source :: Source,
+    -- | The file's change (@added@, @modified@, ...), diff mode only
+    -- (D-325). 'Nothing' in browse mode or for an unchanged file.
+    change :: Maybe Text,
+    -- | Its parse settings differ from the other side's.
+    settingsChanged :: Bool
+  }
+  deriving (Eq, Show)
+
+-- | One side's module tree.
+data SideModules = SideModules
+  { side :: Side,
+    items :: [ModuleItem]
   }
   deriving (Eq, Show)
 
@@ -69,6 +89,7 @@ data SampleKind
 -- | A module page the start-up runs ask for while indexing.
 data Sample = Sample
   { kind :: SampleKind,
+    side :: Side,
     ref :: Text
   }
   deriving (Eq, Show)
@@ -100,7 +121,8 @@ onDemandStatus indexedBefore t
 
 -- | A module we parse, in queue order.
 data Queued = Queued
-  { ref :: Text,
+  { side :: Side,
+    ref :: Text,
     -- | Relative to the project root.
     path :: FilePath
   }
@@ -108,7 +130,8 @@ data Queued = Queued
 
 -- | A queued module and its file size.
 data Sized = Sized
-  { ref :: Text,
+  { side :: Side,
+    ref :: Text,
     bytes :: Integer
   }
   deriving (Eq, Show)
@@ -152,7 +175,9 @@ parseModuleList body = either (Left . ModuleListError) Right $ do
       r <- m .: "ref"
       src <- m .: "source"
       s <- source src
-      pure ModuleItem {ref = r, source = s}
+      (c, sc) <- markers m
+      pure ModuleItem {ref = r, source = s, change = c, settingsChanged = sc}
+    markers m = (,) <$> m .: "change" <*> m .: "settingsChanged"
     source = Aeson.withObject "source" $ \s -> do
       kind <- s .: "kind" :: Aeson.Types.Parser Text
       case kind of
@@ -167,7 +192,15 @@ parseModuleList body = either (Left . ModuleListError) Right $ do
         "module" -> do
           r <- x .: "ref"
           p <- x .: "path"
-          pure [ModuleItem {ref = r, source = Parsed (Text.unpack p)}]
+          (c, sc) <- markers x
+          pure
+            [ ModuleItem
+                { ref = r,
+                  source = Parsed (Text.unpack p),
+                  change = c,
+                  settingsChanged = sc
+                }
+            ]
         _ -> pure []
 
 -- | Does it get a parse (and an index slot)?
@@ -176,11 +209,37 @@ isSlot m = case m.source of
   Parsed _ -> True
   _ -> False
 
--- | The modules we parse, in background queue order (D-158). That's
--- tree order: see @indexJobs@ in "HaskellReviewer.Core.IndexQueue".
-queueOrder :: [ModuleItem] -> [Queued]
-queueOrder items =
-  [Queued {ref = m.ref, path = p} | m@ModuleItem {source = Parsed p} <- items]
+-- | Is it changed, so indexed first in diff mode (D-317)? From the
+-- markers (D-325). The product goes by blob and settings, which is
+-- close enough: this only picks the samples.
+isChanged :: ModuleItem -> Bool
+isChanged m = isJust m.change || m.settingsChanged
+
+-- | The modules we parse on one side, in background queue order
+-- (D-158). That's tree order: see @indexJobs@ in
+-- "HaskellReviewer.Core.IndexQueue".
+queueOrder :: Side -> [ModuleItem] -> [Queued]
+queueOrder side items =
+  [ Queued {side = side, ref = m.ref, path = p}
+  | m@ModuleItem {source = Parsed p} <- items
+  ]
+
+-- | Diff mode's queue order, head and base trees given (D-317): head's
+-- changed, base's changed, head's other modules, base's other modules.
+diffQueueOrder :: [ModuleItem] -> [ModuleItem] -> [Queued]
+diffQueueOrder headItems baseItems =
+  pick Head isChanged headItems
+    <> pick Base isChanged baseItems
+    <> pick Head (not . isChanged) headItems
+    <> pick Base (not . isChanged) baseItems
+  where
+    pick side p = queueOrder side . filter p
+
+-- | The queue order of the trees from 'Bench.Mode.modeSides': tree order
+-- in browse mode, 'diffQueueOrder' in diff mode.
+modeQueueOrder :: NonEmpty SideModules -> [Queued]
+modeQueueOrder (t :| []) = queueOrder t.side t.items
+modeQueueOrder (h :| b : _) = diffQueueOrder h.items b.items
 
 -- * Picking
 
@@ -192,13 +251,28 @@ pickSamples list = case NE.nonEmpty list of
   Nothing -> []
   Just queue ->
     dedupe
-      [ Sample LastQueued (NE.last queue).ref,
+      [ sample LastQueued (NE.last queue),
         -- First of the largest, if two have the same size.
-        Sample Largest (NE.head (NE.sortOn (Down . (.bytes)) queue)).ref,
-        Sample Middle (list !! (length list `div` 2)).ref
+        sample Largest (NE.head (NE.sortOn (Down . (.bytes)) queue)),
+        sample Middle (list !! (length list `div` 2))
       ]
   where
-    dedupe = foldr (\s acc -> s : filter (\t -> t.ref /= s.ref) acc) []
+    sample k q = Sample {kind = k, side = q.side, ref = q.ref}
+
+-- | Diff mode's samples (D-357): 'pickSamples' on head's part of the
+-- queue (sizes from the checkout, which is at head), then the last of
+-- the whole queue on base: the base side is indexed last.
+pickDiffSamples :: [Sized] -> [Queued] -> [Sample]
+pickDiffSamples headSized queue =
+  dedupe (pickSamples headSized <> lastBase)
+  where
+    lastBase = case reverse [q | q <- queue, q.side == Base] of
+      q : _ -> [Sample {kind = LastQueued, side = Base, ref = q.ref}]
+      [] -> []
+
+-- | Each module once, the first kept.
+dedupe :: [Sample] -> [Sample]
+dedupe = foldr (\s acc -> s : filter (\t -> (t.side, t.ref) /= (s.side, s.ref)) acc) []
 
 -- | The name in the report.
 sampleKindText :: SampleKind -> Text

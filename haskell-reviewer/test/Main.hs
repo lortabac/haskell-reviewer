@@ -4,12 +4,14 @@ import ApiSupport (forceFixtures)
 import Bench.FallbacksTest qualified
 import Bench.GcLogTest qualified
 import Bench.IndexLogTest qualified
+import Bench.ModeTest qualified
 import Bench.ModuleListTest qualified
 import Bench.PathTest qualified
 import Bench.ProjectsTest qualified
 import Bench.QueriesTest qualified
 import Bench.RefsTest qualified
 import Bench.RtsStatsTest qualified
+import Bench.SessionTest qualified
 import Bench.ShellTest qualified
 import Bench.StatsTest qualified
 import Bench.TargetsTest qualified
@@ -174,12 +176,14 @@ main = do
       [ Bench.FallbacksTest.tests,
         Bench.GcLogTest.tests,
         Bench.IndexLogTest.tests,
+        Bench.ModeTest.tests,
         Bench.ModuleListTest.tests,
         Bench.PathTest.tests,
         Bench.ProjectsTest.tests,
         Bench.QueriesTest.tests,
         Bench.RefsTest.tests,
         Bench.RtsStatsTest.tests,
+        Bench.SessionTest.tests,
         Bench.ShellTest.tests,
         Bench.StatsTest.tests,
         Bench.TargetsTest.tests,

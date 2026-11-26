@@ -26,12 +26,17 @@ module Bench.Targets
 
     -- * Verdicts
     verdict,
+    verdictOf,
+    sideVerdicts,
     renderVerdict,
     statText,
   )
 where
 
+import Bench.Mode (Side)
 import Bench.Projects (Role (..))
+import Bench.Stats (Latency (..), Summary (..), latency, summarize)
+import Data.List.NonEmpty qualified as NE
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Text.Printf (printf)
@@ -61,6 +66,9 @@ data Target = Target
 -- | A target, the value we got, and whether it's met.
 data Verdict = Verdict
   { target :: Target,
+    -- | Which side the samples are from, in diff mode. 'Nothing' in
+    -- browse mode, and for the start-up targets.
+    side :: Maybe Side,
     valueUs :: Double,
     -- | The worst sample, shown next to the value. 'Nothing' if the
     -- value is already the max.
@@ -218,12 +226,28 @@ memoryBudgetBytes _ = Nothing
 -- | Check a value (and the worst sample, shown next to it).
 verdict :: Target -> Double -> Maybe Double -> Verdict
 verdict t value worst =
-  Verdict {target = t, valueUs = value, maxUs = worst, met = ok}
+  Verdict {target = t, side = Nothing, valueUs = value, maxUs = worst, met = ok}
   where
     limit = fromInteger t.limitUs
     ok = case t.bound of
       Below -> value < limit
       AtMost -> value <= limit
+
+-- | The target's statistic over the samples (microseconds), with the
+-- max. 'Nothing' without samples.
+verdictOf :: Target -> [Integer] -> Maybe Verdict
+verdictOf t xs = do
+  ne <- NE.nonEmpty (map fromInteger xs)
+  let value = case t.stat of
+        Median -> (summarize ne).median
+        P95 -> (latency ne).p95
+  Just (verdict t value (Just (maximum ne)))
+
+-- | One verdict per side, so a slow side can't hide behind the other
+-- one (D-357). Sides without samples get none.
+sideVerdicts :: Target -> [(Maybe Side, [Integer])] -> [Verdict]
+sideVerdicts t perSide =
+  [v {side = s} | (s, xs) <- perSide, Just v <- [verdictOf t xs]]
 
 -- | One line of the table, e.g.
 --

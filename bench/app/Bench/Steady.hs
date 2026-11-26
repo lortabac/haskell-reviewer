@@ -3,7 +3,8 @@
 -- idle gaps, then the same source pages with the same gaps; then
 -- search, then find references, then text search (D-308). With
 -- @+RTS -S@, for the GC pauses. The first run also does the fallback
--- census, in a pass of its own before the timed one.
+-- census, in a pass of its own before the timed one. In diff mode
+-- (D-357) each phase does head, then base.
 module Bench.Steady
   ( -- * Types
     SteadyPlan (..),
@@ -24,10 +25,12 @@ import Bench.GcLog (GcLog, GcLogError, PhaseMark (..))
 import Bench.Http (Gzip (..), HttpResponse (..))
 import Bench.IndexLog (IndexDone)
 import Bench.Machine (LoadAvg, getLoadAvg)
+import Bench.Mode (Side, sideText)
 import Bench.ModuleList
   ( IdleStep (..),
     ModuleItem (..),
     Queued (..),
+    SideModules (..),
     idlePlan,
     isSlot,
     queueOrder,
@@ -66,6 +69,7 @@ import Control.Concurrent (threadDelay)
 import Control.Monad (forM, replicateM)
 import Data.Aeson qualified as Aeson
 import Data.ByteString.Lazy qualified as LBS
+import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
@@ -80,7 +84,7 @@ import HaskellReviewer.Server.CborJson (cborToJson, renderCborJsonError)
 data SteadyPlan = SteadyPlan
   { census :: CensusPass,
     timed :: TimedPass,
-    -- | Pages with idle gaps (@--nav-idle@).
+    -- | Pages with idle gaps (@--nav-idle@), per side.
     idlePages :: Int,
     -- | Rounds of every query after indexing.
     searchRounds :: Int,
@@ -109,7 +113,8 @@ data Route = ModuleRoute | SourceRoute
 
 -- | One module or source page.
 data PageTime = PageTime
-  { route :: Route,
+  { side :: Side,
+    route :: Route,
     -- | The module's ref, also for a source page.
     ref :: Text,
     -- | From request to the last byte.
@@ -119,7 +124,8 @@ data PageTime = PageTime
 
 -- | One text search request.
 data TextTime = TextTime
-  { query :: Text,
+  { side :: Side,
+    query :: Text,
     -- | From request to the last byte.
     us :: Integer,
     stopped :: Bool,
@@ -143,8 +149,9 @@ data SteadyRun = SteadyRun
     idleSources :: [PageTime],
     searchTimes :: [QueryTime],
     refsTimes :: [RefsTime],
-    -- | The first text search: it loads the store. Limit 8.
-    textFirst :: Maybe TextTime,
+    -- | The first text search of each side: it loads the store. Limit
+    -- 8.
+    textFirst :: [TextTime],
     -- | Text searches after it, limit 8.
     textTimes :: [TextTime],
     -- | One round with the results page's limit (1000).
@@ -167,14 +174,16 @@ data SteadyRun = SteadyRun
 
 -- * Running
 
--- | One run over the listed modules (tree order).
-runSteady :: SessionConfig -> [ModuleItem] -> SteadyPlan -> IO (Either RunError SteadyRun)
-runSteady cfg items plan = (>>= finish) <$> withSession cfg (steps items plan)
+-- | One run over the listed modules of each side (tree order).
+runSteady ::
+  SessionConfig -> NonEmpty SideModules -> SteadyPlan -> IO (Either RunError SteadyRun)
+runSteady cfg trees plan = (>>= finish) <$> withSession cfg (steps trees plan)
   where
     finish (build, ended) = build ended <$> requireRts ended
 
-steps :: [ModuleItem] -> SteadyPlan -> Session -> IO (Ended -> RtsStats -> SteadyRun)
-steps items plan s = do
+steps ::
+  NonEmpty SideModules -> SteadyPlan -> Session -> IO (Ended -> RtsStats -> SteadyRun)
+steps trees plan s = do
   doneAt <- awaitDone s
   atDone <- procMemory s
   let mark name = (\t -> PhaseMark {name = name, startUs = t}) <$> elapsedUs s
@@ -184,17 +193,22 @@ steps items plan s = do
   census <- case plan.census of
     NoCensusPass -> pure Nothing
     CensusPass -> do
-      hits <- forM items $ \m -> getApi s Gzip (modulePath m.ref) >>= classify m
-      pure (Just (Map.fromListWith (flip (<>)) [(c, [h]) | Just (c, h) <- hits]))
+      hits <- forM (NE.toList trees) $ \t -> forM t.items $ \m ->
+        getApi s Gzip (modulePath t.side m.ref) >>= classify m
+      pure (Just (Map.fromListWith (flip (<>)) [(c, [h]) | Just (c, h) <- concat hits]))
 
-  let slots = queueOrder items
+  let sides = NE.map (.side) trees
+      perSide :: (Side -> IO [a]) -> IO [a]
+      perSide f = concat <$> mapM f (NE.toList sides)
+      sideSlots = [queueOrder t.side t.items | t <- NE.toList trees]
       timed f = case plan.timed of
         NoTimedPass -> pure []
-        TimedPass -> mapM f slots
-      idleSteps = idlePlan plan.seed plan.idlePages (length slots)
-      idlePass f = forM idleSteps $ \step -> do
-        threadDelay (step.gapMs * 1000)
-        f (slots !! step.index)
+        TimedPass -> mapM f (concat sideSlots)
+      -- The same seed on each side: the sides' lists differ anyway.
+      idlePass f = fmap concat $ forM sideSlots $ \slots ->
+        forM (idlePlan plan.seed plan.idlePages (length slots)) $ \step -> do
+          threadDelay (step.gapMs * 1000)
+          f (slots !! step.index)
   m1 <- mark "pages"
   pages <- timed (timePage s)
   m2 <- mark "sources"
@@ -205,21 +219,23 @@ steps items plan s = do
   idleSources <- idlePass (timeSource s)
 
   m5 <- mark "search"
-  searched <-
-    concatMap NE.toList <$> replicateM plan.searchRounds (mapM (timeQuery s) queries)
+  searched <- perSide $ \side ->
+    concatMap NE.toList <$> replicateM plan.searchRounds (mapM (timeQuery s side) queries)
   m6 <- mark "refs"
-  refsTimes <- concat <$> replicateM plan.refsRounds (mapM (timeRefs s) plan.refs)
+  refsTimes <- perSide $ \side ->
+    concat <$> replicateM plan.refsRounds (mapM (timeRefs s side) plan.refs)
   -- Last: the store it loads would change the memory of the phases
   -- before.
   m7 <- mark "text"
-  (textFirst, textTimes, textPages) <-
+  (textFirst, textRounds, textPages) <-
     if plan.textRounds <= 0
-      then pure (Nothing, [], [])
-      else do
-        first <- timeText s textLimitBox (NE.head textQueries)
-        rounds <- replicateM plan.textRounds (mapM (timeText s textLimitBox) textQueries)
-        page <- mapM (timeText s textLimitPage) textQueries
-        pure (Just first, concatMap NE.toList rounds, NE.toList page)
+      then pure ([], [], [])
+      else fmap unzip3 $ forM (NE.toList sides) $ \side -> do
+        first <- timeText s side textLimitBox (NE.head textQueries)
+        rounds <-
+          replicateM plan.textRounds (mapM (timeText s side textLimitBox) textQueries)
+        page <- mapM (timeText s side textLimitPage) textQueries
+        pure (first, concatMap NE.toList rounds, NE.toList page)
   m8 <- mark "end_idle"
 
   -- Over the RTS idle-GC delay (0.3 s), so this is the idle size.
@@ -239,8 +255,8 @@ steps items plan s = do
         searchTimes = searched,
         refsTimes = refsTimes,
         textFirst = textFirst,
-        textTimes = textTimes,
-        textPages = textPages,
+        textTimes = concat textRounds,
+        textPages = concat textPages,
         phases = [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9],
         census = census,
         gc = ended.gc,
@@ -255,10 +271,11 @@ steps items plan s = do
 -- census looks at statuses.
 timePage :: Session -> Queued -> IO PageTime
 timePage s m = do
-  t <- getApi s Gzip (modulePath m.ref)
+  t <- getApi s Gzip (modulePath m.side m.ref)
   pure
     PageTime
-      { route = ModuleRoute,
+      { side = m.side,
+        route = ModuleRoute,
         ref = m.ref,
         us = t.us,
         wireBytes = t.response.wireBytes
@@ -268,14 +285,22 @@ timePage s m = do
 -- it's a 200: every parsed module's file is in the file list.
 timeSource :: Session -> Queued -> IO PageTime
 timeSource s m = do
-  t <- getApi s Gzip (sourcePath m.path)
+  t <- getApi s Gzip (sourcePath m.side m.path)
   if t.response.status /= 200
     then
-      failWith ("source " <> m.path <> ": expected 200, got " <> show t.response.status)
+      failWith
+        ( "source "
+            <> Text.unpack (sideText m.side)
+            <> " "
+            <> m.path
+            <> ": expected 200, got "
+            <> show t.response.status
+        )
     else
       pure
         PageTime
-          { route = SourceRoute,
+          { side = m.side,
+            route = SourceRoute,
             ref = m.ref,
             us = t.us,
             wireBytes = t.response.wireBytes
@@ -283,9 +308,9 @@ timeSource s m = do
 
 -- | One text search, timed. Fails the run unless it's a 200 with a text
 -- search answer.
-timeText :: Session -> Int -> Text -> IO TextTime
-timeText s limit q = do
-  t <- getApi s Gzip (textSearchPath q limit)
+timeText :: Session -> Side -> Int -> Text -> IO TextTime
+timeText s side limit q = do
+  t <- getApi s Gzip (textSearchPath side q limit)
   let what = "text search " <> show q
   if t.response.status /= 200
     then failWith (what <> ": expected 200, got " <> show t.response.status)
@@ -294,7 +319,8 @@ timeText s limit q = do
       Right a ->
         pure
           TextTime
-            { query = q,
+            { side = side,
+              query = q,
               us = t.us,
               stopped = a.stopped,
               total = a.total,
