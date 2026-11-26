@@ -1,8 +1,8 @@
 -- | Golden tests for the highlighting rules (Note [Language rules] in
 -- "HaskellReviewer.Core.Lang"). Each file in fixtures/lang is parsed,
 -- and the rules and warnings dumped next to it. The rules we ship
--- (highlight/ in the repo) must have no warnings, and the @.scm@ files
--- of fixtures/highlight are scanned with them.
+-- (highlight/ in the repo) must have no warnings, and the files of
+-- fixtures/highlight are scanned with them.
 --
 -- Tests run from the package dir, so the fixtures are one level up.
 module HaskellReviewer.Core.LangGoldenTest (tests, langCases) where
@@ -78,7 +78,11 @@ langCases =
     -- Hashbang, the three string kinds, numbers, `this.x`.
     ("javascript-basic.js", "javascript.toml"),
     -- TS keywords and types.
-    ("typescript-basic.ts", "typescript.toml")
+    ("typescript-basic.ts", "typescript.toml"),
+    -- A tab and an astral char, both string kinds, numbers, booleans,
+    -- markers, list dashes, a quote in a plain scalar, a block scalar,
+    -- a string with no end.
+    ("yaml-basic.yaml", "yaml.toml")
   ]
 
 fixtureDir :: FilePath

@@ -1,0 +1,34 @@
+# Every kind of run: a tab	and an astral 😀 in a comment.
+%YAML 1.2
+---
+# A key spelled like a 1.1 boolean, as in a GitHub Actions file.
+on:
+  push:
+    branches: [main]
+name: yaml-basic
+version: 1.2.3
+count: 42
+negative: -1
+tilde: ~
+enabled: true
+disabled: FALSE
+missing: null
+quoted: "a \"quoted\" \\ string"
+url: "http://x # not a comment"
+hash: http://x#frag
+anchor: &a value
+alias: *a
+tag: !!str 3
+flow: [1, 2]
+key-with-dash: a value
+list:
+  - one
+  - two
+apostrophe: Don't panic, won't you
+size: the 5" screen, a 6" tablet
+single: 'it''s'
+block: |
+  # not a comment
+  "a string", 3 of them
+last: ...
+"no end

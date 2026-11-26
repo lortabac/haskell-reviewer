@@ -1,0 +1,48 @@
+# YAML. Format: SPEC §5.6.
+# Not handled:
+# - block scalars (| and >): their lines are scanned as normal text, so a
+#   quote, a # or a number in one is coloured (a quote can run to the end
+#   of the file).
+# - plain scalars, keys, anchors, aliases and tags: plain, unless the word
+#   is in a list below (so the `on:` every GitHub Actions file starts with
+#   is coloured as a literal).
+# - %YAML and %TAG: the directive's name is plain (% isn't in words), and
+#   the version in %YAML 1.2 is a number.
+# - the ~ of a null: not a word, never matches a list.
+# - -1: with - in word-chars it is one word, and not one that starts with
+#   a digit, so the sign is not coloured.
+# - quotes in a plain scalar (Don't, the 5" screen): a string starts
+#   there and runs to the next one, or to the end of the file. Inside a
+#   string, '' doesn't escape: the first ' closes it.
+# - # after a word: a comment starts there, though YAML wants a space
+#   before it (http://x#frag loses its fragment).
+
+extensions = ["yaml", "yml"]
+word-chars = "-_."
+line-comments = ["#"]
+numbers = true
+
+[[strings]]
+open = "\""
+close = "\""
+escape = "\\"
+
+[[strings]]
+open = "'"
+close = "'"
+
+[words]
+# Document markers. --- and ... are words only because - and . are in
+# word-chars.
+keyword = ["---", "..."]
+# A list item's dash: a word when it stands alone.
+operator = ["-"]
+# The booleans and nulls of YAML: the three spellings each of true,
+# false and null (1.2), plus the 1.1 forms most parsers still read as
+# booleans. y, n and ~ are left out: too short, or not a word.
+literal = [
+  "true", "True", "TRUE", "false", "False", "FALSE",
+  "null", "Null", "NULL",
+  "yes", "Yes", "YES", "no", "No", "NO",
+  "on", "On", "ON", "off", "Off", "OFF",
+]
