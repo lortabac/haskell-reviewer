@@ -105,6 +105,11 @@ export function mdPathFromPathname(
   return segmentsAfter(pathname, ["md", side])?.join("/");
 }
 
+// The hash of marked lines: #L<n> or #L<n>-L<m>.
+export function lineHash(from: number, to = from): string {
+  return from === to ? `#L${from}` : `#L${from}-L${to}`;
+}
+
 // Lines to mark, from a hash like "#L3" or "#L3-L7". Undefined for
 // anything else, line 0, or a range that goes backwards.
 export function parseLineHash(

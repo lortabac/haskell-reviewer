@@ -20,6 +20,8 @@ test.afterEach(async () => {
 const button = (page: Page): Locator =>
   page.getByRole("button", { name: /^Reload/ });
 const status = (page: Page): Locator => page.locator(".keys-status");
+// Three new lines, put in above.
+const three = "-- one\n-- two\n-- three\n";
 const decl = (page: Page, name: string): Locator =>
   page
     .locator("main section.decl")
@@ -50,7 +52,7 @@ test("browse: Reload keeps the declaration, with the new text", async ({
   await decl(page, "target").focus();
   await writeFile(
     join(project.root, "R.hs"),
-    reloadRHs({ above: "-- one\n-- two\n-- three\n", doc: "New target doc." }),
+    reloadRHs({ above: three, doc: "New target doc." }),
   );
   await button(page).click();
   await reloaded(page);
@@ -364,4 +366,167 @@ test("the gone notice is for that landing only", async ({
   await page.reload();
   await expect(page.locator("main h1")).toHaveText("Home");
   await expect(page.locator("main .reload-gone")).toHaveCount(0);
+});
+
+// The same code line (D-356).
+const cursorRow = (page: Page): Locator =>
+  page.locator('main .code-row:has([tabindex="0"])');
+async function openSource(page: Page, base: string, hash: string) {
+  await page.goto(base + "src/tree/R.hs" + hash);
+  // The outline: the place is kept by declaration.
+  await expect(page.locator("main .code-outline")).toBeVisible();
+}
+
+test("source: lines put in above, Reload: the same code line", async ({
+  page,
+  startServer,
+}) => {
+  const server = await startServer({ root: project.root });
+  await openSource(page, server.base, "#L9");
+  await expect(cursorRow(page)).toHaveAttribute("data-line", "9");
+  await expect(cursorRow(page)).toContainText("target = 2");
+  await writeFile(join(project.root, "R.hs"), reloadRHs({ above: three }));
+  await button(page).click();
+  await reloaded(page);
+  await expect(page).toHaveURL(/\/src\/tree\/R\.hs#L12$/);
+  await expect(cursorRow(page)).toHaveAttribute("data-line", "12");
+  await expect(cursorRow(page)).toContainText("target = 2");
+});
+
+test("source: a marked range is kept", async ({ page, startServer }) => {
+  const server = await startServer({ root: project.root });
+  await openSource(page, server.base, "#L8-L9");
+  await writeFile(join(project.root, "R.hs"), reloadRHs({ above: three }));
+  await button(page).click();
+  await reloaded(page);
+  await expect(page).toHaveURL(/#L11-L12$/);
+  await expect(cursorRow(page)).toContainText("target :: Int");
+});
+
+test("source: the declaration gone, the line kept in the file", async ({
+  page,
+  startServer,
+}) => {
+  const server = await startServer({ root: project.root });
+  await openSource(page, server.base, "#L13");
+  await expect(cursorRow(page)).toContainText("removed = 3");
+  await writeFile(join(project.root, "R.hs"), reloadRHs({ removed: false }));
+  await button(page).click();
+  await reloaded(page);
+  // Clamped to the last line (9).
+  await expect(page).toHaveURL(/\/src\/tree\/R\.hs#L9$/);
+  await expect(cursorRow(page)).toHaveAttribute("data-line", "9");
+  await expect(cursorRow(page)).toContainText("target = 2");
+});
+
+test("source: no hash, Reload: still none", async ({ page, startServer }) => {
+  const server = await startServer({ root: project.root });
+  await openSource(page, server.base, "");
+  await writeFile(join(project.root, "R.hs"), reloadRHs({ above: three }));
+  await button(page).click();
+  await reloaded(page);
+  await expect(page).toHaveURL(/\/src\/tree\/R\.hs$/);
+});
+
+const diffRow = (page: Page): Locator =>
+  page.locator('main [role="row"]:has([tabindex="0"])');
+
+test("--diff HEAD: a head line below new lines keeps its code", async ({
+  page,
+  startServer,
+}) => {
+  await writeFile(join(project.root, "R.hs"), reloadRHs({ doc: "Edited." }));
+  const server = await startServer({ root: project.root, diff: "HEAD" });
+  await page.goto(server.base + "diff/R.hs#head-L9");
+  await expect(diffRow(page)).toContainText("target = 2");
+  await writeFile(
+    join(project.root, "R.hs"),
+    reloadRHs({ above: three, doc: "Edited." }),
+  );
+  await button(page).click();
+  await reloaded(page);
+  await expect(page).toHaveURL(/\/diff\/R\.hs#head-L12$/);
+  await expect(diffRow(page)).toContainText("target = 2");
+});
+
+test("--diff HEAD: a base line stays", async ({ page, startServer }) => {
+  await writeFile(join(project.root, "R.hs"), reloadRHs({ doc: "Edited." }));
+  const server = await startServer({ root: project.root, diff: "HEAD" });
+  // Base line 7: the old doc, a removed row.
+  await page.goto(server.base + "diff/R.hs#base-L7");
+  await expect(diffRow(page)).toContainText("Target doc.");
+  await writeFile(
+    join(project.root, "R.hs"),
+    reloadRHs({ above: three + three, doc: "Edited." }),
+  );
+  await button(page).click();
+  await reloaded(page);
+  await expect(page).toHaveURL(/\/diff\/R\.hs#base-L7$/);
+  await expect(diffRow(page)).toContainText("Target doc.");
+});
+
+test("source: the outline late, focus moved out meanwhile: it stays out", async ({
+  page,
+  startServer,
+}) => {
+  const server = await startServer({ root: project.root });
+  await openSource(page, server.base, "#L9");
+  await cursorRow(page).locator('[tabindex="0"]').focus();
+  // After the reload, api/source answers once we let it.
+  let release: (() => void) | undefined;
+  const held = new Promise<void>((r) => (release = r));
+  await page.route(/\/api\/source\//, async (route) => {
+    await held;
+    await route.continue();
+  });
+  await writeFile(join(project.root, "R.hs"), reloadRHs({ above: three }));
+  await page.keyboard.press("r");
+  await expect(status(page)).toHaveText("Files reloaded.");
+  // The old line, for now; focus went with it.
+  await expect(cursorRow(page)).toHaveAttribute("data-line", "9");
+  await button(page).focus();
+  release?.();
+  await expect(page).toHaveURL(/#L12$/);
+  await expect(cursorRow(page)).toContainText("target = 2");
+  await expect(button(page)).toBeFocused();
+  await settle(page);
+});
+
+test("source: scrolled, never clicked: the same top line (T17a review N3)", async ({
+  page,
+  startServer,
+}) => {
+  const long = (above: string) =>
+    "module L where\n\n" +
+    above +
+    Array.from({ length: 200 }, (_, i) => `f${i} :: Int\nf${i} = ${i}\n`).join(
+      "",
+    );
+  await writeFile(join(project.root, "L.hs"), long(""));
+  const server = await startServer({ root: project.root });
+  await page.goto(server.base + "src/tree/L.hs");
+  await expect(page.locator("main .code-outline")).toBeVisible();
+  const box = page.locator("main .code-view");
+  const top = () =>
+    box.evaluate((b) => {
+      const t = b.getBoundingClientRect().top;
+      const rows = [...b.querySelectorAll<HTMLElement>(".code-row[data-line]")];
+      // The row half a row below the top edge.
+      return rows.find((row) => {
+        const r = row.getBoundingClientRect();
+        return r.top <= t + r.height / 2 && t + r.height / 2 < r.bottom;
+      })?.textContent;
+    });
+  // Line 93 at the top (a bit of it off screen).
+  await box.evaluate((b) => {
+    const r = b.querySelector(".code-row[data-line]")!.getBoundingClientRect();
+    b.scrollTop = Math.round((92 + 1 / 4) * r.height);
+  });
+  const before = await top();
+  expect(before).toBe("f45 :: Int");
+  await writeFile(join(project.root, "L.hs"), long(three));
+  await button(page).click();
+  await reloaded(page);
+  await expect(page).toHaveURL(/\/src\/tree\/L\.hs$/);
+  await expect.poll(top).toBe(before);
 });

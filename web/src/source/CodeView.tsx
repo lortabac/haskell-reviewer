@@ -103,6 +103,8 @@ export interface CodeApi {
   // Move the cursor, no focus change and no scroll.
   setCursor: (line: number, col?: number) => void;
   cursor: () => Cursor;
+  // The lines on screen in the view (no layout: undefined).
+  onScreen: () => { from: number; to: number } | undefined;
   // Focus is somewhere in the view.
   hasFocus: () => boolean;
   // Lines to keep mounted (on top of the cursor's and the selection's).
@@ -357,6 +359,12 @@ export function CodeView(props: CodeViewProps): JSX.Element {
       setCursor({ line, col: Math.min(col, lineLength(line)), link: false });
     },
     cursor,
+    onScreen: () => {
+      const r = v.range;
+      return r === null || count() === 0
+        ? undefined
+        : { from: clamp(r.startIndex + 1), to: clamp(r.endIndex + 1) };
+    },
     hasFocus: () => box.contains(document.activeElement),
     pin: (ls) => setExtraPins([...ls]),
     selectionLines: selLines,
