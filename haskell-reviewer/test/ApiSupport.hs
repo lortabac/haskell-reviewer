@@ -133,7 +133,7 @@ import HaskellReviewer.Effects.Clock (Microseconds (..))
 import HaskellReviewer.Effects.FileSystem (ListError (..), ReadError (..))
 import HaskellReviewer.Effects.Log (LogLevel (..), Logger, newLogger)
 import HaskellReviewer.Effects.Parser (parseGuarded)
-import HaskellReviewer.Effects.Source (EntrySource (..))
+import HaskellReviewer.Effects.Source (EntrySource (..), textKeyOf)
 import HaskellReviewer.Server.Api (FilesApi (..))
 import HaskellReviewer.Server.Api qualified as Api (newSnapshot)
 import HaskellReviewer.Server.CborJson (cborToJson)
@@ -153,7 +153,7 @@ import HaskellReviewer.Session.Live (DiffLive (DiffLive), LiveIndexing (LiveInde
 import HaskellReviewer.Session.Prefs (PrefsStore (..), newPrefsStore)
 import HaskellReviewer.Session.Reload (ReloadOutcome)
 import HaskellReviewer.Session.Snapshot
-  ( Snapshot (files, index, side),
+  ( Snapshot (files, index, side, source),
     fillSnapshot,
     firstGeneration,
     newSessionShare,
@@ -573,7 +573,8 @@ indexDeps api snap =
         _ -> pure (Left ReadGone),
       parse = api.parse,
       logger = api.logger,
-      label = ""
+      label = "",
+      textKey = textKeyOf snap.source
     }
 
 -- | A snapshot in a pool of its own.

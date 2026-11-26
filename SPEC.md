@@ -1744,12 +1744,19 @@ on but the text: language, extensions, ghc-options, the CPP environment,
 literate style and file kind, compared by equality. Included files are not
 read yet, so they are not part of the key. Equal keys share one result, so
 in diff mode an unchanged module is parsed and stored once, with its text.
-Only bytes read from a blob are shared: a commit's, or a clean
-working-tree file's index blob. A file read from disk (browse mode, a
-dirty working-tree file) is never shared. A result shown as text because
-the parse was too slow is shared too; failures (gone, unreadable,
-crashed) are not. The text search store shares its bytes by blob the same
-way; it still holds a second copy of each module's text (D-306).
+A file read from disk (browse mode, a dirty or untracked working-tree
+file) has no blob id up front: it is hashed after the read, with git's
+blob hash of the text read (after the line-end clean step; SHA-256 in
+browse mode), and looked up by that (D-353). The files may be hostile
+(§9.1), so a hit also needs the cached text to equal the text read,
+and a blob never takes a result made from disk. So equal text with
+equal settings shares one result, across sides and reloads, and a
+dirty file edited back to a committed text uses that blob's result. A
+result shown as text because the parse was too slow is shared too,
+within a generation (a reload retries it, §11.5); failures (gone,
+unreadable, crashed) are not. The text search store shares its bytes
+by blob only (a commit's, or a clean working-tree file's index blob);
+it still holds a second copy of each module's text (D-306).
 Resolution depends on the imports of each side, so it stays per side, and
 it is cheap compared with parsing.
 
@@ -1907,17 +1914,20 @@ the search box's 8 results, on a large project once the store is loaded
   not done fail ("replaced by a reload"), and the new workers start: one
   set of workers per pool at a time. Requests still on the old
   generation finish against it. Unchanged blobs hit the shared parse
-  results (§11.4.4), so a reload re-parses only what changed. A dirty
-  file is read from disk, so it is parsed again, and so is every file in
-  browse mode (no blob ids). With `--diff REV`, head is listed again and
-  base keeps its listing and project (its commit can't change; listed
-  again if it failed, or its project read crashed or could not read a
-  file); both snapshots are built again, and so are the pairing, the
-  markers and the outside count (D-352). If pairing fails on a reload,
-  the swap still happens, as at start-up: the POST gets 200 and
-  `api/diff-files` a 500 until the next reload. Between the old
-  workers' end and the new ones' start, the shared parse results and
-  texts drop what the new snapshots don't use.
+  results (§11.4.4), so a reload re-parses only what changed. A file
+  read from disk (dirty, untracked, or browse mode) is hashed after the
+  read; same text and settings reuse the parse (D-353). With `--diff
+  REV`, head is listed again and base keeps its listing and project
+  (its commit can't change; listed again if it failed, or its project
+  read crashed or could not read a file); both snapshots are built
+  again, and so are the pairing, the markers and the outside count
+  (D-352). If pairing fails on a reload, the swap still happens, as at
+  start-up: the POST gets 200 and `api/diff-files` a 500 until the next
+  reload. Between the old workers' end and the new ones' start, the
+  shared parse results and texts drop what the new snapshots don't use
+  (a file read from disk keeps the result of the text it last read,
+  D-353). Results shown as text because the parse was too slow are
+  dropped too, so a reload parses them again (D-353).
 - **GC.** Big indexes may cause long GC pauses. Benchmarks pick the fix:
   compact regions or the non-moving GC (Q-GC). M1 and M2 keep the copying
   GC with the D-162 defaults: pauses are well under target (D-219, D-305).

@@ -33,6 +33,7 @@ module HaskellReviewer.Session.Index
     withRequest,
     failUnfinished,
     bigFileSize,
+    carrySeen,
     pruneCache,
 
     -- * Reading
@@ -46,6 +47,7 @@ module HaskellReviewer.Session.Index
     requestCount,
     isRequested,
     cacheKeys,
+    ownedCount,
   )
 where
 
@@ -81,6 +83,7 @@ import Control.Monad (forM, forM_, when)
 import Data.List (find)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.Maybe (catMaybes, isNothing)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Foreign qualified as Text.Foreign
@@ -97,7 +100,8 @@ import HaskellReviewer.Core.IndexQueue qualified as Queue
 import HaskellReviewer.Core.ModuleModel
   ( ModuleParse (..),
     ParsedModule (..),
-    TextOnlyModule,
+    TextOnlyModule (..),
+    TextOnlyReason (..),
   )
 import HaskellReviewer.Core.Modules
   ( HaskellFile (..),
@@ -185,12 +189,11 @@ place back. The counts use modifyTVar'. Trade-off (accepted): under
 steady requests with 2 workers, one big file can delay a Requested
 module.
 
-Sharing (D-320): in diff mode most modules are the same on both
-sides. A parse depends only on the text and the 'ParseSettings' (GHC
-sees a fixed file name), so the pool keeps a cache by 'ModuleKey':
-blob id, then settings by equality. A slot whose key has no blob
-('Nothing': browse mode, a file read from disk) never touches it. At
-claim time, for a Pending slot with a blob:
+Sharing (D-320, D-353): in diff mode most modules are the same on
+both sides, and a reload sees mostly the same files again. A parse
+depends only on the text and the 'ParseSettings' (GHC sees a fixed
+file name), so the pool keeps a cache by 'ModuleKey': blob id, then
+settings by equality. At claim time, for a Pending slot with a blob:
 
 - the key is Shared: claim it as a hit. The worker fills the slot
   from the cache: no read, no parse, no big-file lock;
@@ -203,7 +206,7 @@ claim time, for a Pending slot with a blob:
   same transaction.
 
 The owner's end: Ready sets the key Shared (a TooSlow text-only
-result too: there is no retry anyway). Failed, or big and put back,
+result too: there is no retry within a generation). Failed, or big and put back,
 drops the key, so a twin reads for itself. The worker's 'finally'
 drops it too if this claim still owns it: a cancel must not leave a
 key Owned for ever (the next 'runWorkers' on the pool would skip it).
@@ -211,12 +214,35 @@ Each claim has its own token (a fresh TVar), not its slot's: a slot
 put back and claimed again is a new owner, which the first claim's
 'finally' must not drop.
 
+A slot with no blob (browse mode, a file read from disk) looks the
+cache up after the read (D-353). The key is the git blob id of the
+text read ('textKey'), with the slot's settings. A blob-keyed entry's
+text is that blob in full, so both kinds of key mean "the id of this
+text": a dirty file equal to a committed blob hits its entry. The
+lookup comes before the big-file check: a hit needs no lock. On a
+hit, the slot gets the cached result: no parse. Else it parses and
+puts the result in if the key is free. A hit counts only if the cached
+text is the text read, byte for byte: our hash has no collision
+check, and the files may be hostile (SPEC §9.1). Else it parses and
+keeps the entry. An entry put in by such a slot is marked 'fromDisk':
+a claim with a blob treats it as Free, reads its blob and puts its
+own result in. So a result under a git blob id always comes from that
+blob. Browse mode hashes with SHA-256. Content keys are never Owned:
+two workers on the same text at once both parse (rare); the second
+one keeps the first one's entry. The slot keeps the hash in 'seen',
+for the prune; a read that gives no text clears it.
+
 The cache lives as long as the pool. A reload drops the keys no live
 index uses ('pruneCache', D-352), else old results stay alive. It runs
 after the old workers ended and before the new ones start, so no
 worker writes the cache meanwhile. It keeps Owned entries anyway (there
-should be none). A browse reload has no keys: it parses everything
-again.
+should be none). A new slot with no blob has not read anything yet,
+so first 'carrySeen' gives it the hash its path had in the old index;
+the prune keeps those too. So the cache keeps one old result per live
+module, and an edited file's old result goes at the next reload. The
+carry is by path: a file moved in browse mode is parsed again. The
+prune also drops TooSlow results (D-353): a reload is how a user
+retries one. Within a generation they stay shared.
 
 Reload (D-351): the listing thread stops the old 'runWorkers' with
 'StopWorkers' and waits for it to end before it starts the new one, so
@@ -230,14 +256,17 @@ share the queue. So nothing shared holds a thunk. The two counts are
 strict Ints, written with modifyTVar'. The parse result is fully
 forced by parseGuarded (the text is strict, read already), the
 names by 'forceNames', the keys of find references by 'evaluate' (an
-unboxed vector), all before the transaction that publishes them. The
+unboxed vector), all before the transaction that publishes them. A
+text hash is forced before its lookup and written with '$!'. The
 queue is a strict map with strict fields, written with '$!'. The rest
 is StrictData values written already evaluated. The slots and the queue
 are built and forced in 'newIndex', before any worker or request sees
 them, keys too ('forceModuleKey'). The cache holds only forced values;
 each variant list is built in full before it is written, with '$!'.
-'runWorkers' forces each job's deps before the workers start:
-every worker's first claim would force them in STM.
+'runWorkers' forces each job's deps before the workers start: every
+worker's first claim would force them in STM. It also calls each
+'textKey' once, so its closure is forced on one thread, not by all
+workers at once.
 -}
 
 -- * Types
@@ -279,8 +308,20 @@ newtype Owner = Owner (TVar ())
 data Cached = Cached
   { result :: Indexed,
     -- | For a parsed module.
-    names :: Maybe [NameEntry]
+    names :: Maybe [NameEntry],
+    -- | The text, for a text-only result (a parsed one has it): a hit
+    -- with no blob checks it ('cachedText').
+    text :: Maybe Text,
+    -- | Put in by a slot with no blob. A claim with a blob doesn't take
+    -- it (D-353).
+    fromDisk :: Bool
   }
+
+-- | The text a result was made from, if we have it.
+cachedText :: Cached -> Maybe Text
+cachedText c = case c.result of
+  IndexedParsed p -> Just p.text
+  _ -> c.text
 
 -- | How much work the pool's workers did.
 data ShareCounts = ShareCounts
@@ -310,7 +351,10 @@ data Slot = Slot
     -- | Found over 'bigFileSize' when read.
     big :: TVar Bool,
     -- | A request asked for it.
-    requested :: TVar Bool
+    requested :: TVar Bool,
+    -- | The hash of the text read last, for a slot with no blob. Kept
+    -- across reloads ('carrySeen').
+    seen :: TVar (Maybe ObjectId)
   }
 
 -- | Where a module is. See Note [Indexing].
@@ -387,7 +431,10 @@ data IndexDeps = IndexDeps
     -- | In front of each log line: the side, in diff mode ('sideTag'
     -- in "HaskellReviewer.Core.Sides"). Empty in browse mode. Text, not
     -- a side: the index doesn't need to know about sides.
-    label :: Text
+    label :: Text,
+    -- | The cache key of a text read from a slot with no blob: its git
+    -- blob id ('textKeyOf' in "HaskellReviewer.Effects.Source").
+    textKey :: Text -> ObjectId
   }
 
 -- * Building
@@ -423,6 +470,7 @@ newIndex pool blobOf idx = do
     st <- newTVarIO Pending
     big <- newTVarIO False
     requested <- newTVarIO False
+    seen <- newTVarIO Nothing
     slot <-
       evaluate
         Slot
@@ -430,7 +478,8 @@ newIndex pool blobOf idx = do
             key = key,
             state = st,
             big = big,
-            requested = requested
+            requested = requested,
+            seen = seen
           }
     pure (i, slot)
   slots <- evaluate (Map.fromList jobs)
@@ -528,8 +577,11 @@ runWorkers n0 work = case work of
       -- machinery than this one line.
       when (any (\job -> job.index.pool.identity /= pool.identity) work) $
         throwIO (ErrorCall "runWorkers: indexes from different pools")
-      -- Before the workers share them. See Note [Indexing].
-      forM_ work $ \job -> evaluate job.deps
+      -- Before the workers share them. See Note [Indexing]. One call
+      -- of 'textKey' forces what it holds (the source, its format).
+      forM_ work $ \job -> do
+        deps <- evaluate job.deps
+        evaluate (deps.textKey "")
       replicateConcurrently_ n (worker n pool work)
 
 -- | What the modules not done fail with, when 'runWorkers' ends on
@@ -564,13 +616,34 @@ failUnfinished index why = do
       writeTVar slot.state (Failed why')
       modifyTVar' index.progress (\p -> p {failed = p.failed + 1})
 
+-- | Give each slot of the new index with no blob the text hash that
+-- the old index's slot with the same path has. For 'pruneCache', at a
+-- reload: the new slots have read nothing yet. Only between two
+-- 'runWorkers'. See Note [Indexing].
+carrySeen :: Index -> Index -> IO ()
+carrySeen old new = atomically $ do
+  -- Only slots with no blob have a hash.
+  hashes <- forM (Map.elems old.slots) $ \slot -> (slot.file.path,) <$> readTVar slot.seen
+  let byPath = Map.fromList [(p, k) | (p, Just k) <- hashes]
+  forM_ (Map.elems new.slots) $ \slot ->
+    case Map.lookup slot.file.path byPath of
+      Just k | keyless slot -> writeTVar slot.seen (Just k)
+      _ -> pure ()
+  where
+    keyless slot = isNothing slot.key.blob
+
 -- | Drop the cache entries that none of these indexes uses: a blob and
--- settings no slot has. Owned entries stay. Gives how many results
--- were dropped. Only between two 'runWorkers': see Note [Indexing].
+-- settings no slot has, where a slot with no blob has its 'seen' hash.
+-- TooSlow results go too, so a reload parses them again. Owned entries
+-- stay. Gives how many results were dropped. Only between two
+-- 'runWorkers': see Note [Indexing].
 pruneCache :: Pool -> [Index] -> IO Int
 pruneCache pool live = do
+  seenKeys <- atomically $
+    forM [slot | index <- live, slot <- Map.elems index.slots] $ \slot ->
+      fmap (,[slot.key.settings]) <$> readTVar slot.seen
   -- Built in full before the transaction (Q-RTS-BLACKHOLE).
-  wanted <- evaluate (Map.fromListWith (<>) keys)
+  wanted <- evaluate (Map.fromListWith (<>) (keys <> catMaybes seenKeys))
   _ <- evaluate (size wanted)
   atomically $ do
     m <- readTVar pool.cache
@@ -595,7 +668,11 @@ pruneCache pool live = do
             vs' -> foldr seq () vs' `seq` Just vs'
     used settings v = case v.entry of
       Owned _ -> True
-      Shared _ -> v.settings `elem` settings
+      Shared r -> v.settings `elem` settings && not (tooSlow r.result)
+    -- A reload retries it (D-353).
+    tooSlow = \case
+      IndexedTextOnly TextOnlyModule {reason = TooSlow} -> True
+      _ -> False
 
 -- * Reading
 
@@ -629,6 +706,12 @@ requestCount index = readTVar index.pool.requests
 -- | The cache's blobs, with how many results each has.
 cacheKeys :: Pool -> STM (Map ObjectId Int)
 cacheKeys pool = Map.map length <$> readTVar pool.cache
+
+-- | How many cache entries are Owned now.
+ownedCount :: Pool -> STM Int
+ownedCount pool = do
+  m <- readTVar pool.cache
+  pure (length [() | vs <- Map.elems m, Variant {entry = Owned _} <- vs])
 
 -- | A request asked for this module. False if it has no slot.
 isRequested :: Index -> ModuleId -> STM Bool
@@ -724,9 +807,10 @@ scanAt n busy p job = do
             readTVar slot.state >>= \case
               Pending ->
                 lookupShare index.pool slot.key >>= \case
-                  Hit r -> claim q t i slot (FromCache r)
+                  Hit r | not r.fromDisk -> claim q t i slot (FromCache r)
                   Busy -> go q dropped True rest
-                  Free -> do
+                  -- Free, or a result from disk: read it ourselves.
+                  _ -> do
                     big <- readTVar slot.big
                     if big && busy
                       then go q dropped True rest
@@ -760,8 +844,10 @@ scanAt n busy p job = do
 
 -- | How reading and parsing one module ended.
 data Outcome
-  = -- | With the names, for a parsed module.
-    Done Indexed (Maybe [NameEntry])
+  = -- | With the key to put it in the cache under.
+    Done ModuleKey Cached
+  | -- | Found in the cache after the read: no parse.
+    Reused Cached
   | Broke IndexFailure
   | -- | Over 'bigFileSize', and we don't hold the lock.
     FoundBig
@@ -770,9 +856,7 @@ data Outcome
 -- async exceptions.
 indexClaim :: Claim -> IO ()
 indexClaim c = case c.how of
-  FromCache hit ->
-    finish c (Ready hit.result) hit.names $
-      modifyTVar' c.index.pool.counts (\k -> k {shares = k.shares + 1})
+  FromCache hit -> reuse hit
   ReadIt reading ->
     indexOne c reading >>= \case
       FoundBig ->
@@ -785,8 +869,13 @@ indexClaim c = case c.how of
           when requested (modifyTVar' c.index.queue (Queue.push Requested c.id))
           -- Else the slot would skip itself. A twin may read it now.
           disown c reading
-      Done r ns -> finish c (Ready r) ns (publish c reading r ns)
+      Done key r -> finish c (Ready r.result) r.names (publish c reading key r)
+      Reused hit -> reuse hit
       Broke f -> finish c (Failed f) Nothing (disown c reading)
+  where
+    reuse hit =
+      finish c (Ready hit.result) hit.names $
+        modifyTVar' c.index.pool.counts (\k -> k {shares = k.shares + 1})
 
 -- * Cache
 
@@ -819,13 +908,14 @@ claimKey pool key = case key.blob of
     pure (Just owner)
 
 -- | A read is done: its key is Shared, unless another claim owns it or
--- it is Shared already.
-publish :: Claim -> Reading -> Indexed -> Maybe [NameEntry] -> STM ()
-publish c reading r ns =
-  alterEntry c.index.pool c.slot.key $ \case
+-- it is Shared already. The key is the slot's, or the text's for a
+-- slot with no blob (never Owned by this claim).
+publish :: Claim -> Reading -> ModuleKey -> Cached -> STM ()
+publish c reading key r =
+  alterEntry c.index.pool key $ \case
     Just (Owned o) | Just o /= reading.owner -> Keep
     Just (Shared _) -> Keep
-    _ -> Set (Shared Cached {result = r, names = ns})
+    _ -> Set (Shared r)
 
 -- | Drop the key if this claim still owns it.
 disown :: Claim -> Reading -> STM ()
@@ -879,33 +969,59 @@ indexOne c reading =
   where
     deps = c.deps
     path = c.slot.file.path
-    work =
-      deps.readModule path >>= \case
+    work = do
+      got <- deps.readModule path
+      -- No text now: no hash for the prune to keep (D-353).
+      case got of
+        Right (TextContent _) -> pure ()
+        _ | isNothing c.slot.key.blob -> atomically (writeTVar c.slot.seen Nothing)
+        _ -> pure ()
+      case got of
         Left ReadGone -> pure (Broke SourceGone)
         Left (ReadFailed why) -> cannotRead why >> pure (Broke (SourceUnreadable why))
         Left (ReadMissing o) ->
           cannotRead (missingReason o) >> pure (Broke SourceNotLocal)
-        Right (TextContent t)
-          | FileSize (Text.Foreign.lengthWord8 t) > bigFileSize,
-            not reading.holdsBig ->
-              pure FoundBig
-          | otherwise -> do
-              atomically $
-                modifyTVar' c.index.pool.counts (\k -> k {parses = k.parses + 1})
-              r <- evaluate =<< deps.parse c.slot.key.settings t
-              -- Built and forced before the transaction: see Note
-              -- [Indexing]. Here, so a throw fails only this module.
-              case r of
-                Parsed m -> do
-                  let ns = moduleNames m.declarations
-                  _ <- evaluate (forceNames ns)
-                  source <- evaluate (newParsedSource t m)
-                  pure (Done (IndexedParsed source) (Just ns))
-                TextOnly o -> pure (Done (IndexedTextOnly o) Nothing)
-        Right (Binary size) -> pure (Done (IndexedNotText size) Nothing)
-        Right (TooLarge info) -> pure (Done (IndexedTooLarge info) Nothing)
+        Right (TextContent t) -> do
+          (key, share) <- textShare t
+          case share of
+            -- Same text too: a hash collision must not show another
+            -- file's text (D-353). Else parse, and keep the entry.
+            Hit hit | cachedText hit == Just t -> pure (Reused hit)
+            _
+              | FileSize (Text.Foreign.lengthWord8 t) > bigFileSize,
+                not reading.holdsBig ->
+                  pure FoundBig
+              | otherwise -> do
+                  atomically $
+                    modifyTVar' c.index.pool.counts (\k -> k {parses = k.parses + 1})
+                  r <- evaluate =<< deps.parse key.settings t
+                  -- Built and forced before the transaction: see Note
+                  -- [Indexing]. Here, so a throw fails only this module.
+                  case r of
+                    Parsed m -> do
+                      let ns = moduleNames m.declarations
+                      _ <- evaluate (forceNames ns)
+                      source <- evaluate (newParsedSource t m)
+                      pure (Done key (cached (IndexedParsed source) (Just ns) Nothing))
+                    TextOnly o ->
+                      pure (Done key (cached (IndexedTextOnly o) Nothing (Just t)))
+        Right (Binary size) -> pure (Done c.slot.key (noText (IndexedNotText size)))
+        Right (TooLarge info) -> pure (Done c.slot.key (noText (IndexedTooLarge info)))
         -- A link, a submodule: no longer a file.
         Right _ -> pure (Broke SourceGone)
+    cached r ns t =
+      Cached {result = r, names = ns, text = t, fromDisk = isNothing c.slot.key.blob}
+    noText r = cached r Nothing Nothing
+    -- A slot with no blob: look the text up (D-353). A slot with a
+    -- blob was looked up at claim time.
+    textShare t = case c.slot.key.blob of
+      Just _ -> pure (c.slot.key, Free)
+      Nothing -> do
+        k <- evaluate (deps.textKey t)
+        key <- evaluate ModuleKey {blob = Just k, settings = c.slot.key.settings}
+        atomically $ do
+          writeTVar c.slot.seen $! Just k
+          (key,) <$> lookupShare c.index.pool key
     cannotRead why =
       quietly . logInfo deps.logger $
         "haskell-reviewer: "

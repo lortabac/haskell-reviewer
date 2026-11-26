@@ -26,6 +26,7 @@ module HaskellReviewer.Effects.Source
     -- * Blobs
     sourceBlob,
     sharedBlob,
+    textKeyOf,
 
     -- * Warm-up
     warmUpListing,
@@ -45,6 +46,7 @@ import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Text.Encoding qualified as Text.Encoding
 import HaskellReviewer.Core.BlobId (blobId, emptyBlobId)
 import HaskellReviewer.Core.CommitFiles
   ( BlobRef (..),
@@ -454,6 +456,20 @@ sharedBlob source p = case source of
   WorkTreeEntries w -> case Map.lookup p w.files of
     Just (FromIndex o) -> Just o
     _ -> Nothing
+
+-- | The parse cache key of a text read from a path with no shared
+-- blob: the git blob id of its UTF-8 bytes, which are the bytes read
+-- (D-353). The repo's format on the working tree, so a dirty file
+-- equal to a blob hits that blob's entry. SHA-256 on a disk side: it
+-- has nothing else in the cache, and SHA-1 collisions can be made. A
+-- commit side always has blobs.
+textKeyOf :: EntrySource -> Text -> ObjectId
+textKeyOf source t = blobId format (Text.Encoding.encodeUtf8 t)
+  where
+    format = case source of
+      WorkTreeEntries w -> w.format
+      DiskEntries _ -> Sha256
+      CommitEntries _ -> Sha1
 
 -- | git's clean bytes of a file, or a symlink's target, for pairing
 -- (D-324), read in full up to the cap. 'Nothing' if it can't be read,
