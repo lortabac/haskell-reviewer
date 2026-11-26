@@ -24,6 +24,8 @@ import {
   type TextOnlyModule,
 } from "../api/module";
 import { useDiffLink } from "../diff/link";
+import { useAnswerGeneration } from "../events/generation";
+import { useGoneHome, useQuietReload } from "../events/ReloadApply";
 import { hrefFor, lineHref, withBase } from "../files/paths";
 import { usePageSide } from "../session";
 import { pageLinkInfos } from "../source/links";
@@ -131,6 +133,11 @@ function DocsPage(props: { moduleRef: string }): JSX.Element {
     const r = result();
     return r?.kind === "ok" ? r.value : undefined;
   };
+  useAnswerGeneration(() => page()?.generation);
+  useGoneHome(
+    () => result()?.kind === "not-found",
+    () => props.moduleRef,
+  );
   // Docs / Source in the header. The path from the tree until the page
   // comes.
   const modules = useModules();
@@ -576,6 +583,21 @@ function ModulePage(props: {
         : { href: lineHref(side(), path, line), state: { codeJump: true } };
     },
     leave: leaveDecl,
+    // A reload: the same declaration, by its id (D-354). At the top
+    // (the title on screen, no declaration focused): the top.
+    here: () => {
+      const title = rootEl()?.querySelector("h1");
+      if (
+        declFocus.get() === undefined &&
+        title != null &&
+        title.getBoundingClientRect().bottom > 0
+      ) {
+        return { href: docsHref(side(), props.typedRef) };
+      }
+      const d = declHere();
+      const id = d === undefined ? undefined : ix().idOfHandle(d.n);
+      return { href: docsHref(side(), props.typedRef, id ?? null) };
+    },
   });
   const hidden = createMemo(() => hiddenCount(props.parsed));
   const ctx: PageCtx = {
@@ -632,9 +654,11 @@ function ModulePage(props: {
   // toggling can clear one without the other.
   const [missing, setMissing] = createSignal<string>();
   const [hiddenAnchor, setHiddenAnchor] = createSignal<string>();
-  // moveFocus: false on a toggle (recompute only, D-204): scrolling or
-  // moving focus away from what the user was doing would be rude.
-  const go = (hash: string, moveFocus: boolean) => {
+  // move: "focus" scrolls there and focuses it; "scroll" only scrolls
+  // (a reload with focus outside main, D-354); "none" on a toggle
+  // (recompute only, D-204): scrolling or moving focus away from what
+  // the user was doing would be rude.
+  const go = (hash: string, move: "focus" | "scroll" | "none") => {
     const a = anchorFromHash(hash);
     if (a === null) {
       setMissing(undefined);
@@ -664,9 +688,9 @@ function ModulePage(props: {
       }
       setMissing(undefined);
       setHiddenAnchor(undefined);
-      if (moveFocus) {
+      if (move !== "none") {
         el.scrollIntoView({ block: "start" });
-        el.focus({ preventScroll: true });
+        if (move === "focus") el.focus({ preventScroll: true });
       }
       return;
     }
@@ -693,12 +717,16 @@ function ModulePage(props: {
     setMissing(a);
   };
   // After the router: it scrolls to the top on a hash it has no
-  // element for.
+  // element for. A reload landing takes focus only if main had it
+  // (D-354).
+  let quiet = useQuietReload()(untrack(() => location.state));
   createEffect(
     on(
       () => location.hash,
       (hash) => {
-        const frame = requestAnimationFrame(() => go(hash, true));
+        const move = quiet ? "scroll" : "focus";
+        quiet = false;
+        const frame = requestAnimationFrame(() => go(hash, move));
         onCleanup(() => cancelAnimationFrame(frame));
       },
     ),
@@ -708,14 +736,14 @@ function ModulePage(props: {
   // link to its own URL, so nothing above would re-run `go`. Same
   // fix as `inPage` below, for a picker outside this page (C7).
   // eslint-disable-next-line solid/reactivity -- a window event, go() is always current
-  onCleanup(onReselectAnchor((hash) => go(hash, true)));
+  onCleanup(onReselectAnchor((hash) => go(hash, "focus")));
   // Toggling "exported only" can show or hide the current anchor's
   // element: re-resolve, but never move focus or scroll (D-204).
   createEffect(
     on(
       () => prefs.exportedOnly(),
       () => {
-        const frame = requestAnimationFrame(() => go(location.hash, false));
+        const frame = requestAnimationFrame(() => go(location.hash, "none"));
         onCleanup(() => cancelAnimationFrame(frame));
       },
       { defer: true },
@@ -726,7 +754,7 @@ function ModulePage(props: {
   // to register; the frame outlives at most one render.
   const showAll = (hash: string) => {
     prefs.setExportedOnly(false);
-    requestAnimationFrame(() => go(hash, true));
+    requestAnimationFrame(() => go(hash, "focus"));
   };
   // Links to this page. Two router quirks: it scrolls to the top on a
   // hash it has no element for (one frame, before go), and it ignores
@@ -752,7 +780,7 @@ function ModulePage(props: {
     }
     a.setAttribute("noscroll", "");
     if (url.hash !== "" && url.hash === window.location.hash) {
-      go(url.hash, true);
+      go(url.hash, "focus");
     }
   };
   return (

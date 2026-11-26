@@ -44,7 +44,8 @@
   cursor: default;
 }
 
-.shortcuts-button {
+.shortcuts-button,
+.reload-button {
   padding: var(--space-1) var(--space-2);
   font: inherit;
   color: var(--color-fg);
@@ -134,4 +135,16 @@
   border: 1px solid var(--color-muted);
   border-radius: 4px;
   cursor: pointer;
+}
+
+/* Reload (D-354). Off (waiting, or the session ended): muted, still
+   focusable. */
+.reload-button {
+  white-space: nowrap;
+}
+
+.reload-button[aria-disabled="true"] {
+  color: var(--color-muted);
+  border-style: dashed;
+  cursor: default;
 }

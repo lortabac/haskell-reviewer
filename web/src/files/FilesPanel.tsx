@@ -11,6 +11,11 @@ import { getJson, type Result } from "../api/client";
 import { decodeFileList, type FileList } from "../api/files";
 import { DiffFilesNotes, openAllUpTo, useDiffFiles } from "../diff/store";
 import { diffPathFromPathname } from "../diff/urls";
+import {
+  reloadCache,
+  useAnswerGeneration,
+  useReloads,
+} from "../events/generation";
 import { usePrefs } from "../prefs/store";
 import { usePageSide } from "../session";
 import type { Side } from "../sides";
@@ -25,12 +30,18 @@ import { buildTree, isEmptyTree } from "./tree";
 // and ghosts from api/diff-files, and the "changed only" filter (D-337).
 export function FilesPanel(): JSX.Element {
   const side = usePageSide();
-  const lists = new Map<Side, Result<FileList>>();
-  const [list] = createResource(side, async (s) => {
-    const got = lists.get(s) ?? (await getJson(apiFilesUrl(s), decodeFileList));
-    if (got.kind === "ok") lists.set(s, got);
-    return { side: s, got };
-  });
+  // A reload drops them all and fetches again (D-354).
+  const lists = reloadCache<Result<FileList>>();
+  const reloads = useReloads();
+  const [list] = createResource(
+    () => ({ s: side(), n: reloads() }),
+    async ({ s, n }) => {
+      const got =
+        lists.get(s, n) ?? (await getJson(apiFilesUrl(s), decodeFileList));
+      if (got.kind === "ok") lists.set(s, n, got);
+      return { side: s, got };
+    },
+  );
   const location = useLocation();
   // On a diff page: its path, on head (D-342; ghosts are never current).
   const current = createMemo(
@@ -48,6 +59,7 @@ export function FilesPanel(): JSX.Element {
     // Safety net: createResource already drops late answers.
     return r?.side === side() && r.got.kind === "ok" ? r.got.value : undefined;
   };
+  useAnswerGeneration(() => ok()?.generation);
   const diffFiles = useDiffFiles();
   const prefs = usePrefs();
   const tree = createMemo(() => {
@@ -68,11 +80,16 @@ export function FilesPanel(): JSX.Element {
     const f = filter();
     return f !== undefined && f.count <= openAllUpTo;
   };
-  // Changed only, while api/diff-files loads: only the note.
-  const waiting = () => prefs.changedOnly() && diffFiles.loading();
+  // Changed only, while api/diff-files loads: only the note. A reload
+  // keeps the old marks until the new ones come.
+  const waiting = () =>
+    prefs.changedOnly() &&
+    diffFiles.loading() &&
+    diffFiles.marks() === undefined;
   return (
     <Switch>
-      <Match when={list.loading}>
+      {/* A reload keeps the old list until the new one comes. */}
+      <Match when={list.loading && ok() === undefined}>
         <p>Loading files…</p>
       </Match>
       <Match when={ok()}>

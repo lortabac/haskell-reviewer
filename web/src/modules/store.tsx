@@ -7,6 +7,7 @@ import {
   createResource,
   type JSX,
   type ParentProps,
+  untrack,
   useContext,
 } from "solid-js";
 import { getJson, type Result } from "../api/client";
@@ -17,6 +18,11 @@ import {
   type ModuleTree,
 } from "../api/modules";
 import { apiModulesUrl } from "../docs/urls";
+import {
+  reloadCache,
+  useAnswerGeneration,
+  useReloads,
+} from "../events/generation";
 import { usePageSide, useSession } from "../session";
 import { otherSide, type Side } from "../sides";
 
@@ -159,14 +165,16 @@ const ModulesContext = createContext<Modules>();
 export function ModulesProvider(props: ParentProps): JSX.Element {
   const session = useSession();
   const side = usePageSide();
-  const trees = new Map<Side, Result<ModuleTree>>();
-  const load = async (s: Side) => {
+  // A reload drops them all (D-354).
+  const trees = reloadCache<Result<ModuleTree>>();
+  const reloads = useReloads();
+  const load = async ({ s, n }: { s: Side; n: number }) => {
     const got =
-      trees.get(s) ?? (await getJson(apiModulesUrl(s), decodeModuleTree));
-    if (got.kind === "ok") trees.set(s, got);
+      trees.get(s, n) ?? (await getJson(apiModulesUrl(s), decodeModuleTree));
+    if (got.kind === "ok") trees.set(s, n, got);
     return { side: s, got };
   };
-  const [answer] = createResource(side, load);
+  const [answer] = createResource(() => ({ s: side(), n: reloads() }), load);
   // Only the page's side: never the last side's tree while loading.
   const tree = (): Result<ModuleTree> | undefined => {
     const r = answer();
@@ -199,15 +207,19 @@ export function ModulesProvider(props: ParentProps): JSX.Element {
     );
   });
   // After the page side's tree, so it never slows that one down.
-  const wantOther = (): Side | undefined =>
-    session.mode === "diff" && ok() !== undefined
-      ? otherSide(side())
+  useAnswerGeneration(() => ok()?.generation);
+  const wantOther = (): { s: Side; n: number } | undefined => {
+    const o = otherSide(side());
+    // untrack: after a reload, wait for the page side's new tree first.
+    return session.mode === "diff" && ok() !== undefined && o !== undefined
+      ? { s: o, n: untrack(reloads) }
       : undefined;
+  };
   const [otherAnswer] = createResource(wantOther, load);
   const otherResult = (): Result<ModuleTree> | undefined => {
     const r = otherAnswer();
     const want = wantOther();
-    return want !== undefined && r?.side === want ? r.got : undefined;
+    return want !== undefined && r?.side === want.s ? r.got : undefined;
   };
   const other = (): ModuleTree | undefined => {
     const r = otherResult();

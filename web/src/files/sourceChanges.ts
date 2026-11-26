@@ -6,7 +6,8 @@
 // either. Unlisted in api/diff-files: unchanged, no fetch (unless the
 // list can't be trusted: then the server decides). The rest: one
 // api/diff fetch. Its rows and the page's text must be the same
-// snapshot with the same line count, else no marks (reload: T16).
+// snapshot with the same line count, else no marks (a reload mounts
+// the page again, D-354).
 import { type Accessor, createMemo, createResource } from "solid-js";
 import { getCbor } from "../api/client";
 import { decodeDiffView, diffUrl } from "../api/diff";

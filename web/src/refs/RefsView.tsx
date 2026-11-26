@@ -2,7 +2,7 @@
 // Results in groups by module, a snippet each, a link to the line.
 // While the answer is partial it is asked again (D-286); the list
 // keeps its rows (keys), so focus stays where it is.
-import { A, useLocation } from "@solidjs/router";
+import { A, useLocation, useNavigate } from "@solidjs/router";
 import {
   createEffect,
   createMemo,
@@ -25,6 +25,9 @@ import { decodeRefs, type Refs, refsUrl } from "../api/refs";
 import { useDiffLink } from "../diff/link";
 import { anchorName } from "../docs/urls";
 import { createRefetchLoop } from "../events/refetchLoop";
+import { useGeneration } from "../events/generation";
+import { reloadTexts } from "../header/ReloadButton";
+import { useQuietReload, useReloadLanding } from "../events/ReloadApply";
 import { IndexingContext } from "../events/indexing";
 import { hrefFor, lineHref } from "../files/paths";
 import { copyText } from "../copy/clipboard";
@@ -112,6 +115,7 @@ function RefsPage(props: { module: string; decl: string }): JSX.Element {
   // Set when we come back to this entry (Back, Forward, reload).
   const location = useLocation();
   const followed = followedKey(untrack(() => location.state));
+  const generation = useGeneration();
   const indexing = useContext(IndexingContext);
   const name = anchorName(decl);
   // The module's name from the tree, when it is loaded (stable from the
@@ -121,6 +125,23 @@ function RefsPage(props: { module: string; decl: string }): JSX.Element {
   const word = declWords[/^([a-z]+):/.exec(decl)?.[1] ?? ""];
 
   const [state, setState] = createSignal<State>("loading");
+  // A reload took the declaration or its module away (a 404 for
+  // either): its docs page, which says which (D-354). The landing goes
+  // on there.
+  const navigate = useNavigate();
+  const landing = useReloadLanding()(untrack(() => location.state));
+  if (landing !== undefined) {
+    const status = useKeys();
+    createEffect(() => {
+      if (state() !== "not-found") return;
+      // The move clears the status line: say it again there.
+      status?.sayAfterNav(reloadTexts.done);
+      navigate(docsHref(side(), module, decl), {
+        replace: true,
+        state: { reload: landing },
+      });
+    });
+  }
   const [meta, setMeta] = createSignal<
     Pick<Refs, "module" | "total" | "partial" | "generation"> & {
       summary: string;
@@ -150,9 +171,11 @@ function RefsPage(props: { module: string; decl: string }): JSX.Element {
     if (had && focusLost()) h1?.focus();
   };
 
-  // A cached answer, if it is for the snapshot we are in.
+  // A cached answer, if it is for the snapshot we are in (D-354: the
+  // generation state, not the indexing one, which lags after a
+  // reload). The indexing one before any generation is known.
   const cached = cache.get(pageKey);
-  const gen = indexing.of(side())?.generation;
+  const gen = untrack(generation.current) ?? indexing.of(side())?.generation;
   const useCached = cached !== undefined && cached.generation === gen;
   if (useCached) {
     cache.delete(pageKey);
@@ -172,6 +195,7 @@ function RefsPage(props: { module: string; decl: string }): JSX.Element {
         return undefined;
       }
       const refs = r.value;
+      generation.seen(refs.generation);
       show(refs);
       if (!refs.partial) {
         // Once, when it is complete.
@@ -258,12 +282,14 @@ function RefsPage(props: { module: string; decl: string }): JSX.Element {
       }),
     );
   }
-  // Back from a followed item: focus it again.
+  // Back from a followed item: focus it again. Not on a reload landing
+  // with focus outside main (D-354): the kept state still says it.
+  const quiet = useQuietReload()(untrack(() => location.state));
   createEffect(
     on(
       () => state() === "ok",
       (ok) => {
-        if (!ok || followed === undefined) return;
+        if (!ok || followed === undefined || quiet) return;
         const frame = requestAnimationFrame(() => {
           const a = [
             ...document.querySelectorAll<HTMLElement>("[data-ref-key]"),

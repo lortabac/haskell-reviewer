@@ -389,8 +389,17 @@ describe("IndexingStatus, two sides (D-333)", () => {
       ready: 4,
       failed: 0,
     });
+  });
+
+  it("only the newest generation counts (D-354)", () => {
     expect(
       sumIndexing([at("head", 4, 4), { ...at("base", 2, 1), generation: 3 }]),
+    ).toEqual({ generation: 3, total: 2, ready: 1, failed: 0 });
+    expect(
+      sumIndexing([
+        { ...at("head", 4, 4), generation: 3 },
+        { ...at("base", 2, 1), generation: 3 },
+      ]),
     ).toEqual({ generation: 3, total: 6, ready: 5, failed: 0 });
   });
 });

@@ -227,6 +227,93 @@ describe("createHub", () => {
   });
 });
 
+describe("createHub, generations (D-354)", () => {
+  const ix = (generation: number, side: string, ready = 0) =>
+    JSON.stringify({ generation, side, total: 2, ready, failed: 0 });
+  const gen = (g: number) => JSON.stringify({ generation: g });
+
+  it("forwards the generation event", () => {
+    const hub = createHub("/tok/api/events", FakeSource);
+    const a = listener();
+    hub.add(a);
+    only().fire("generation", undefined, gen(2));
+    expect(a.got.at(-1)).toEqual({ type: "generation", generation: 2 });
+  });
+
+  it("a bad or old generation is not passed on", () => {
+    const hub = createHub("/tok/api/events", FakeSource);
+    const a = listener();
+    hub.add(a);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    only().fire("generation", undefined, "[");
+    only().fire("generation", undefined, JSON.stringify({ generation: 0 }));
+    only().fire("generation", undefined, gen(3));
+    only().fire("generation", undefined, gen(3));
+    only().fire("generation", undefined, gen(2));
+    expect(a.got.filter((m) => m.type === "generation")).toEqual([
+      { type: "generation", generation: 3 },
+    ]);
+    expect(error).toHaveBeenCalledTimes(2);
+    error.mockRestore();
+  });
+
+  it("replays the newest generation, from indexing too (a reconnect)", () => {
+    const hub = createHub("/tok/api/events", FakeSource);
+    only().indexing(ix(1, "tree"));
+    only().fire("generation", undefined, gen(2));
+    only().indexing(ix(2, "tree"));
+    // A reconnect after another reload: no generation event on open.
+    only().indexing(ix(3, "tree"));
+    const late = listener();
+    hub.add(late);
+    expect(late.got.slice(1, 2)).toEqual([
+      { type: "generation", generation: 3, replay: true },
+    ]);
+  });
+
+  it("replays status, then the generation, then indexing", () => {
+    const hub = createHub("/tok/api/events", FakeSource);
+    only().fire("open", 1);
+    only().indexing(ix(1, "base"));
+    only().fire("generation", undefined, gen(2));
+    only().indexing(ix(2, "head", 1));
+    const late = listener();
+    hub.add(late);
+    expect(late.got).toEqual([
+      { type: "status", status: "open" },
+      { type: "generation", generation: 2, replay: true },
+      {
+        type: "indexing",
+        indexing: {
+          generation: 2,
+          side: "head",
+          total: 2,
+          ready: 1,
+          failed: 0,
+        },
+      },
+    ]);
+  });
+
+  it("drops indexing states older than the newest generation", () => {
+    const hub = createHub("/tok/api/events", FakeSource);
+    const a = listener();
+    hub.add(a);
+    only().indexing(ix(1, "base"));
+    only().indexing(ix(1, "head"));
+    // A newer indexing event, with no generation event (a reconnect).
+    only().indexing(ix(2, "head"));
+    // Late, for the old snapshot: not passed on.
+    only().indexing(ix(1, "base", 1));
+    expect(
+      a.got.filter((m) => m.type === "indexing").map((m) => m.indexing),
+    ).toHaveLength(3);
+    const late = listener();
+    hub.add(late);
+    expect(late.got.map((m) => m.type)).toEqual(["status", "indexing"]);
+  });
+});
+
 describe("decodeWorkerMessage", () => {
   it("accepts our messages", () => {
     for (const m of [
@@ -242,6 +329,8 @@ describe("decodeWorkerMessage", () => {
           failed: 0,
         },
       },
+      { type: "generation", generation: 2 },
+      { type: "generation", generation: 2, replay: true },
       { type: "unsupported" },
     ]) {
       expect(decodeWorkerMessage(m)).toEqual(m);
@@ -257,6 +346,9 @@ describe("decodeWorkerMessage", () => {
       { type: "nope" },
       { type: "indexing", indexing: { generation: 1, side: "tree", total: 1 } },
       { type: "indexing", indexing: "bogus" },
+      { type: "generation" },
+      { type: "generation", generation: 0 },
+      { type: "generation", generation: "2" },
     ]) {
       expect(decodeWorkerMessage(m)).toBeUndefined();
     }

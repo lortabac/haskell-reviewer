@@ -6,6 +6,7 @@ import { decodeSession } from "./api/session";
 import { App } from "./App";
 import { connectEvents } from "./events/connect";
 import { ConnectionContext } from "./events/ConnectionNotice";
+import { createGenerationState, GenerationContext } from "./events/generation";
 import { createIndexingState, IndexingContext } from "./events/indexing";
 import type { Status } from "./events/protocol";
 import { applyTheme } from "./prefs/theme";
@@ -53,17 +54,20 @@ const session = await sessionAnswer;
 const [status, setStatus] = createSignal<Status>("connecting");
 const [fallback, setFallback] = createSignal(false);
 const indexing = createIndexingState();
+const generation = createGenerationState();
 
 render(
   () =>
     session.kind === "ok" ? (
       <ConnectionContext.Provider value={{ status, fallback }}>
         <IndexingContext.Provider value={indexing.state}>
-          <App
-            initialPrefs={initialPrefs}
-            pendingPrefs={fetched}
-            session={session.value}
-          />
+          <GenerationContext.Provider value={generation}>
+            <App
+              initialPrefs={initialPrefs}
+              pendingPrefs={fetched}
+              session={session.value}
+            />
+          </GenerationContext.Provider>
         </IndexingContext.Provider>
       </ConnectionContext.Provider>
     ) : (
@@ -93,7 +97,15 @@ if (session.kind === "ok") {
       (msg) => {
         if (msg.type === "status") setStatus(msg.status);
         else if (msg.type === "unsupported") setFallback(true);
-        else if (msg.type === "indexing") indexing.set(msg.indexing);
+        else if (msg.type === "generation") {
+          // A live one is a reload even with no baseline yet.
+          generation.seen(msg.generation, msg.replay !== true);
+        } else if (msg.type === "indexing") {
+          // After a reconnect no generation event comes: the indexing
+          // events carry it (D-354).
+          generation.seen(msg.indexing.generation);
+          indexing.set(msg.indexing);
+        }
       },
     );
   }, 0);

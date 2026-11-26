@@ -60,7 +60,8 @@ export function ModulesPanel(): JSX.Element {
     modules.otherFailed() ? otherSide(side()) : undefined;
   return (
     <Switch>
-      <Match when={modules.loading()}>
+      {/* A reload keeps the old tree until the new one comes. */}
+      <Match when={modules.loading() && modules.ok() === undefined}>
         <p>{loadingModulesText}</p>
       </Match>
       <Match when={view()}>

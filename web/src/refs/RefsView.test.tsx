@@ -1,9 +1,10 @@
-import { createSignal } from "solid-js";
+import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Indexing } from "../api/events";
 import { fixture, stubFetch } from "../../test/fixtures";
 import { mountAppAt, unmountApp } from "../../test/mount";
 import { diffSession } from "../../test/sessions";
+import { createGenerationState } from "../events/generation";
 import { clearRefsCache } from "./RefsView";
 
 const api = "/tok/api/refs/tree?module=R.Shape&decl=val%3Aarea";
@@ -254,6 +255,45 @@ describe("RefsView", () => {
       expect(m2.querySelector(".refs-group")).not.toBeNull(),
     );
     expect(fetchMock.mock.calls.some((c) => c[0] === api)).toBe(false);
+  });
+});
+
+describe("RefsView, the generation state (D-354)", () => {
+  // The cache is checked against the generation state, not the
+  // indexing one (which lags just after a reload).
+  async function cachedThenRemount(current: number) {
+    const { main, fetchMock } = open({ [api]: [200, fixture("refs")] });
+    await vi.waitFor(() =>
+      expect(main.querySelector(".refs-group")).not.toBeNull(),
+    );
+    unmountApp();
+    fetchMock.mockClear();
+    const gen = createRoot(() => createGenerationState());
+    gen.seen(current);
+    // The indexing state still says 1.
+    const [ix] = createSignal<Indexing>(at(1, 2));
+    // eslint-disable-next-line solid/reactivity -- read by the page
+    const m2 = mountAppAt(
+      page,
+      undefined,
+      ix,
+      null,
+      undefined,
+      gen,
+    ).querySelector("main")!;
+    await vi.waitFor(() =>
+      expect(m2.querySelector(".refs-group")).not.toBeNull(),
+    );
+    await settle();
+    return fetchMock.mock.calls.some((c) => c[0] === api);
+  }
+
+  it("same generation: the cached answer, no fetch", async () => {
+    expect(await cachedThenRemount(1)).toBe(false);
+  });
+
+  it("a newer generation: fetched again", async () => {
+    expect(await cachedThenRemount(2)).toBe(true);
   });
 });
 

@@ -62,6 +62,9 @@ export interface ViewLinks {
   missing?: (to: ToView) => string | undefined;
   // Called right before goView leaves this page.
   leave?: () => void;
+  // Where a reload lands on this page (D-354). Undefined: the URL as
+  // it is.
+  here?: () => ViewTarget | undefined;
 }
 
 // What Copy location copies: a text, or words to say instead.
@@ -101,6 +104,8 @@ export interface KeysApi {
   status: Accessor<string>;
   // Say something on the status line.
   say: (text: string) => void;
+  // Say it once the navigation about to start has changed the URL.
+  sayAfterNav: (text: string) => void;
   // The view's Copy location, if it has one (the header button).
   location: Accessor<(() => LocationText | undefined) | undefined>;
   copyLocation: () => void;
@@ -424,6 +429,7 @@ export function KeysProvider(props: ParentProps): JSX.Element {
     },
     status,
     say,
+    sayAfterNav: (text) => done({ afterNav: text }),
     location: locationFn,
     copyLocation,
     sideTarget,

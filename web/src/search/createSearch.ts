@@ -4,6 +4,7 @@
 import { createEffect, createMemo, on, untrack, useContext } from "solid-js";
 import { getJson } from "../api/client";
 import { decodeSearch, searchUrl, type SearchResult } from "../api/search";
+import { useGeneration } from "../events/generation";
 import { IndexingContext } from "../events/indexing";
 import { refetchStep } from "../events/partialRefetch";
 import { usePageSide } from "../session";
@@ -89,6 +90,18 @@ export function createSearch(
       { defer: true },
     ),
   );
+
+  // A reload (D-354): an answer of an older generation is stale, partial
+  // or not. Asked again once shown (the header popup can be closed).
+  const gen = useGeneration();
+  const stale = createMemo(() => {
+    const a = f.value()?.generation;
+    const c = gen.current();
+    return a !== undefined && c !== undefined && a < c;
+  });
+  createEffect(() => {
+    if (stale() && visible()) f.run(untrack(query));
+  });
 
   return {
     results: () => f.value()?.results ?? [],

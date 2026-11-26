@@ -24,6 +24,8 @@ import {
 import { CopyButton } from "../copy/CopyButton";
 import { lastFocus } from "../copy/lastFocus";
 import { location as locationText } from "../copy/names";
+import { useAnswerGeneration } from "../events/generation";
+import { useQuietReload } from "../events/ReloadApply";
 import { hrefFor, lineHref } from "../files/paths";
 import { useCopyLocation, useSideTarget } from "../keys/KeysProvider";
 import { NotFound } from "../NotFound";
@@ -84,6 +86,7 @@ function TextSearchPage(props: { q: string }): JSX.Element {
     const r = result();
     return r?.kind === "ok" ? r.value : undefined;
   };
+  useAnswerGeneration(() => value()?.generation);
   const failed = () => {
     const r = result();
     return r !== undefined && r.kind !== "ok";
@@ -101,13 +104,16 @@ function TextSearchPage(props: { q: string }): JSX.Element {
   let list: HTMLDivElement | undefined;
 
   let h1: HTMLHeadingElement | undefined;
+  // A reload landing with focus outside main: no focus move at all
+  // (D-354).
+  const quiet = useQuietReload()(untrack(() => location.state));
   // Back from a followed row: focus it again; if it is gone, the h1
   // (else the h1 right away, below).
   createEffect(
     on(
       () => value() !== undefined || failed(),
       (done) => {
-        if (!done || followed === undefined) return;
+        if (!done || followed === undefined || quiet) return;
         const frame = requestAnimationFrame(() => {
           const a = [
             ...document.querySelectorAll<HTMLElement>("[data-hit-key]"),
@@ -146,7 +152,9 @@ function TextSearchPage(props: { q: string }): JSX.Element {
         ref={(el) => {
           h1 = el;
           queueMicrotask(() => {
-            if (followed === undefined && el.isConnected) el.focus();
+            if (followed === undefined && !quiet && el.isConnected) {
+              el.focus();
+            }
           });
         }}
         class="refs-title text-search-title"

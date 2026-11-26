@@ -3,6 +3,11 @@ import { render } from "solid-js/web";
 import type { Indexing } from "../src/api/events";
 import type { Prefs } from "../src/api/prefs";
 import { App } from "../src/App";
+import {
+  GenerationContext,
+  type GenerationState,
+  idleGeneration,
+} from "../src/events/generation";
 import { IndexingContext } from "../src/events/indexing";
 import type { Session } from "../src/api/session";
 import { singleIndexing } from "./indexing";
@@ -21,6 +26,8 @@ export function mountAppAt(
   state: unknown = null,
   // Browse mode unless given.
   session?: Session,
+  // Idle unless given (no reloads).
+  generation?: GenerationState,
 ): HTMLElement {
   window.history.replaceState(state, "", path);
   const root = document.createElement("div");
@@ -28,7 +35,9 @@ export function mountAppAt(
   dispose = render(
     () => (
       <IndexingContext.Provider value={singleIndexing(indexing)}>
-        <App initialPrefs={initialPrefs} session={session} />
+        <GenerationContext.Provider value={generation ?? idleGeneration}>
+          <App initialPrefs={initialPrefs} session={session} />
+        </GenerationContext.Provider>
       </IndexingContext.Provider>
     ),
     root,

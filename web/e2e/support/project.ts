@@ -509,3 +509,44 @@ export function makeDiffViewProject(): Promise<Project> {
 export function makeMarksProject(): Promise<Project> {
   return repoProject("marks");
 }
+
+// For reload (D-354): R has three declarations, Other one. Two
+// commits (Other changes in the second), so `--diff HEAD~1..HEAD` is a
+// commit range. Tests edit the files: one project per test.
+// above: lines before the first declaration. doc: target's doc.
+// removed: false drops the last declaration.
+export const reloadRHs = ({
+  above = "",
+  doc = "Target doc.",
+  removed = true,
+}: { above?: string; doc?: string; removed?: boolean } = {}) =>
+  [
+    "module R where",
+    "",
+    above + "-- | First doc.",
+    "first :: Int",
+    "first = 1",
+    "",
+    `-- | ${doc}`,
+    "target :: Int",
+    "target = 2",
+    "",
+    ...(removed
+      ? ["-- | Removed soon.", "removed :: Int", "removed = 3", ""]
+      : []),
+  ].join("\n");
+
+export async function makeReloadProject(): Promise<Project> {
+  const root = await mkdtemp(join(tmpdir(), "hr-e2e-reload-"));
+  git(root, "init", "-q");
+  await put(root, "R.hs", reloadRHs());
+  await put(root, "Other.hs", "module Other where\n\nx :: Int\nx = 1\n");
+  git(root, "add", "-A");
+  git(root, "commit", "-q", "-m", "one");
+  await put(root, "Other.hs", "module Other where\n\nx :: Int\nx = 2\n");
+  git(root, "commit", "-q", "-a", "-m", "two");
+  return {
+    root,
+    remove: () => rm(root, { recursive: true, force: true }),
+  };
+}
