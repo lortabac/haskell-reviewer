@@ -1,6 +1,7 @@
 -- | A start-up run (plan §2.1): from the spawn to "UI usable", one
 -- on-demand module page while indexing, the end of indexing, idle
--- memory, stop.
+-- memory, stop. In diff mode (D-357) the UI's first page is on head,
+-- and @api\/session@ is part of "UI usable".
 module Bench.Startup
   ( -- * Types
     StartupRun (..),
@@ -17,6 +18,7 @@ where
 import Bench.Http (Gzip (..), HttpResponse (..))
 import Bench.IndexLog (IndexDone)
 import Bench.Machine (LoadAvg, getLoadAvg)
+import Bench.Mode (Mode (..), Side, modeSides)
 import Bench.ModuleList
   ( OnDemandStatus,
     OnDemandTimes (..),
@@ -44,7 +46,15 @@ import Bench.Run
     withSession,
   )
 import Bench.Shell (assetPaths)
-import Bench.Url (modulePath, searchPath)
+import Bench.Url
+  ( diffFilesPath,
+    filesPath,
+    indexingPath,
+    modulePath,
+    modulesPath,
+    searchPath,
+    sessionPath,
+  )
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (Concurrently (..), mapConcurrently)
 import Control.Monad (unless, when)
@@ -98,14 +108,19 @@ data StartupRun = StartupRun
   }
 
 -- | When each part of "UI usable" was there. The assets go out right
--- after the shell; the API requests after a look at
--- @api\/indexing\/tree@, all at once, like a browser's requests.
+-- after the shell; the API requests after a look at @api\/indexing@,
+-- all at once, like a browser's requests.
 data UiParts = UiParts
   { assetsUs :: Integer,
     prefsUs :: Integer,
+    -- | Diff mode only: the client waits for it (D-332).
+    sessionUs :: Maybe Integer,
     modulesUs :: Integer,
     searchUs :: Integer,
-    moduleUs :: Maybe Integer
+    moduleUs :: Maybe Integer,
+    -- | Diff mode only. Sent with the others (the client asks at once),
+    -- but not part of "UI usable".
+    diffFilesUs :: Maybe Integer
   }
 
 -- | The module page asked for while indexing.
@@ -114,12 +129,13 @@ data OnDemand = OnDemand
     -- | From request to the last byte (not since start).
     us :: Integer,
     status :: OnDemandStatus,
-    -- | ready + failed from @api\/indexing\/tree@ just before, of total.
+    -- | ready + failed from @api\/indexing@ just before, of total. Both
+    -- sides summed in diff mode.
     doneBefore :: Int,
     total :: Int
   }
 
--- | @api\/files\/tree@: how many entries, and where from.
+-- | @api\/files@ of the first side: how many entries, and where from.
 data FileList = FileList
   { count :: Int,
     source :: FileSource
@@ -133,8 +149,8 @@ data FileSource = FromGit | FromDisk
 -- * Running
 
 -- | One run. The sample is the module page to ask for while indexing.
-runStartup :: SessionConfig -> Maybe Sample -> IO (Either RunError StartupRun)
-runStartup cfg sample = (>>= finish) <$> withSession cfg (steps sample)
+runStartup :: SessionConfig -> Mode -> Maybe Sample -> IO (Either RunError StartupRun)
+runStartup cfg mode sample = (>>= finish) <$> withSession cfg (steps mode sample)
   where
     finish (build, ended) = build ended <$> requireRts ended
 
@@ -145,11 +161,15 @@ data ApiAnswers = ApiAnswers
     modules :: Timed,
     search :: Timed,
     modulePage :: Maybe Timed,
-    files :: Timed
+    files :: Timed,
+    -- | Diff mode only.
+    session :: Maybe Timed,
+    -- | Diff mode only.
+    diffFiles :: Maybe Timed
   }
 
-steps :: Maybe Sample -> Session -> IO (Ended -> RtsStats -> StartupRun)
-steps sample s = do
+steps :: Mode -> Maybe Sample -> Session -> IO (Ended -> RtsStats -> StartupRun)
+steps mode sample s = do
   shell <- getApi s Gzip ""
   ok "/" shell
   let assets = assetPaths shell.response.body
@@ -163,7 +183,7 @@ steps sample s = do
     runConcurrently $
       (,)
         <$> Concurrently (mapConcurrently (getPath s Gzip) assets)
-        <*> Concurrently (apiRequests sample s)
+        <*> Concurrently (apiRequests mode sample s)
 
   mapM_ (\(p, t) -> ok p t) (zip assets assetTs)
   mapM_ (\t -> unless (BS.length t.response.body > 0) (failWith "empty asset")) assetTs
@@ -181,17 +201,24 @@ steps sample s = do
   sequence_ (checkModulePage <$> sample <*> api.modulePage)
   ok "files" api.files
   fileList <- checkFilesBody api.files.response.body
+  mapM_ (\t -> ok "session" t >> decodeJson "session" t) api.session
+  mapM_ (\t -> ok "diff-files" t >> decodeJson "diff-files" t) api.diffFiles
 
   let uiSet =
-        [shell, api.prefs, api.modules, api.search] <> assetTs <> maybe [] pure api.modulePage
+        [shell, api.prefs, api.modules, api.search]
+          <> assetTs
+          <> maybe [] pure api.modulePage
+          <> maybe [] pure api.session
       assetsUs = maximum (map (.endUs) assetTs)
       parts =
         UiParts
           { assetsUs = assetsUs,
             prefsUs = api.prefs.endUs,
+            sessionUs = (.endUs) <$> api.session,
             modulesUs = api.modules.endUs,
             searchUs = api.search.endUs,
-            moduleUs = (.endUs) <$> api.modulePage
+            moduleUs = (.endUs) <$> api.modulePage,
+            diffFilesUs = (.endUs) <$> api.diffFiles
           }
 
   doneAt <- awaitDone s
@@ -249,17 +276,28 @@ steps sample s = do
         Right _ -> pure ()
 
 -- | The indexing look, then the API requests in parallel. @api\/prefs@
--- is there because the app waits for it before its first render.
-apiRequests :: Maybe Sample -> Session -> IO ApiAnswers
-apiRequests sample s = do
-  progress <- indexingProgress s
+-- is there because the app waits for it before its first render. The
+-- tree, search and files are the first side's (head in diff mode); the
+-- module page is the sample's side.
+apiRequests :: Mode -> Maybe Sample -> Session -> IO ApiAnswers
+apiRequests mode sample s = do
+  -- Both sides at once: one round trip, as in browse mode.
+  progress <- sumProgress <$> mapConcurrently (indexingProgress s) (NE.toList sides)
   runConcurrently $
     ApiAnswers progress
       <$> Concurrently (getApi s Gzip "api/prefs")
-      <*> Concurrently (getApi s Gzip "api/modules/tree")
-      <*> Concurrently (getApi s Gzip (searchPath (NE.head queries)))
-      <*> Concurrently (traverse (\m -> getApi s Gzip (modulePath m.ref)) sample)
-      <*> Concurrently (getApi s Gzip "api/files/tree")
+      <*> Concurrently (getApi s Gzip (modulesPath first))
+      <*> Concurrently (getApi s Gzip (searchPath first (NE.head queries)))
+      <*> Concurrently (traverse (\m -> getApi s Gzip (modulePath m.side m.ref)) sample)
+      <*> Concurrently (getApi s Gzip (filesPath first))
+      <*> Concurrently (diffOnly (getApi s Gzip sessionPath))
+      <*> Concurrently (diffOnly (getApi s Gzip diffFilesPath))
+  where
+    sides = modeSides mode
+    first = NE.head sides
+    diffOnly act = case mode of
+      Browse -> pure Nothing
+      _ -> Just <$> act
 
 -- | Fail the run unless it's a 200.
 ok :: String -> Timed -> IO ()
@@ -271,7 +309,7 @@ decodeJson :: String -> Timed -> IO Aeson.Value
 decodeJson what t =
   either (failWith . ((what <> ": ") <>)) pure (Aeson.eitherDecodeStrict t.response.body)
 
--- | @api\/indexing\/tree@ (D-160).
+-- | @api\/indexing\/\<side\>@ (D-160).
 data Progress = Progress
   { doneCount :: Int,
     total :: Int,
@@ -279,9 +317,9 @@ data Progress = Progress
     finished :: Bool
   }
 
-indexingProgress :: Session -> IO Progress
-indexingProgress s = do
-  t <- getApi s NoGzip "api/indexing/tree"
+indexingProgress :: Session -> Side -> IO Progress
+indexingProgress s side = do
+  t <- getApi s NoGzip (indexingPath side)
   ok "indexing" t
   v <- decodeJson "indexing" t
   either (failWith . ("indexing: " <>)) pure (Aeson.Types.parseEither parser v)
@@ -292,6 +330,14 @@ indexingProgress s = do
       failed <- o .: "failed"
       let n = ready + failed
       pure Progress {doneCount = n, total = total, finished = n == total}
+
+-- | Both sides as one.
+sumProgress :: [Progress] -> Progress
+sumProgress ps =
+  Progress {doneCount = n, total = t, finished = all (.finished) ps}
+  where
+    n = sum (map (.doneCount) ps)
+    t = sum (map (.total) ps)
 
 checkFilesBody :: ByteString -> IO FileList
 checkFilesBody body = case Aeson.eitherDecodeStrict body of

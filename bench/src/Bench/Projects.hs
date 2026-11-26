@@ -28,7 +28,10 @@ data Project = Project
   { name :: Text,
     role :: Role,
     url :: Text,
-    sha :: Text
+    sha :: Text,
+    -- | The base commit for the diff modes (D-357). 'Nothing': browse
+    -- only.
+    base :: Maybe Text
   }
   deriving (Eq, Show)
 
@@ -52,8 +55,8 @@ renderProjectsError (UnknownName n) = n <> ": not in bench/projects.txt"
 
 -- * Parsing and selection
 
--- | Parse the whole file: one @name role url sha@ per line, blank lines
--- and @#@ comments skipped.
+-- | Parse the whole file: one @name role url sha [base]@ per line, blank
+-- lines and @#@ comments skipped. No base, or @-@: browse only.
 parseProjectsFile :: Text -> Either ProjectsError [Project]
 parseProjectsFile text =
   traverse parseLine (filter (not . skip . snd) (zip [1 ..] (Text.lines text)))
@@ -64,12 +67,16 @@ parseProjectsFile text =
 
 parseLine :: (Int, Text) -> Either ProjectsError Project
 parseLine (n, l) = case Text.words l of
-  (nm : r : u : s : _) -> do
+  (nm : r : u : s : rest) -> do
     checkName n nm
     role <- parseRole n r
-    checkSha n s
-    Right Project {name = nm, role = role, url = u, sha = s}
-  _ -> Left (BadLine n "expected 4 fields: name role url sha")
+    checkSha n "sha" s
+    base <- case rest of
+      [] -> Right Nothing
+      ("-" : _) -> Right Nothing
+      (b : _) -> Just b <$ checkSha n "base sha" b
+    Right Project {name = nm, role = role, url = u, sha = s, base = base}
+  _ -> Left (BadLine n "expected 4 or 5 fields: name role url sha [base]")
 
 parseRole :: Int -> Text -> Either ProjectsError Role
 parseRole n r = case r of
@@ -88,10 +95,10 @@ checkName n nm
     okChar c = (c >= 'a' && c <= 'z') || isDigit c || c == '-'
 
 -- | Same shape as @fetch-projects.sh@'s @^[0-9a-f]{40}$@ check.
-checkSha :: Int -> Text -> Either ProjectsError ()
-checkSha n s
+checkSha :: Int -> Text -> Text -> Either ProjectsError ()
+checkSha n what s
   | Text.length s == 40 && Text.all isLowerHex s = Right ()
-  | otherwise = Left (BadLine n ("bad sha: " <> s))
+  | otherwise = Left (BadLine n ("bad " <> what <> ": " <> s))
   where
     isLowerHex c = isDigit c || (c >= 'a' && c <= 'f')
 

@@ -16,6 +16,7 @@ module Bench.Refs
   )
 where
 
+import Bench.Mode (Side (..), onSide)
 import Bench.Queries (RefsQuery, refsQueryText)
 import Bench.Stats (Latency, latency)
 import Data.List (nub)
@@ -25,7 +26,8 @@ import Data.Text (Text)
 
 -- | One refs request.
 data RefsTime = RefsTime
-  { query :: RefsQuery,
+  { side :: Side,
+    query :: RefsQuery,
     -- | From request to the last byte.
     us :: Integer,
     -- | When the request started, since the session started.
@@ -79,23 +81,27 @@ slowdownPercent base slow
   | otherwise = Just ((slow / base - 1) * 100)
 
 -- | The message for a refs query that got a 404 (with the body's
--- @what@, if any): the list is stale for the pin.
-staleQueryMessage :: RefsQuery -> Maybe Text -> Text
-staleQueryMessage q what =
+-- @what@, if any): the list is stale for the pin (or the base).
+staleQueryMessage :: Side -> RefsQuery -> Maybe Text -> Text
+staleQueryMessage side q what =
   "refs query "
     <> refsQueryText q
+    <> onSide side
     <> ": 404 (what: "
     <> fromMaybe "?" what
     <> "); update refsQueries in bench/src/Bench/Queries.hs"
+    <> case side of
+      Base -> " (one list for both sides: pick a name on both, or move the base)"
+      _ -> ""
 
 -- | Refs answers after indexing that look wrong: still partial, or no
 -- ref at all (the declaration's own binding always counts). Once per
 -- query.
 refsWarnings :: [RefsTime] -> [Text]
 refsWarnings ts =
-  [ "refs query " <> refsQueryText q <> ": partial after indexing"
-  | q <- nub [t.query | t <- ts, t.partial]
+  [ "refs query " <> refsQueryText q <> onSide s <> ": partial after indexing"
+  | (s, q) <- nub [(t.side, t.query) | t <- ts, t.partial]
   ]
-    <> [ "refs query " <> refsQueryText q <> ": total 0 after indexing"
-       | q <- nub [t.query | t <- ts, t.total == 0]
+    <> [ "refs query " <> refsQueryText q <> onSide s <> ": total 0 after indexing"
+       | (s, q) <- nub [(t.side, t.query) | t <- ts, t.total == 0]
        ]

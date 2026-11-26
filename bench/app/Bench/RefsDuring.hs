@@ -15,6 +15,7 @@ where
 import Bench.Http (Gzip (..), HttpResponse (..))
 import Bench.IndexLog (IndexDone)
 import Bench.Machine (LoadAvg, getLoadAvg)
+import Bench.Mode (Side)
 import Bench.Queries
   ( RefsAnswer (..),
     RefsQuery,
@@ -43,9 +44,9 @@ import Data.Text qualified as Text
 -- | Ask once. Fails the run unless it's a 200 with a refs answer. A
 -- 404 means the query list is stale for this pin: the message says
 -- where to fix it.
-timeRefs :: Session -> RefsQuery -> IO RefsTime
-timeRefs s q = do
-  t <- getApi s Gzip (refsPath q)
+timeRefs :: Session -> Side -> RefsQuery -> IO RefsTime
+timeRefs s side q = do
+  t <- getApi s Gzip (refsPath side q)
   let what = "refs query " <> Text.unpack (refsQueryText q)
   case t.response.status of
     200 -> case parseRefsAnswer t.response.body of
@@ -53,7 +54,8 @@ timeRefs s q = do
       Right a ->
         pure
           RefsTime
-            { query = q,
+            { side = side,
+              query = q,
               us = t.us,
               startUs = t.endUs - t.us,
               partial = a.partial,
@@ -63,7 +65,7 @@ timeRefs s q = do
             }
     404 ->
       failWith
-        (Text.unpack (staleQueryMessage q (parseNotFoundWhat t.response.body)))
+        (Text.unpack (staleQueryMessage side q (parseNotFoundWhat t.response.body)))
     other -> failWith (what <> ": expected 200, got " <> show other)
 
 -- | One run of refs queries while indexing.
@@ -77,12 +79,13 @@ data RefsDuringRun = RefsDuringRun
     loadAvg :: Maybe LoadAvg
   }
 
--- | One run: rounds of every query until the last answer of a round is
--- full, at most 'maxRounds'; then wait for the done line and stop (an
--- idle server, Note [Second SIGTERM] in "Bench.Run"). The same loop as
--- 'Bench.SearchDuring.runSearchDuring'.
-runRefsDuring :: SessionConfig -> NonEmpty RefsQuery -> IO (Either RunError RefsDuringRun)
-runRefsDuring cfg qs = fmap fst <$> withSession cfg steps
+-- | One run on one side: rounds of every query until the last answer
+-- of a round is full, at most 'maxRounds'; then wait for the done line
+-- and stop (an idle server, Note [Second SIGTERM] in "Bench.Run"). The
+-- same loop as 'Bench.SearchDuring.runSearchDuring'.
+runRefsDuring ::
+  SessionConfig -> Side -> NonEmpty RefsQuery -> IO (Either RunError RefsDuringRun)
+runRefsDuring cfg side qs = fmap fst <$> withSession cfg steps
   where
     steps s = do
       (ts, n) <- loop s 1 []
@@ -98,7 +101,7 @@ runRefsDuring cfg qs = fmap fst <$> withSession cfg steps
           }
     loop :: Session -> Int -> [NonEmpty RefsTime] -> IO ([NonEmpty RefsTime], Int)
     loop s n acc = do
-      ts <- mapM (timeRefs s) qs
+      ts <- mapM (timeRefs s side) qs
       if (NE.last ts).partial && n < maxRounds
         then loop s (n + 1) (ts : acc)
         else pure (ts : acc, n)

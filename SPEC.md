@@ -2204,7 +2204,8 @@ a framework would cost more than it saves.
   reproducibility, no-eval check); one end-to-end job, on Linux only
   (Chromium, Firefox, WebKit).
 - **Benchmarks** (`make bench`) run on three pinned reference projects: a
-  small one, a typical one and a 2,000-module one. They measure the §10
+  small one, a typical one and a 2,000-module one, in browse mode and in
+  diff mode against a pinned base commit (D-357). They measure the §10
   targets and memory. They are run by hand and before each release, not in
   CI, because shared runners are too noisy. CI only does a smoke run on the
   small project: it checks that the harness works, with no timing checks

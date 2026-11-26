@@ -109,7 +109,9 @@ data SessionConfig = SessionConfig
     tag :: String,
     -- | Extra @+RTS@ options (@--rts@), after ours.
     rtsOpts :: [String],
-    stats :: StatsFile
+    stats :: StatsFile,
+    -- | @--diff@'s argument; 'Nothing' for browse mode (D-357).
+    diff :: Maybe String
   }
 
 -- | Which RTS stats file to ask for. Only one: see "Bench.RtsStats".
@@ -265,9 +267,10 @@ runArgs cfg =
     "--idle-exit",
     "0",
     "--trace-file",
-    traceFileOf cfg,
-    "+RTS"
+    traceFileOf cfg
   ]
+    <> maybe [] (\spec -> ["--diff", spec]) cfg.diff
+    <> ["+RTS"]
     <> statsArgs
     <> cfg.rtsOpts
     <> ["-RTS", cfg.projectDir]

@@ -1,7 +1,8 @@
--- | The benchmark harness (SPEC §10, §11.9; D-76, D-215, D-303). Runs
--- the product binary against the pinned reference projects (D-82) and
--- reports the SPEC §10.1 targets, memory, GC pauses and the fallback
--- census.
+-- | The benchmark harness (SPEC §10, §11.9; D-76, D-215, D-303, D-357).
+-- Runs the product binary against the pinned reference projects (D-82),
+-- in browse mode and in diff mode against each project's base commit,
+-- and reports the SPEC §10.1 targets, memory, GC pauses and the
+-- fallback census.
 --
 -- Exit codes: 0 when every run worked, even if a target was missed
 -- (§10.3: being slow never fails this); 1 for a broken run (a refs
@@ -27,11 +28,27 @@ import Bench.Fallbacks
 import Bench.Http (Gzip (..), HttpResponse (..))
 import Bench.IndexLog (IndexDone (..))
 import Bench.Machine (LoadAvg (..), getLoadAvg, getMachineInfo)
+import Bench.Mode
+  ( Mode (..),
+    ModeRuns (..),
+    allModes,
+    diffSpec,
+    modeNames,
+    modeRuns,
+    modeSides,
+    modeText,
+    onSide,
+    parseModes,
+    projectModes,
+    sideText,
+  )
 import Bench.ModuleList
-  ( ModuleItem,
-    Queued (..),
+  ( Queued (..),
+    SideModules (..),
     Sized (..),
+    modeQueueOrder,
     parseModuleList,
+    pickDiffSamples,
     pickSamples,
     queueOrder,
   )
@@ -51,10 +68,11 @@ import Bench.Report
     ProjectReport (..),
     Report (..),
     Settings (..),
+    SideCount (..),
     ToolInfo (..),
-    encodeReportJson,
     renderTable,
   )
+import Bench.Report.Json (encodeReportJson)
 import Bench.RtsStats (checkUserRtsOpts)
 import Bench.Run
   ( RunError,
@@ -68,6 +86,7 @@ import Bench.Run
     withSession,
   )
 import Bench.SearchDuring (runSearchDuring)
+import Bench.Session (checkSession, parseSession)
 import Bench.Startup (StartupRun (..), runStartup)
 import Bench.Steady
   ( CensusPass (..),
@@ -77,12 +96,14 @@ import Bench.Steady
     TimedPass (..),
     runSteady,
   )
+import Bench.Url (modulesPath, sessionPath)
 import Control.Exception (Exception, IOException, throwIO, try)
-import Control.Monad (forM, mfilter, unless)
+import Control.Monad (forM, mfilter, unless, when)
 import Data.ByteString.Lazy qualified as LBS
 import Data.List (nub)
+import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe (fromMaybe, maybeToList)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as Text.IO
@@ -125,6 +146,7 @@ main = do
 
 data Options = Options
   { exe :: FilePath,
+    modes :: [Mode],
     listFile :: FilePath,
     fallbacksFile :: FilePath,
     runs :: Int,
@@ -157,6 +179,16 @@ optionsParser =
       ( Opt.long "exe"
           <> Opt.metavar "PATH"
           <> Opt.help "The haskell-reviewer binary to benchmark"
+      )
+    <*> Opt.option
+      (Opt.eitherReader parseModes)
+      ( Opt.long "modes"
+          <> Opt.metavar "LIST"
+          <> Opt.value allModes
+          <> Opt.showDefaultWith (const (Text.unpack modeNames))
+          <> Opt.help
+            "Modes, comma separated: browse, range (--diff BASE..HEAD), \
+            \worktree (--diff BASE). The diff modes need a base in the project list"
       )
     <*> Opt.strOption
       ( Opt.long "list"
@@ -232,18 +264,24 @@ readCount flag s = case reads s of
 
 runBench :: Options -> [Expected] -> [Project] -> IO ()
 runBench opts rows projects = do
+  -- Only diff modes asked, for projects with no base: nothing to run.
+  when (null pairs) $ do
+    mapM_ (hPutStrLn stderr . ("haskell-reviewer-bench: " <>) . Text.unpack) notes
+    hPutStrLn stderr "haskell-reviewer-bench: nothing to run"
+    exitWith (ExitFailure 2)
   started <- getCurrentTime
   tool <- getToolInfo opts.exe
   machine <- getMachineInfo
   load <- getLoadAvg
   withSystemTempDirectory "haskell-reviewer-bench" $ \tmp -> do
-    outcomes <- mapM (runProject opts rows tmp) projects
-    let succeeded = [pr | Just pr <- outcomes]
-        failedNames = [p.name | (p, Nothing) <- zip projects outcomes]
+    outcomes <- forM pairs $ \(p, m) -> (p,m,) <$> runProject opts rows tmp p m
+    let succeeded = [pr | (_, _, Just pr) <- outcomes]
+        failedNames = [runLabel p m | (p, m, Nothing) <- outcomes]
         badFallbacks =
-          [ pr.project.name
+          [ runLabel pr.project pr.mode
           | pr <- succeeded,
-            failsBench pr.fallbacks.strictness pr.fallbacks.verdict
+            Just fc <- [pr.fallbacks],
+            failsBench fc.strictness fc.verdict
           ]
         report =
           Report
@@ -251,7 +289,8 @@ runBench opts rows projects = do
               label = opts.label,
               settings =
                 Settings
-                  { runs = opts.runs,
+                  { modes = asked,
+                    runs = opts.runs,
                     warmup = opts.warmup,
                     steadyRuns = opts.steadyRuns,
                     searchRuns = opts.searchRuns,
@@ -264,8 +303,10 @@ runBench opts rows projects = do
               tool = tool,
               machine = machine,
               loadAtStart = load,
-              projects = succeeded
+              projects = succeeded,
+              notes = notes
             }
+    mapM_ (hPutStrLn stderr . ("haskell-reviewer-bench: " <>) . Text.unpack) notes
     Text.IO.putStr (renderTable report)
     maybe (pure ()) (`LBS.writeFile` encodeReportJson report) opts.jsonOut
     maybe (pure ()) (`Text.IO.writeFile` renderTable report) opts.reportOut
@@ -279,11 +320,28 @@ runBench opts rows projects = do
           <> ": "
           <> show (map Text.unpack badFallbacks)
     exitWith (if null failedNames && null badFallbacks then ExitSuccess else ExitFailure 1)
+  where
+    -- The census is a browse thing (D-357).
+    asked = if opts.censusOnly then [Browse] else opts.modes
+    pairs = [(p, m) | p <- projects, m <- projectModes asked p]
+    notes =
+      [ p.name <> ": no base commit, so no " <> Text.intercalate ", " (map modeText s)
+      | p <- projects,
+        let s = filter (`notElem` projectModes asked p) asked,
+        not (null s)
+      ]
 
--- | One project: check its pin, read its module list, then the runs.
--- 'Nothing' on any failure (already reported on stderr).
-runProject :: Options -> [Expected] -> FilePath -> Project -> IO (Maybe ProjectReport)
-runProject opts rows tmp project = do
+-- | "pandoc", "pandoc (range)": for messages.
+runLabel :: Project -> Mode -> Text
+runLabel p Browse = p.name
+runLabel p m = p.name <> " (" <> modeText m <> ")"
+
+-- | One project in one mode: check its pin (and base), read its module
+-- trees, then the runs. 'Nothing' on any failure (already reported on
+-- stderr).
+runProject ::
+  Options -> [Expected] -> FilePath -> Project -> Mode -> IO (Maybe ProjectReport)
+runProject opts rows tmp project mode = do
   result <- try @BenchFailure go
   case result of
     Right pr -> pure (Just pr)
@@ -291,33 +349,49 @@ runProject opts rows tmp project = do
       hPutStrLn stderr (prefix <> err)
       pure Nothing
   where
-    prefix = "haskell-reviewer-bench: " <> Text.unpack project.name <> ": "
+    prefix = "haskell-reviewer-bench: " <> Text.unpack (runLabel project mode) <> ": "
     progress msg = hPutStrLn stderr (prefix <> msg)
     orFail = either (throwBench . renderRunError) pure
+    spec = diffSpec mode project
+    rules = modeRuns mode
+    sides = modeSides mode
+    firstSide = NE.head sides
     go = do
       dir <- projectDir opts project >>= either throwBench pure
       checkPin dir project >>= either throwBench pure
+      when rules.needsBase $
+        mapM_ (\b -> checkBase dir b >>= either throwBench pure) project.base
+      when rules.needsClean $ checkClean dir >>= either throwBench pure
       let cfg tag stats =
             SessionConfig
               { exe = opts.exe,
                 projectDir = dir,
                 tmpDir = tmp,
-                tag = Text.unpack project.name <> "-" <> tag,
+                tag = Text.unpack (project.name <> "-" <> modeText mode) <> "-" <> tag,
                 rtsOpts = opts.rts,
-                stats = stats
+                stats = stats,
+                diff = Text.unpack <$> spec
               }
       progress "reading the module list"
-      items <- listModules (cfg "list" TStats) >>= orFail
-      sizes <- forM (queueOrder items) $ \q -> do
+      trees <- listModules (cfg "list" TStats) mode project >>= orFail
+      let queue = modeQueueOrder trees
+          headQueue = [q | q <- queue, q.side == firstSide]
+      sizes <- forM headQueue $ \q -> do
         size <- fileSize (dir </> q.path)
         -- Unreadable: it then can't be the largest.
-        pure Sized {ref = q.ref, bytes = fromMaybe 0 size}
-      let samples = pickSamples sizes
+        pure Sized {side = q.side, ref = q.ref, bytes = fromMaybe 0 size}
+      let samples = case mode of
+            Browse -> pickSamples sizes
+            _ -> pickDiffSamples sizes queue
           sampleFor i = case samples of
             [] -> Nothing
             _ -> Just (samples !! (i `mod` length samples))
           expected = lookupExpected project.name project.sha rows
           refs = refsQueries project.name
+          steadyRuns = maybe id min rules.maxSteadyRuns opts.steadyRuns
+          duringRuns n = if rules.duringRuns then n else 0
+          startup tag i =
+            runStartup (cfg tag TStats) mode (sampleFor (i - 1)) >>= orFail
           loop :: String -> Int -> (Int -> IO a) -> IO [a]
           loop what n f =
             forM [1 .. n] $ \i -> do
@@ -339,17 +413,18 @@ runProject opts rows tmp project = do
                       seed = 1
                     }
             s <- loop "census run" 1 $ \_ ->
-              runSteady (cfg "census" TStats) items plan >>= orFail
+              runSteady (cfg "census" TStats) trees plan >>= orFail
             pure ([], s, [], [])
           else do
             _ <- loop "warm-up run" opts.warmup $ \i ->
-              runStartup (cfg ("warmup-" <> show i) TStats) (sampleFor (i - 1)) >>= orFail
+              startup ("warmup-" <> show i) i
             st <- loop "start-up run" opts.runs $ \i ->
-              runStartup (cfg ("startup-" <> show i) TStats) (sampleFor (i - 1)) >>= orFail
-            sd <- loop "steady run" opts.steadyRuns $ \i ->
+              startup ("startup-" <> show i) i
+            sd <- loop "steady run" steadyRuns $ \i ->
               let plan =
                     SteadyPlan
-                      { census = if i == 1 then CensusPass else NoCensusPass,
+                      { census =
+                          if i == 1 && rules.census then CensusPass else NoCensusPass,
                         timed = TimedPass,
                         idlePages = opts.navIdle,
                         searchRounds = 5,
@@ -358,13 +433,14 @@ runProject opts rows tmp project = do
                         textRounds = 5,
                         seed = i
                       }
-               in runSteady (cfg ("steady-" <> show i) GcStats) items plan >>= orFail
-            sr <- loop "search-during run" opts.searchRuns $ \i ->
-              runSearchDuring (cfg ("search-" <> show i) TStats) >>= orFail
+               in runSteady (cfg ("steady-" <> show i) GcStats) trees plan >>= orFail
+            -- While indexing: the first side only (head in diff mode).
+            sr <- loop "search-during run" (duringRuns opts.searchRuns) $ \i ->
+              runSearchDuring (cfg ("search-" <> show i) TStats) firstSide >>= orFail
             rd <- case NE.nonEmpty refs of
               Nothing -> pure []
-              Just qs -> loop "refs-during run" opts.refsRuns $ \i ->
-                runRefsDuring (cfg ("refs-" <> show i) TStats) qs >>= orFail
+              Just qs -> loop "refs-during run" (duringRuns opts.refsRuns) $ \i ->
+                runRefsDuring (cfg ("refs-" <> show i) TStats) firstSide qs >>= orFail
             pure (st, sd, sr, rd)
       let census = case steadies of
             s : _ -> s.census
@@ -375,12 +451,28 @@ runProject opts rows tmp project = do
           strictness
             | opts.censusOnly || project.role == Extra = RowOptional
             | otherwise = RowRequired
-          parsed = length (queueOrder items)
+          counts =
+            NE.map
+              ( \t ->
+                  SideCount
+                    { side = t.side,
+                      listed = length t.items,
+                      parsed = length (queueOrder t.side t.items)
+                    }
+              )
+              trees
+          parsed = sum (NE.map (.parsed) counts)
           runKind = if opts.censusOnly then CensusRunKind else SteadyRunKind
+          -- The text-only count is checked against the census row,
+          -- which is for browse mode.
+          expectedForDone = if rules.census then expected else NoRow
       pure
         ProjectReport
           { project = project,
-            modulesListed = length items,
+            mode = mode,
+            diffSpec = spec,
+            sides = counts,
+            modulesListed = sum (NE.map (.listed) counts),
             modulesParsed = parsed,
             samples = samples,
             startup = startups,
@@ -389,16 +481,20 @@ runProject opts rows tmp project = do
             refsQueries = refs,
             refsDuring = refsDuring,
             fallbacks =
-              FallbackCheck
-                { got = census,
-                  expected = expected,
-                  diffs = diffs,
-                  verdict = fallbackVerdict census expected diffs,
-                  strictness = strictness
-                },
+              if rules.census
+                then
+                  Just
+                    FallbackCheck
+                      { got = census,
+                        expected = expected,
+                        diffs = diffs,
+                        verdict = fallbackVerdict census expected diffs,
+                        strictness = strictness
+                      }
+                else Nothing,
             warnings =
               projectWarnings
-                expected
+                expectedForDone
                 parsed
                 ( [(StartupRunKind, r.done, r.loadAvg) | r <- startups]
                     <> [(runKind, r.done, r.loadAvg) | r <- steadies]
@@ -411,11 +507,11 @@ runProject opts rows tmp project = do
 -- | Text searches that hit the deadline (stopped): once per query.
 textWarnings :: [SteadyRun] -> [Text]
 textWarnings runs =
-  [ "text search \"" <> q <> "\": stopped at the deadline"
-  | q <- nub [t.query | t <- ts, t.stopped]
+  [ "text search \"" <> q <> "\"" <> onSide s <> ": stopped at the deadline"
+  | (s, q) <- nub [(t.side, t.query) | t <- ts, t.stopped]
   ]
   where
-    ts = concat [maybeToList r.textFirst <> r.textTimes <> r.textPages | r <- runs]
+    ts = concat [r.textFirst <> r.textTimes <> r.textPages | r <- runs]
 
 -- | Which kind of run a done line came from, for the warnings.
 data RunKind = StartupRunKind | SteadyRunKind | CensusRunKind
@@ -485,20 +581,34 @@ projectWarnings expected parsed doneLines diffs =
     showT :: (Show a) => a -> Text
     showT = Text.pack . show
 
--- | Read the module list: spawn, one request, stop. Waits for the done
--- line first, so the stop reaches an idle server: on macOS a busy one
--- can miss it (Note [Second SIGTERM] in "Bench.Run").
-listModules :: SessionConfig -> IO (Either RunError [ModuleItem])
-listModules cfg = fmap fst <$> withSession cfg steps
+-- | Read the module trees: spawn, a few requests, stop. Checks
+-- @api\/session@ first: the mode and commits we asked for (D-357).
+-- Waits for the done line first, so the stop reaches an idle server: on
+-- macOS a busy one can miss it (Note [Second SIGTERM] in "Bench.Run").
+listModules ::
+  SessionConfig -> Mode -> Project -> IO (Either RunError (NonEmpty SideModules))
+listModules cfg mode project = fmap fst <$> withSession cfg steps
   where
     steps s = do
-      t <- getApi s Gzip "api/modules/tree"
-      unless (t.response.status == 200) $
-        failWith ("modules: expected 200, got " <> show t.response.status)
-      items <-
-        either (failWith . ("modules: " <>) . show) pure (parseModuleList t.response.body)
+      sess <- getApi s Gzip sessionPath
+      unless (sess.response.status == 200) $
+        failWith ("session: expected 200, got " <> show sess.response.status)
+      answer <-
+        either (failWith . ("session: " <>) . show) pure (parseSession sess.response.body)
+      either (failWith . Text.unpack) pure (checkSession mode project answer)
+      trees <- forM (modeSides mode) $ \side -> do
+        let what = "modules " <> Text.unpack (sideText side)
+        t <- getApi s Gzip (modulesPath side)
+        unless (t.response.status == 200) $
+          failWith (what <> ": expected 200, got " <> show t.response.status)
+        items <-
+          either
+            (failWith . ((what <> ": ") <>) . show)
+            pure
+            (parseModuleList t.response.body)
+        pure SideModules {side = side, items = items}
       _ <- awaitDone s
-      pure items
+      pure trees
 
 -- | 'Nothing' if we can't read it.
 fileSize :: FilePath -> IO (Maybe Integer)
@@ -547,6 +657,32 @@ checkPin dir project = do
                 <> "; run bench/fetch-projects.sh"
             )
     ExitFailure _ -> Left (dir <> ": git rev-parse failed; run bench/fetch-projects.sh")
+
+-- | Is the base commit there (D-357)? A depth-1 fetch has it only if
+-- fetch-projects.sh fetched it.
+checkBase :: FilePath -> Text -> IO (Either String ())
+checkBase dir sha = do
+  let base = Text.unpack sha
+  (code, _, _) <-
+    readCreateProcessWithExitCode
+      (proc "git" ["-C", dir, "cat-file", "-e", base <> "^{commit}"])
+      ""
+  pure $ case code of
+    ExitSuccess -> Right ()
+    ExitFailure _ ->
+      Left (dir <> ": no base commit " <> base <> "; run bench/fetch-projects.sh")
+
+-- | Worktree mode compares the working tree: it must be the clean
+-- checkout, else we'd measure local edits.
+checkClean :: FilePath -> IO (Either String ())
+checkClean dir = do
+  (code, out, _) <-
+    readCreateProcessWithExitCode (proc "git" ["-C", dir, "status", "--porcelain"]) ""
+  pure $ case code of
+    ExitSuccess
+      | null out -> Right ()
+      | otherwise -> Left (dir <> ": not clean; run bench/fetch-projects.sh")
+    ExitFailure _ -> Left (dir <> ": git status failed; run bench/fetch-projects.sh")
 
 -- | What the product binary says about itself: its version (printed on
 -- stderr, by design: see "HaskellReviewer.App.Run"), and its RTS build

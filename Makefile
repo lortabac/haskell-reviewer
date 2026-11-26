@@ -5,6 +5,8 @@ BINDIR ?= $(PREFIX)/bin
 # count, as in the tool.
 CONFDIR ?= $(if $(filter /%,$(XDG_CONFIG_HOME)),$(XDG_CONFIG_HOME),$(HOME)/.config)/haskell-reviewer
 BENCH_RUNS ?= 10
+# Comma list: browse, range, worktree (D-357). Empty: all three.
+BENCH_MODES ?=
 BENCH_PROJECTS ?=
 BENCH_JSON ?=
 # Text report only, without the build log and progress lines.
@@ -24,9 +26,11 @@ test:
 	$(CABAL) test all --test-show-details=direct
 
 # Runs the three reference projects (SPEC §10, §11.9; D-76, D-82, D-215,
-# D-303, D-308): the §10.1 targets (module and source pages, search, find
-# references, text search), memory, GC pauses and the fallback census. 10-20
-# minutes. By hand, before a release: shared CI runners are too noisy for
+# D-303, D-308, D-357): the §10.1 targets (module and source pages, search,
+# find references, text search), memory, GC pauses and the fallback census.
+# In browse mode, then in diff mode against each project's base commit
+# (range, then the working tree). About 45-60 minutes; BENCH_MODES=browse
+# for 10-20. By hand, before a release: shared CI runners are too noisy for
 # timings. Needs network the first time, to fetch the projects into
 # bench/projects/ (git-ignored). Exit 1 for a broken run or wrong fallback
 # counts, never for a missed target.
@@ -35,6 +39,7 @@ bench: build
 	"$$($(CABAL) list-bin bench:haskell-reviewer-bench)" \
 	    --exe "$$($(CABAL) list-bin exe:haskell-reviewer)" \
 	    --runs $(BENCH_RUNS) \
+	    $(if $(BENCH_MODES),--modes $(BENCH_MODES)) \
 	    $(if $(BENCH_JSON),--json $(BENCH_JSON)) \
 	    $(if $(BENCH_REPORT),--report $(BENCH_REPORT)) \
 	    $(if $(BENCH_LABEL),--label "$(BENCH_LABEL)") \
@@ -43,8 +48,8 @@ bench: build
 	    $(BENCH_PROJECTS)
 
 # CI smoke test (D-76): checks the harness itself works, on one small
-# project, with no timing checks; the fallback census and the refs
-# queries are checked. Needs network the first time.
+# project, in all three modes, with no timing checks; the fallback census
+# and the refs queries are checked. Needs network the first time.
 bench-smoke: build
 	bench/fetch-projects.sh optparse-applicative
 	"$$($(CABAL) list-bin bench:haskell-reviewer-bench)" \

@@ -16,6 +16,7 @@ where
 
 import Bench.Http (Gzip (..), HttpResponse (..))
 import Bench.Machine (LoadAvg, getLoadAvg)
+import Bench.Mode (Side)
 import Bench.Queries (SearchAnswer (..), parseSearchAnswer, queries)
 import Bench.Run
   ( DoneAt (..),
@@ -35,7 +36,8 @@ import Data.Text (Text)
 
 -- | One search request.
 data QueryTime = QueryTime
-  { query :: Text,
+  { side :: Side,
+    query :: Text,
     -- | From request to the last byte.
     us :: Integer,
     partial :: Bool,
@@ -43,16 +45,23 @@ data QueryTime = QueryTime
   }
 
 -- | Ask once. Fails the run unless it's a 200 with a search answer.
-timeQuery :: Session -> Text -> IO QueryTime
-timeQuery s q = do
-  t <- getApi s Gzip (searchPath q)
+timeQuery :: Session -> Side -> Text -> IO QueryTime
+timeQuery s side q = do
+  t <- getApi s Gzip (searchPath side q)
   let what = "search " <> show q
   if t.response.status /= 200
     then failWith (what <> ": expected 200, got " <> show t.response.status)
     else case parseSearchAnswer t.response.body of
       Left e -> failWith (what <> ": " <> show e)
       Right a ->
-        pure QueryTime {query = q, us = t.us, partial = a.partial, matches = a.matches}
+        pure
+          QueryTime
+            { side = side,
+              query = q,
+              us = t.us,
+              partial = a.partial,
+              matches = a.matches
+            }
 
 -- | One run of searches while indexing.
 data SearchDuringRun = SearchDuringRun
@@ -64,11 +73,11 @@ data SearchDuringRun = SearchDuringRun
     loadAvg :: Maybe LoadAvg
   }
 
--- | One run: rounds of every query until the last answer of a round is
--- full, at most 'maxRounds'; then wait for the done line and stop.
--- 'Bench.RefsDuring.runRefsDuring' has the same loop.
-runSearchDuring :: SessionConfig -> IO (Either RunError SearchDuringRun)
-runSearchDuring cfg = fmap fst <$> withSession cfg steps
+-- | One run on one side: rounds of every query until the last answer
+-- of a round is full, at most 'maxRounds'; then wait for the done line
+-- and stop. 'Bench.RefsDuring.runRefsDuring' has the same loop.
+runSearchDuring :: SessionConfig -> Side -> IO (Either RunError SearchDuringRun)
+runSearchDuring cfg side = fmap fst <$> withSession cfg steps
   where
     steps s = do
       (ts, n) <- loop s 1 []
@@ -83,7 +92,7 @@ runSearchDuring cfg = fmap fst <$> withSession cfg steps
           }
     loop :: Session -> Int -> [NonEmpty QueryTime] -> IO ([NonEmpty QueryTime], Int)
     loop s n acc = do
-      ts <- mapM (timeQuery s) queries
+      ts <- mapM (timeQuery s side) queries
       if (NE.last ts).partial && n < maxRounds
         then loop s (n + 1) (ts : acc)
         else pure (ts : acc, n)

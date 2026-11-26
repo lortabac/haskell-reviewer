@@ -1,5 +1,6 @@
 module Bench.TargetsTest (tests) where
 
+import Bench.Mode (Side (..))
 import Bench.Projects (Role (..))
 import Bench.Targets
   ( Bound (..),
@@ -12,20 +13,38 @@ import Bench.Targets
     refsAfterP95,
     renderVerdict,
     searchAfterMedian,
+    sideVerdicts,
     textSearchAfterMedian,
     textSearchAfterP95,
     uiUsable,
     urlAndAccepting,
     verdict,
+    verdictOf,
   )
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (testCase, (@?=))
+import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 tests :: TestTree
 tests =
   testGroup
     "Bench.Targets"
-    [ testCase "< 300 ms: exactly 300 ms is a miss" $ do
+    [ testCase "verdictOf: the target's statistic and the max" $ do
+        v <- maybe (assertFailure "no verdict") pure (verdictOf navigation [10, 20, 30])
+        v.valueUs @?= 30
+        v.maxUs @?= Just 30
+        v.side @?= Nothing
+        (.valueUs) <$> verdictOf urlAndAccepting [10, 20, 90] @?= Just 20
+        verdictOf navigation [] @?= Nothing,
+      testCase "one verdict per side: a slow base can't hide behind head" $ do
+        let vs =
+              sideVerdicts
+                navigation
+                [(Just Head, replicate 99 1_000), (Just Base, [200_000])]
+        [(v.side, v.met) | v <- vs] @?= [(Just Head, True), (Just Base, False)],
+      testCase "one verdict per side: no samples, no verdict" $
+        map (.side) (sideVerdicts navigation [(Nothing, [5]), (Just Base, [])])
+          @?= [Nothing],
+      testCase "< 300 ms: exactly 300 ms is a miss" $ do
         (verdict urlAndAccepting 299_999 Nothing).met @?= True
         (verdict urlAndAccepting 300_000 Nothing).met @?= False,
       testCase "≤ 30 ms: exactly 30 ms is ok" $ do

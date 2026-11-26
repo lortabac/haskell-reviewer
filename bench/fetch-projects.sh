@@ -7,9 +7,11 @@
 #   NAME...      these projects
 #
 # Each project goes to ${REFERENCE_PROJECTS_DIR:-bench/projects}/<name>,
-# as a shallow clone of the pinned commit. A dir already at the right
-# commit and clean is left alone; anything else is deleted and fetched
-# again. Never fetches submodules, never builds or runs anything there.
+# as a shallow clone of the pinned commit, checked out, plus its base
+# commit if it has one (depth 1 each, D-357). A dir already at the right
+# commit, clean and with the base is left alone; anything else is
+# deleted and fetched again. Never fetches submodules, never builds or
+# runs anything there.
 # Exits non-zero if any project fails.
 
 set -u
@@ -46,25 +48,45 @@ wanted() {
   fi
 }
 
+# Is the base there? Always yes with no base.
+has_base() {
+  [ -z "$2" ] || git -C "$1" cat-file -e "$2^{commit}" 2>/dev/null
+}
+
+# A ref on the base, so git gc never drops it.
+keep_base() {
+  [ -z "$2" ] || git -C "$1" update-ref refs/bench/base "$2"
+}
+
 fetch() {
-  name=$1 url=$2 sha=$3
+  name=$1 url=$2 sha=$3 base=$4
   dir="$dest/$name"
   if [ -d "$dir" ] \
      && [ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" = "$sha" ] \
+     && has_base "$dir" "$base" \
      && [ -z "$(git -C "$dir" status --porcelain 2>/dev/null)" ]; then
+    # The ref may be missing (fetched by hand): set it, it's cheap.
+    keep_base "$dir" "$base" || return 1
     echo "$name: up to date"
     return 0
   fi
-  echo "$name: fetching $sha"
+  echo "$name: fetching $sha${base:+ and base $base}"
   rm -rf "$dir" || return 1
   mkdir -p "$dir" || return 1
   git -C "$dir" init -q || return 1
   git -C "$dir" -c core.hooksPath=/dev/null fetch -q --depth 1 --no-tags \
-      --no-recurse-submodules "$url" "$sha" || return 1
+      --no-recurse-submodules "$url" "$sha" ${base:+"$base"} || return 1
   git -C "$dir" -c core.hooksPath=/dev/null -c submodule.recurse=false \
-      checkout -q --detach FETCH_HEAD || return 1
+      checkout -q --detach "$sha" || return 1
   [ "$(git -C "$dir" rev-parse HEAD)" = "$sha" ] || {
     echo "$name: HEAD is not $sha" >&2; return 1; }
+  has_base "$dir" "$base" || { echo "$name: no base $base" >&2; return 1; }
+  keep_base "$dir" "$base" || return 1
+  # Right after a checkout every index entry is racy, so the product
+  # would hash every file with --diff REV. Wait a second, then let git
+  # refresh the index, as a user's repo would have it.
+  sleep 1
+  git -C "$dir" status --porcelain >/dev/null || return 1
 }
 
 [ -f "$list" ] || { echo "missing $list" >&2; exit 1; }
@@ -72,7 +94,7 @@ fetch() {
 failed=0
 found=""
 # fd 3, so git can't eat the list from stdin
-while read -r name prole url sha rest <&3; do
+while read -r name prole url sha base rest <&3; do
   case "$name" in ''|'#'*) continue ;; esac
   wanted "$name" "$prole" || continue
   found="$found $name"
@@ -82,7 +104,11 @@ while read -r name prole url sha rest <&3; do
   if ! printf '%s\n' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
     echo "$name: bad sha '$sha'" >&2; failed=1; continue
   fi
-  fetch "$name" "$url" "$sha" || { echo "$name: FAILED" >&2; failed=1; }
+  [ "$base" = "-" ] && base=""
+  if [ -n "$base" ] && ! printf '%s\n' "$base" | grep -Eq '^[0-9a-f]{40}$'; then
+    echo "$name: bad base '$base'" >&2; failed=1; continue
+  fi
+  fetch "$name" "$url" "$sha" "$base" || { echo "$name: FAILED" >&2; failed=1; }
 done 3< "$list"
 
 # Names asked for but not in the list
