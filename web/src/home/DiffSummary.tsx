@@ -37,7 +37,7 @@ export function DiffSummary(props: { session: DiffSession }): JSX.Element {
     <>
       <Revisions session={props.session} />
       <h2>Changes</h2>
-      <Show when={diff.loading()}>
+      <Show when={diff.loading() && diff.files() === undefined}>
         <p class="home-note">{loadingText}</p>
       </Show>
       <Show when={diff.failed()}>

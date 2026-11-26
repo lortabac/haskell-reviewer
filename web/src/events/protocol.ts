@@ -1,6 +1,6 @@
 // Messages from the events worker (or the per-tab hub) to a tab.
 // See SPEC §11.6.2.
-import { decodeIndexing, type Indexing } from "../api/events";
+import { decodeGeneration, decodeIndexing, type Indexing } from "../api/events";
 
 export type Status = "connecting" | "open" | "reconnecting" | "ended";
 
@@ -10,6 +10,10 @@ export type WorkerMessage =
   // Indexing progress (D-210): forwarded from the server's own
   // "indexing" SSE event, so a tab can refresh a partial search.
   | { type: "indexing"; indexing: Indexing }
+  // A reload swapped in a new generation (D-351, D-354): from the
+  // server's "generation" SSE event. replay: the hub's latest, sent to
+  // a listener that joins late, not a new event.
+  | { type: "generation"; generation: number; replay?: true }
   // The worker has no EventSource (some browsers). The tab falls back
   // to its own stream.
   | { type: "unsupported" };
@@ -40,6 +44,15 @@ export function decodeWorkerMessage(data: unknown): WorkerMessage | undefined {
     case "indexing":
       try {
         return { type: "indexing", indexing: decodeIndexing(msg.indexing) };
+      } catch {
+        return undefined;
+      }
+    case "generation":
+      try {
+        const generation = decodeGeneration(msg).generation;
+        return msg.replay === true
+          ? { type: "generation", generation, replay: true }
+          : { type: "generation", generation };
       } catch {
         return undefined;
       }

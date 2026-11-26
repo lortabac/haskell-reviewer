@@ -24,6 +24,8 @@ import { fileStep, sourceOrder } from "../diff/fileOrder";
 import { filesWhy, useDiffFiles } from "../diff/store";
 import { stepTo } from "../diff/rows";
 import { fileStepTexts, stepTexts } from "../diff/words";
+import { useAnswerGeneration } from "../events/generation";
+import { useGoneHome, useQuietReload } from "../events/ReloadApply";
 import { bannerText } from "../modules/notices";
 import { useModules } from "../modules/store";
 import { declAtLine, outlineStep } from "../keys/outline";
@@ -116,10 +118,12 @@ function FilePage(props: { path: string }): JSX.Element {
   // Only the result for this path, never a stale one.
   const result = () => (file.state === "ready" ? file() : undefined);
   const notFound = () => result()?.kind === "not-found";
+  useGoneHome(notFound, () => props.path);
   const view = (): View | undefined => {
     const r = result();
     return r?.kind === "ok" ? r.value : undefined;
   };
+  useAnswerGeneration(() => view()?.generation);
   const lexed = createSource(
     () => props.path,
     () => view()?.generation,
@@ -155,6 +159,16 @@ function FilePage(props: { path: string }): JSX.Element {
     missing: (to) =>
       to === "diff" ? (diffHooks?.why() ?? changesTexts.unchanged) : undefined,
     leave: () => leave?.(),
+    // A reload: the cursor's line (D-354). T17b keeps the code line.
+    here: () => {
+      const c = diffHooks?.cursor();
+      return c === undefined
+        ? undefined
+        : {
+            href: lineHref(side(), props.path, c.line),
+            state: { origin: { col: c.col } },
+          };
+    },
   });
   // b: the path only (FileText adds the line). Also binary files,
   // symlinks and not found (it may be on the other side).
@@ -299,12 +313,14 @@ function Symlink(props: {
   );
 }
 
-// What the page tells the header's Diff link and `3`.
+// What the text tells the page: for the header's Diff link and `3`,
+// and the cursor (where a reload lands, D-354).
 interface DiffHooks {
   // The diff at the cursor's line.
   at: () => ViewTarget | undefined;
   // Why there is no diff to show, if the state says.
   why: () => string | undefined;
+  cursor: () => { line: number; col: number } | undefined;
 }
 
 // The text in the source view. #L<n>[-L<m>] marks those lines and
@@ -322,6 +338,7 @@ function FileText(props: {
 }): JSX.Element {
   const side = usePageSide();
   const location = useLocation();
+  const quietReload = useQuietReload();
   const base = useResolvedPath(() => "/");
   const index = createMemo(() => lineIndex(props.text));
   // Diff mode: the change signs, and n / p between them (D-348).
@@ -537,7 +554,10 @@ function FileText(props: {
       // search mark: it would move the cursor to its own column.
       const origin = originOf(state);
       markLanded(state, m.from, cp, origin === undefined ? len : undefined);
-      if (origin !== undefined) {
+      // A reload with focus outside main: the cursor only (D-354).
+      if (origin !== undefined && quietReload(state)) {
+        a.setCursor(m.from, origin.col);
+      } else if (origin !== undefined) {
         a.focusAt(m.from, origin.col);
         if (untrack(hl) === undefined) {
           land = { line: m.from, col: origin.col };
@@ -740,6 +760,10 @@ function FileText(props: {
         : { href, state: { codeJump: true } };
     },
     why: () => changesWhy(changes.state()),
+    cursor: () => {
+      const c = api?.cursor();
+      return c === undefined ? undefined : { line: c.line, col: c.col };
+    },
   });
   onCleanup(() => props.setDiffHooks?.(undefined));
   let wrap!: HTMLDivElement;

@@ -33,6 +33,8 @@ import type { LexedSource } from "../api/source";
 import { copyText } from "../copy/clipboard";
 import { CopyButton } from "../copy/CopyButton";
 import { location as locationText, targetCopyText } from "../copy/names";
+import { useAnswerGeneration } from "../events/generation";
+import { useGoneHome, useQuietReload } from "../events/ReloadApply";
 import {
   apiFileUrl,
   hrefFor,
@@ -329,6 +331,11 @@ function DiffPage(props: { path: string }): JSX.Element {
     const r = result();
     return r?.kind === "ok" ? r.value : undefined;
   };
+  useAnswerGeneration(() => view()?.generation);
+  useGoneHome(
+    () => result()?.kind === "not-found",
+    () => props.path,
+  );
   // Texts only for a diff with lines (not for too slow).
   const linesView = () => {
     const v = view();
@@ -549,6 +556,16 @@ function DiffPage(props: { path: string }): JSX.Element {
     diff: () => diffHref(props.path),
     at: (to) => (to === "diff" ? undefined : hooks?.at(to)),
     leave: () => hooks?.leave(),
+    // A reload: the cursor's side and line (D-354). T17b maps head
+    // lines.
+    here: () => {
+      const h = hooks?.here();
+      if (h === undefined) return undefined;
+      return {
+        href: diffHref(props.path) + location.search + h.hash,
+        state: { origin: h.origin },
+      };
+    },
   });
 
   // b: the other column or side, in this page (D-349).
@@ -753,6 +770,8 @@ interface BodyHooks {
   at: (to: Exclude<ToView, "diff">) => ReturnType<NonNullable<ViewLinks["at"]>>;
   // Back comes to the cursor (D-339).
   leave: () => void;
+  // Where a reload lands: the cursor's hash and origin (D-354).
+  here: () => { hash: string; origin: Origin } | undefined;
   // The change buttons: the cursor goes there, focus stays. What to
   // say: the row, or "No more changes.".
   stepChange: (dir: 1 | -1) => string | undefined;
@@ -815,6 +834,7 @@ function DiffBody(props: {
   onLayout: (l: DiffLayout) => void;
 }): JSX.Element {
   const location = useLocation();
+  const quietReload = useQuietReload();
   const navigate = useNavigate();
   // Read once: DiffPage makes a new body for new rows.
   const { rows, rowsSplit, base, head } = untrack(() => ({
@@ -925,7 +945,10 @@ function DiffBody(props: {
       land = undefined;
       // A link of another file took us here: focus the line.
       const codeJump = isCodeJump(state);
-      if (origin !== undefined) {
+      // A reload with focus outside main: the cursor only (D-354).
+      if (origin !== undefined && quietReload(state)) {
+        a.setCursorRow(r, side, origin.col);
+      } else if (origin !== undefined) {
         a.focusRow(r, origin.col, side);
         // The side whose text the cell shows (unified: the row's, so
         // head on an equal row whatever the hash).
@@ -1011,6 +1034,9 @@ function DiffBody(props: {
       (untrack(layout) === "unified" || m.side === c.side)
     );
   };
+  // The hash of the cursor's line.
+  const cursorHash = (c: { row: number; side: DiffSessionSide }) =>
+    diffHash({ side: c.side, line: lineOn(rows, c.row, c.side) });
   // Before we leave for a link or by 1 / 2: Back comes to the cursor
   // (D-339, D-342). to: where the link goes.
   const saveCursor = (to?: string) => {
@@ -1019,13 +1045,7 @@ function DiffBody(props: {
     const c = a.cursor();
     const origin: Origin = c.gap ? { col: 0, gap: true } : { col: c.col };
     const here = hashAt(c);
-    saveOrigin(
-      diffHash({ side: c.side, line: lineOn(rows, c.row, c.side) }),
-      origin,
-      here,
-      c.first,
-      to,
-    );
+    saveOrigin(cursorHash(c), origin, here, c.first, to);
   };
   // 1 / 2: the docs or source of the cursor's side and line. null:
   // none on that side (not lexed yet, or no module), never the other
@@ -1124,8 +1144,7 @@ function DiffBody(props: {
     // so no jump either.
     if (!marks || hashAt(n)) return fromKey ? true : words;
     jump = { row: n.row, col: n.col, stay: true };
-    const hash = diffHash({ side: n.side, line: lineOn(rows, n.row, n.side) });
-    navigate(diffHref(props.path) + location.search + hash, {
+    navigate(diffHref(props.path) + location.search + cursorHash(n), {
       replace: true,
       scroll: false,
     });
@@ -1136,6 +1155,15 @@ function DiffBody(props: {
     otherSide: switchSide,
     at,
     leave: () => saveCursor(),
+    here: () => {
+      const a = api;
+      if (a === undefined) return undefined;
+      const c = a.cursor();
+      return {
+        hash: cursorHash(c),
+        origin: c.gap ? { col: 0, gap: true } : { col: c.col },
+      };
+    },
     stepChange: (dir) => {
       const r = go(blocks, dir, false);
       return r === true ? undefined : r;

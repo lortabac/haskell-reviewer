@@ -23,7 +23,9 @@ export function Sidebar(): JSX.Element {
   const view = createMemo<View>(() => {
     const choice = prefs.sidebar();
     if (choice !== "auto") return choice;
-    return modules.loading() || modules.hasModules() ? "modules" : "files";
+    // A reload's refetch keeps the old tree: no flip meanwhile (D-354).
+    const first = modules.loading() && modules.ok() === undefined;
+    return first || modules.hasModules() ? "modules" : "files";
   });
   let modulesPanel: HTMLDivElement | undefined;
   let filesPanel: HTMLDivElement | undefined;

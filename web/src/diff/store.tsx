@@ -1,6 +1,6 @@
 // The changed files of a diff session (api/diff-files), fetched once
-// and shared by the sidebar, Home and the header. Browse mode: no
-// fetch, nothing loading.
+// (again after each reload, D-354) and shared by the sidebar, Home and
+// the header. Browse mode: no fetch, nothing loading.
 import {
   createContext,
   createMemo,
@@ -12,6 +12,7 @@ import {
 } from "solid-js";
 import { getJson } from "../api/client";
 import { type DiffFiles, decodeDiffFiles } from "../api/diffFiles";
+import { useAnswerGeneration, useReloads } from "../events/generation";
 import { fileMarks, type FileMarks } from "../files/changes";
 import { usePageSide, useSession } from "../session";
 
@@ -29,6 +30,8 @@ export const truncatedText =
 export interface DiffFilesApi {
   // Once loaded, else undefined.
   files: () => DiffFiles | undefined;
+  // Also while a reload fetches it again (files() is the old one
+  // then).
   loading: () => boolean;
   // The server answered with an error (pairing failed, say).
   failed: () => boolean;
@@ -50,23 +53,26 @@ const DiffFilesContext = createContext<DiffFilesApi>(none);
 export function DiffFilesProvider(props: ParentProps): JSX.Element {
   const session = useSession();
   const side = usePageSide();
-  // The server's answer is the same for the whole process (until
-  // reloads, T16), so one fetch.
+  // The server's answer is the same until a reload, so one fetch per
+  // reload.
+  const reloads = useReloads();
   const [answer] = createResource(
-    () => session.mode === "diff",
+    () => (session.mode === "diff" ? { n: reloads() } : false),
     () => getJson("/api/diff-files", decodeDiffFiles),
   );
   const files = (): DiffFiles | undefined => {
     const r = answer();
     return r?.kind === "ok" ? r.value : undefined;
   };
+  useAnswerGeneration(() => files()?.generation);
   const marks = createMemo(() => {
     const f = files();
     return f === undefined ? undefined : fileMarks(f, side());
   });
   const value: DiffFilesApi = {
     files,
-    loading: () => session.mode === "diff" && answer() === undefined,
+    loading: () =>
+      session.mode === "diff" && (answer.loading || answer() === undefined),
     failed: () => {
       const r = answer();
       return r !== undefined && r.kind !== "ok";
@@ -90,7 +96,9 @@ export function DiffFilesNotes(props: { loading: boolean }): JSX.Element {
   const diff = useDiffFiles();
   return (
     <>
-      <Show when={props.loading && diff.loading()}>
+      <Show
+        when={props.loading && diff.loading() && diff.files() === undefined}
+      >
         <p class="tree-note">{loadingText}</p>
       </Show>
       <Show when={diff.failed()}>

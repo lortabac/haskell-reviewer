@@ -2,10 +2,11 @@ import { decode as decodeCbor } from "cbor-x/decode-no-eval";
 import { basePath } from "../base";
 import { DecodeError } from "./decode";
 
+// status: the HTTP status of an error answer, from postJson only.
 export type Result<T> =
   | { kind: "ok"; value: T }
   | { kind: "not-found" }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string; status?: number };
 
 // GET a JSON API route and decode it. path is relative to the token,
 // like "/api/files/<side>". Never throws. signal: abort the fetch (e.g. a
@@ -26,7 +27,8 @@ export async function getJson<T>(
   );
 }
 
-// POST a JSON body to a route and decode the answer, like getJson.
+// POST a JSON body to a route and decode the answer, like getJson. An
+// error answer has its status (404 too: no "not-found" here).
 // Default (cors) mode, so the browser sends our Origin (D-198): never
 // "same-origin" or "no-cors", never a <form>.
 export async function postJson<T>(
@@ -40,7 +42,13 @@ export async function postJson<T>(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!res.ok) return { kind: "error", message: `HTTP ${res.status}` };
+    if (!res.ok) {
+      return {
+        kind: "error",
+        message: `HTTP ${res.status}`,
+        status: res.status,
+      };
+    }
     return { kind: "ok", value: decode(await res.json()) };
   } catch (e) {
     return { kind: "error", message: String(e) };

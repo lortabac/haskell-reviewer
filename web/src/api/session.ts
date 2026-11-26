@@ -65,3 +65,10 @@ export function sessionSides(s: Session): readonly Side[] {
 export function defaultSide(s: Session): Side {
   return s.mode === "browse" ? "tree" : "head";
 }
+
+// Can this session reload (D-351, D-354)? Browse mode, and --diff REV
+// (head is the working tree). A commit range can't: nothing there
+// changes. Derived, so api/session needs no field.
+export function canReload(s: Session): boolean {
+  return s.mode === "browse" || s.head.commit === null;
+}

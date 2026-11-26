@@ -96,11 +96,11 @@ describe("createDispatcher", () => {
     expect(ran).toEqual(["definition", "references"]);
   });
 
-  it("g d r: only g d (the other half-done sequence is dropped)", () => {
+  it("g d r: g d, then r on its own (the half-done g r is dropped)", () => {
     press("g");
     press("d");
     press("r");
-    expect(ran).toEqual(["definition"]);
+    expect(ran).toEqual(["definition", "reload"]);
   });
 
   it("g then a pause: the sequence is gone", () => {

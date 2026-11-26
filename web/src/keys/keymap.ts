@@ -22,6 +22,7 @@ export type ActionId =
   | "sourceView"
   | "diffView"
   | "otherSide"
+  | "reload"
   | "escape"
   | "help";
 
@@ -184,6 +185,14 @@ export const keymap: readonly KeyRow[] = [
     label: "View on the other side (base or head)",
     where: "Diff mode",
     control: "View on base / head in the header; Other side button (diff)",
+  },
+  {
+    id: "reload",
+    bindings: ["r"],
+    keys: ["r"],
+    label: "Reload the files from disk",
+    where: "Browse mode, --diff REV",
+    control: "Reload button in the header",
   },
   {
     id: "escape",

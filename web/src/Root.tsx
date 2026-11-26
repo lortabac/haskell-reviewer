@@ -1,11 +1,19 @@
 // The frame around every page, and the side gate (D-332).
 import { type RouteSectionProps, useLocation } from "@solidjs/router";
-import { createMemo, type JSX, type ParentProps, Show } from "solid-js";
+import {
+  createMemo,
+  createSignal,
+  type JSX,
+  type ParentProps,
+  Show,
+} from "solid-js";
 import { defaultPrefs, type Prefs } from "./api/prefs";
 import { defaultSide, sessionSides } from "./api/session";
 import { CopyLocation } from "./copy/CopyLocation";
 import { DiffFilesProvider } from "./diff/store";
+import { ReloadApply } from "./events/ReloadApply";
 import { Frame } from "./Frame";
+import { ReloadButton } from "./header/ReloadButton";
 import { RevisionInfo } from "./header/RevisionInfo";
 import { KeysProvider, KeysStatus } from "./keys/KeysProvider";
 import { ShortcutsButton } from "./keys/ShortcutsButton";
@@ -61,6 +69,9 @@ export function Root(
     const p = page();
     return p.kind === "ok" ? p.side : undefined;
   };
+  // Bumped by a reload (D-354): the page mounts again.
+  const [epoch, setEpoch] = createSignal(0);
+  const pageKey = () => `${side()} ${epoch()}`;
   return (
     <SideContext.Provider value={side}>
       <PrefsProvider
@@ -70,42 +81,46 @@ export function Root(
         <DiffFilesProvider>
           <ModulesProvider>
             <KeysProvider>
-              <Frame
-                sidebar={<Sidebar />}
-                revisions={<RevisionInfo current={current()} />}
-                notices={<ProjectNotices />}
-                views={
-                  <>
-                    <ViewSwitch />
-                    <SideSwitch />
-                  </>
-                }
-                search={<SearchBox placement="header" />}
-                controls={
-                  <>
-                    <CopyLocation />
-                    <ThemeSwitch />
-                    <ShortcutsButton />
-                    <PrefsStatus />
-                    <KeysStatus />
-                  </>
-                }
-              >
-                <Show
-                  when={wrongSide()}
-                  fallback={
-                    // Keyed: a side change (an edited URL) mounts the page
-                    // again. The router keeps route components when only
-                    // params change, so their resources would keep the old
-                    // side. Reading props.children here builds new routes.
-                    <Show when={side()} keyed>
-                      {(s) => <Keyed on={s}>{props.children}</Keyed>}
-                    </Show>
+              <ReloadApply remount={() => setEpoch((e) => e + 1)}>
+                <Frame
+                  sidebar={<Sidebar />}
+                  revisions={<RevisionInfo current={current()} />}
+                  notices={<ProjectNotices />}
+                  views={
+                    <>
+                      <ViewSwitch />
+                      <SideSwitch />
+                    </>
+                  }
+                  search={<SearchBox placement="header" />}
+                  controls={
+                    <>
+                      <ReloadButton />
+                      <CopyLocation />
+                      <ThemeSwitch />
+                      <ShortcutsButton />
+                      <PrefsStatus />
+                      <KeysStatus />
+                    </>
                   }
                 >
-                  {(typed) => <WrongSide side={typed()} />}
-                </Show>
-              </Frame>
+                  <Show
+                    when={wrongSide()}
+                    fallback={
+                      // Keyed: a side change (an edited URL) or a reload
+                      // mounts the page again. The router keeps route
+                      // components when only params change, so their
+                      // resources would keep the old side. Reading
+                      // props.children here builds new routes.
+                      <Show when={pageKey()} keyed>
+                        {(s) => <Keyed on={s}>{props.children}</Keyed>}
+                      </Show>
+                    }
+                  >
+                    {(typed) => <WrongSide side={typed()} />}
+                  </Show>
+                </Frame>
+              </ReloadApply>
             </KeysProvider>
           </ModulesProvider>
         </DiffFilesProvider>
@@ -116,7 +131,7 @@ export function Root(
 
 // Just its children. on: the value the Show around it is keyed on (so
 // the Show's callback has an argument to use).
-function Keyed(props: ParentProps<{ on: Side }>): JSX.Element {
+function Keyed(props: ParentProps<{ on: string }>): JSX.Element {
   return <>{props.children}</>;
 }
 

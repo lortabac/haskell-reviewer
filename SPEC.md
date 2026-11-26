@@ -782,7 +782,25 @@ side there is no file watching. Instead:
   D-351); M3 has no HIE files yet, so it re-reads the files only.
 - After a reload, the current location is preserved by *(module,
   declaration)* when possible. If it no longer exists, the user lands at the
-  nearest enclosing module with a notice.
+  nearest enclosing module with a notice (no module left: Home).
+- Client (D-354): the Reload button is first in the header controls, only
+  in browse mode and with `--diff REV` (`r`, §5.3). While it waits it is
+  aria-disabled and says "Reloading…"; errors: "Couldn't list the files.
+  See the terminal." (500), "The server can't reload now. See the
+  terminal." (503), "Reload isn't available in this session." (404),
+  else "Couldn't reload: <message>.". Every new generation is applied
+  at once, whoever started it (another tab too), with one polite
+  "Files reloaded.". The page mounts again at its place, with no new
+  history entry: docs keep the declaration with focus, else the first
+  on screen (a removed one: the module and its "No declaration…"
+  notice; a refs page goes to that docs page); source and diff keep the
+  cursor's line number (T17b: the same code line); other pages keep the
+  URL. A docs page still at its top stays at the top. Focus moves only
+  if it was in main, and only on that landing (not on a later Back). A
+  module or file that is gone has no enclosing module: Home, with
+  "`<what>` is not in the files any more.", also said. The sidebar, the changed files and the
+  header search refetch in place; the find bar, the selection, the
+  hover card and open diff gaps are lost.
 - LLM threads carry the snapshot they were asked against. Threads from an
   older snapshot are marked *stale* (§6.6).
 
@@ -814,6 +832,7 @@ are off (D-297, D-298).
 | `1` `2` `3` `4` | Docs · Source · Diff · Expanded diff (`3`/`4` diff mode only). `3` goes to the diff at the cursor's line from the source view, and to the top of the diff from docs, Markdown and refs pages (at the line: M4) |
 | `u` | Toggle unified / side-by-side (diff view). Saves the preference; when the window is too narrow it flips the preference and says so (D-345) |
 | `b` | View on the other side (base/head), at the same place (§5.1, D-349). Diff mode only |
+| `r` | Reload (§5.2, D-354): the Reload button in the header. Browse mode and `--diff REV` |
 | `a` | Ask the LLM about the focus/selection |
 | `y` | Copy the focused item's primary identifier (§5.7) |
 | `Esc` | Close the hover card if one shows; else close the overlay/panel; clear the selection |
@@ -2053,7 +2072,10 @@ a framework would cost more than it saves.
     right before that generation's `indexing` events, never on open,
     D-351), LLM stream updates, notices. The client keeps the latest `indexing` of
     each side; a page follows its own side, the header shows the sum
-    (D-333).
+    of the sides at the newest generation (D-333). The worker passes
+    `generation` on too, keeps the latest and replays it before the
+    `indexing` ones, and drops `indexing` states of older generations
+    (D-354).
   - Fallback: without SharedWorker, each tab opens its own stream, and a
     notice warns about the limit.
 - **Liveness**: a browser is connected while its SSE stream is open. The

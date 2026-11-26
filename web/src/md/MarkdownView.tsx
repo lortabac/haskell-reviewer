@@ -20,6 +20,8 @@ import type { Doc } from "../api/richtext";
 import { CopyButton } from "../copy/CopyButton";
 import { useDiffLink } from "../diff/link";
 import { useDiffFiles } from "../diff/store";
+import { useAnswerGeneration } from "../events/generation";
+import { useGoneHome } from "../events/ReloadApply";
 import { markdownTarget, pathTarget } from "../files/otherSide";
 import { type Links, LinksContext } from "../docs/links";
 import { anchorId, DocView } from "../docs/RichText";
@@ -76,6 +78,11 @@ function MarkdownPageView(props: { path: string }): JSX.Element {
     const r = result();
     return r?.kind === "ok" ? r.value : undefined;
   };
+  useAnswerGeneration(() => page()?.generation);
+  useGoneHome(
+    () => result()?.kind === "not-found",
+    () => props.path,
+  );
   const diffLink = useDiffLink();
   useViewLinks({
     current: "docs",

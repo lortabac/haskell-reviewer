@@ -396,7 +396,7 @@ test("a drag from a link selects, exact copy, no navigation", async ({
   await expect(page).toHaveURL(server.base + mainUrl);
 });
 
-test("partial: refetch on indexing done, once; another snapshot: none", async ({
+test("partial: refetch on done, once; a newer generation remounts (D-354)", async ({
   page,
   context,
   startServer,
@@ -424,7 +424,9 @@ test("partial: refetch on indexing done, once; another snapshot: none", async ({
   await page.waitForTimeout(1200);
   await emit(page, "indexing", { ...done(src.generation() + 1), ready: 1 });
   await page.waitForTimeout(300);
-  expect(src.calls()).toBe(2);
+  // The newer generation is a reload: the page is mounted again and
+  // fetches once. Its answer is older than the events: no loop.
+  expect(src.calls()).toBe(3);
 });
 
 for (const t of themes) {
