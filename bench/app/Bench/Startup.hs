@@ -16,7 +16,7 @@ module Bench.Startup
 where
 
 import Bench.Http (Gzip (..), HttpResponse (..))
-import Bench.IndexLog (IndexDone)
+import Bench.IndexLog (DiffLog, IndexDone)
 import Bench.Machine (LoadAvg, getLoadAvg)
 import Bench.Mode (Mode (..), Side, modeSides)
 import Bench.ModuleList
@@ -41,6 +41,7 @@ import Bench.Run
     getApi,
     getPath,
     procMemory,
+    readDiffLog,
     requireRts,
     traceSpans,
     withSession,
@@ -97,6 +98,8 @@ data StartupRun = StartupRun
     startupSpanUs :: Maybe Integer,
     filesSpanUs :: Maybe Integer,
     indexingSpanUs :: Maybe Integer,
+    -- | Diff mode only: the @pairing@ span.
+    pairingSpanUs :: Maybe Integer,
     -- | 1 s after the done line; Linux only.
     idleRssBytes :: Maybe Integer,
     hwmBytes :: Maybe Integer,
@@ -104,7 +107,9 @@ data StartupRun = StartupRun
     -- | From the stop signal to exit.
     stopUs :: Integer,
     rts :: RtsStats,
-    files :: FileList
+    files :: FileList,
+    -- | The diff-mode log lines (D-358); all 'Nothing' in browse mode.
+    diffLog :: DiffLog
   }
 
 -- | When each part of "UI usable" was there. The assets go out right
@@ -120,7 +125,9 @@ data UiParts = UiParts
     moduleUs :: Maybe Integer,
     -- | Diff mode only. Sent with the others (the client asks at once),
     -- but not part of "UI usable".
-    diffFilesUs :: Maybe Integer
+    diffFilesUs :: Maybe Integer,
+    -- | Its own request time, from request to the last byte.
+    diffFilesRequestUs :: Maybe Integer
   }
 
 -- | The module page asked for while indexing.
@@ -218,7 +225,8 @@ steps mode sample s = do
             modulesUs = api.modules.endUs,
             searchUs = api.search.endUs,
             moduleUs = (.endUs) <$> api.modulePage,
-            diffFilesUs = (.endUs) <$> api.diffFiles
+            diffFilesUs = (.endUs) <$> api.diffFiles,
+            diffFilesRequestUs = (.us) <$> api.diffFiles
           }
 
   doneAt <- awaitDone s
@@ -237,14 +245,22 @@ steps mode sample s = do
               doneBefore = api.progress.doneCount,
               total = api.progress.total
             }
-  spans <- traceSpans s ["startup", "files", "indexing"]
-  (startupSpan, filesSpan, indexingSpan) <- case spans of
-    [a, b, c] -> pure (a, b, c)
+  -- Pairing: diff mode only (D-358). The span has the exact time; the
+  -- log line has whole ms.
+  let pairingName = case mode of
+        Browse -> []
+        _ -> ["pairing"]
+  spans <- traceSpans s (["startup", "files", "indexing"] <> pairingName)
+  (startupSpan, filesSpan, indexingSpan, pairingSpan) <- case spans of
+    [a, b, c] -> pure (a, b, c, Nothing)
+    [a, b, c, d] -> pure (a, b, c, d)
     _ -> failWith "trace spans: wrong count"
   -- Idle memory: indexing is over, the server waits.
   threadDelay 1_000_000
   mem <- procMemory s
   load <- getLoadAvg
+  -- Late: the pairing line can come after the done line.
+  diffLog <- readDiffLog s
 
   pure $ \ended rts ->
     StartupRun
@@ -261,12 +277,14 @@ steps mode sample s = do
         startupSpanUs = startupSpan,
         filesSpanUs = filesSpan,
         indexingSpanUs = indexingSpan,
+        pairingSpanUs = pairingSpan,
         idleRssBytes = mem.rssBytes,
         hwmBytes = mem.hwmBytes,
         loadAvg = load,
         stopUs = ended.stopUs,
         rts = rts,
-        files = fileList
+        files = fileList,
+        diffLog = diffLog
       }
   where
     checkModulePage m t = do

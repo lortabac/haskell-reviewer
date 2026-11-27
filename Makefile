@@ -26,8 +26,9 @@ test:
 	$(CABAL) test all --test-show-details=direct
 
 # Runs the three reference projects (SPEC §10, §11.9; D-76, D-82, D-215,
-# D-303, D-308, D-357): the §10.1 targets (module and source pages, search,
-# find references, text search), memory, GC pauses and the fallback census.
+# D-303, D-308, D-357, D-358): the §10.1 targets (module and source pages,
+# search, find references, text search, diffs), memory, GC pauses and the
+# fallback census.
 # In browse mode, then in diff mode against each project's base commit
 # (range, then the working tree). About 45-60 minutes; BENCH_MODES=browse
 # for 10-20. By hand, before a release: shared CI runners are too noisy for

@@ -4,6 +4,7 @@ import Bench.Mode (Side (..))
 import Bench.Queries (RefsQuery (..))
 import Bench.Url
   ( diffFilesPath,
+    diffPath,
     encodePath,
     encodeQueryValue,
     filesPath,
@@ -59,5 +60,8 @@ tests =
         indexingPath Tree @?= "api/indexing/tree",
       testCase "side-free paths" $ do
         sessionPath @?= "api/session"
-        diffFilesPath @?= "api/diff-files"
+        diffFilesPath @?= "api/diff-files",
+      testCase "a diff path keeps its slashes; space and Unicode encoded" $ do
+        diffPath "src/A.hs" @?= "api/diff/src/A.hs"
+        diffPath "a b/Ü.hs" @?= "api/diff/a%20b/%C3%9C.hs"
     ]

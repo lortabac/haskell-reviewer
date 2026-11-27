@@ -1,6 +1,8 @@
 module Main (main) where
 
 import ApiSupport (forceFixtures)
+import Bench.DiffAnswerTest qualified
+import Bench.DiffFilesTest qualified
 import Bench.FallbacksTest qualified
 import Bench.GcLogTest qualified
 import Bench.IndexLogTest qualified
@@ -173,7 +175,9 @@ main = do
   defaultMain $
     testGroup
       "haskell-reviewer"
-      [ Bench.FallbacksTest.tests,
+      [ Bench.DiffAnswerTest.tests,
+        Bench.DiffFilesTest.tests,
+        Bench.FallbacksTest.tests,
         Bench.GcLogTest.tests,
         Bench.IndexLogTest.tests,
         Bench.ModeTest.tests,

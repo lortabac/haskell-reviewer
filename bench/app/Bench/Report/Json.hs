@@ -1,11 +1,21 @@
--- | The bench's JSON report, schema 5 (D-357; schema 4 was D-308).
--- One entry per project and mode; a browse entry has every schema-4
--- key with the same meaning, plus the new ones.
+-- | The bench's JSON report, schema 5 (D-357, D-358; schema 4 was
+-- D-308). One entry per project and mode; a browse entry has every
+-- schema-4 key with the same meaning, plus the new ones.
 module Bench.Report.Json
   ( encodeReportJson,
   )
 where
 
+import Bench.DiffAnswer (DiffKind (..))
+import Bench.DiffFiles
+  ( Candidate (..),
+    ChangedFile (..),
+    DiffFilesAnswer (..),
+    DiffPick (..),
+    StatusCounts (..),
+    statusCounts,
+    statusText,
+  )
 import Bench.Fallbacks
   ( Category,
     Diff (..),
@@ -20,7 +30,14 @@ import Bench.Fallbacks
     failsBench,
   )
 import Bench.GcLog (GcSummary (..), PhaseGc (..), renderGcLogError)
-import Bench.IndexLog (IndexDone (..))
+import Bench.IndexLog
+  ( ChangedLine (..),
+    DiffLog (..),
+    IndexDone (..),
+    PairingLine (..),
+    WorkTreeLine (..),
+    noDiffLog,
+  )
 import Bench.Machine (LoadAvg (..), MachineInfo (..))
 import Bench.Mode (Mode (..), Side (..), modeText, sideText)
 import Bench.ModuleList (OnDemandStatus (..), Sample (..), sampleKindText)
@@ -29,7 +46,8 @@ import Bench.Queries (RefsQuery (..))
 import Bench.Refs (RefsSummary (..), RefsTime (..), byQuery)
 import Bench.RefsDuring (RefsDuringRun (..))
 import Bench.Report
-  ( FallbackCheck (..),
+  ( DiffFileSummary (..),
+    FallbackCheck (..),
     ProjectReport (..),
     Report (..),
     Settings (..),
@@ -38,6 +56,9 @@ import Bench.Report
     SlowPage (..),
     TextSummary (..),
     ToolInfo (..),
+    diffAfter,
+    diffByFile,
+    diffFilesAfter,
     firstTimes,
     gcSummary,
     hwms,
@@ -72,7 +93,7 @@ import Bench.Startup
     UiParts (..),
   )
 import Bench.Stats (Latency (..), Summary (..))
-import Bench.Steady (PageTime (..), SteadyRun (..), TextTime (..))
+import Bench.Steady (DiffTime (..), PageTime (..), SteadyRun (..), TextTime (..))
 import Bench.Targets (Target (..), Verdict (..), memoryBudgetBytes, statText)
 import Data.Aeson ((.=))
 import Data.Aeson.Encoding qualified as Aeson.Encoding
@@ -171,12 +192,16 @@ projectEncoding pr =
       <> Aeson.Encoding.pair
         "refs_queries"
         (Aeson.Encoding.list refsQueryEncoding pr.refsQueries)
+      <> Aeson.Encoding.pair "changed" (nullable changedEncoding firstLog.changed)
+      <> Aeson.Encoding.pair "pairing" (nullable pairingEncoding firstLog.pairing)
       <> Aeson.Encoding.pair
         "startup_runs"
         (Aeson.Encoding.list startupEncoding pr.startup)
       <> Aeson.Encoding.pair "summary" (startupSummaryEncoding pr.startup)
       <> Aeson.Encoding.pair "on_demand" (maybeLatency (latencyUs (onDemandTimes pr)))
       <> Aeson.Encoding.pair "steady" (steadyEncoding pr)
+      <> Aeson.Encoding.pair "diff_files" (nullable (diffFilesEncoding pr) pr.diffPick)
+      <> Aeson.Encoding.pair "diff_pages" (nullable (diffPagesEncoding pr) pr.diffPick)
       <> Aeson.Encoding.pair "search_during" (searchDuringEncoding pr.searchDuring)
       <> Aeson.Encoding.pair "refs_during" (refsDuringEncoding pr.refsDuring)
       <> Aeson.Encoding.pair "fallbacks" (nullable fallbacksEncoding pr.fallbacks)
@@ -188,6 +213,64 @@ projectEncoding pr =
     first = case pr.startup of
       r : _ -> Just r
       [] -> Nothing
+    -- The counts of the first start-up run (they don't change).
+    firstLog = maybe noDiffLog (.diffLog) first
+    changedEncoding c = Aeson.Encoding.pairs (("head" .= c.head) <> ("base" .= c.base))
+    pairingEncoding p =
+      Aeson.Encoding.pairs $
+        ("changed" .= p.changed)
+          <> ("renamed" .= p.renamed)
+          <> ("limit" .= p.limit)
+
+-- | The list session's answer (counts), and the request times: since
+-- the start in the start-up runs, request to last byte after indexing.
+diffFilesEncoding :: ProjectReport -> DiffPick -> Encoding
+diffFilesEncoding pr pk =
+  Aeson.Encoding.pairs $
+    ("files" .= length a.files)
+      <> ("added" .= c.added)
+      <> ("removed" .= c.removed)
+      <> ("modified" .= c.modified)
+      <> ("renamed" .= c.renamed)
+      <> ("rename_limit_hit" .= a.renameLimitHit)
+      <> ("truncated" .= a.truncated)
+      <> ("outside_total" .= a.outsideTotal)
+      <> Aeson.Encoding.pair "since_start" (nullable summaryEncoding sinceStart)
+      <> Aeson.Encoding.pair "latency" (maybeLatency (latencyUs (diffFilesAfter pr)))
+  where
+    a = pk.answer
+    c = statusCounts a.files
+    sinceStart = summaryUs (mapMaybe (.parts.diffFilesUs) pr.startup)
+
+-- | The picked files and their diffs after indexing (D-358).
+diffPagesEncoding :: ProjectReport -> DiffPick -> Encoding
+diffPagesEncoding pr pk =
+  Aeson.Encoding.pairs $
+    ("candidates" .= pk.candidates)
+      <> ("asked" .= pk.asked)
+      <> Aeson.Encoding.pair "files" (Aeson.Encoding.list fileEncoding pk.picked)
+      <> Aeson.Encoding.pair "latency" (maybeLatency (latencyUs (map (.us) ds)))
+      <> ("too_slow" .= length [() | d <- ds, d.kind == DiffTooSlow])
+      <> Aeson.Encoding.pair
+        "by_file"
+        (Aeson.Encoding.list byFileEncoding (diffByFile pr))
+  where
+    ds = diffAfter pr
+    fileEncoding c =
+      Aeson.Encoding.pairs $
+        ("path" .= c.file.path)
+          <> ("old_path" .= c.file.oldPath)
+          <> ("status" .= statusText c.file.status)
+          <> ("base_bytes" .= c.baseBytes)
+          <> ("head_bytes" .= c.headBytes)
+    byFileEncoding f =
+      Aeson.Encoding.pairs $
+        ("path" .= f.candidate.file.path)
+          <> ("count" .= fmap (.count) f.latency)
+          <> ("median_us" .= fmap (.median) f.latency)
+          <> ("p95_us" .= fmap (.p95) f.latency)
+          <> ("max_us" .= fmap (.max) f.latency)
+          <> ("wire_bytes" .= f.wireBytes)
 
 sourceText :: FileSource -> Text
 sourceText FromGit = "git"
@@ -226,6 +309,8 @@ startupFields =
     ("ui_module_us", (.parts.moduleUs)),
     ("ui_session_us", (.parts.sessionUs)),
     ("diff_files_us", (.parts.diffFilesUs)),
+    ("diff_files_request_us", (.parts.diffFilesRequestUs)),
+    ("pairing_span_us", (.pairingSpanUs)),
     ("ui_wire_bytes", Just . toInteger . (.uiWireBytes)),
     ("done_us", Just . (.doneUs)),
     ("indexing_ms", Just . (.done.ms)),
@@ -247,6 +332,7 @@ startupEncoding r =
   Aeson.Encoding.pairs $
     foldMap (\(k, f) -> k .= f r) startupFields
       <> ("search_partial" .= r.searchPartial)
+      <> ("worktree_hashed" .= fmap (.hashed) r.diffLog.workTree)
       <> Aeson.Encoding.pair "on_demand" (nullable onDemandEncoding r.onDemand)
       <> Aeson.Encoding.pair "done" (doneEncoding r.done)
       <> Aeson.Encoding.pair "loadavg" (loadEncoding r.loadAvg)
@@ -378,6 +464,8 @@ steadyEncoding pr =
           <> ("refs" .= length r.refsTimes)
           <> ("text_searches" .= length r.textTimes)
           <> ("text_first_us" .= fmap (.us) (listToMaybe r.textFirst))
+          <> ("diff_files" .= length r.diffFilesTimes)
+          <> ("diffs" .= length r.diffTimes)
           <> ("peak_mem_bytes" .= r.rts.peakMemBytes)
           <> ("max_live_bytes" .= r.rts.maxLiveBytes)
           <> ("idle_rss_bytes" .= r.idleRssBytes)

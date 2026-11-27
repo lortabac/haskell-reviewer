@@ -7,6 +7,7 @@ import Bench.Targets
     Stat (..),
     Target (..),
     Verdict (..),
+    diffAfterP95,
     navigation,
     navigationSource,
     navigationSourceIdle,
@@ -80,6 +81,10 @@ tests =
         (textSearchAfterP95.stat, textSearchAfterP95.bound) @?= (P95, AtMost)
         (verdict textSearchAfterP95 150_000 Nothing).met @?= True
         (verdict textSearchAfterP95 150_001 Nothing).met @?= False,
+      testCase "diff after indexing: p95 < 100 ms" $ do
+        (diffAfterP95.stat, diffAfterP95.bound) @?= (P95, Below)
+        (verdict diffAfterP95 99_999 Nothing).met @?= True
+        (verdict diffAfterP95 100_000 Nothing).met @?= False,
       testCase "a refs line" $
         renderVerdict "wire-server" (verdict refsAfterP95 216_000 (Just 250_000))
           @?= "D-303 find references after indexing < 300 ms (p95): wire-server: ok \
