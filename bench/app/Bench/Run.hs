@@ -22,6 +22,7 @@ module Bench.Run
     failWith,
     elapsedUs,
     awaitDone,
+    readDiffLog,
     getApi,
     getPath,
     procMemory,
@@ -31,7 +32,7 @@ where
 
 import Bench.GcLog (GcLog, GcLogError, parseGcLog)
 import Bench.Http (Gzip, HttpResponse (..), rawHttp, requestBytes)
-import Bench.IndexLog (IndexDone, parseDoneLine)
+import Bench.IndexLog (DiffLog, IndexDone, addDiffLine, noDiffLog, parseDoneLine)
 import Bench.RtsStats (RtsStats, parseRtsStats, parseRtsSummary, renderRtsStatsError)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar
@@ -134,6 +135,8 @@ data Session = Session
     done :: MVar (Either String DoneAt),
     -- | The last stderr lines, for error messages.
     seen :: IORef [String],
+    -- | The diff-mode log lines so far (D-358).
+    diffLog :: IORef DiffLog,
     traceFile :: FilePath
   }
 
@@ -354,6 +357,11 @@ awaitDone s = do
     Just (Left why) -> lastLines s >>= failWith . ((why <> "; stderr: ") <>)
     Nothing -> lastLines s >>= failWith . ("no 'indexing: done' within 300 s; stderr: " <>)
 
+-- | The diff-mode log lines read so far. Read them late: the pairing
+-- line can come after the done line.
+readDiffLog :: Session -> IO DiffLog
+readDiffLog s = readIORef s.diffLog
+
 -- | GET a path under the token (no leading slash, already encoded).
 getApi :: Session -> Gzip -> String -> IO Timed
 getApi s gzip path = getPath s gzip ("/" <> s.token <> "/" <> path)
@@ -425,6 +433,7 @@ steps ::
   IO (a, Ended)
 steps t0 cfg action out err ph = do
   seen <- newIORef []
+  diffLog <- newIORef noDiffLog
   urlVar <- newEmptyMVar
   doneVar <- newEmptyMVar
   stdoutVar <- newEmptyMVar
@@ -439,7 +448,7 @@ steps t0 cfg action out err ph = do
   -- block *us* waiting for a reader that's stuck on a pipe whose
   -- writer is still alive, which is exactly the deadlock this is
   -- avoiding.
-  _ <- forkIO (drainStderr t0 err seen urlVar doneVar)
+  _ <- forkIO (drainStderr t0 err seen diffLog urlVar doneVar)
   _ <- forkIO (drainStdout out stdoutVar)
 
   urlLine <- readUrlLine seen urlVar
@@ -456,6 +465,7 @@ steps t0 cfg action out err ph = do
             urlUs = microsSince t0 urlLine.at,
             done = doneVar,
             seen = seen,
+            diffLog = diffLog,
             traceFile = traceFileOf cfg
           }
   result <- action session
@@ -516,15 +526,16 @@ steps t0 cfg action out err ph = do
 -- that starts with 'urlPrefix' also goes into @urlVar@, and the done
 -- line into @doneVar@ with the time it came (once each: a
 -- 'tryPutMVar' that a later EOF can't overwrite). At EOF both get
--- their "no such line" value.
+-- their "no such line" value. The diff-mode lines go into @diffLog@.
 drainStderr ::
   Word64 ->
   Handle ->
   IORef [String] ->
+  IORef DiffLog ->
   MVar (Maybe UrlLine) ->
   MVar (Either String DoneAt) ->
   IO ()
-drainStderr t0 h seen urlVar doneVar = do
+drainStderr t0 h seen diffLog urlVar doneVar = do
   _ <- try @IOException go
   void (tryPutMVar urlVar Nothing)
   void (tryPutMVar doneVar (Left "stderr ended before 'indexing: done'"))
@@ -535,6 +546,7 @@ drainStderr t0 h seen urlVar doneVar = do
         l <- hGetLine h
         now <- getMonotonicTimeNSec
         atomicModifyIORef' seen (\ls -> (take 40 (l : ls), ()))
+        atomicModifyIORef' diffLog (\d -> (addDiffLine l d, ()))
         when (urlPrefix `isPrefixOf` l) $
           void (tryPutMVar urlVar (Just UrlLine {text = l, at = now}))
         case parseDoneLine l of

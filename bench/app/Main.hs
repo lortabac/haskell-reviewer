@@ -10,6 +10,19 @@
 -- is wrong for a reason other than time; 2 for a usage error.
 module Main (main) where
 
+import Bench.DiffAnswer (DiffKind (..), worthTiming)
+import Bench.DiffFiles
+  ( BlobSizes (..),
+    Candidate (..),
+    ChangedFile (..),
+    DiffFilesAnswer (..),
+    DiffPick (..),
+    askLimit,
+    largestChanged,
+    parseLsTree,
+    pickCount,
+    pickFiles,
+  )
 import Bench.Fallbacks
   ( Category (..),
     Diff (..),
@@ -26,7 +39,7 @@ import Bench.Fallbacks
     renderFallbacksError,
   )
 import Bench.Http (Gzip (..), HttpResponse (..))
-import Bench.IndexLog (IndexDone (..))
+import Bench.IndexLog (DiffLog (..), IndexDone (..), WorkTreeLine (..))
 import Bench.Machine (LoadAvg (..), getLoadAvg, getMachineInfo)
 import Bench.Mode
   ( Mode (..),
@@ -90,20 +103,27 @@ import Bench.Session (checkSession, parseSession)
 import Bench.Startup (StartupRun (..), runStartup)
 import Bench.Steady
   ( CensusPass (..),
+    DiffPlan (..),
+    DiffTime (..),
     SteadyPlan (..),
     SteadyRun (..),
     TextTime (..),
     TimedPass (..),
+    getDiffFiles,
     runSteady,
+    timeDiff,
   )
 import Bench.Url (modulesPath, sessionPath)
 import Control.Exception (Exception, IOException, throwIO, try)
 import Control.Monad (forM, mfilter, unless, when)
+import Data.ByteString (ByteString)
+import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as LBS
 import Data.List (nub)
 import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe (fromMaybe)
+import Data.Map.Strict (Map)
+import Data.Maybe (fromMaybe, isNothing)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as Text.IO
@@ -118,9 +138,16 @@ import System.Directory
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..), exitWith)
 import System.FilePath (takeDirectory, (</>))
-import System.IO (hPutStrLn, stderr)
+import System.IO (hClose, hPutStrLn, stderr)
 import System.IO.Temp (withSystemTempDirectory)
-import System.Process (proc, readCreateProcessWithExitCode)
+import System.Process
+  ( CreateProcess (..),
+    StdStream (..),
+    proc,
+    readCreateProcessWithExitCode,
+    waitForProcess,
+    withCreateProcess,
+  )
 import Text.Printf (printf)
 
 main :: IO ()
@@ -372,23 +399,32 @@ runProject opts rows tmp project mode = do
                 stats = stats,
                 diff = Text.unpack <$> spec
               }
+      -- Sizes for the diff pick: the base and the head commit (also
+      -- for worktree: the checkout is clean, at the head).
+      sizes <- case project.base of
+        Just b | mode /= Browse -> do
+          bs <- blobSizes dir b >>= either throwBench pure
+          hs <- blobSizes dir project.sha >>= either throwBench pure
+          pure (Just BlobSizes {base = bs, head = hs})
+        _ -> pure Nothing
       progress "reading the module list"
-      trees <- listModules (cfg "list" TStats) mode project >>= orFail
+      (trees, pick) <- listModules (cfg "list" TStats) mode project sizes >>= orFail
       let queue = modeQueueOrder trees
           headQueue = [q | q <- queue, q.side == firstSide]
-      sizes <- forM headQueue $ \q -> do
+      fileSizes <- forM headQueue $ \q -> do
         size <- fileSize (dir </> q.path)
         -- Unreadable: it then can't be the largest.
         pure Sized {side = q.side, ref = q.ref, bytes = fromMaybe 0 size}
       let samples = case mode of
-            Browse -> pickSamples sizes
-            _ -> pickDiffSamples sizes queue
+            Browse -> pickSamples fileSizes
+            _ -> pickDiffSamples fileSizes queue
           sampleFor i = case samples of
             [] -> Nothing
             _ -> Just (samples !! (i `mod` length samples))
           expected = lookupExpected project.name project.sha rows
           refs = refsQueries project.name
           steadyRuns = maybe id min rules.maxSteadyRuns opts.steadyRuns
+          diffPlan pk = DiffPlan {filesRounds = 5, files = pk.picked, rounds = 5}
           duringRuns n = if rules.duringRuns then n else 0
           startup tag i =
             runStartup (cfg tag TStats) mode (sampleFor (i - 1)) >>= orFail
@@ -410,7 +446,8 @@ runProject opts rows tmp project mode = do
                       refs = refs,
                       refsRounds = 1,
                       textRounds = 0,
-                      seed = 1
+                      seed = 1,
+                      diff = Nothing
                     }
             s <- loop "census run" 1 $ \_ ->
               runSteady (cfg "census" TStats) trees plan >>= orFail
@@ -431,7 +468,8 @@ runProject opts rows tmp project mode = do
                         refs = refs,
                         refsRounds = 5,
                         textRounds = 5,
-                        seed = i
+                        seed = i,
+                        diff = diffPlan <$> pick
                       }
                in runSteady (cfg ("steady-" <> show i) GcStats) trees plan >>= orFail
             -- While indexing: the first side only (head in diff mode).
@@ -475,6 +513,7 @@ runProject opts rows tmp project mode = do
             modulesListed = sum (NE.map (.listed) counts),
             modulesParsed = parsed,
             samples = samples,
+            diffPick = pick,
             startup = startups,
             steady = if opts.censusOnly then [] else steadies,
             searchDuring = during,
@@ -502,6 +541,7 @@ runProject opts rows tmp project mode = do
                 diffs
                 <> refsWarnings (concatMap (.refsTimes) steadies)
                 <> textWarnings steadies
+                <> diffWarnings mode pick startups steadies
           }
 
 -- | Text searches that hit the deadline (stopped): once per query.
@@ -512,6 +552,52 @@ textWarnings runs =
   ]
   where
     ts = concat [r.textFirst <> r.textTimes <> r.textPages | r <- runs]
+
+-- | Diff mode (D-358): a racy index (worktree hashes files, so the
+-- numbers include that), missing log lines, no file to diff, too-slow
+-- diffs.
+diffWarnings :: Mode -> Maybe DiffPick -> [StartupRun] -> [SteadyRun] -> [Text]
+diffWarnings Browse _ _ _ = []
+diffWarnings mode pick startups steadies =
+  [ "start-up run "
+      <> showT i
+      <> ": files: "
+      <> showT w.hashed
+      <> " hashed: the index is not fresh; run bench/fetch-projects.sh"
+  | (i, r) <- zip [1 :: Int ..] startups,
+    Just w <- [r.diffLog.workTree],
+    w.hashed > 0
+  ]
+    <> [ "start-up run " <> showT i <> ": no " <> what <> " line"
+       | (i, r) <- zip [1 :: Int ..] startups,
+         (what, missing) <-
+           [ ("changed", isNothing r.diffLog.changed),
+             ("pairing", isNothing r.diffLog.pairing),
+             ("files: working tree", mode == WorkTree && isNothing r.diffLog.workTree)
+           ],
+         missing
+       ]
+    <> [ "no changed file with a line diff: no diff target"
+       | Just pk <- [pick],
+         null pk.picked
+       ]
+    <> [ "only "
+           <> showT (length pk.picked)
+           <> " files to diff: the pick stopped after "
+           <> showT askLimit
+           <> " asks"
+       | Just pk <- [pick],
+         not (null pk.picked),
+         length pk.picked < pickCount,
+         pk.asked >= askLimit
+       ]
+    <> [ "diff " <> p <> ": too-slow (over the product's time limit)"
+       | p <- nub [d.path | r <- steadies, d <- r.diffTimes, d.kind == DiffTooSlow]
+       ]
+
+-- | For messages.
+showT :: (Show a) => a -> Text
+showT = Text.pack . show
 
 -- | Which kind of run a done line came from, for the warnings.
 data RunKind = StartupRunKind | SteadyRunKind | CensusRunKind
@@ -578,16 +664,21 @@ projectWarnings expected parsed doneLines diffs =
       ]
     loadText Nothing = "unknown"
     loadText (Just l) = Text.pack (printf "%.2f" l.one)
-    showT :: (Show a) => a -> Text
-    showT = Text.pack . show
 
 -- | Read the module trees: spawn, a few requests, stop. Checks
 -- @api\/session@ first: the mode and commits we asked for (D-357).
 -- Waits for the done line first, so the stop reaches an idle server: on
 -- macOS a busy one can miss it (Note [Second SIGTERM] in "Bench.Run").
+--
+-- In diff mode it also picks the files for the @diff@ phase (D-358),
+-- from @api\/diff-files@ and the blob sizes (base, head).
 listModules ::
-  SessionConfig -> Mode -> Project -> IO (Either RunError (NonEmpty SideModules))
-listModules cfg mode project = fmap fst <$> withSession cfg steps
+  SessionConfig ->
+  Mode ->
+  Project ->
+  Maybe BlobSizes ->
+  IO (Either RunError (NonEmpty SideModules, Maybe DiffPick))
+listModules cfg mode project sizes = fmap fst <$> withSession cfg steps
   where
     steps s = do
       sess <- getApi s Gzip sessionPath
@@ -608,7 +699,20 @@ listModules cfg mode project = fmap fst <$> withSession cfg steps
             (parseModuleList t.response.body)
         pure SideModules {side = side, items = items}
       _ <- awaitDone s
-      pure trees
+      pick <- traverse (pickDiffs s) sizes
+      pure (trees, pick)
+    pickDiffs s blobs = do
+      (_, answer) <- getDiffFiles s
+      let cands = largestChanged blobs answer.files
+      (picked, asked) <- pickFiles (worth s) cands
+      pure
+        DiffPick
+          { answer = answer,
+            candidates = length cands,
+            asked = asked,
+            picked = picked
+          }
+    worth s c = worthTiming . (.kind) <$> timeDiff s c.file.path
 
 -- | 'Nothing' if we can't read it.
 fileSize :: FilePath -> IO (Maybe Integer)
@@ -671,6 +775,29 @@ checkBase dir sha = do
     ExitSuccess -> Right ()
     ExitFailure _ ->
       Left (dir <> ": no base commit " <> base <> "; run bench/fetch-projects.sh")
+
+-- | Blob sizes by path at a commit (@git ls-tree -r -l -z@), for the
+-- diff pick.
+blobSizes :: FilePath -> Text -> IO (Either String (Map Text Integer))
+blobSizes dir sha = do
+  r <- gitBytes dir ["ls-tree", "-r", "-l", "-z", Text.unpack sha]
+  pure $ case r of
+    Nothing -> Left (dir <> ": git ls-tree " <> Text.unpack sha <> " failed")
+    Just out -> either (Left . ((dir <> ": ls-tree: ") <>) . show) Right (parseLsTree out)
+
+-- | A git command's stdout as bytes (paths may not be UTF-8);
+-- 'Nothing' if it fails. Its stderr goes to ours.
+gitBytes :: FilePath -> [String] -> IO (Maybe ByteString)
+gitBytes dir args =
+  withCreateProcess cp $ \_ mout _ ph -> case mout of
+    Nothing -> pure Nothing
+    Just out -> do
+      bytes <- BS.hGetContents out
+      hClose out
+      code <- waitForProcess ph
+      pure (if code == ExitSuccess then Just bytes else Nothing)
+  where
+    cp = (proc "git" (["-C", dir] <> args)) {std_out = CreatePipe, std_in = NoStream}
 
 -- | Worktree mode compares the working tree: it must be the clean
 -- checkout, else we'd measure local edits.

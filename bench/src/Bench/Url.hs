@@ -11,6 +11,7 @@ module Bench.Url
     filesPath,
     sessionPath,
     diffFilesPath,
+    diffPath,
 
     -- * Encoding
     encodePath,
@@ -80,6 +81,11 @@ sessionPath = "api/session"
 -- | The changed files, diff mode only (D-325).
 diffFilesPath :: String
 diffFilesPath = "api/diff-files"
+
+-- | One file's diff, by its head path (or base path if removed; D-331).
+-- Plain: no @ws=ignore@.
+diffPath :: Text -> String
+diffPath p = "api/diff/" <> encodePath p
 
 -- | A side as a path segment.
 seg :: Side -> String

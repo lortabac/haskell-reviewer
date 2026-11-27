@@ -28,6 +28,10 @@ module Bench.Report
     textFirsts,
     textPagesOf,
     textByQuery,
+    diffAfter,
+    diffFilesAfter,
+    DiffFileSummary (..),
+    diffByFile,
     refsDuringTimes,
     firstTimes,
     peakStartup,
@@ -45,6 +49,15 @@ module Bench.Report
   )
 where
 
+import Bench.DiffAnswer (DiffKind (..))
+import Bench.DiffFiles
+  ( Candidate (..),
+    ChangedFile (..),
+    DiffFilesAnswer (..),
+    DiffPick (..),
+    StatusCounts (..),
+    statusCounts,
+  )
 import Bench.Fallbacks
   ( Census,
     Diff (..),
@@ -65,7 +78,13 @@ import Bench.GcLog
     renderGcLogError,
     summarizeGc,
   )
-import Bench.IndexLog (IndexDone (..))
+import Bench.IndexLog
+  ( ChangedLine (..),
+    DiffLog (..),
+    IndexDone (..),
+    PairingLine (..),
+    WorkTreeLine (..),
+  )
 import Bench.Machine (LoadAvg (..), MachineInfo (..))
 import Bench.Mode (Mode (..), Side (..), diffSide, modeText, sideText)
 import Bench.ModuleList (OnDemandStatus (..), Sample (..), sampleKindText)
@@ -87,10 +106,17 @@ import Bench.Startup
     UiParts (..),
   )
 import Bench.Stats (Latency (..), Summary (..), latency, summarize)
-import Bench.Steady (PageTime (..), Route (..), SteadyRun (..), TextTime (..))
+import Bench.Steady
+  ( DiffTime (..),
+    PageTime (..),
+    Route (..),
+    SteadyRun (..),
+    TextTime (..),
+  )
 import Bench.Targets
   ( Target (..),
     Verdict (..),
+    diffAfterP95,
     memoryBudgetBytes,
     navigation,
     navigationIdle,
@@ -179,6 +205,8 @@ data ProjectReport = ProjectReport
     modulesListed :: Int,
     modulesParsed :: Int,
     samples :: [Sample],
+    -- | Diff mode only: the files the @diff@ phase asks for (D-358).
+    diffPick :: Maybe DiffPick,
     startup :: [StartupRun],
     steady :: [SteadyRun],
     searchDuring :: [SearchDuringRun],
@@ -270,6 +298,8 @@ projectVerdicts pr =
     <> bySide refsAfterP95 (map (.us) . (.refs))
     <> bySide textSearchAfterMedian (map (.us) . (.text))
     <> bySide textSearchAfterP95 (map (.us) . (.text))
+    -- A diff has both sides in it: no side.
+    <> catMaybes [verdictOf diffAfterP95 (map (.us) (diffAfter pr))]
   where
     bySide t f = sideVerdicts t [(diffSide st.side, f st) | st <- projectSideTimes pr]
 
@@ -293,6 +323,39 @@ textFirsts pr = concatMap (.textFirst) pr.steady
 -- | Text searches with the results page's limit.
 textPagesOf :: ProjectReport -> [TextTime]
 textPagesOf pr = concatMap (.textPages) pr.steady
+
+-- | @api\/diff@ requests of the steady runs.
+diffAfter :: ProjectReport -> [DiffTime]
+diffAfter pr = concatMap (.diffTimes) pr.steady
+
+-- | @api\/diff-files@ request times of the steady runs.
+diffFilesAfter :: ProjectReport -> [Integer]
+diffFilesAfter pr = concatMap (.diffFilesTimes) pr.steady
+
+-- | Latency of one picked file's diffs, with its sizes.
+data DiffFileSummary = DiffFileSummary
+  { candidate :: Candidate,
+    latency :: Maybe Latency,
+    -- | Of the last answer.
+    wireBytes :: Maybe Int
+  }
+
+-- | One summary per picked file, in pick order (largest first).
+diffByFile :: ProjectReport -> [DiffFileSummary]
+diffByFile pr = case pr.diffPick of
+  Nothing -> []
+  Just pk -> map one pk.picked
+  where
+    ds = diffAfter pr
+    one c =
+      let mine = [d | d <- ds, d.path == c.file.path]
+       in DiffFileSummary
+            { candidate = c,
+              latency = latencyUs (map (.us) mine),
+              wireBytes = case reverse mine of
+                d : _ -> Just d.wireBytes
+                [] -> Nothing
+            }
 
 -- | Latency over all samples of one query on one side; counts from the
 -- last sample (they don't change after indexing).
@@ -366,8 +429,8 @@ renderTable report =
       [] -> []
       ls ->
         [ "",
-          "Targets (SPEC §10.1, D-208, D-303, D-308, D-357; a MISS never fails the \
-          \bench, §10.3):"
+          "Targets (SPEC §10.1, D-208, D-303, D-308, D-357, D-358; a MISS never \
+          \fails the bench, §10.3):"
         ]
           <> ls
     verdictLines pr =
@@ -481,8 +544,40 @@ startupLines pr = case NE.nonEmpty pr.startup of
         <> " text only (first run)",
       "  stop " <> ms1 (.stopUs) runs
     ]
+      <> diffLogLines
     where
       d = (NE.head runs).done
+      -- The counts of the first run; the pairing time over all runs.
+      -- No line if none came (the warnings say so).
+      firstLog = (NE.head runs).diffLog
+      diffLogLines = case catMaybes
+        [ changedText <$> firstLog.changed,
+          pairingText <$> firstLog.pairing,
+          workTreeText <$> firstLog.workTree
+        ] of
+        [] -> []
+        parts -> ["  diff (counts of the first run): " <> Text.intercalate "; " parts]
+      changedText c =
+        "changed " <> showT c.head <> " on head, " <> showT c.base <> " on base"
+      pairingText p =
+        "pairing "
+          <> showT p.changed
+          <> " changed, "
+          <> showT p.renamed
+          <> " renamed"
+          <> maybe "" (", " <>) (Text.pack <$> p.limit)
+          <> maybe
+            ""
+            (\x -> " in " <> fmtMs x.median <> " ms (median)")
+            (summaryUs (mapMaybe (.pairingSpanUs) (NE.toList runs)))
+      workTreeText w =
+        "working tree "
+          <> showT w.entries
+          <> " entries, "
+          <> showT w.hashed
+          <> " hashed, "
+          <> showT w.fromDisk
+          <> " read from disk"
       onDemandText = case latencyUs (onDemandTimes pr) of
         Nothing -> "no sample (indexing always done first)" <> excluded
         Just l -> latencyText l <> excluded <> "; " <> sampleText
@@ -506,15 +601,26 @@ steadyLines :: ProjectReport -> [Text]
 steadyLines pr = case pr.steady of
   [] -> []
   runs ->
-    ["steady, " <> plural (length runs) "run" <> " after indexing, ms:"]
+    [ "steady, "
+        <> plural (length runs) "run"
+        <> " after indexing, ms"
+        <> perQueryNote
+        <> ":"
+    ]
       <> concatMap sideLines (projectSideTimes pr)
+      <> diffLines pr
       <> slowLines
       <> gcLines
       <> phaseLines
       <> gcWarnings
   where
     -- The same lines for each side; " (base)" after the name in diff
-    -- mode.
+    -- mode. The refs and text search lines per query on the first side
+    -- only (the JSON has them all), else the table gets long.
+    firstSide = NE.head (NE.map (.side) pr.sides)
+    perQueryNote = case pr.mode of
+      Browse -> ""
+      _ -> " (per-query lines: " <> sideText firstSide <> " only; the JSON has both)"
     sideLines st =
       [ "  navigation back to back" <> sfx <> ": " <> lat st.pages,
         "  navigation with idle gaps" <> sfx <> ": " <> lat st.idlePages,
@@ -531,7 +637,7 @@ steadyLines pr = case pr.steady of
           | null pr.refsQueries = []
           | otherwise =
               ("  refs" <> sfx <> ": " <> lat (map (.us) st.refs))
-                : map refsQueryLine (byQuery pr.refsQueries st.refs)
+                : perQuery (map refsQueryLine (byQuery pr.refsQueries st.refs))
         textLines = case st.text of
           [] -> []
           ts ->
@@ -550,18 +656,20 @@ steadyLines pr = case pr.steady of
                 <> "): "
                 <> maybe "-" shortLatency (latencyUs (map (.us) st.textPages))
             ]
-              <> map textQueryLine (textByQuery ts)
-              <> [ "    page "
-                     <> quoted q.query
-                     <> ": "
-                     <> fmtMs q.latency.median
-                     <> ", sent "
-                     <> showT q.sent
-                     <> ", "
-                     <> fmtKiB q.wireBytes
-                     <> " KiB"
-                 | q <- textByQuery st.textPages
-                 ]
+              <> perQuery (map textQueryLine (textByQuery ts))
+              <> perQuery
+                [ "    page "
+                    <> quoted q.query
+                    <> ": "
+                    <> fmtMs q.latency.median
+                    <> ", sent "
+                    <> showT q.sent
+                    <> ", "
+                    <> fmtKiB q.wireBytes
+                    <> " KiB"
+                | q <- textByQuery st.textPages
+                ]
+        perQuery ls = if st.side == firstSide then ls else []
     refsQueryLine q =
       "    "
         <> q.query.moduleRef
@@ -642,6 +750,58 @@ steadyLines pr = case pr.steady of
             <> fmtMs (fromInteger g.pausedUs)
             <> " in total"
         ]
+
+-- | Diff mode (D-358): api/diff-files and the diffs of the picked files.
+diffLines :: ProjectReport -> [Text]
+diffLines pr = case pr.diffPick of
+  Nothing -> []
+  Just pk ->
+    [ "  diff-files: "
+        <> lat (diffFilesAfter pr)
+        <> "; "
+        <> filesText pk.answer,
+      "  diff ("
+        <> plural (length pk.picked) "file"
+        <> ", the largest modified or renamed with a line diff or too-slow, plain; "
+        <> showT pk.asked
+        <> " asked of "
+        <> showT pk.candidates
+        <> "): "
+        <> lat (map (.us) ds)
+        <> tooSlowText
+    ]
+      <> map fileLine (diffByFile pr)
+  where
+    ds = diffAfter pr
+    lat = maybe "-" latencyText . latencyUs
+    tooSlowText = case length [() | d <- ds, d.kind == DiffTooSlow] of
+      0 -> ""
+      n -> "; " <> showT n <> " too-slow"
+    filesText a =
+      let c = statusCounts a.files
+       in plural (length a.files) "file"
+            <> " ("
+            <> showT c.added
+            <> " added, "
+            <> showT c.removed
+            <> " removed, "
+            <> showT c.modified
+            <> " modified, "
+            <> showT c.renamed
+            <> " renamed)"
+            <> (if a.renameLimitHit then ", rename limit hit" else "")
+            <> (if a.truncated then ", truncated" else "")
+            <> maybe "" (\n -> "; outside ROOT " <> showT n) a.outsideTotal
+    fileLine f =
+      "    "
+        <> maybe "" (<> " -> ") f.candidate.file.oldPath
+        <> f.candidate.file.path
+        <> " ("
+        <> fmtKiB (fromInteger f.candidate.baseBytes)
+        <> " + "
+        <> fmtKiB (fromInteger f.candidate.headBytes)
+        <> " KiB): "
+        <> maybe "-" shortLatency f.latency
 
 searchDuringLines :: ProjectReport -> [Text]
 searchDuringLines pr = case pr.searchDuring of

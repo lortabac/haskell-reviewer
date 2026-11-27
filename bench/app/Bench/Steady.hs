@@ -1,25 +1,36 @@
 -- | A steady run (plan §2.2, D-303): after indexing, every module page
 -- once, back to back, then every source page; then module pages with
 -- idle gaps, then the same source pages with the same gaps; then
--- search, then find references, then text search (D-308). With
--- @+RTS -S@, for the GC pauses. The first run also does the fallback
--- census, in a pass of its own before the timed one. In diff mode
--- (D-357) each phase does head, then base.
+-- search, then find references, then in diff mode the diffs (D-358),
+-- then text search (D-308). With @+RTS -S@, for the GC pauses. The
+-- first run also does the fallback census, in a pass of its own before
+-- the timed one. In diff mode (D-357) each phase does head, then base.
 module Bench.Steady
   ( -- * Types
     SteadyPlan (..),
+    DiffPlan (..),
     CensusPass (..),
     TimedPass (..),
     PageTime (..),
     Route (..),
     TextTime (..),
+    DiffTime (..),
     SteadyRun (..),
 
     -- * Running
     runSteady,
+    timeDiff,
+    getDiffFiles,
   )
 where
 
+import Bench.DiffAnswer (DiffKind, parseDiffAnswer)
+import Bench.DiffFiles
+  ( Candidate (..),
+    ChangedFile (..),
+    DiffFilesAnswer,
+    parseDiffFiles,
+  )
 import Bench.Fallbacks (Category (..), Census, Hit (..), Slot (..), classifyPage)
 import Bench.GcLog (GcLog, GcLogError, PhaseMark (..))
 import Bench.Http (Gzip (..), HttpResponse (..))
@@ -64,7 +75,7 @@ import Bench.Run
     withSession,
   )
 import Bench.SearchDuring (QueryTime, timeQuery)
-import Bench.Url (modulePath, sourcePath, textSearchPath)
+import Bench.Url (diffFilesPath, diffPath, modulePath, sourcePath, textSearchPath)
 import Control.Concurrent (threadDelay)
 import Control.Monad (forM, replicateM)
 import Data.Aeson qualified as Aeson
@@ -95,7 +106,17 @@ data SteadyPlan = SteadyPlan
     -- no text search at all.
     textRounds :: Int,
     -- | Picks the idle pages and gaps: the run index.
-    seed :: Int
+    seed :: Int,
+    -- | Diff mode only.
+    diff :: Maybe DiffPlan
+  }
+
+-- | The @diff@ phase (D-358): @api\/diff-files@ a few times, then
+-- rounds of @api\/diff@ over the picked files.
+data DiffPlan = DiffPlan
+  { filesRounds :: Int,
+    files :: [Candidate],
+    rounds :: Int
   }
 
 -- | Decode every page and bucket the fallbacks? A pass of its own, so
@@ -135,6 +156,16 @@ data TextTime = TextTime
     wireBytes :: Int
   }
 
+-- | One @api\/diff@ request.
+data DiffTime = DiffTime
+  { path :: Text,
+    -- | From request to the last byte.
+    us :: Integer,
+    wireBytes :: Int,
+    -- | Too-slow (D-331) is the one to look at.
+    kind :: DiffKind
+  }
+
 -- | Everything one steady run measures.
 data SteadyRun = SteadyRun
   { doneUs :: Integer,
@@ -156,6 +187,10 @@ data SteadyRun = SteadyRun
     textTimes :: [TextTime],
     -- | One round with the results page's limit (1000).
     textPages :: [TextTime],
+    -- | @api\/diff-files@ request times; diff mode only.
+    diffFilesTimes :: [Integer],
+    -- | @api\/diff@ requests; diff mode only.
+    diffTimes :: [DiffTime],
     -- | When each phase started, the first at the done line. Named like
     -- the JSON keys.
     phases :: [PhaseMark],
@@ -224,6 +259,14 @@ steps trees plan s = do
   m6 <- mark "refs"
   refsTimes <- perSide $ \side ->
     concat <$> replicateM plan.refsRounds (mapM (timeRefs s side) plan.refs)
+  -- No mark in browse mode: its phases stay as before.
+  (mDiff, diffFilesTimes, diffTimes) <- case plan.diff of
+    Nothing -> pure ([], [], [])
+    Just d -> do
+      m <- mark "diff"
+      fs <- replicateM d.filesRounds ((.us) . fst <$> getDiffFiles s)
+      ds <- concat <$> replicateM d.rounds (mapM (timeDiff s . (.file.path)) d.files)
+      pure ([m], fs, ds)
   -- Last: the store it loads would change the memory of the phases
   -- before.
   m7 <- mark "text"
@@ -257,7 +300,9 @@ steps trees plan s = do
         textFirst = textFirst,
         textTimes = concat textRounds,
         textPages = concat textPages,
-        phases = [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9],
+        diffFilesTimes = diffFilesTimes,
+        diffTimes = diffTimes,
+        phases = [m0, m1, m2, m3, m4, m5, m6] <> mDiff <> [m7, m8, m9],
         census = census,
         gc = ended.gc,
         rts = rts,
@@ -305,6 +350,37 @@ timeSource s m = do
             us = t.us,
             wireBytes = t.response.wireBytes
           }
+
+-- | @api\/diff-files@, timed and read. Fails the run unless it's a 200
+-- with a diff-files answer.
+getDiffFiles :: Session -> IO (Timed, DiffFilesAnswer)
+getDiffFiles s = do
+  t <- getApi s Gzip diffFilesPath
+  if t.response.status /= 200
+    then failWith ("diff-files: expected 200, got " <> show t.response.status)
+    else case parseDiffFiles t.response.body of
+      Left e -> failWith ("diff-files: " <> show e)
+      Right a -> pure (t, a)
+
+-- | One file's diff, timed. Fails the run unless it's a 200 with a
+-- diff answer. Any kind is fine here: the pick decides, the report
+-- warns about too-slow.
+timeDiff :: Session -> Text -> IO DiffTime
+timeDiff s p = do
+  t <- getApi s Gzip (diffPath p)
+  let what = "diff " <> Text.unpack p
+  if t.response.status /= 200
+    then failWith (what <> ": expected 200, got " <> show t.response.status)
+    else case parseDiffAnswer t.response.body of
+      Left e -> failWith (what <> ": " <> show e)
+      Right k ->
+        pure
+          DiffTime
+            { path = p,
+              us = t.us,
+              wireBytes = t.response.wireBytes,
+              kind = k
+            }
 
 -- | One text search, timed. Fails the run unless it's a 200 with a text
 -- search answer.

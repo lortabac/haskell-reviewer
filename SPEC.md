@@ -1426,6 +1426,7 @@ benchmarks that are part of the project.
 | Opening a not-yet-indexed module on demand | < 300 ms |
 | Find references after indexing (p95 over the bench's refs queries, D-303) | < 300 ms |
 | Text search after indexing, store loaded (limit 8; median / p95 over the bench's text queries, D-308) | ≤ 50 ms / ≤ 150 ms |
+| Opening a changed file's diff after indexing (diff mode; p95 over the bench's 10 largest changed files with a line diff, D-358) | < 100 ms |
 | Large project, precise tier, **cold** HIE cache (first run, all `.hie` converted) | Syntactic UI within the 10 s target; precise tier fills in progressively, with no fixed bound in v1 (to be set from benchmarks) |
 
 Diff-mode targets cover **both sides**. Except where marked *cold*,

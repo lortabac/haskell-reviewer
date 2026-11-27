@@ -244,6 +244,10 @@ test-suite haskell-reviewer-test
   main-is:            Main.hs
   other-modules:
     ApiSupport
+    Bench.DiffAnswer
+    Bench.DiffAnswerTest
+    Bench.DiffFiles
+    Bench.DiffFilesTest
     Bench.Fallbacks
     Bench.FallbacksTest
     Bench.GcLog
@@ -436,6 +440,8 @@ benchmark haskell-reviewer-bench
   hs-source-dirs: ../bench/app ../bench/src
   main-is:        Main.hs
   other-modules:
+    Bench.DiffAnswer
+    Bench.DiffFiles
     Bench.Fallbacks
     Bench.GcLog
     Bench.Http

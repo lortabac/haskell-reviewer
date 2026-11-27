@@ -1,7 +1,7 @@
--- | The SPEC §10.1 targets (and D-208's search, D-303's refs and
--- D-308's text search targets), and whether a run met them. Missing
--- one never fails the bench (§10.3): the table says MISS and the human
--- decides.
+-- | The SPEC §10.1 targets (and D-208's search, D-303's refs, D-308's
+-- text search and D-358's diff targets), and whether a run met them.
+-- Missing one never fails the bench (§10.3): the table says MISS and
+-- the human decides.
 module Bench.Targets
   ( -- * Types
     Stat (..),
@@ -22,6 +22,7 @@ module Bench.Targets
     refsAfterP95,
     textSearchAfterMedian,
     textSearchAfterP95,
+    diffAfterP95,
     memoryBudgetBytes,
 
     -- * Verdicts
@@ -214,6 +215,19 @@ textSearchAfterP95 =
       stat = P95,
       bound = AtMost,
       limitUs = 150_000
+    }
+
+-- | A changed file's diff after indexing (D-358): opening it is
+-- navigation, so the navigation bound. Over the bench's sample of the
+-- largest changed files.
+diffAfterP95 :: Target
+diffAfterP95 =
+  Target
+    { key = "diff_after_p95",
+      label = "§10.1 diff after indexing < 100 ms",
+      stat = P95,
+      bound = Below,
+      limitUs = 100_000
     }
 
 -- | SPEC §10.2's provisional budget, for the large project only.
