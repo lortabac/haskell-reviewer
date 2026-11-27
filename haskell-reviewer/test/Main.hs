@@ -110,6 +110,7 @@ import HaskellReviewer.Server.CborTest qualified
 import HaskellReviewer.Server.DiffTest qualified
 import HaskellReviewer.Server.EventsTest qualified
 import HaskellReviewer.Server.ListenTest qualified
+import HaskellReviewer.Server.MarkdownTest qualified
 import HaskellReviewer.Server.PageLinksTest qualified
 import HaskellReviewer.Server.PageTest qualified
 import HaskellReviewer.Server.Prefs (warmUpPrefs)
@@ -343,6 +344,7 @@ main = do
                     ],
                 HaskellReviewer.Server.PageLinksTest.tests,
                 HaskellReviewer.Server.PageLinksTest.linearTests,
+                HaskellReviewer.Server.MarkdownTest.tests,
                 HaskellReviewer.Server.PageTest.tests
               ],
         HaskellReviewer.Server.AssetsTest.tests,
