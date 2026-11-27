@@ -287,6 +287,26 @@ newResolverCase = do
   r3 <- newResolver w1.modules w1.index
   memoKeys r3 >>= (@?= [])
 
+{- Note [Requests done before indexing]
+
+A complete result can come before indexing is done. Mk re-exports only
+M1, plus its own fk. So M20's names come from M19 and M1 only. M2 to
+M18 can still be Pending or Parsing: their sets are then not final, but
+the result is complete. So the 8 request threads can all end while a
+module is still parsing.
+
+Call 'waitDone' inside the 'withAsync' of 'runWorkers'. Leaving it
+stops the workers, and every module not done fails ('failUnfinished').
+'waitDone' then returns at once. Say M11 failed: in the last round,
+M20's walk stops at M11 (not parsed, so final), and nothing builds
+M10's own set. The memo has no M10.
+
+The test holds M11 until the requests are done, so this always happens.
+Then it checks that no module failed. No deadlock: M10 comes before
+M11, so it's done and gives a partial while M1 is held.
+-}
+
+-- | See Note [Requests done before indexing].
 concurrent :: Assertion
 concurrent = do
   let n = 30 :: Int
@@ -307,8 +327,8 @@ concurrent = do
       mods = [(name k, src k) | k <- [1 .. n]]
       wanted = map name [10, 20, n]
   -- M1 is held until a partial result is seen, so the requests really
-  -- run while indexing.
-  w <- newWorld ["M1"] mods
+  -- run while indexing. M11 is held until they are done: none needs it.
+  w <- newWorld ["M1", "M11"] mods
   partials <- newTVarIO (0 :: Int)
   finals <- withAsync (runWorkers 2 [IndexJob w.deps w.index]) $ \_ ->
     withAsync
@@ -316,8 +336,13 @@ concurrent = do
       $ \requests -> do
         within (atomically (readTVar partials >>= check . (> 0)))
         release w "M1"
-        within (wait requests)
-  waitDone w.index
+        got <- within (wait requests)
+        atomically (slotState w.index (modId "M11")) >>= (@?= Just Parsing)
+        release w "M11"
+        -- Inside the withAsync: leaving it stops the workers.
+        waitDone w.index
+        pure got
+  (.failed) <$> atomically (readProgress w.index) >>= (@?= 0)
   single <- newWorld [] mods
   within (runWorkers 1 [IndexJob single.deps single.index])
   expected <- forM wanted (resolved single)
