@@ -230,7 +230,7 @@ diffAfterP95 =
       limitUs = 100_000
     }
 
--- | SPEC §10.2's provisional budget, for the large project only.
+-- | SPEC §10.2's budget (D-361), for the large project only.
 memoryBudgetBytes :: Role -> Maybe Integer
 memoryBudgetBytes Large = Just (2 * 1024 * 1024 * 1024)
 memoryBudgetBytes _ = Nothing

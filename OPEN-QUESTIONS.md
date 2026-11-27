@@ -98,13 +98,15 @@ is updated if needed (§10.3).
   backstop.
 - **Q-PERF-COLD**: Set a bound for the cold HIE-conversion cache from the
   first benchmarks (§10.1).
-- **Q-GC**: closed for M1 (D-219) and M2 (D-305): keep the copying GC and
-  the D-162 defaults. Re-check when the precise tier or diff mode grows the
-  index. Options then: compact regions for finished module models, or the
-  non-moving collector (§11.5). M2 reference run: wire-server max major
-  pause after indexing 18 ms, idle-gap navigation p95 12.1 ms (module) and
-  13.6 ms (source). T18b: re-check on the range runs, both sides
-  indexed (D-357).
+- **Q-GC**: closed for M1 (D-219), M2 (D-305) and M3 (D-362): keep the
+  copying GC and the D-162 defaults. Re-check when M4 (semantic diff) or
+  the precise tier grows the index; write the rule down before that run.
+  Options then: compact regions for finished module models, or the
+  non-moving collector (§11.5). M3 reference run, wire-server range, both
+  sides: max major pause after indexing 27 ms, idle-gap p95 module 12.8 /
+  10.6 ms, source 13.8 / 14.8 ms (head / base); max live 231 MiB. Watch:
+  a few idle-gap pages over 100 ms (max 213 ms), not a GC pause alone
+  (D-360).
 - **Q-OPENAI-COMPAT**: Check that the `openai` package's raw stream and our
   delta decoder work with Ollama, llama.cpp and vLLM, not only OpenAI
   (§11.6.3).
