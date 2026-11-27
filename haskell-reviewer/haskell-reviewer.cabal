@@ -361,6 +361,7 @@ test-suite haskell-reviewer-test
     HaskellReviewer.Server.AssetsTest
     HaskellReviewer.Server.CborTest
     HaskellReviewer.Server.PageLinksTest
+    HaskellReviewer.Server.MarkdownTest
     HaskellReviewer.Server.PageTest
     HaskellReviewer.Server.RefsTest
     HaskellReviewer.Server.EventsTest
