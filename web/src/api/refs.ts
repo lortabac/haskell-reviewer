@@ -102,6 +102,26 @@ export function decodeRefsNotFound(value: unknown): RefsNotFound {
   };
 }
 
+// The 200 body when the module's blob is not in the local repo (partial
+// clone, D-359).
+export type RefsNotLocal = { generation: number; kind: "not-local" };
+
+export function decodeRefsNotLocal(value: unknown): RefsNotLocal {
+  const path = "$";
+  const o = object(value, path);
+  return {
+    generation: field(o, "generation", path, nat),
+    kind: field(o, "kind", path, oneOf(["not-local"] as const)),
+  };
+}
+
+// The refs route's 200: the list, or not-local.
+export function decodeRefsAnswer(value: unknown): Refs | RefsNotLocal {
+  return typeof value === "object" && value !== null && "kind" in value
+    ? decodeRefsNotLocal(value)
+    : decodeRefs(value);
+}
+
 // The route for a declaration, relative to the token, for getJson.
 export function refsUrl(side: Side, moduleRef: string, decl: string): string {
   return (

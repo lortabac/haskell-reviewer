@@ -52,7 +52,12 @@ import HaskellReviewer.Core.Search (ModuleCandidate (..), moduleCandidates)
 import HaskellReviewer.Effects.FileSystem (ListError (..))
 import HaskellReviewer.Server.Api (FilesApi, fromSideSnapshot)
 import HaskellReviewer.Server.Security (methodNotAllowed, notFound)
-import HaskellReviewer.Server.Wire (RefsMissing (..), encodeRefs, encodeRefsNotFound)
+import HaskellReviewer.Server.Wire
+  ( RefsMissing (..),
+    encodeRefs,
+    encodeRefsNotFound,
+    encodeRefsNotLocal,
+  )
 import HaskellReviewer.Session.Index
   ( IndexFailure (..),
     Indexed (..),
@@ -105,8 +110,10 @@ a declaration id ('renderDeclId').
 The same with "decl": a name the module doesn't declare (instances
 have none).
 
-A read error or a crash on the module: 500, as on api/module. The
-listing failed: 500 "cannot list files".
+A blob not in the local repo (partial clone): 200 with
+{"generation":1,"kind":"not-local"} (D-359). Another read error or a
+crash on the module: 500. The listing failed: 500 "cannot list files".
+The not-local answer comes before the decl is checked.
 
 It waits for the module (it jumps the queue), never for indexing: it
 answers from what is parsed now, and says partial. The client asks
@@ -256,9 +263,9 @@ refsWith found req respond
             HomeFailed SourceGone -> respond (missing src MissingModule)
             HomeFailed (SourceUnreadable _) ->
               respond (plain status500 "cannot read file")
-            -- The refs page: still a 500 (D-343).
+            -- Not in the partial clone: a 200 (D-359).
             HomeFailed SourceNotLocal ->
-              respond (plain status500 "cannot read file")
+              respond (json status200 (encodeRefsNotLocal src.generation))
             HomeFailed (IndexCrashed _) ->
               respond (plain status500 "cannot index module")
             HomeParsed i names ->

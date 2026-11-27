@@ -344,8 +344,9 @@ fileApp api side segs req respond
 -- anything.
 --
 -- An unknown ref, or a module whose file is gone, is a 404 with a JSON
--- body ('encodeModuleNotFound'). A bad side is a plain 404. Exceptions
--- from resolution are not caught: a 500.
+-- body ('encodeModuleNotFound'). A bad side is a plain 404. A blob
+-- missing from a partial clone is a 200 with the reason @not-local@
+-- (D-359). Exceptions from resolution are not caught: a 500.
 moduleApp :: FilesApi -> Text -> [Text] -> Application
 moduleApp api side segs req respond
   | req.requestMethod /= methodGet = respond (methodNotAllowed "GET")
@@ -394,6 +395,7 @@ moduleApp api side segs req respond
           answer snap i (Just path) (NotTextModule size)
         Just (Right (IndexedTooLarge info)) ->
           answer snap i (Just path) (TooLargeModule info)
+        Just (Left SourceNotLocal) -> answer snap i (Just path) NotLocalModule
         Just (Left e) -> respond (indexFailed (missing snap) e)
         -- Every Haskell source has a slot.
         Nothing -> respond (missing snap)
@@ -641,8 +643,7 @@ indexFailed :: Response -> IndexFailure -> Response
 indexFailed gone = \case
   SourceGone -> gone
   SourceUnreadable _ -> serverError "cannot read file"
-  -- The module page and refs: still a 500 (D-343). api/source answers
-  -- not-local before it gets here.
+  -- Unused: the routes answer not-local first (D-343, D-359).
   SourceNotLocal -> serverError "cannot read file"
   IndexCrashed _ -> serverError "cannot index module"
 

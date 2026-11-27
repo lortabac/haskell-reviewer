@@ -28,6 +28,7 @@ module HaskellReviewer.Server.Wire
     encodeSearch,
     encodeRefs,
     encodeRefsNotFound,
+    encodeRefsNotLocal,
     encodeTextSearch,
     helloPayload,
 
@@ -664,6 +665,13 @@ encodeRefs (Generation g) home decl candidate pathOf a =
 -- | What a find references 404 didn't find.
 data RefsMissing = MissingModule | MissingDecl
   deriving (Eq, Show)
+
+-- | The 200 of the refs route when the module's blob is not in the
+-- local repo (partial clone, D-359): @{"generation":1,"kind":"not-local"}@.
+encodeRefsNotLocal :: Generation -> LBS.ByteString
+encodeRefsNotLocal (Generation g) =
+  Encoding.encodingToLazyByteString . Aeson.pairs $
+    ("generation" .= g) <> kindIs "not-local"
 
 -- | The 404 of the refs route:
 -- @{"generation":1,"kind":"not-found","what":"module"}@, or @"decl"@.

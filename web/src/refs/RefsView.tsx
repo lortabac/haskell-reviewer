@@ -21,7 +21,7 @@ import {
 import { createStore, reconcile } from "solid-js/store";
 import { getJson } from "../api/client";
 import { docsHref } from "../api/module";
-import { decodeRefs, type Refs, refsUrl } from "../api/refs";
+import { decodeRefsAnswer, type Refs, refsUrl } from "../api/refs";
 import { useDiffLink } from "../diff/link";
 import { anchorName } from "../docs/urls";
 import { createRefetchLoop } from "../events/refetchLoop";
@@ -48,6 +48,7 @@ import { usePageSide } from "../session";
 import { plainPieces } from "../source/display";
 import { reasonText } from "../source/hover";
 import { createDelay, focusInMain, focusLost } from "../ui/focus";
+import { noteTexts } from "../ui/notes";
 import {
   guessCount,
   type Group,
@@ -101,7 +102,7 @@ const declWords: Record<string, string> = {
   field: "field",
 };
 
-type State = "loading" | "not-found" | "error" | "ok";
+type State = "loading" | "not-found" | "not-local" | "error" | "ok";
 
 function RefsPage(props: { module: string; decl: string }): JSX.Element {
   const side = usePageSide();
@@ -184,7 +185,8 @@ function RefsPage(props: { module: string; decl: string }): JSX.Element {
     setSaid(summary(cached));
   }
   const fetchNow = createRefetchLoop(
-    (signal) => getJson(refsUrl(side(), module, decl), decodeRefs, { signal }),
+    (signal) =>
+      getJson(refsUrl(side(), module, decl), decodeRefsAnswer, { signal }),
     (r) => {
       if (r.kind === "not-found") {
         if (state() !== "ok") setState("not-found");
@@ -196,6 +198,13 @@ function RefsPage(props: { module: string; decl: string }): JSX.Element {
       }
       const refs = r.value;
       generation.seen(refs.generation);
+      if ("kind" in refs) {
+        // Not in the partial clone: nothing to ask again.
+        setMeta(undefined);
+        setGroups("list", []);
+        setState("not-local");
+        return "stop";
+      }
       show(refs);
       if (!refs.partial) {
         // Once, when it is complete.
@@ -327,6 +336,9 @@ function RefsPage(props: { module: string; decl: string }): JSX.Element {
         <Switch>
           <Match when={state() === "error"}>
             <p>Couldn't load the references.</p>
+          </Match>
+          <Match when={state() === "not-local"}>
+            <p>{noteTexts.notLocal}</p>
           </Match>
           <Match when={meta()} keyed>
             {(m) => (

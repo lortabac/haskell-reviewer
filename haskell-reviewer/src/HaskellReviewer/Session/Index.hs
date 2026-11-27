@@ -399,7 +399,7 @@ data IndexFailure
     SourceGone
   | -- | A read error, as the OS says it.
     SourceUnreadable Text
-  | -- | The blob is not in the local repo (partial clone, D-331, D-343).
+  | -- | The blob is not in the local repo (partial clone, D-331, D-343, D-359).
     SourceNotLocal
   | -- | A bug, or indexing was stopped, with a message.
     IndexCrashed Text

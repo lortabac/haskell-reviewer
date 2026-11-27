@@ -945,6 +945,11 @@ describe("text-only pages", () => {
       "/tok/src/tree/Main.hs#L1",
     ],
     [
+      "module-not-local",
+      "Not in the local repo (partial clone).",
+      "/tok/src/tree/s/src/C.hs#L1",
+    ],
+    [
       "module-too-large",
       "This module is too large to parse (2,000,000 bytes; the limit is 1 MiB).",
       "/tok/src/tree/src/Data/Deep/Mod.hs#L1",

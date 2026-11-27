@@ -60,7 +60,14 @@ import {
 import { decodeMarkdownPage } from "./markdown";
 import { decodePrefs, diffLayouts, sidebarViews, themes } from "./prefs";
 import { decodeSession } from "./session";
-import { decodeRefs, decodeRefsNotFound, refKinds, refsUrl } from "./refs";
+import {
+  decodeRefs,
+  decodeRefsAnswer,
+  decodeRefsNotFound,
+  decodeRefsNotLocal,
+  refKinds,
+  refsUrl,
+} from "./refs";
 import {
   decodeSearch,
   searchKinds,
@@ -134,6 +141,7 @@ const decoders: Record<string, (value: unknown) => unknown> = {
   "module-generated": decodeModulePage,
   "module-no-source": decodeModulePage,
   "module-not-text": decodeModulePage,
+  "module-not-local": decodeModulePage,
   "module-too-large": decodeModulePage,
   "module-page": decodeModulePage,
   "module-page-sections": decodeModulePage,
@@ -145,6 +153,7 @@ const decoders: Record<string, (value: unknown) => unknown> = {
   refs: decodeRefs,
   "refs-partial": decodeRefs,
   "refs-not-found": decodeRefsNotFound,
+  "refs-not-local": decodeRefsNotLocal,
   search: decodeSearch,
   "search-qualified": decodeSearch,
   "search-partial": decodeSearch,
@@ -543,6 +552,16 @@ describe("API fixtures", () => {
     ]);
     expect(refs.total).toBe(refs.results.length);
     expect(decodeRefsNotFound(fixture("refs-not-found")).what).toBe("decl");
+    // The 200 answer is either the list or not-local (D-359).
+    expect(decodeRefsAnswer(fixture("refs-not-local"))).toEqual(
+      fixture("refs-not-local"),
+    );
+    expect(decodeRefsAnswer(fixture("refs"))).toEqual(
+      decodeRefs(fixture("refs")),
+    );
+    expect(() =>
+      decodeRefsNotLocal({ generation: 1, kind: "not-found" }),
+    ).toThrow(DecodeError);
   });
 
   it("the text search fixtures: kinds skipped, capped, long line", () => {
