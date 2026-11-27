@@ -25,8 +25,9 @@ import Data.ByteString (ByteString)
 import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
+import HaskellReviewer.Core.Git (ObjectId (..))
 import HaskellReviewer.Core.Sides (Sides (..))
-import HaskellReviewer.Effects.FileSystem (ListError (..))
+import HaskellReviewer.Effects.FileSystem (ListError (..), ReadError (..))
 import HaskellReviewer.Session.Index (IndexJob (..), runWorkers)
 import HaskellReviewer.Session.Snapshot (Snapshot (index))
 import Test.Tasty (TestTree, testGroup)
@@ -109,6 +110,16 @@ tests =
           -- No workers and a failing listing: the 400 comes first.
           r <- getApiQuery refsApi {workers = 0, sides = BrowseSides listFails} refsPath q
           (q, r.status, r.body) @?= (q, 400, "bad query"),
+      testCase "blob not in the local repo: 200 not-local (D-359)" $ do
+        let api =
+              indexed
+                refsApi
+                  { readEntry = \_ _ _ -> pure (Left (ReadMissing (ObjectId "ee")))
+                  }
+        r <- getApiQuery api refsPath okQuery
+        r.status @?= 200
+        lookup "Content-Type" r.headers @?= Just "application/json"
+        r.body @?= "{\"generation\":1,\"kind\":\"not-local\"}",
       testCase "not found: 404 with JSON, module or decl" $ do
         let notFound api q what = do
               r <- getApiQuery api refsPath q

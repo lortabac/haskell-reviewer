@@ -2009,17 +2009,18 @@ a framework would cost more than it saves.
   (D-343). A blob missing from a partial clone is a 200, not a 500:
   `api/file` and `api/markdown` have kind `not-local`, `api/source` has
   highlight `not-local` (only the head fields besides); the views say
-  "Not in the local repo (partial clone)." (D-343). Exceptions: the
-  module page and refs still answer 500 "cannot read file", and
-  `api/source` answers `plain` for a file it doesn't read (no module,
-  no language rules). A module page
+  "Not in the local repo (partial clone)." (D-343). So do the module
+  page (text-only reason `not-local`) and refs (D-359). Exception: `api/source` answers `plain` for a
+  file it doesn't read (no module, no language rules). A module page
   has the same `partial` flag and a targets table of the same shape for
   its links out of the module (D-289); the docs page refetches it the
   same way and only its links change (D-293). Search is
   `GET api/search/<side>?q=` (D-207). Find references is
   `GET api/refs/<side>?module=<ref>&decl=<id>` (JSON, D-294): at most
   1000 results with their line, a total and the same `partial` flag; a
-  missing module or declaration is a 404 with a small JSON body. Text search is
+  missing module or declaration is a 404 with a small JSON body; a
+  module whose blob is not local is a 200 `{generation, kind:
+  "not-local"}`, whatever the declaration (D-359). Text search is
   `GET api/text-search/<side>?q=&limit=` (JSON, D-307): one result per
   matching line, cut to 240 code points, with its hit columns; a total, a
   file count, the files not searched by why, and a `stopped` flag. In

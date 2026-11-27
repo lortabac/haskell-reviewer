@@ -409,8 +409,7 @@ data ReadError
     ReadFailed Text
   | -- | A blob not in the local repo (partial clone). The diff,
     -- file, source and Markdown routes and the index slots tell it apart
-    -- (D-343); the module page, refs and the project files answer as for
-    -- 'ReadFailed'.
+    -- (D-343, D-359); the project files answer as for 'ReadFailed'.
     ReadMissing ObjectId
   deriving (Eq, Show)
 

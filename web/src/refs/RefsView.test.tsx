@@ -197,6 +197,25 @@ describe("RefsView", () => {
     expect(st._depth).toBeDefined();
   });
 
+  it("not local: says so, no list (D-359)", async () => {
+    const { main, fetchMock } = open({
+      [api]: [200, fixture("refs-not-local")],
+    });
+    await vi.waitFor(() =>
+      expect(main.textContent).toContain(
+        "Not in the local repo (partial clone).",
+      ),
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    const asked = fetchMock.mock.calls.filter((c) =>
+      (c[0] as string).includes("/api/refs/"),
+    );
+    expect(asked.length).toBe(1);
+    expect(main.querySelector("h1")?.textContent).toContain("area");
+    expect(main.querySelector(".refs-group")).toBeNull();
+    expect(main.querySelector(".refs-summary")).toBeNull();
+  });
+
   it("404 and error", async () => {
     const { main } = open({
       [api]: [404, fixture("refs-not-found")],

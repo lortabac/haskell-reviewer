@@ -186,8 +186,8 @@ Commit reads, by the kind in the list:
 - a symlink is read up to 'linkTargetCap' ('commitLink');
 - a blob missing from a partial clone is 'ReadMissing': the diff route
   shows it as "not local", api/file, api/source and api/markdown
-  answer 200 not-local (D-343), the module page and refs 500 "cannot read
-  file" (D-331);
+  answer 200 not-local (D-343), and so do the module page and refs
+  (D-359);
 - any other object error is 'ReadFailed': 500 "cannot read file".
 -}
 

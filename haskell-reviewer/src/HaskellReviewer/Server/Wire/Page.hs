@@ -225,6 +225,8 @@ data NotParsed
     NoSourceModule NoSourceReason
   | -- | Binary, or not UTF-8.
     NotTextModule FileSize
+  | -- | The blob is not in the local repo (partial clone, D-359).
+    NotLocalModule
   | -- | Over the text limit.
     TooLargeModule TooLargeInfo
 
@@ -244,7 +246,7 @@ may change (as on the source view); false for a page not parsed.
 
 parse is {kind: text-only, reason, warnings} (reasons as for the
 banner: parse-error, pragma-error, preprocessed, parser-crashed,
-too-slow, generated, no-source, not-text, too-large) or
+too-slow, generated, no-source, not-text, not-local, too-large) or
 
   {kind: parsed, header, exports, imports, extensions, warnings,
    idParts, targets, declarations, docItems, pragmas}
@@ -363,6 +365,7 @@ encodeModulePage (Generation g) idx v =
       PreprocessedModule tool -> [kind "preprocessed", ("tool", Cbor.text tool)]
       NoSourceModule r -> [kind "no-source", ("reason", Cbor.text (noSourceReason r))]
       NotTextModule size -> [kind "not-text", ("size", bytes size)]
+      NotLocalModule -> [kind "not-local"]
       TooLargeModule info ->
         [kind "too-large", ("size", bytes info.size), ("limit", bytes info.limit)]
     bytes (FileSize n) = Cbor.int n
@@ -433,6 +436,7 @@ pageWarmUp =
         NoSourceModule Autogen,
         NoSourceModule Missing,
         NotTextModule (FileSize 1),
+        NotLocalModule,
         TooLargeModule TooLargeInfo {size = FileSize 2, limit = FileSize 1}
       ]
   where

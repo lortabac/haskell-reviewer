@@ -3,6 +3,7 @@
 import type { TextOnlyReason } from "../api/module";
 import { reasonText } from "../modules/notices";
 import { bytes, limit } from "../ui/format";
+import { noteTexts } from "../ui/notes";
 
 export function reasonBanner(r: TextOnlyReason): string {
   switch (r.kind) {
@@ -32,6 +33,8 @@ export function reasonBanner(r: TextOnlyReason): string {
       return `Listed, but there is no source (${reasonText(r.reason)}).`;
     case "not-text":
       return `This module is not UTF-8 text (${bytes(r.size)}).`;
+    case "not-local":
+      return noteTexts.notLocal;
     case "too-large":
       return `This module is too large to parse (${bytes(r.size)}; the limit is ${limit(r.limit)}).`;
   }

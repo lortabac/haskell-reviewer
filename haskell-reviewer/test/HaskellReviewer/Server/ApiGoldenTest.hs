@@ -207,6 +207,8 @@ cases =
     cbor "module-no-source" (okCbor projectApi (modulePath "Gone")),
     cbor "module-not-text" (okCbor implicitApi (modulePath "Main")),
     cbor "module-too-large" (okCbor implicitApi (modulePath "Data.Deep.Mod")),
+    -- The blob is missing from a partial clone (D-359).
+    cbor "module-not-local" (okCbor (indexed (missingApi sourceApi)) (modulePath "C")),
     -- The page: every kind of declaration and doc markup; sections.
     cbor "module-page" (okCbor pageApi (modulePath "Page")),
     cbor "module-page-sections" (okCbor pageApi (modulePath "Sections")),
@@ -262,6 +264,8 @@ cases =
       okRefs
         (refsGatedOn "r/src/R/Use.hs" gate) {workers = 2}
         "?module=R.Shape&decl=con:Square",
+    json "refs-not-local" $
+      okRefs (indexed (missingApi refsApi)) "?module=R.Shape&decl=val:area",
     json "refs-not-found" $ do
       r <-
         getApiQuery

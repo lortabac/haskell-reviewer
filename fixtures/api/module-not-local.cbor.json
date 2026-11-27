@@ -1,0 +1,1 @@
+{"generation":1,"id":"s:lib:C","ref":"C","path":"s/src/C.hs","package":{"name":"s","version":"1"},"component":"lib","tier":{"kind":"syntactic","reason":"no-hie"},"partial":false,"parse":{"kind":"text-only","reason":{"kind":"not-local"},"warnings":[]}}

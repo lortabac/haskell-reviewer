@@ -159,6 +159,7 @@ export const reasonKinds = [
   "generated",
   "no-source",
   "not-text",
+  "not-local",
   "too-large",
 ] as const;
 
@@ -177,6 +178,8 @@ export type TextOnlyReason =
   | { kind: "too-slow" }
   | { kind: "no-source"; reason: NoSourceReason }
   | { kind: "not-text"; size: number }
+  // The blob is not in the local repo (partial clone, D-359).
+  | { kind: "not-local" }
   | { kind: "too-large"; size: number; limit: number };
 
 export interface TextOnlyModule {
@@ -621,6 +624,8 @@ function decodeReason(value: unknown, path: string): TextOnlyReason {
       return { kind, reason: field(o, "reason", path, oneOf(noSourceReasons)) };
     case "not-text":
       return { kind, size: field(o, "size", path, nat) };
+    case "not-local":
+      return { kind };
     case "too-large":
       return {
         kind,

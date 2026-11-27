@@ -335,6 +335,32 @@ moduleTests =
       lines' <- readIORef logged
       assertBool (show lines') $
         "haskell-reviewer: cannot read pkg/src/Foo.hs: Permission denied" `elem` lines',
+    testCase "module: blob not in the local repo: 200 not-local (D-359), logged" $ do
+      logged <- newIORef []
+      let api =
+            projectApi
+              { readEntry = \_ _ _ -> pure (Left (ReadMissing (ObjectId "ee"))),
+                logger = newLogger LevelInfo (\l -> modifyIORef' logged (<> [l]))
+              }
+      r <- getApi api ["api", "module", "tree", "Foo"]
+      r.status @?= 200
+      lookup "Content-Type" r.headers @?= Just "application/cbor"
+      v <- cborValue r.body
+      let parse = case v of
+            Aeson.Object o -> KeyMap.lookup "parse" o
+            _ -> Nothing
+      parse
+        @?= Just
+          ( Aeson.object
+              [ "kind" Aeson..= ("text-only" :: Text),
+                "reason" Aeson..= Aeson.object ["kind" Aeson..= ("not-local" :: Text)],
+                "warnings" Aeson..= ([] :: [Text])
+              ]
+          )
+      lines' <- readIORef logged
+      assertBool (show lines') $
+        "haskell-reviewer: cannot read pkg/src/Foo.hs: object ee is not in the local repo"
+          `elem` lines',
     testCase "module: indexing crashed: 500" $ do
       let api = projectApi {parse = \_ _ -> ioError (userError "boom")}
       r <- getApi api ["api", "module", "tree", "Foo"]
