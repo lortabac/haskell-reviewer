@@ -22,14 +22,14 @@ import Control.Concurrent.Async (concurrently)
 import Control.Exception
   ( IOException,
     bracket,
-    bracketOnError,
     evaluate,
-    finally,
     mask_,
+    throwIO,
     try,
   )
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
+import Data.Either (lefts)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Int (Int64)
 import Data.List (isPrefixOf)
@@ -37,6 +37,7 @@ import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NonEmpty
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.Maybe (fromMaybe)
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text)
@@ -130,11 +131,10 @@ import HaskellReviewer.Effects.Git
   )
 import HaskellReviewer.Effects.GitObjects (BlobBytes (..), ObjectReader, readBlob)
 import HaskellReviewer.Effects.Log (Logger, logVerbose)
-import HaskellReviewer.Effects.PosixAt (listDirFd, lstatAt, readLinkAt)
+import HaskellReviewer.Effects.PosixAt (listDirFd, lstatAt, readLinkAt, withFileAt)
 import System.FilePath (takeDirectory)
-import System.IO (hClose)
 import System.Posix.Files.ByteString qualified as PosixFiles
-import System.Posix.IO.ByteString (OpenMode (ReadOnly), closeFd, fdToHandle, openFdAt)
+import System.Posix.IO.ByteString (OpenMode (ReadOnly), closeFd, openFdAt)
 import System.Posix.Types (Fd)
 
 {- Note [Working-tree listing]
@@ -876,7 +876,7 @@ indexTime :: CanonicalRoot -> ByteString -> IO IndexTime
 indexTime canon raw = do
   result <- try @IOException $ do
     st <- PosixFiles.getFileStatus path
-    names <- bracketOnError (openFdAt Nothing dir ReadOnly dirFlags) closeFd listDirFd
+    names <- bracket (openFdAt Nothing dir ReadOnly dirFlags) closeFd listDirFd
     shared <-
       mapM
         (\n -> PosixFiles.getFileStatus (dir <> "/" <> n))
@@ -913,18 +913,26 @@ withWalker canon = bracket open close
     open = mask_ $ do
       r <- try @IOException (openFdAt Nothing canon.bytes ReadOnly dirFlags)
       Walker <$> newIORef [Frame {dir = [], fd = r}]
-    close (Walker ref) = readIORef ref >>= mapM_ closeFrame
+    close (Walker ref) = readIORef ref >>= closeFrames
 
-closeFrame :: Frame -> IO ()
-closeFrame f = either (const (pure ())) closeFd f.fd
+-- | Close every frame, even if one close throws; then throw the first
+-- error. See Note [Fd ownership] in "HaskellReviewer.Effects.PosixAt".
+closeFrames :: [Frame] -> IO ()
+closeFrames frames = do
+  rs <- mapM (try @IOException . closeFrame) frames
+  mapM_ throwIO (take 1 (lefts rs))
+  where
+    closeFrame f = either (const (pure ())) closeFd f.fd
 
 -- | The fd of a directory under ROOT.
 dirFd :: Walker -> [Text] -> IO (Either IOException Fd)
 dirFd (Walker ref) want = do
   frames <- readIORef ref
   let (done, kept) = span (\f -> not (f.dir `isPrefixOf` want)) frames
-  mapM_ closeFrame done
-  writeIORef ref kept
+  -- Out of the ref first, masked: a cancel must not leave a closed fd
+  -- for withWalker to close again. See Note [Fd ownership] in
+  -- "HaskellReviewer.Effects.PosixAt".
+  mask_ (writeIORef ref kept >> closeFrames done)
   descend
   where
     descend =
@@ -997,32 +1005,26 @@ readForHash dir name st = case statKind st of
     either (ReadChanged . reasonOf) ReadLinkTarget
       <$> try @IOException (readLinkAt dir name)
   StatRegular -> do
-    result <- try @IOException $ do
-      opened <- bracketOnError (openFdAt (Just dir) name ReadOnly fileFlags) closeFd $
-        \fd -> do
-          now <- PosixFiles.getFdStatus fd
-          if PosixFiles.isRegularFile now
-            && fromIntegral (PosixFiles.fileID now) == st.ino
-            && fromIntegral (PosixFiles.deviceID now) == st.dev
-            then Just . (,now) <$> fdToHandle fd
-            else closeFd fd >> pure Nothing
-      case opened of
-        Nothing -> pure (ReadChanged "swapped")
-        Just (h, now)
-          | size > hashCap -> ReadTooBig <$ hClose h
-          | otherwise -> (`finally` hClose h) $ do
-              -- The fstat size, not the cap: hGet allocates all it
-              -- may read up front.
-              bytes <- BS.hGet h size
-              more <- BS.hGetSome h 1
-              pure $
-                if BS.length bytes /= size || not (BS.null more)
-                  then ReadChanged "size changed while reading"
-                  else ReadBytes bytes
-          where
-            size = fromIntegral (PosixFiles.fileSize now) :: Int
-    pure (either (ReadChanged . reasonOf) id result)
+    result <- try @IOException . withFileAt dir name fileFlags same $ \h now -> do
+      let size = fromIntegral (PosixFiles.fileSize now) :: Int
+      if size > hashCap
+        then pure ReadTooBig
+        else do
+          -- The fstat size, not the cap: hGet allocates all it may
+          -- read up front.
+          bytes <- BS.hGet h size
+          more <- BS.hGetSome h 1
+          pure $
+            if BS.length bytes /= size || not (BS.null more)
+              then ReadChanged "size changed while reading"
+              else ReadBytes bytes
+    pure (either (ReadChanged . reasonOf) (fromMaybe (ReadChanged "swapped")) result)
   _ -> pure (ReadChanged "not a file")
+  where
+    same now =
+      PosixFiles.isRegularFile now
+        && fromIntegral (PosixFiles.fileID now) == st.ino
+        && fromIntegral (PosixFiles.deviceID now) == st.dev
 
 -- * Internal
 

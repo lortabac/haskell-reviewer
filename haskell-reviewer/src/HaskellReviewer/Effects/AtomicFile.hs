@@ -15,7 +15,7 @@ module HaskellReviewer.Effects.AtomicFile
   )
 where
 
-import Control.Exception (IOException, bracketOnError, finally, try)
+import Control.Exception (IOException, bracket, bracketOnError, finally, mask, try)
 import Control.Monad (unless, void)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Either (fromRight)
@@ -101,9 +101,11 @@ writeFileAtomicWith write path bytes = do
       $ \(tmp, h) -> do
         write h bytes
         hFlush h
-        -- Closes the handle; we close the fd.
-        fd <- handleToFd h
-        fileSynchronise fd `finally` closeFd fd
+        -- Closes the handle; we close the fd. Masked, so it is closed
+        -- even if a cancel comes right after handleToFd.
+        mask $ \restore -> do
+          fd <- handleToFd h
+          restore (fileSynchronise fd) `finally` closeFd fd
         Dir.renameFile tmp target
     syncDir dir
   pure $ case result of
@@ -136,6 +138,6 @@ removeQuietly p = void (try @IOException (Dir.removeFile p))
 
 -- | So the rename itself is on disk. Some file systems can't: ignored.
 syncDir :: FilePath -> IO ()
-syncDir dir = void . try @IOException $ do
-  fd <- openFd dir ReadOnly defaultFileFlags
-  fileSynchronise fd `finally` closeFd fd
+syncDir dir =
+  void . try @IOException $
+    bracket (openFd dir ReadOnly defaultFileFlags) closeFd fileSynchronise
