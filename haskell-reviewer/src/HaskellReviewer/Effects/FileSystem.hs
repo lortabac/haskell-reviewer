@@ -38,15 +38,15 @@ module HaskellReviewer.Effects.FileSystem
   )
 where
 
-import Control.Exception (IOException, bracket, bracketOnError, evaluate, finally, try)
-import Control.Monad (foldM, unless)
+import Control.Exception (IOException, bracket, evaluate, onException, try)
+import Control.Monad (foldM, join, unless)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.List (sort)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
@@ -115,9 +115,9 @@ import HaskellReviewer.Effects.PosixAt
     listDirFd,
     readLinkAt,
     statAt,
+    withFileAt,
   )
 import System.Directory qualified as Dir
-import System.IO (hClose)
 import System.IO.Error (ioeGetErrorString, isDoesNotExistError)
 import System.Posix.Files.ByteString qualified as PosixFiles
 import System.Posix.IO.ByteString
@@ -125,8 +125,6 @@ import System.Posix.IO.ByteString
     OpenMode (ReadOnly),
     closeFd,
     defaultFileFlags,
-    dup,
-    fdToHandle,
     openFdAt,
   )
 import System.Posix.Types (Fd)
@@ -360,7 +358,7 @@ walkFiles canon limit = do
           (<> ["cannot read directory " <> shown rel <> ": " <> reasonOf e])
       walk :: Fd -> [Text] -> ByteString -> IO ()
       walk fd segs rel = do
-        names <- try @IOException (dup fd >>= listDirFd)
+        names <- try @IOException (listDirFd fd)
         case names of
           Left e -> warn rel e
           Right ns -> mapM_ (entry fd segs rel) (sort ns)
@@ -379,17 +377,14 @@ walkFiles canon limit = do
                 (Just p, Right s) -> case s.kind of
                   KindSymlink -> add p EntrySymlink
                   KindFile -> add p EntryFile
-                  KindDir -> do
-                    sub <- try @IOException (openFdAt (Just fd) name ReadOnly dirFlags)
-                    case sub of
-                      Left e -> warn rel' e
-                      Right subFd -> walk subFd segs' rel' `finally` closeFd subFd
+                  KindDir -> withDirAt (Just fd) name $ \case
+                    Left e -> warn rel' e
+                    Right subFd -> walk subFd segs' rel'
                   KindOther -> pure ()
                 _ -> pure ()
-  root <- try @IOException (openFdAt Nothing canon.bytes ReadOnly dirFlags)
-  case root of
+  withDirAt Nothing canon.bytes $ \case
     Left e -> warn "" e
-    Right fd -> walk fd [] "" `finally` closeFd fd
+    Right fd -> walk fd [] ""
   WalkResult
     <$> (reverse <$> readIORef found)
     <*> readIORef skipped
@@ -462,23 +457,15 @@ readDiskEntry canon clean p = \case
         KindFile -> readRegular dirFd
         _ -> pure (Left ReadGone)
     readRegular dirFd = do
-      -- The fd is ours until it becomes a handle.
-      opened <- bracketOnError (openFdAt (Just dirFd) name ReadOnly fileFlags) closeFd $
-        \fd -> do
-          st <- PosixFiles.getFdStatus fd
-          if PosixFiles.isRegularFile st
-            then Just . (,st) <$> fdToHandle fd
-            else closeFd fd >> pure Nothing
-      case opened of
-        Nothing -> pure (Left ReadGone)
-        Just (h, st) -> (`finally` hClose h) $ do
-          let FileSize maxText = textLimit
-              size = FileSize (fromIntegral (PosixFiles.fileSize st))
-          bytes <- BS.hGet h (maxText + 1)
-          let cleaned
-                | BS.length bytes <= maxText = clean bytes
-                | otherwise = bytes
-          pure (Right (contentFromBytes size cleaned))
+      opened <- withFileAt dirFd name fileFlags PosixFiles.isRegularFile $ \h st -> do
+        let FileSize maxText = textLimit
+            size = FileSize (fromIntegral (PosixFiles.fileSize st))
+        bytes <- BS.hGet h (maxText + 1)
+        let cleaned
+              | BS.length bytes <= maxText = clean bytes
+              | otherwise = bytes
+        pure (Right (contentFromBytes size cleaned))
+      pure (fromMaybe (Left ReadGone) opened)
 
 -- | What 'readDiskBytes' found.
 data DiskBytes
@@ -505,28 +492,20 @@ readDiskBytes canon cap p =
         KindSymlink -> Just . DiskLinkBytes <$> readLinkAt dirFd name
         KindFile -> readRegular dirFd
         _ -> pure Nothing
-    readRegular dirFd = do
-      opened <- bracketOnError (openFdAt (Just dirFd) name ReadOnly fileFlags) closeFd $
-        \fd -> do
-          st <- PosixFiles.getFdStatus fd
-          if PosixFiles.isRegularFile st
-            then Just . (,st) <$> fdToHandle fd
-            else closeFd fd >> pure Nothing
-      case opened of
-        Nothing -> pure Nothing
-        Just (h, st)
-          | size > cap -> Nothing <$ hClose h
-          | otherwise -> (`finally` hClose h) $ do
-              -- The fstat size, not the cap: hGet allocates all it may
-              -- read up front.
-              bytes <- BS.hGet h size
-              more <- BS.hGetSome h 1
-              pure $
-                if BS.length bytes /= size || not (BS.null more)
-                  then Nothing
-                  else Just (DiskFileBytes bytes)
-          where
-            size = fromIntegral (PosixFiles.fileSize st) :: Int
+    readRegular dirFd =
+      fmap join . withFileAt dirFd name fileFlags PosixFiles.isRegularFile $ \h st -> do
+        let size = fromIntegral (PosixFiles.fileSize st) :: Int
+        if size > cap
+          then pure Nothing
+          else do
+            -- The fstat size, not the cap: hGet allocates all it may
+            -- read up front.
+            bytes <- BS.hGet h size
+            more <- BS.hGetSome h 1
+            pure $
+              if BS.length bytes /= size || not (BS.null more)
+                then Nothing
+                else Just (DiskFileBytes bytes)
 
 -- * Shared with the working-tree side
 
@@ -568,6 +547,15 @@ reasonOf e
 
 -- * Internal
 
+-- | Open a dir (a name in a dir fd, or a path), run, close it. The
+-- action gets the open error, if any. See Note [Fd ownership] in
+-- "HaskellReviewer.Effects.PosixAt".
+withDirAt :: Maybe Fd -> ByteString -> (Either IOException Fd -> IO a) -> IO a
+withDirAt dir name =
+  bracket
+    (try @IOException (openFdAt dir name ReadOnly dirFlags))
+    (either (const (pure ())) closeFd)
+
 -- | Open ROOT, then each parent dir of the path in turn, never
 -- following a symlink. Gives back the fd of the last one.
 openParents :: CanonicalRoot -> RelPath -> IO Fd
@@ -580,7 +568,9 @@ openParents canon p = do
       next <-
         try @IOException $
           openFdAt (Just fd) (Text.Encoding.encodeUtf8 seg) ReadOnly dirFlags
-      closeFd fd
+      -- Runs masked (a bracket acquire): close the new fd too if this
+      -- close throws.
+      closeFd fd `onException` either (const (pure ())) closeFd next
       either ioError pure next
 
 -- | 'Nothing' if it can't be read (gone, no permission, ...).

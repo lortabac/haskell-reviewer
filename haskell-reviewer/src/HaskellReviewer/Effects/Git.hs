@@ -48,7 +48,7 @@ import Control.Monad (void)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.List (intercalate)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
@@ -692,9 +692,8 @@ cleanUp :: (Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle) -> IO ()
 cleanUp (hIn, hOut, hErr, ph) = do
   pid <- getPid ph
   mapM_ (\p -> void (try @IOException (signalProcess sigKILL p))) pid
-  mapM_ (void . try @IOException . hClose) hIn
-  mapM_ hClose hOut
-  mapM_ hClose hErr
+  -- Each close under try, so git is reaped even if one throws.
+  mapM_ (void . try @IOException . hClose) (catMaybes [hIn, hOut, hErr])
   void (try @IOException (waitForProcess ph))
 
 -- | What 'readOutput' does past its size.

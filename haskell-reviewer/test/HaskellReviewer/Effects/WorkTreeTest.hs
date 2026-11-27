@@ -81,6 +81,7 @@ import HaskellReviewer.Effects.WorkTree
     lookPath,
     readForHash,
     stripPrefixLevels,
+    withDirOf,
     withWalker,
   )
 import System.Directory qualified as Dir
@@ -96,9 +97,17 @@ import System.Posix.IO
   )
 import System.Posix.Types (Fd)
 import Test.Tasty (TestTree, testGroup, withResource)
-import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit
+  ( Assertion,
+    assertBool,
+    assertFailure,
+    testCase,
+    testCaseInfo,
+    (@?=),
+  )
 import TestSupport
   ( GitRun (..),
+    cancelledManyTimes,
     fixtureRepo,
     git,
     gitBytes,
@@ -324,7 +333,19 @@ tests =
           readNow st4 >>= (@?= ReadTooBig)
           Dir.removeFile f >> Files.createSymbolicLink "target" f
           st5 <- withDir tmp (\fd -> lstatAt fd "f")
-          readNow st5 >>= (@?= ReadLinkTarget "target")
+          readNow st5 >>= (@?= ReadLinkTarget "target"),
+      testCaseInfo "cancel: a walk that hashes, cut short, leaks no fd" $
+        withCanonicalTemp $ \tmp -> do
+          Dir.createDirectoryIfMissing True (tmp </> "a/b/c")
+          Dir.createDirectoryIfMissing True (tmp </> "z")
+          BS.writeFile (tmp </> "a/b/big") (BS.replicate 1_000_000 0x61)
+          let small = ["a/x", "a/b/c/f", "a/b/g", "z/y", "top"]
+          mapM_ (\f -> BS.writeFile (tmp </> f) "x\n") small
+          canon <- canonicalRoot (Root tmp)
+          let paths = sort (map rel ("a/b/big" : small))
+              hash fd name = lstatAt fd name >>= readForHash fd name
+          cancelledManyTimes tmp . withWalker canon $ \w ->
+            mapM (\p -> withDirOf w p hash) paths
     ]
   where
     -- Seconds cut to 32 bits, as lstatAt gives them.

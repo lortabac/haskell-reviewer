@@ -64,10 +64,24 @@ long hr_readlink_at(int dirfd, const char *name, char *buf, size_t len)
     return (long)readlinkat(dirfd, name, buf, len);
 }
 
-/* fdopendir. Owns the fd from now on: closedir closes it. */
-void *hr_fdopendir(int fd)
+/* A DIR over a close-on-exec dup of fd, read from the start. The
+   caller keeps fd; closedir closes the dup. NULL and errno on error,
+   with the dup closed. A dup shares the read position with fd, hence
+   the rewind. */
+void *hr_dup_opendir(int fd)
 {
-    return fdopendir(fd);
+    int d = fcntl(fd, F_DUPFD_CLOEXEC, 0);
+    if (d < 0)
+        return NULL;
+    DIR *dir = fdopendir(d);
+    if (dir == NULL) {
+        int e = errno;
+        close(d);
+        errno = e;
+        return NULL;
+    }
+    rewinddir(dir);
+    return dir;
 }
 
 /* The next name, or NULL at the end (errno 0) or on error (errno set). */

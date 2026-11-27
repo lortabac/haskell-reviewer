@@ -30,6 +30,7 @@ import HaskellReviewer.Effects.FileSystem
     WalkResult (..),
     canonicalRoot,
     listFiles,
+    readDiskBytes,
     readEntry,
     walkFiles,
   )
@@ -45,13 +46,28 @@ import HaskellReviewer.Effects.Log (LogLevel (..), Logger, newLogger)
 import System.Directory qualified as Dir
 import System.FilePath (takeDirectory, (</>))
 import System.Info (os)
-import System.Posix.Files (createNamedPipe)
+import System.Posix.Files (createNamedPipe, createSymbolicLink)
 import System.Posix.IO.ByteString (closeFd, createFile)
 import System.Posix.Signals (nullSignal, signalProcess)
 import System.Timeout (timeout)
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
-import TestSupport (git, gitOut, gitSetup, isRootUser, withCanonicalTemp, writeScript)
+import Test.Tasty.HUnit
+  ( Assertion,
+    assertBool,
+    assertFailure,
+    testCase,
+    testCaseInfo,
+    (@?=),
+  )
+import TestSupport
+  ( cancelledManyTimes,
+    git,
+    gitOut,
+    gitSetup,
+    isRootUser,
+    withCanonicalTemp,
+    writeScript,
+  )
 
 tests :: TestTree
 tests =
@@ -59,7 +75,15 @@ tests =
     "FileSystem"
     [ gitTests,
       walkTests,
-      readTests
+      readTests,
+      testCaseInfo "cancel: reads and walks cut short leak no fd" $
+        withCanonicalTemp $ \dir -> do
+          makeTree dir
+          canon <- canonicalRoot (Root dir)
+          big <- maybe (assertFailure "bad path") pure (rel "a/b/big")
+          _ <- cancelledManyTimes dir (readEntry canon big EntryFile)
+          _ <- cancelledManyTimes dir (readDiskBytes canon 2_000_000 big)
+          cancelledManyTimes dir (walkFiles canon 1000)
     ]
 
 -- * With git
@@ -401,6 +425,18 @@ readAt dir path kind = do
 
 rel :: BS.ByteString -> Maybe RelPath
 rel = relPathFromBytes
+
+-- | A few dirs, small files, a symlink and a 1 MB file (a/b/big), so a
+-- cancel can land in the middle of a read.
+makeTree :: FilePath -> IO ()
+makeTree dir = do
+  Dir.createDirectoryIfMissing True (dir </> "a/b/c")
+  Dir.createDirectoryIfMissing True (dir </> "z")
+  BS.writeFile (dir </> "a/b/big") (BS.replicate 1_000_000 0x61)
+  mapM_
+    (\f -> BS.writeFile (dir </> f) "x\n")
+    ["a/x", "a/b/c/f", "a/b/g", "z/y", "top"]
+  createSymbolicLink "a/x" (dir </> "link")
 
 unlock :: FilePath -> Assertion
 unlock p =

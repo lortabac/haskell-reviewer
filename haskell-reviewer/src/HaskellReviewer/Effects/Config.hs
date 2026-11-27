@@ -13,7 +13,7 @@ module HaskellReviewer.Effects.Config
   )
 where
 
-import Control.Exception (IOException, evaluate, finally, onException, try)
+import Control.Exception (IOException, evaluate, finally, mask, onException, try)
 import Control.Monad (void)
 import Data.ByteString qualified as BS
 import Data.Text (Text)
@@ -116,7 +116,9 @@ readRegularFile limit path = do
   status <- getFileStatus path
   if not (isRegularFile status)
     then pure Nothing
-    else do
+    -- Masked up to the Handle, so the fd is closed once. See Note [Fd
+    -- ownership] in "HaskellReviewer.Effects.PosixAt".
+    else mask $ \restore -> do
       fd <- openFd path ReadOnly defaultFileFlags {nonBlock = True}
       -- It may have changed since the first look.
       again <- getFdStatus fd `onException` closeFd fd
@@ -124,7 +126,7 @@ readRegularFile limit path = do
         then Nothing <$ closeFd fd
         else do
           h <- fdToHandle fd `onException` closeFd fd
-          (Just <$> BS.hGet h (limit + 1)) `finally` hClose h
+          Just <$> restore (BS.hGet h (limit + 1)) `finally` hClose h
 
 -- * Internal
 

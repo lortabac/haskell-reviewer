@@ -30,17 +30,19 @@ module TestSupport
     listFdsTo,
     baselineFds,
     assertFds,
+    cancelledManyTimes,
   )
 where
 
-import Control.Concurrent.Async (wait, withAsync)
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async (cancel, wait, withAsync)
 import Control.Concurrent.MVar (MVar, newMVar, withMVar)
-import Control.Exception (IOException, bracket, try)
-import Control.Monad (unless, void, when)
+import Control.Exception (IOException, bracket, evaluate, try)
+import Control.Monad (forM, forM_, unless, void, when)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.List (isPrefixOf, sort)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text.Encoding
 import HaskellReviewer.Core.Root (Root (..))
@@ -60,9 +62,10 @@ import System.FilePath (splitSearchPath, (</>))
 import System.IO (IOMode (ReadMode), hClose, hGetContents', readFile', withBinaryFile)
 import System.IO.Temp (withSystemTempDirectory)
 import System.IO.Unsafe (unsafePerformIO)
+import System.Posix.Files (deviceID, fileID, getFdStatus, readSymbolicLink)
 import System.Posix.IO
   ( OpenFileFlags (..),
-    OpenMode (WriteOnly),
+    OpenMode (ReadOnly, WriteOnly),
     closeFd,
     defaultFileFlags,
     openFd,
@@ -76,7 +79,7 @@ import System.Process
     proc,
     waitForProcess,
   )
-import Test.Tasty.HUnit (Assertion, assertFailure)
+import Test.Tasty.HUnit (Assertion, assertFailure, (@?=))
 
 -- * Temp dirs
 
@@ -303,6 +306,47 @@ withFdLock action = withMVar fdLock (const action)
 fdLock :: MVar ()
 fdLock = unsafePerformIO (newMVar ())
 {-# NOINLINE fdLock #-}
+
+-- | Run the action once in full (it must not throw), then 400 times,
+-- each one cancelled after a different short delay (0 to 400 us). The
+-- first run also forces shared values on one thread, so no cancel
+-- freezes one half-done (Q-RTS-BLACKHOLE). Then no fd may still point
+-- into the dir (a leak), and an fd we keep open must still be ours (a
+-- stray second close would take it). A double close that hits another
+-- thread's fd isn't caught for sure: the timing is luck.
+--
+-- The leak check needs /proc/self/fd (Linux). Without it only the kept
+-- fd is checked, and the result says so (for 'testCaseInfo').
+cancelledManyTimes :: FilePath -> IO a -> IO String
+cancelledManyTimes dir act = do
+  let kept = dir </> "kept-open"
+  writeFile kept "k"
+  _ <- act >>= evaluate
+  bracket (openFd kept ReadOnly defaultFileFlags) closeFd $ \fd -> do
+    before <- getFdStatus fd
+    forM_ [0 .. 399 :: Int] $ \i ->
+      withAsync act $ \a -> threadDelay ((i * 37) `mod` 400) >> cancel a
+    after <- getFdStatus fd
+    (fileID after, deviceID after) @?= (fileID before, deviceID before)
+    fdsInto dir >>= \case
+      Nothing -> pure "no /proc/self/fd: leak check skipped"
+      Just leaked -> "" <$ (filter (/= kept) leaked @?= [])
+
+-- | Where the open fds that point into the dir point. 'Nothing'
+-- without /proc.
+fdsInto :: FilePath -> IO (Maybe [FilePath])
+fdsInto dir = do
+  listed <- try @IOException (Dir.listDirectory "/proc/self/fd")
+  case listed of
+    Left _ -> pure Nothing
+    Right names -> Just <$> pointing names
+  where
+    pointing names = do
+      targets <- forM names $ \n ->
+        -- An fd may be gone by now: skip it.
+        either (const Nothing) Just
+          <$> try @IOException (readSymbolicLink ("/proc/self/fd" </> n))
+      pure [t | t <- catMaybes targets, t == dir || (dir <> "/") `isPrefixOf` t]
 
 -- | A shell line that writes @ls -l /dev/fd/@ to the file (a shell
 -- word, quoted by the caller). One command, its own redirect: the shell
