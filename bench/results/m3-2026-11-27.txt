@@ -1,0 +1,774 @@
+haskell-reviewer bench - M3 reference
+modes: browse,range,worktree; runs: 10 start-up + 1 warm-up, 3 steady, 3 search-during, 3 refs-during; RTS: product defaults
+RLIMIT_NOFILE: soft=1024 hard=524288
+load average at start: 0.87 0.33 0.18
+
+== optparse-applicative (small, browse, 34 modules listed, 34 parsed)
+start-up, 10 runs, ms, median [min-max]:
+  URL 20.6 [15.9-21.2] | accepting 22.5 [17.9-23.0]
+  UI usable 210.2 [195.5-291.8] (151.7 KiB on the wire, first run)
+    shell 22.5, assets 29.7, prefs 195.8, modules 195.9, search 195.8, module 209.5, files 192.2 (first search partial in 10)
+  on-demand module: median 31.4, p95 81.4, max 81.4 (10); last-queued Setup, largest Main, middle Examples.Alternatives
+  indexing done (harness) 235.0 [206.4-279.4] | product 57.5 [49.0-69.0] | span 58.2
+  done line: 34 modules, 34 ready, 0 failed, 0 text only (first run)
+  stop 33.7 [30.2-41.9]
+steady, 3 runs after indexing, ms:
+  navigation back to back: median 1.2, p95 5.5, max 7.8 (102)
+  navigation with idle gaps: median 3.1, p95 6.6, max 8.7 (150)
+  source back to back: median 1.1, p95 4.0, max 11.8 (102)
+  source with idle gaps: median 3.2, p95 6.2, max 11.8 (150)
+  search: median 0.3, p95 0.8, max 1.9 (300)
+  refs: median 3.9, p95 7.1, max 8.0 (90)
+    Options.Applicative.Types type:Parser: median 5.5, p95 8.0, max 8.0; total 145, sent 145, 3.4 KiB
+    Options.Applicative.Types type:ParserInfo: median 4.9, p95 6.8, max 6.8; total 45, sent 45, 1.7 KiB
+    Options.Applicative.Types field:ParserInfo.infoParser: median 2.6, p95 3.6, max 3.6; total 15, sent 15, 0.8 KiB
+    Options.Applicative.Builder val:long: median 3.6, p95 5.3, max 5.3; total 105, sent 105, 2.7 KiB
+    Options.Applicative.Builder val:strOption: median 4.0, p95 4.9, max 4.9; total 45, sent 45, 1.3 KiB
+    Options.Applicative.Extra val:hsubparser: median 1.5, p95 2.5, max 2.5; total 15, sent 15, 0.6 KiB
+  text search (limit 8, after the load): median 0.2, p95 0.6, max 0.9 (150)
+    first (loads the store): 4.9, 3.5, 4.4; page (limit 1000): median 0.2, p95 2.7, max 2.8
+    "e": median 0.4, p95 0.7, max 0.7; total 5909 lines in 69 files
+    "where": median 0.3, p95 0.5, max 0.5; total 203 lines in 36 files
+    "import qualified": median 0.2, p95 0.4, max 0.4; total 29 lines in 9 files
+    "ByteString": median 0.2, p95 0.3, max 0.3; total 1 line in 1 file
+    "<$>": median 0.2, p95 0.4, max 0.4; total 114 lines in 23 files
+    "zzqqxx": median 0.1, p95 0.3, max 0.3; total 0 lines in 0 files
+    "ü": median 0.1, p95 0.9, max 0.9; total 0 lines in 0 files
+    "-- This program is free software: you can redistribute it and/or modify": median 0.2, p95 0.9, max 0.9; total 0 lines in 0 files
+    "a "b": median 0.2, p95 0.3, max 0.3; total 0 lines in 0 files
+    "TODO": median 0.1, p95 0.4, max 0.4; total 0 lines in 0 files
+    page "e": 2.7, sent 1000, 31.6 KiB
+    page "where": 0.6, sent 203, 3.4 KiB
+    page "import qualified": 0.4, sent 29, 0.7 KiB
+    page "ByteString": 0.2, sent 1, 0.3 KiB
+    page "<$>": 0.4, sent 114, 2.8 KiB
+    page "zzqqxx": 0.1, sent 0, 0.2 KiB
+    page "ü": 0.1, sent 0, 0.2 KiB
+    page "-- This program is free software: you can redistribute it and/or modify": 0.1, sent 0, 0.2 KiB
+    page "a "b": 0.1, sent 0, 0.2 KiB
+    page "TODO": 0.2, sent 0, 0.2 KiB
+  GC: 421 pauses, 415 major (415 after indexing); max 6.2, max major 6.2, p99 4.0; max major after indexing 6.0, max live after indexing 4.4 MiB
+      max during indexing 3.0, after 6.0; paused 1244.0 in total
+  major GC by phase: census 0, pages 0, sources 0, pages_idle 203 (max 6.0), sources_idle 203 (max 4.0), search 0, refs 0, text 0, end_idle 6 (max 4.0), stop 3 (max 1.0)
+search during indexing, 3 runs, report only, ms: median 0.3, p95 0.7, max 160.4 (234); 260 queries, 234 partial
+refs during indexing, 3 runs, report only, ms: median 6.4, p95 211.5, max 211.5 (10); 8 of them partial
+  first answer median 211.2; rounds 1, 1, 1; indexing +6.1% vs start-up
+fallbacks: as expected; got: none
+memory, MiB, max over runs: max_mem_in_use start-up 619.0 / steady 648.0, max_live 4.4, idle RSS after indexing 583.1 / after the steady work 589.5, peak RSS 614.0 (at done 570.0)
+
+== optparse-applicative (small, range --diff 5377a34d..a6ca1a25, 65 modules listed, 65 parsed; head 34/34, base 31/31)
+start-up, 10 runs, ms, median [min-max]:
+  URL 28.3 [23.2-29.5] | accepting 30.2 [25.0-31.5]
+  UI usable 284.2 [199.9-333.1] (151.6 KiB on the wire, first run)
+    shell 30.2, assets 38.1, prefs 261.4, session 261.0, modules 261.8, search 261.3, module 281.1, files 261.1, diff-files (not in UI usable) 262.7 (first search partial in 10)
+  on-demand module: median 25.2, p95 73.0, max 73.0 (10); last-queued head:Setup, largest head:Main, middle head:Examples.ParserGroup.DuplicateCommandGroups, last-queued base:Setup
+  indexing done (harness) 322.1 [259.2-335.6] | product 71.0 [61.0-75.0] | span 71.3
+  done line: 65 modules, 65 ready, 0 failed, 0 text only (first run)
+  stop 38.9 [36.6-47.3]
+  diff (counts of the first run): changed 21 on head, 18 on base; pairing 28 changed, 0 renamed in 0.5 ms (median)
+steady, 3 runs after indexing, ms (per-query lines: head only; the JSON has both):
+  navigation back to back (head): median 1.4, p95 4.9, max 6.9 (102)
+  navigation with idle gaps (head): median 2.9, p95 6.4, max 9.4 (150)
+  source back to back (head): median 1.2, p95 4.9, max 7.5 (102)
+  source with idle gaps (head): median 3.1, p95 7.0, max 21.5 (150)
+  search (head): median 0.3, p95 0.8, max 1.6 (300)
+  refs (head): median 3.1, p95 5.0, max 5.5 (90)
+    Options.Applicative.Types type:Parser: median 4.9, p95 5.5, max 5.5; total 145, sent 145, 3.4 KiB
+    Options.Applicative.Types type:ParserInfo: median 4.3, p95 4.9, max 4.9; total 45, sent 45, 1.7 KiB
+    Options.Applicative.Types field:ParserInfo.infoParser: median 1.9, p95 4.6, max 4.6; total 15, sent 15, 0.8 KiB
+    Options.Applicative.Builder val:long: median 3.2, p95 5.4, max 5.4; total 105, sent 105, 2.7 KiB
+    Options.Applicative.Builder val:strOption: median 2.7, p95 3.3, max 3.3; total 45, sent 45, 1.3 KiB
+    Options.Applicative.Extra val:hsubparser: median 0.9, p95 2.4, max 2.4; total 15, sent 15, 0.6 KiB
+  text search (limit 8, after the load) (head): median 0.2, p95 0.4, max 0.9 (150)
+    first (loads the store): 2.1, 2.8, 4.0; page (limit 1000): median 0.3, p95 2.4, max 2.7
+    "e": median 0.4, p95 0.9, max 0.9; total 5909 lines in 69 files
+    "where": median 0.2, p95 0.4, max 0.4; total 203 lines in 36 files
+    "import qualified": median 0.2, p95 0.3, max 0.3; total 29 lines in 9 files
+    "ByteString": median 0.1, p95 0.2, max 0.2; total 1 line in 1 file
+    "<$>": median 0.2, p95 0.6, max 0.6; total 114 lines in 23 files
+    "zzqqxx": median 0.1, p95 0.2, max 0.2; total 0 lines in 0 files
+    "ü": median 0.1, p95 0.2, max 0.2; total 0 lines in 0 files
+    "-- This program is free software: you can redistribute it and/or modify": median 0.1, p95 0.2, max 0.2; total 0 lines in 0 files
+    "a "b": median 0.1, p95 0.2, max 0.2; total 0 lines in 0 files
+    "TODO": median 0.1, p95 0.2, max 0.2; total 0 lines in 0 files
+    page "e": 2.4, sent 1000, 31.6 KiB
+    page "where": 0.6, sent 203, 3.4 KiB
+    page "import qualified": 0.3, sent 29, 0.7 KiB
+    page "ByteString": 0.2, sent 1, 0.3 KiB
+    page "<$>": 0.5, sent 114, 2.8 KiB
+    page "zzqqxx": 0.2, sent 0, 0.2 KiB
+    page "ü": 0.1, sent 0, 0.2 KiB
+    page "-- This program is free software: you can redistribute it and/or modify": 0.9, sent 0, 0.2 KiB
+    page "a "b": 0.2, sent 0, 0.2 KiB
+    page "TODO": 0.1, sent 0, 0.2 KiB
+  navigation back to back (base): median 1.4, p95 4.5, max 7.0 (93)
+  navigation with idle gaps (base): median 2.9, p95 6.2, max 14.4 (150)
+  source back to back (base): median 1.2, p95 4.7, max 12.6 (93)
+  source with idle gaps (base): median 3.0, p95 8.0, max 22.2 (150)
+  search (base): median 0.2, p95 0.6, max 0.8 (300)
+  refs (base): median 2.9, p95 5.2, max 7.4 (90)
+  text search (limit 8, after the load) (base): median 0.2, p95 0.4, max 0.8 (150)
+    first (loads the store): 1.4, 1.3, 1.8; page (limit 1000): median 0.2, p95 2.5, max 2.7
+  diff-files: median 0.3, p95 0.9, max 0.9 (15); 28 files (7 added, 0 removed, 21 modified, 0 renamed); outside ROOT 0
+  diff (10 files, the largest modified or renamed with a line diff or too-slow, plain; 10 asked of 21): median 0.5, p95 1.2, max 1.9 (150)
+    tests/test.hs (38.4 + 45.4 KiB): median 0.9, p95 1.7, max 1.7
+    README.md (34.6 + 34.3 KiB): median 0.9, p95 1.9, max 1.9
+    src/Options/Applicative/Builder.hs (18.6 + 19.1 KiB): median 0.6, p95 0.7, max 0.7
+    CHANGELOG.md (16.9 + 17.2 KiB): median 0.5, p95 0.7, max 0.7
+    src/Options/Applicative/Help/Core.hs (15.4 + 15.4 KiB): median 0.5, p95 0.6, max 0.6
+    src/Options/Applicative/Types.hs (13.8 + 14.6 KiB): median 0.5, p95 1.3, max 1.3
+    src/Options/Applicative/Common.hs (11.0 + 11.2 KiB): median 0.4, p95 0.6, max 0.6
+    src/Options/Applicative/Extra.hs (11.0 + 11.0 KiB): median 0.4, p95 0.6, max 0.6
+    src/Options/Applicative/BashCompletion.hs (8.6 + 9.7 KiB): median 0.4, p95 0.5, max 0.5
+    src/Options/Applicative/Internal.hs (7.3 + 7.5 KiB): median 0.4, p95 0.5, max 0.5
+  GC: 828 pauses, 822 major (819 after indexing); max 5.5, max major 5.5, p99 4.0; max major after indexing 5.0, max live after indexing 6.2 MiB
+      max during indexing 5.0, after 5.0; paused 2853.0 in total
+  major GC by phase: census 0, pages 0, sources 0, pages_idle 406 (max 5.0), sources_idle 404 (max 5.0), search 0, refs 0, diff 0, text 0, end_idle 6 (max 4.0), stop 3 (max 2.0)
+search during indexing, 3 runs, report only, ms: median 0.5, p95 19.6, max 229.4 (80); 120 queries, 80 partial
+refs during indexing, 3 runs, report only, ms: median 10.4, p95 296.3, max 296.3 (7); 4 of them partial
+  first answer median 292.5; rounds 1, 1, 1; indexing -4.2% vs start-up
+memory, MiB, max over runs: max_mem_in_use start-up 556.0 / steady 577.0, max_live 13.2, idle RSS after indexing 591.3 / after the steady work 617.7, peak RSS 630.6 (at done 585.8)
+
+== optparse-applicative (small, worktree --diff 5377a34d, 65 modules listed, 65 parsed; head 34/34, base 31/31)
+start-up, 10 runs, ms, median [min-max]:
+  URL 25.9 [23.9-27.3] | accepting 27.9 [25.7-29.1]
+  UI usable 285.9 [211.7-338.6] (151.5 KiB on the wire, first run)
+    shell 27.9, assets 37.5, prefs 269.1, session 268.1, modules 269.4, search 269.1, module 285.9, files 268.7, diff-files (not in UI usable) 268.3 (first search partial in 10)
+  on-demand module: median 17.7, p95 69.1, max 69.1 (10); last-queued head:Setup, largest head:Main, middle head:Examples.ParserGroup.DuplicateCommandGroups, last-queued base:Setup
+  indexing done (harness) 332.6 [257.4-379.9] | product 71.0 [61.0-74.0] | span 71.6
+  done line: 65 modules, 65 ready, 0 failed, 0 text only (first run)
+  stop 39.2 [34.4-46.0]
+  diff (counts of the first run): changed 21 on head, 18 on base; pairing 28 changed, 0 renamed in 0.6 ms (median); working tree 69 entries, 0 hashed, 0 read from disk
+steady, 1 run after indexing, ms (per-query lines: head only; the JSON has both):
+  navigation back to back (head): median 1.3, p95 5.4, max 7.9 (34)
+  navigation with idle gaps (head): median 2.9, p95 5.4, max 6.4 (50)
+  source back to back (head): median 1.4, p95 4.6, max 12.8 (34)
+  source with idle gaps (head): median 2.7, p95 6.0, max 9.7 (50)
+  search (head): median 0.3, p95 0.7, max 1.3 (100)
+  refs (head): median 3.4, p95 5.2, max 7.1 (30)
+    Options.Applicative.Types type:Parser: median 4.9, p95 7.1, max 7.1; total 145, sent 145, 3.4 KiB
+    Options.Applicative.Types type:ParserInfo: median 4.2, p95 4.8, max 4.8; total 45, sent 45, 1.7 KiB
+    Options.Applicative.Types field:ParserInfo.infoParser: median 2.1, p95 3.0, max 3.0; total 15, sent 15, 0.8 KiB
+    Options.Applicative.Builder val:long: median 3.4, p95 4.0, max 4.0; total 105, sent 105, 2.7 KiB
+    Options.Applicative.Builder val:strOption: median 3.4, p95 4.4, max 4.4; total 45, sent 45, 1.3 KiB
+    Options.Applicative.Extra val:hsubparser: median 0.9, p95 1.5, max 1.5; total 15, sent 15, 0.6 KiB
+  text search (limit 8, after the load) (head): median 0.2, p95 0.4, max 0.5 (50)
+    first (loads the store): 2.0; page (limit 1000): median 0.2, p95 2.8, max 2.8
+    "e": median 0.4, p95 0.4, max 0.4; total 5909 lines in 69 files
+    "where": median 0.3, p95 0.3, max 0.3; total 203 lines in 36 files
+    "import qualified": median 0.2, p95 0.2, max 0.2; total 29 lines in 9 files
+    "ByteString": median 0.1, p95 0.2, max 0.2; total 1 line in 1 file
+    "<$>": median 0.2, p95 0.5, max 0.5; total 114 lines in 23 files
+    "zzqqxx": median 0.1, p95 0.1, max 0.1; total 0 lines in 0 files
+    "ü": median 0.1, p95 0.2, max 0.2; total 0 lines in 0 files
+    "-- This program is free software: you can redistribute it and/or modify": median 0.2, p95 0.2, max 0.2; total 0 lines in 0 files
+    "a "b": median 0.2, p95 0.2, max 0.2; total 0 lines in 0 files
+    "TODO": median 0.2, p95 0.2, max 0.2; total 0 lines in 0 files
+    page "e": 2.8, sent 1000, 31.6 KiB
+    page "where": 0.7, sent 203, 3.4 KiB
+    page "import qualified": 0.3, sent 29, 0.7 KiB
+    page "ByteString": 0.2, sent 1, 0.3 KiB
+    page "<$>": 0.4, sent 114, 2.8 KiB
+    page "zzqqxx": 0.1, sent 0, 0.2 KiB
+    page "ü": 0.1, sent 0, 0.2 KiB
+    page "-- This program is free software: you can redistribute it and/or modify": 0.1, sent 0, 0.2 KiB
+    page "a "b": 0.2, sent 0, 0.2 KiB
+    page "TODO": 0.2, sent 0, 0.2 KiB
+  navigation back to back (base): median 1.4, p95 5.8, max 6.9 (31)
+  navigation with idle gaps (base): median 2.8, p95 6.1, max 7.3 (50)
+  source back to back (base): median 1.5, p95 4.6, max 11.4 (31)
+  source with idle gaps (base): median 3.7, p95 6.3, max 33.9 (50)
+  search (base): median 0.2, p95 0.5, max 0.7 (100)
+  refs (base): median 3.1, p95 6.1, max 6.8 (30)
+  text search (limit 8, after the load) (base): median 0.2, p95 0.4, max 0.9 (50)
+    first (loads the store): 1.2; page (limit 1000): median 0.2, p95 2.5, max 2.5
+  diff-files: median 0.4, p95 0.4, max 0.4 (5); 28 files (7 added, 0 removed, 21 modified, 0 renamed); outside ROOT 0
+  diff (10 files, the largest modified or renamed with a line diff or too-slow, plain; 10 asked of 21): median 0.5, p95 1.0, max 1.9 (50)
+    tests/test.hs (38.4 + 45.4 KiB): median 1.0, p95 1.7, max 1.7
+    README.md (34.6 + 34.3 KiB): median 0.9, p95 1.9, max 1.9
+    src/Options/Applicative/Builder.hs (18.6 + 19.1 KiB): median 0.6, p95 0.7, max 0.7
+    CHANGELOG.md (16.9 + 17.2 KiB): median 0.5, p95 0.6, max 0.6
+    src/Options/Applicative/Help/Core.hs (15.4 + 15.4 KiB): median 0.5, p95 0.6, max 0.6
+    src/Options/Applicative/Types.hs (13.8 + 14.6 KiB): median 0.5, p95 0.5, max 0.5
+    src/Options/Applicative/Common.hs (11.0 + 11.2 KiB): median 0.4, p95 0.5, max 0.5
+    src/Options/Applicative/Extra.hs (11.0 + 11.0 KiB): median 0.4, p95 0.5, max 0.5
+    src/Options/Applicative/BashCompletion.hs (8.6 + 9.7 KiB): median 0.4, p95 0.4, max 0.4
+    src/Options/Applicative/Internal.hs (7.3 + 7.5 KiB): median 0.3, p95 0.4, max 0.4
+  GC: 241 pauses, 239 major (238 after indexing); max 5.0, max major 5.0, p99 5.0; max major after indexing 5.0, max live after indexing 6.2 MiB
+      max during indexing 5.0, after 5.0; paused 808.0 in total
+  major GC by phase: census 0, pages 0, sources 0, pages_idle 118 (max 5.0), sources_idle 117 (max 4.0), search 0, refs 0, diff 0, text 0, end_idle 2 (max 4.0), stop 1 (max 2.0)
+memory, MiB, max over runs: max_mem_in_use start-up 555.0 / steady 573.0, max_live 12.7, idle RSS after indexing 591.5 / after the steady work 610.6, peak RSS 630.2 (at done 583.4)
+
+== pandoc (typical, browse, 367 modules listed, 366 parsed)
+start-up, 10 runs, ms, median [min-max]:
+  URL 20.6 [17.5-21.5] | accepting 22.7 [19.1-23.4]
+  UI usable 397.4 [288.8-478.1] (158.8 KiB on the wire, first run)
+    shell 22.7, assets 30.3, prefs 288.7, modules 298.6, search 298.6, module 397.4, files 277.3 (first search partial in 10)
+  on-demand module: median 147.1, p95 217.7, max 217.7 (10); last-queued test/command/6466-whole.hs, largest Text.Pandoc.Writers.Powerpoint.Output, middle Text.Pandoc.Readers.RST
+  indexing done (harness) 734.4 [721.4-748.9] | product 479.0 [470.0-490.0] | span 479.8
+  done line: 366 modules, 366 ready, 0 failed, 0 text only (first run)
+  stop 44.2 [39.0-55.8]
+steady, 3 runs after indexing, ms:
+  navigation back to back: median 1.3, p95 4.6, max 17.2 (1098)
+  navigation with idle gaps: median 3.5, p95 8.8, max 88.5 (150)
+  source back to back: median 1.3, p95 5.7, max 13.4 (1098)
+  source with idle gaps: median 3.9, p95 11.8, max 44.4 (150)
+  search: median 1.6, p95 2.7, max 5.9 (300)
+  refs: median 22.8, p95 63.6, max 64.2 (90)
+    Text.Pandoc.Class.PandocMonad class:PandocMonad: median 49.5, p95 64.2, max 64.2; total 2851, sent 1000, 22.9 KiB
+    Text.Pandoc.Options type:ReaderOptions: median 24.9, p95 32.5, max 32.5; total 135, sent 135, 4.1 KiB
+    Text.Pandoc.Options field:ReaderOptions.readerExtensions: median 14.2, p95 18.5, max 18.5; total 89, sent 89, 3.0 KiB
+    Text.Pandoc.Class.PandocMonad val:report: median 37.5, p95 46.4, max 46.4; total 288, sent 288, 8.3 KiB
+    Text.Pandoc.Shared val:stringify: median 16.0, p95 30.3, max 30.3; total 58, sent 58, 2.4 KiB
+    Text.Pandoc.Shared val:trimr: median 7.2, p95 12.4, max 12.4; total 32, sent 32, 1.4 KiB
+  text search (limit 8, after the load): median 1.5, p95 5.0, max 5.5 (150)
+    first (loads the store): 41.0, 41.7, 40.1; page (limit 1000): median 2.6, p95 6.9, max 7.0
+    "e": median 4.9, p95 5.5, max 5.5; total 256403 lines in 2491 files
+    "where": median 1.7, p95 3.9, max 3.9; total 2326 lines in 479 files
+    "import qualified": median 0.9, p95 1.2, max 1.2; total 1008 lines in 293 files
+    "ByteString": median 1.1, p95 2.9, max 2.9; total 426 lines in 97 files
+    "<$>": median 1.6, p95 3.6, max 3.6; total 2663 lines in 191 files
+    "zzqqxx": median 0.8, p95 1.5, max 1.5; total 0 lines in 0 files
+    "ü": median 0.7, p95 1.7, max 1.7; total 92 lines in 32 files
+    "-- This program is free software: you can redistribute it and/or modify": median 1.5, p95 3.2, max 3.2; total 0 lines in 0 files
+    "a "b": median 2.5, p95 5.5, max 5.5; total 73 lines in 25 files
+    "TODO": median 1.5, p95 1.7, max 1.7; total 163 lines in 63 files
+    page "e": 6.9, sent 1000, 24.7 KiB
+    page "where": 3.3, sent 1000, 19.5 KiB
+    page "import qualified": 2.4, sent 1000, 11.7 KiB
+    page "ByteString": 2.0, sent 426, 9.7 KiB
+    page "<$>": 3.4, sent 1000, 26.9 KiB
+    page "zzqqxx": 1.1, sent 0, 0.2 KiB
+    page "ü": 1.1, sent 92, 3.5 KiB
+    page "-- This program is free software: you can redistribute it and/or modify": 1.6, sent 0, 0.2 KiB
+    page "a "b": 2.8, sent 73, 2.2 KiB
+    page "TODO": 2.8, sent 163, 5.9 KiB
+  GC: 645 pauses, 422 major (413 after indexing); max 8.2, max major 8.2, p99 8.0; max major after indexing 8.0, max live after indexing 53.5 MiB
+      max during indexing 8.0, after 8.0; paused 3004.0 in total
+  major GC by phase: census 1 (max 5.0), pages 0, sources 0, pages_idle 203 (max 8.0), sources_idle 200 (max 8.0), search 0, refs 0, text 0, end_idle 6 (max 8.0), stop 3 (max 4.0)
+search during indexing, 3 runs, report only, ms: median 7.4, p95 45.6, max 240.2 (107); 160 queries, 107 partial
+refs during indexing, 3 runs, report only, ms: median 63.7, p95 242.9, max 269.6 (25); 25 of them partial
+  first answer median 242.9; rounds 2, 2, 2; indexing +1.0% vs start-up
+fallbacks: as expected; got: no-source/autogen 1
+memory, MiB, max over runs: max_mem_in_use start-up 673.0 / steady 726.0, max_live 53.5, idle RSS after indexing 663.9 / after the steady work 673.7, peak RSS 717.4 (at done 653.3)
+
+== pandoc (typical, range --diff 381230ee..e51c9c60, 733 modules listed, 731 parsed; head 367/366, base 366/365)
+start-up, 10 runs, ms, median [min-max]:
+  URL 28.1 [26.7-29.1] | accepting 29.9 [28.4-30.9]
+  UI usable 470.9 [335.4-611.7] (158.9 KiB on the wire, first run)
+    shell 29.9, assets 37.5, prefs 403.1, session 402.2, modules 403.8, search 404.1, module 470.9, files 403.9, diff-files (not in UI usable) 402.5 (first search partial in 10)
+  on-demand module: median 70.2, p95 212.3, max 212.3 (10); last-queued head:test/command/6466-whole.hs, largest head:Text.Pandoc.Writers.Powerpoint.Output, middle head:Text.Pandoc.Readers.LaTeX.Macro, last-queued base:test/command/6466-whole.hs
+  indexing done (harness) 1010.9 [921.6-1113.4] | product 612.0 [600.0-709.0] | span 612.2
+  done line: 731 modules, 731 ready, 0 failed, 0 text only (first run)
+  stop 42.7 [37.5-49.7]
+  diff (counts of the first run): changed 56 on head, 55 on base; pairing 154 changed, 0 renamed in 13.1 ms (median)
+steady, 3 runs after indexing, ms (per-query lines: head only; the JSON has both):
+  navigation back to back (head): median 1.3, p95 5.0, max 18.0 (1098)
+  navigation with idle gaps (head): median 3.3, p95 7.6, max 12.1 (150)
+  source back to back (head): median 1.5, p95 7.9, max 25.1 (1098)
+  source with idle gaps (head): median 3.6, p95 10.4, max 18.3 (150)
+  search (head): median 1.9, p95 3.6, max 5.9 (300)
+  refs (head): median 23.3, p95 51.8, max 68.9 (90)
+    Text.Pandoc.Class.PandocMonad class:PandocMonad: median 50.0, p95 68.9, max 68.9; total 2851, sent 1000, 22.9 KiB
+    Text.Pandoc.Options type:ReaderOptions: median 24.8, p95 33.5, max 33.5; total 135, sent 135, 4.1 KiB
+    Text.Pandoc.Options field:ReaderOptions.readerExtensions: median 15.6, p95 27.6, max 27.6; total 89, sent 89, 3.0 KiB
+    Text.Pandoc.Class.PandocMonad val:report: median 33.8, p95 47.6, max 47.6; total 288, sent 288, 8.3 KiB
+    Text.Pandoc.Shared val:stringify: median 16.5, p95 20.9, max 20.9; total 58, sent 58, 2.4 KiB
+    Text.Pandoc.Shared val:trimr: median 6.5, p95 8.5, max 8.5; total 32, sent 32, 1.4 KiB
+  text search (limit 8, after the load) (head): median 1.6, p95 5.0, max 6.3 (150)
+    first (loads the store): 68.0, 69.5, 70.5; page (limit 1000): median 2.4, p95 6.9, max 6.9
+    "e": median 5.0, p95 6.3, max 6.3; total 256403 lines in 2491 files
+    "where": median 1.8, p95 2.7, max 2.7; total 2326 lines in 479 files
+    "import qualified": median 1.0, p95 1.9, max 1.9; total 1008 lines in 293 files
+    "ByteString": median 1.1, p95 1.7, max 1.7; total 426 lines in 97 files
+    "<$>": median 1.7, p95 1.8, max 1.8; total 2663 lines in 191 files
+    "zzqqxx": median 0.8, p95 1.0, max 1.0; total 0 lines in 0 files
+    "ü": median 0.7, p95 1.3, max 1.3; total 92 lines in 32 files
+    "-- This program is free software: you can redistribute it and/or modify": median 1.5, p95 2.0, max 2.0; total 0 lines in 0 files
+    "a "b": median 2.6, p95 2.7, max 2.7; total 73 lines in 25 files
+    "TODO": median 1.6, p95 2.4, max 2.4; total 163 lines in 63 files
+    page "e": 6.9, sent 1000, 24.7 KiB
+    page "where": 3.4, sent 1000, 19.5 KiB
+    page "import qualified": 2.4, sent 1000, 11.7 KiB
+    page "ByteString": 2.2, sent 426, 9.7 KiB
+    page "<$>": 3.6, sent 1000, 26.9 KiB
+    page "zzqqxx": 1.2, sent 0, 0.2 KiB
+    page "ü": 1.2, sent 92, 3.5 KiB
+    page "-- This program is free software: you can redistribute it and/or modify": 1.6, sent 0, 0.2 KiB
+    page "a "b": 2.7, sent 73, 2.2 KiB
+    page "TODO": 1.9, sent 163, 5.9 KiB
+  navigation back to back (base): median 1.2, p95 5.2, max 18.1 (1095)
+  navigation with idle gaps (base): median 3.6, p95 9.7, max 97.1 (150)
+  source back to back (base): median 1.5, p95 6.5, max 25.1 (1095)
+  source with idle gaps (base): median 3.5, p95 13.2, max 20.4 (150)
+  search (base): median 1.6, p95 2.9, max 4.9 (300)
+  refs (base): median 20.7, p95 50.1, max 68.6 (90)
+  text search (limit 8, after the load) (base): median 1.5, p95 4.9, max 6.8 (150)
+    first (loads the store): 25.5, 25.9, 25.7; page (limit 1000): median 2.3, p95 6.8, max 6.9
+  diff-files: median 0.3, p95 0.6, max 0.6 (15); 154 files (26 added, 0 removed, 128 modified, 0 renamed); outside ROOT 0
+  diff (10 files, the largest modified or renamed with a line diff or too-slow, plain; 11 asked of 128): median 1.2, p95 5.2, max 6.6 (150)
+    MANUAL.txt (300.4 + 301.4 KiB): median 4.8, p95 6.6, max 6.6
+    pandoc-cli/man/pandoc.1 (293.0 + 294.0 KiB): median 5.0, p95 6.0, max 6.0
+    test/typst-reader.native (190.7 + 194.2 KiB): median 2.4, p95 3.0, max 3.0
+    src/Text/Pandoc/Readers/Markdown.hs (88.7 + 88.9 KiB): median 1.5, p95 2.0, max 2.0
+    src/Text/Pandoc/Writers/HTML.hs (82.7 + 82.7 KiB): median 1.2, p95 1.4, max 1.4
+    src/Text/Pandoc/Readers/RST.hs (75.9 + 75.9 KiB): median 1.2, p95 1.6, max 1.6
+    test/writer.opendocument (64.3 + 63.8 KiB): median 0.7, p95 1.1, max 1.1
+    src/Text/Pandoc/Readers/Docx/Parse.hs (62.7 + 63.2 KiB): median 0.9, p95 1.0, max 1.0
+    src/Text/Pandoc/Writers/LaTeX.hs (62.5 + 62.6 KiB): median 0.9, p95 1.0, max 1.0
+    src/Text/Pandoc/Readers/RTF.hs (53.2 + 55.3 KiB): median 1.0, p95 1.0, max 1.0
+  GC: 972 pauses, 822 major (813 after indexing); max 10.1, max major 10.1, p99 10.0; max major after indexing 10.0, max live after indexing 67.5 MiB
+      max during indexing 7.0, after 10.0; paused 7051.0 in total
+  major GC by phase: census 0, pages 0, sources 0, pages_idle 402 (max 10.0), sources_idle 402 (max 10.0), search 0, refs 0, diff 0, text 0, end_idle 6 (max 10.0), stop 3 (max 6.0)
+search during indexing, 3 runs, report only, ms: median 5.4, p95 27.0, max 377.3 (225); 260 queries, 225 partial
+refs during indexing, 3 runs, report only, ms: median 36.5, p95 296.5, max 324.7 (41); 41 of them partial
+  first answer median 322.0; rounds 3, 3, 3; indexing -0.3% vs start-up
+memory, MiB, max over runs: max_mem_in_use start-up 618.0 / steady 681.0, max_live 67.5, idle RSS after indexing 663.1 / after the steady work 722.8, peak RSS 726.4 (at done 646.2)
+
+== pandoc (typical, worktree --diff 381230ee, 733 modules listed, 731 parsed; head 367/366, base 366/365)
+start-up, 10 runs, ms, median [min-max]:
+  URL 25.9 [22.4-27.3] | accepting 27.8 [24.1-29.1]
+  UI usable 500.5 [358.3-635.7] (158.8 KiB on the wire, first run)
+    shell 27.8, assets 35.5, prefs 433.9, session 431.1, modules 434.6, search 434.6, module 500.1, files 434.3, diff-files (not in UI usable) 433.3 (first search partial in 10)
+  on-demand module: median 66.5, p95 236.9, max 236.9 (10); last-queued head:test/command/6466-whole.hs, largest head:Text.Pandoc.Writers.Powerpoint.Output, middle head:Text.Pandoc.Readers.LaTeX.Macro, last-queued base:test/command/6466-whole.hs
+  indexing done (harness) 1041.2 [932.0-1101.8] | product 609.5 [584.0-661.0] | span 610.3
+  done line: 731 modules, 731 ready, 0 failed, 0 text only (first run)
+  stop 45.2 [38.8-55.3]
+  diff (counts of the first run): changed 56 on head, 55 on base; pairing 154 changed, 0 renamed in 13.0 ms (median); working tree 2888 entries, 0 hashed, 0 read from disk
+steady, 1 run after indexing, ms (per-query lines: head only; the JSON has both):
+  navigation back to back (head): median 1.6, p95 5.5, max 18.5 (366)
+  navigation with idle gaps (head): median 3.3, p95 7.1, max 8.0 (50)
+  source back to back (head): median 1.5, p95 6.0, max 13.4 (366)
+  source with idle gaps (head): median 3.7, p95 8.7, max 137.8 (50)
+  search (head): median 1.8, p95 3.8, max 5.8 (100)
+  refs (head): median 19.9, p95 49.8, max 50.5 (30)
+    Text.Pandoc.Class.PandocMonad class:PandocMonad: median 49.8, p95 50.5, max 50.5; total 2851, sent 1000, 22.9 KiB
+    Text.Pandoc.Options type:ReaderOptions: median 24.2, p95 26.6, max 26.6; total 135, sent 135, 4.1 KiB
+    Text.Pandoc.Options field:ReaderOptions.readerExtensions: median 14.3, p95 15.9, max 15.9; total 89, sent 89, 3.0 KiB
+    Text.Pandoc.Class.PandocMonad val:report: median 33.3, p95 36.1, max 36.1; total 288, sent 288, 8.3 KiB
+    Text.Pandoc.Shared val:stringify: median 15.6, p95 16.7, max 16.7; total 58, sent 58, 2.4 KiB
+    Text.Pandoc.Shared val:trimr: median 6.7, p95 8.0, max 8.0; total 32, sent 32, 1.4 KiB
+  text search (limit 8, after the load) (head): median 1.5, p95 5.0, max 5.5 (50)
+    first (loads the store): 70.3; page (limit 1000): median 2.4, p95 6.8, max 6.8
+    "e": median 5.0, p95 5.5, max 5.5; total 256403 lines in 2491 files
+    "where": median 1.7, p95 2.0, max 2.0; total 2326 lines in 479 files
+    "import qualified": median 1.0, p95 1.2, max 1.2; total 1008 lines in 293 files
+    "ByteString": median 1.1, p95 1.4, max 1.4; total 426 lines in 97 files
+    "<$>": median 1.6, p95 1.8, max 1.8; total 2663 lines in 191 files
+    "zzqqxx": median 0.8, p95 1.0, max 1.0; total 0 lines in 0 files
+    "ü": median 0.7, p95 0.8, max 0.8; total 92 lines in 32 files
+    "-- This program is free software: you can redistribute it and/or modify": median 1.5, p95 1.6, max 1.6; total 0 lines in 0 files
+    "a "b": median 2.6, p95 2.7, max 2.7; total 73 lines in 25 files
+    "TODO": median 1.6, p95 1.6, max 1.6; total 163 lines in 63 files
+    page "e": 6.8, sent 1000, 24.7 KiB
+    page "where": 3.7, sent 1000, 19.5 KiB
+    page "import qualified": 2.6, sent 1000, 11.7 KiB
+    page "ByteString": 2.1, sent 426, 9.7 KiB
+    page "<$>": 3.5, sent 1000, 26.9 KiB
+    page "zzqqxx": 1.1, sent 0, 0.2 KiB
+    page "ü": 1.2, sent 92, 3.5 KiB
+    page "-- This program is free software: you can redistribute it and/or modify": 1.6, sent 0, 0.2 KiB
+    page "a "b": 2.7, sent 73, 2.2 KiB
+    page "TODO": 1.9, sent 163, 5.9 KiB
+  navigation back to back (base): median 1.3, p95 5.5, max 11.8 (365)
+  navigation with idle gaps (base): median 2.6, p95 6.7, max 11.6 (50)
+  source back to back (base): median 1.5, p95 6.0, max 14.3 (365)
+  source with idle gaps (base): median 3.5, p95 12.9, max 139.8 (50)
+  search (base): median 1.2, p95 2.2, max 2.7 (100)
+  refs (base): median 20.3, p95 48.9, max 49.5 (30)
+  text search (limit 8, after the load) (base): median 1.6, p95 5.0, max 5.6 (50)
+    first (loads the store): 25.4; page (limit 1000): median 2.3, p95 6.8, max 6.8
+  diff-files: median 0.2, p95 0.5, max 0.5 (5); 154 files (26 added, 0 removed, 128 modified, 0 renamed); outside ROOT 0
+  diff (10 files, the largest modified or renamed with a line diff or too-slow, plain; 11 asked of 128): median 1.2, p95 5.7, max 6.5 (50)
+    MANUAL.txt (300.4 + 301.4 KiB): median 4.7, p95 6.5, max 6.5
+    pandoc-cli/man/pandoc.1 (293.0 + 294.0 KiB): median 5.1, p95 5.9, max 5.9
+    test/typst-reader.native (190.7 + 194.2 KiB): median 2.4, p95 2.6, max 2.6
+    src/Text/Pandoc/Readers/Markdown.hs (88.7 + 88.9 KiB): median 1.5, p95 2.1, max 2.1
+    src/Text/Pandoc/Writers/HTML.hs (82.7 + 82.7 KiB): median 1.2, p95 1.3, max 1.3
+    src/Text/Pandoc/Readers/RST.hs (75.9 + 75.9 KiB): median 1.1, p95 1.2, max 1.2
+    test/writer.opendocument (64.3 + 63.8 KiB): median 0.7, p95 0.7, max 0.7
+    src/Text/Pandoc/Readers/Docx/Parse.hs (62.7 + 63.2 KiB): median 0.9, p95 0.9, max 0.9
+    src/Text/Pandoc/Writers/LaTeX.hs (62.5 + 62.6 KiB): median 0.9, p95 0.9, max 0.9
+    src/Text/Pandoc/Readers/RTF.hs (53.2 + 55.3 KiB): median 1.0, p95 1.0, max 1.0
+  pages over 100 ms: 2
+    idle source base:Tests.Writers.HTML 139.8
+    idle source head:Tests.Readers.Org.Block 137.8
+  GC: 289 pauses, 239 major (236 after indexing); max 10.2, max major 10.2, p99 10.0; max major after indexing 10.0, max live after indexing 68.7 MiB
+      max during indexing 8.0, after 10.0; paused 2138.0 in total
+  major GC by phase: census 0, pages 0, sources 0, pages_idle 116 (max 10.0), sources_idle 117 (max 10.0), search 0, refs 0, diff 0, text 0, end_idle 2 (max 9.0), stop 1 (max 6.0)
+memory, MiB, max over runs: max_mem_in_use start-up 619.0 / steady 683.0, max_live 68.7, idle RSS after indexing 664.4 / after the steady work 721.1, peak RSS 724.7 (at done 658.8)
+
+== wire-server (large, browse, 2061 modules listed, 1972 parsed)
+start-up, 10 runs, ms, median [min-max]:
+  URL 21.1 [16.7-21.4] | accepting 23.1 [18.5-23.5]
+  UI usable 704.3 [482.0-999.5] (199.6 KiB on the wire, first run)
+    shell 23.1, assets 30.4, prefs 574.3, modules 592.5, search 621.7, module 704.3, files 554.5 (first search partial in 10)
+  on-demand module: median 156.1, p95 298.1, max 298.1 (10); last-queued services/proxy/test/unit/Main.hs, largest Test.Wire.API.Golden.Generated, middle Wire.ConversationStore.Cassandra
+  indexing done (harness) 1639.8 [1566.4-1760.8] | product 1214.0 [1193.0-1244.0] | span 1214.5
+  done line: 1972 modules, 1972 ready, 0 failed, 11 text only (first run)
+  stop 55.3 [45.9-55.7]
+steady, 3 runs after indexing, ms:
+  navigation back to back: median 1.6, p95 5.3, max 22.9 (5916)
+  navigation with idle gaps: median 4.6, p95 12.0, max 166.2 (150)
+  source back to back: median 1.6, p95 6.4, max 32.5 (5916)
+  source with idle gaps: median 5.1, p95 13.2, max 23.5 (150)
+  search: median 4.6, p95 9.2, max 16.4 (300)
+  refs: median 76.0, p95 143.4, max 247.5 (90)
+    Data.Id type:UserId: median 135.3, p95 247.5, max 247.5; total 4145, sent 1000, 24.1 KiB
+    Data.Qualified type:Qualified: median 80.6, p95 118.6, max 118.6; total 773, sent 773, 19.6 KiB
+    Data.Qualified con:Qualified: median 82.3, p95 127.7, max 127.7; total 801, sent 801, 21.5 KiB
+    Data.Qualified val:tUnqualified: median 45.6, p95 82.5, max 82.5; total 626, sent 626, 20.5 KiB
+    Data.Qualified field:Qualified.qUnqualified: median 55.6, p95 86.5, max 86.5; total 647, sent 647, 19.2 KiB
+    Data.Qualified val:tSplit: median 4.2, p95 6.1, max 6.1; total 5, sent 5, 0.4 KiB
+  text search (limit 8, after the load): median 4.3, p95 11.7, max 20.7 (150)
+    first (loads the store): 100.8, 95.9, 95.5; page (limit 1000): median 7.1, p95 15.8, max 16.3
+    "e": median 11.6, p95 20.7, max 20.7; total 502557 lines in 6260 files
+    "where": median 5.4, p95 9.0, max 9.0; total 8631 lines in 2051 files
+    "import qualified": median 3.6, p95 5.5, max 5.5; total 1110 lines in 250 files
+    "ByteString": median 3.5, p95 6.4, max 6.4; total 3632 lines in 588 files
+    "<$>": median 3.8, p95 6.0, max 6.0; total 4226 lines in 726 files
+    "zzqqxx": median 3.0, p95 4.8, max 4.8; total 0 lines in 0 files
+    "ü": median 2.7, p95 4.0, max 4.0; total 95 lines in 67 files
+    "-- This program is free software: you can redistribute it and/or modify": median 4.5, p95 8.4, max 8.4; total 1992 lines in 1950 files
+    "a "b": median 7.2, p95 13.7, max 13.7; total 4 lines in 3 files
+    "TODO": median 4.4, p95 8.0, max 8.0; total 221 lines in 130 files
+    page "e": 15.8, sent 1000, 51.3 KiB
+    page "where": 7.3, sent 1000, 22.8 KiB
+    page "import qualified": 7.6, sent 1000, 13.9 KiB
+    page "ByteString": 6.1, sent 1000, 24.4 KiB
+    page "<$>": 6.5, sent 1000, 32.0 KiB
+    page "zzqqxx": 3.7, sent 0, 0.2 KiB
+    page "ü": 3.9, sent 95, 4.8 KiB
+    page "-- This program is free software: you can redistribute it and/or modify": 7.1, sent 1000, 9.6 KiB
+    page "a "b": 7.4, sent 4, 0.8 KiB
+    page "TODO": 8.6, sent 221, 9.4 KiB
+  pages over 100 ms: 3
+    idle module Test.Wire.API.Golden.Generated.TurnURI_user 166.2
+    idle module Gundeck.Instances 161.9
+    idle module Test.Tasty.Cannon 153.3
+  GC: 1026 pauses, 424 major (409 after indexing); max 18.1, max major 18.1, p99 17.0; max major after indexing 18.0, max live after indexing 162.7 MiB
+      max during indexing 14.0, after 18.0; paused 7054.0 in total
+  major GC by phase: census 0, pages 0, sources 0, pages_idle 199 (max 18.0), sources_idle 201 (max 17.0), search 0, refs 0, text 0, end_idle 6 (max 18.0), stop 3 (max 11.0)
+search during indexing, 3 runs, report only, ms: median 12.2, p95 50.6, max 427.7 (248); 280 queries, 248 partial
+refs during indexing, 3 runs, report only, ms: median 38.7, p95 221.7, max 424.5 (76); 76 of them partial
+  first answer median 413.4; rounds 5, 5, 4; indexing +10.0% vs start-up
+fallbacks: as expected; got: preprocessed 11, generated 1, no-source/autogen 85, no-source/missing 3
+memory, MiB, max over runs: max_mem_in_use start-up 849.0 / steady 884.0, max_live 162.7, idle RSS after indexing 840.0 / after the steady work 873.3, peak RSS 879.5 (at done 799.3)
+  §10.2 budget 2048.0 (max_mem_in_use): ok
+
+== wire-server (large, range --diff 3f7f6219..7568f595, 4091 modules listed, 3913 parsed; head 2061/1972, base 2030/1941)
+start-up, 10 runs, ms, median [min-max]:
+  URL 28.3 [21.7-29.4] | accepting 30.3 [23.3-31.9]
+  UI usable 829.4 [731.9-1064.0] (200.9 KiB on the wire, first run)
+    shell 30.3, assets 38.3, prefs 753.4, session 752.5, modules 755.3, search 754.2, module 829.4, files 753.9, diff-files (not in UI usable) 752.7 (first search partial in 10)
+  on-demand module: median 44.5, p95 263.0, max 263.0 (10); last-queued head:services/proxy/test/unit/Main.hs, largest head:Test.Wire.API.Golden.Generated, middle head:Test.Wire.API.Golden.Generated.OtrMessage_user, last-queued base:services/proxy/test/unit/Main.hs
+  indexing done (harness) 2716.5 [2603.0-2769.4] | product 1948.0 [1920.0-1989.0] | span 1948.6
+  done line: 3913 modules, 3913 ready, 0 failed, 22 text only (first run)
+  stop 60.8 [50.0-70.6]
+  diff (counts of the first run): changed 711 on head, 680 on base; pairing 469 changed, 13 renamed in 51.0 ms (median)
+steady, 3 runs after indexing, ms (per-query lines: head only; the JSON has both):
+  navigation back to back (head): median 1.9, p95 6.4, max 37.6 (5916)
+  navigation with idle gaps (head): median 4.7, p95 12.8, max 212.6 (150)
+  source back to back (head): median 1.6, p95 6.5, max 32.6 (5916)
+  source with idle gaps (head): median 4.6, p95 13.8, max 22.9 (150)
+  search (head): median 5.1, p95 12.3, max 19.9 (300)
+  refs (head): median 72.6, p95 137.5, max 153.9 (90)
+    Data.Id type:UserId: median 134.3, p95 153.9, max 153.9; total 4145, sent 1000, 24.1 KiB
+    Data.Qualified type:Qualified: median 83.0, p95 99.3, max 99.3; total 773, sent 773, 19.6 KiB
+    Data.Qualified con:Qualified: median 79.9, p95 90.5, max 90.5; total 801, sent 801, 21.5 KiB
+    Data.Qualified val:tUnqualified: median 46.5, p95 54.2, max 54.2; total 626, sent 626, 20.5 KiB
+    Data.Qualified field:Qualified.qUnqualified: median 57.5, p95 68.8, max 68.8; total 647, sent 647, 19.2 KiB
+    Data.Qualified val:tSplit: median 3.9, p95 6.4, max 6.4; total 5, sent 5, 0.4 KiB
+  text search (limit 8, after the load) (head): median 4.2, p95 11.7, max 13.1 (150)
+    first (loads the store): 126.9, 133.2, 128.3; page (limit 1000): median 5.9, p95 15.2, max 16.8
+    "e": median 11.7, p95 13.1, max 13.1; total 502557 lines in 6260 files
+    "where": median 5.4, p95 6.6, max 6.6; total 8631 lines in 2051 files
+    "import qualified": median 3.4, p95 4.8, max 4.8; total 1110 lines in 250 files
+    "ByteString": median 3.6, p95 5.0, max 5.0; total 3632 lines in 588 files
+    "<$>": median 3.5, p95 4.7, max 4.7; total 4226 lines in 726 files
+    "zzqqxx": median 2.8, p95 3.6, max 3.6; total 0 lines in 0 files
+    "ü": median 2.4, p95 3.2, max 3.2; total 95 lines in 67 files
+    "-- This program is free software: you can redistribute it and/or modify": median 4.3, p95 5.3, max 5.3; total 1992 lines in 1950 files
+    "a "b": median 6.8, p95 8.0, max 8.0; total 4 lines in 3 files
+    "TODO": median 4.4, p95 5.6, max 5.6; total 221 lines in 130 files
+    page "e": 15.2, sent 1000, 51.3 KiB
+    page "where": 7.1, sent 1000, 22.8 KiB
+    page "import qualified": 4.9, sent 1000, 13.9 KiB
+    page "ByteString": 5.4, sent 1000, 24.4 KiB
+    page "<$>": 5.7, sent 1000, 32.0 KiB
+    page "zzqqxx": 3.4, sent 0, 0.2 KiB
+    page "ü": 3.7, sent 95, 4.8 KiB
+    page "-- This program is free software: you can redistribute it and/or modify": 6.3, sent 1000, 9.6 KiB
+    page "a "b": 7.3, sent 4, 0.8 KiB
+    page "TODO": 5.2, sent 221, 9.4 KiB
+  navigation back to back (base): median 1.6, p95 5.9, max 37.2 (5823)
+  navigation with idle gaps (base): median 4.4, p95 10.6, max 24.9 (150)
+  source back to back (base): median 1.6, p95 6.4, max 33.6 (5823)
+  source with idle gaps (base): median 4.5, p95 14.8, max 24.0 (150)
+  search (base): median 3.5, p95 6.4, max 11.0 (300)
+  refs (base): median 75.8, p95 142.8, max 156.5 (90)
+  text search (limit 8, after the load) (base): median 4.4, p95 11.5, max 12.5 (150)
+    first (loads the store): 32.0, 46.8, 32.5; page (limit 1000): median 6.5, p95 14.8, max 16.1
+  diff-files: median 0.6, p95 1.4, max 1.4 (15); 469 files (60 added, 52 removed, 344 modified, 13 renamed); outside ROOT 0
+  diff (10 files, the largest modified or renamed with a line diff or too-slow, plain; 10 asked of 357): median 1.6, p95 4.9, max 11.2 (150)
+    libs/wire-api/test/golden/Test/Wire/API/Golden/Generated.hs (393.7 + 394.1 KiB): median 2.3, p95 3.5, max 3.5
+    CHANGELOG.md (303.5 + 338.6 KiB): median 4.9, p95 11.2, max 11.2
+    services/spar/test-integration/Test/Spar/Scim/UserSpec.hs (111.3 + 114.3 KiB): median 2.2, p95 3.4, max 3.4
+    libs/wire-api/src/Wire/API/Team/Feature.hs (103.6 + 104.5 KiB): median 1.7, p95 3.2, max 3.2
+    services/galley/test/integration/API/Util.hs (99.1 + 98.1 KiB): median 1.7, p95 3.2, max 3.2
+    cassandra-schema.cql (96.5 + 97.4 KiB): median 1.3, p95 2.4, max 2.4
+    services/spar/test-integration/Test/Spar/APISpec.hs (91.9 + 92.4 KiB): median 1.2, p95 2.2, max 2.2
+    docs/src/developer/reference/config-options.md (88.3 + 95.6 KiB): median 1.5, p95 2.8, max 2.8
+    services/brig/test/integration/API/Provider.hs (88.7 + 91.8 KiB): median 1.4, p95 2.3, max 2.3
+    integration/test/Test/Spar.hs (71.6 + 91.2 KiB): median 1.1, p95 2.0, max 2.0
+  pages over 100 ms: 1
+    idle module head:Brig.Index.Options 212.6
+  GC: 1345 pauses, 859 major (845 after indexing); max 27.0, max major 27.0, p99 25.0; max major after indexing 27.0, max live after indexing 231.3 MiB
+      max during indexing 20.0, after 27.0; paused 19331.0 in total
+  major GC by phase: census 0, pages 1 (max 21.0), sources 0, pages_idle 413 (max 27.0), sources_idle 422 (max 25.0), search 0, refs 0, diff 0, text 0, end_idle 6 (max 23.0), stop 3 (max 14.0)
+search during indexing, 3 runs, report only, ms: median 9.3, p95 24.6, max 685.2 (569); 600 queries, 569 partial
+refs during indexing, 3 runs, report only, ms: median 12.4, p95 521.4, max 914.0 (101); 101 of them partial
+  first answer median 613.2; rounds 6, 6, 7; indexing +11.5% vs start-up
+memory, MiB, max over runs: max_mem_in_use start-up 855.0 / steady 944.0, max_live 231.3, idle RSS after indexing 905.6 / after the steady work 989.8, peak RSS 995.2 (at done 880.1)
+  §10.2 budget 2048.0 (max_mem_in_use): ok
+
+== wire-server (large, worktree --diff 3f7f6219, 4091 modules listed, 3913 parsed; head 2061/1972, base 2030/1941)
+start-up, 10 runs, ms, median [min-max]:
+  URL 25.7 [22.5-26.5] | accepting 27.5 [24.3-28.5]
+  UI usable 915.6 [802.1-1076.5] (200.8 KiB on the wire, first run)
+    shell 27.5, assets 36.0, prefs 831.1, session 827.0, modules 832.8, search 830.9, module 915.6, files 829.9, diff-files (not in UI usable) 827.9 (first search partial in 10)
+  on-demand module: median 54.0, p95 259.3, max 259.3 (10); last-queued head:services/proxy/test/unit/Main.hs, largest head:Test.Wire.API.Golden.Generated, middle head:Test.Wire.API.Golden.Generated.OtrMessage_user, last-queued base:services/proxy/test/unit/Main.hs
+  indexing done (harness) 2775.9 [2714.1-2911.7] | product 1960.0 [1924.0-1978.0] | span 1960.7
+  done line: 3913 modules, 3913 ready, 0 failed, 22 text only (first run)
+  stop 70.6 [61.2-81.5]
+  diff (counts of the first run): changed 711 on head, 680 on base; pairing 469 changed, 13 renamed in 81.2 ms (median); working tree 6876 entries, 0 hashed, 0 read from disk
+steady, 1 run after indexing, ms (per-query lines: head only; the JSON has both):
+  navigation back to back (head): median 1.5, p95 5.3, max 28.6 (1972)
+  navigation with idle gaps (head): median 4.8, p95 11.5, max 19.5 (50)
+  source back to back (head): median 1.6, p95 6.3, max 31.5 (1972)
+  source with idle gaps (head): median 4.7, p95 12.8, max 21.4 (50)
+  search (head): median 6.4, p95 14.2, max 19.8 (100)
+  refs (head): median 77.5, p95 137.8, max 140.8 (30)
+    Data.Id type:UserId: median 137.4, p95 140.8, max 140.8; total 4145, sent 1000, 24.1 KiB
+    Data.Qualified type:Qualified: median 81.9, p95 83.0, max 83.0; total 773, sent 773, 19.6 KiB
+    Data.Qualified con:Qualified: median 77.9, p95 88.7, max 88.7; total 801, sent 801, 21.5 KiB
+    Data.Qualified val:tUnqualified: median 45.7, p95 54.4, max 54.4; total 626, sent 626, 20.5 KiB
+    Data.Qualified field:Qualified.qUnqualified: median 56.9, p95 77.4, max 77.4; total 647, sent 647, 19.2 KiB
+    Data.Qualified val:tSplit: median 3.9, p95 4.7, max 4.7; total 5, sent 5, 0.4 KiB
+  text search (limit 8, after the load) (head): median 4.0, p95 11.3, max 12.4 (50)
+    first (loads the store): 127.6; page (limit 1000): median 5.6, p95 14.7, max 14.7
+    "e": median 11.3, p95 12.4, max 12.4; total 502557 lines in 6260 files
+    "where": median 4.7, p95 5.6, max 5.6; total 8631 lines in 2051 files
+    "import qualified": median 3.6, p95 4.4, max 4.4; total 1110 lines in 250 files
+    "ByteString": median 3.4, p95 3.7, max 3.7; total 3632 lines in 588 files
+    "<$>": median 3.2, p95 4.1, max 4.1; total 4226 lines in 726 files
+    "zzqqxx": median 2.6, p95 2.9, max 2.9; total 0 lines in 0 files
+    "ü": median 2.2, p95 3.1, max 3.1; total 95 lines in 67 files
+    "-- This program is free software: you can redistribute it and/or modify": median 4.2, p95 4.7, max 4.7; total 1992 lines in 1950 files
+    "a "b": median 6.7, p95 8.0, max 8.0; total 4 lines in 3 files
+    "TODO": median 4.0, p95 4.5, max 4.5; total 221 lines in 130 files
+    page "e": 14.7, sent 1000, 51.3 KiB
+    page "where": 6.9, sent 1000, 22.8 KiB
+    page "import qualified": 4.8, sent 1000, 13.9 KiB
+    page "ByteString": 5.3, sent 1000, 24.4 KiB
+    page "<$>": 6.1, sent 1000, 32.0 KiB
+    page "zzqqxx": 3.0, sent 0, 0.2 KiB
+    page "ü": 3.7, sent 95, 4.8 KiB
+    page "-- This program is free software: you can redistribute it and/or modify": 5.9, sent 1000, 9.6 KiB
+    page "a "b": 7.1, sent 4, 0.8 KiB
+    page "TODO": 5.2, sent 221, 9.4 KiB
+  navigation back to back (base): median 1.4, p95 5.1, max 19.5 (1941)
+  navigation with idle gaps (base): median 3.9, p95 13.1, max 19.2 (50)
+  source back to back (base): median 1.5, p95 6.2, max 33.7 (1941)
+  source with idle gaps (base): median 4.3, p95 9.5, max 15.8 (50)
+  search (base): median 4.6, p95 14.4, max 19.0 (100)
+  refs (base): median 66.8, p95 136.9, max 147.5 (30)
+  text search (limit 8, after the load) (base): median 4.1, p95 11.4, max 11.8 (50)
+    first (loads the store): 32.1; page (limit 1000): median 6.1, p95 15.2, max 15.2
+  diff-files: median 0.5, p95 0.7, max 0.7 (5); 469 files (60 added, 52 removed, 344 modified, 13 renamed); outside ROOT 0
+  diff (10 files, the largest modified or renamed with a line diff or too-slow, plain; 10 asked of 357): median 1.6, p95 4.9, max 5.8 (50)
+    libs/wire-api/test/golden/Test/Wire/API/Golden/Generated.hs (393.7 + 394.1 KiB): median 2.2, p95 3.5, max 3.5
+    CHANGELOG.md (303.5 + 338.6 KiB): median 4.9, p95 5.8, max 5.8
+    services/spar/test-integration/Test/Spar/Scim/UserSpec.hs (111.3 + 114.3 KiB): median 2.0, p95 2.4, max 2.4
+    libs/wire-api/src/Wire/API/Team/Feature.hs (103.6 + 104.5 KiB): median 1.7, p95 2.3, max 2.3
+    services/galley/test/integration/API/Util.hs (99.1 + 98.1 KiB): median 1.7, p95 1.8, max 1.8
+    cassandra-schema.cql (96.5 + 97.4 KiB): median 1.3, p95 1.3, max 1.3
+    services/spar/test-integration/Test/Spar/APISpec.hs (91.9 + 92.4 KiB): median 1.2, p95 1.3, max 1.3
+    docs/src/developer/reference/config-options.md (88.3 + 95.6 KiB): median 1.6, p95 1.7, max 1.7
+    services/brig/test/integration/API/Provider.hs (88.7 + 91.8 KiB): median 1.4, p95 2.3, max 2.3
+    integration/test/Test/Spar.hs (71.6 + 91.2 KiB): median 1.2, p95 1.2, max 1.2
+  GC: 421 pauses, 258 major (254 after indexing); max 25.4, max major 25.4, p99 24.0; max major after indexing 25.0, max live after indexing 234.4 MiB
+      max during indexing 14.0, after 25.0; paused 5549.0 in total
+  major GC by phase: census 0, pages 1 (max 20.0), sources 0, pages_idle 121 (max 25.0), sources_idle 129 (max 23.0), search 0, refs 0, diff 0, text 0, end_idle 2 (max 24.0), stop 1 (max 14.0)
+memory, MiB, max over runs: max_mem_in_use start-up 856.0 / steady 947.0, max_live 234.4, idle RSS after indexing 905.2 / after the steady work 990.9, peak RSS 996.2 (at done 800.4)
+  §10.2 budget 2048.0 (max_mem_in_use): ok
+
+Targets (SPEC §10.1, D-208, D-303, D-308, D-357, D-358; a MISS never fails the bench, §10.3):
+  §10.1 URL + accepting < 300 ms (median): optparse-applicative: ok (22.5 ms; max 23.0)
+  §10.1 UI usable < 1 s (median): optparse-applicative: ok (210.2 ms; max 291.8)
+  §10.1 on-demand module < 300 ms (p95): optparse-applicative: ok (81.4 ms; max 81.4)
+  §10.1 navigation < 100 ms (back to back) (p95): optparse-applicative: ok (5.5 ms; max 7.8)
+  §10.1 navigation < 100 ms (idle gaps) (p95): optparse-applicative: ok (6.6 ms; max 8.7)
+  §10.1 navigation < 100 ms (source, back to back) (p95): optparse-applicative: ok (4.0 ms; max 11.8)
+  §10.1 navigation < 100 ms (source, idle gaps) (p95): optparse-applicative: ok (6.2 ms; max 11.8)
+  D-208 search after indexing ≤ 30 ms (median): optparse-applicative: ok (0.3 ms; max 1.9)
+  D-208 search after indexing ≤ 100 ms (p95): optparse-applicative: ok (0.8 ms; max 1.9)
+  D-303 find references after indexing < 300 ms (p95): optparse-applicative: ok (7.1 ms; max 8.0)
+  D-308 text search after load ≤ 50 ms (median): optparse-applicative: ok (0.2 ms; max 0.9)
+  D-308 text search after load ≤ 150 ms (p95): optparse-applicative: ok (0.6 ms; max 0.9)
+  §10.1 URL + accepting < 300 ms (median): optparse-applicative range: ok (30.2 ms; max 31.5)
+  §10.1 UI usable < 1 s (median): optparse-applicative range: ok (284.2 ms; max 333.1)
+  §10.1 on-demand module < 300 ms (p95): optparse-applicative range: ok (73.0 ms; max 73.0)
+  §10.1 navigation < 100 ms (back to back) (p95): optparse-applicative range head: ok (4.9 ms; max 6.9)
+  §10.1 navigation < 100 ms (back to back) (p95): optparse-applicative range base: ok (4.5 ms; max 7.0)
+  §10.1 navigation < 100 ms (idle gaps) (p95): optparse-applicative range head: ok (6.4 ms; max 9.4)
+  §10.1 navigation < 100 ms (idle gaps) (p95): optparse-applicative range base: ok (6.2 ms; max 14.4)
+  §10.1 navigation < 100 ms (source, back to back) (p95): optparse-applicative range head: ok (4.9 ms; max 7.5)
+  §10.1 navigation < 100 ms (source, back to back) (p95): optparse-applicative range base: ok (4.7 ms; max 12.6)
+  §10.1 navigation < 100 ms (source, idle gaps) (p95): optparse-applicative range head: ok (7.0 ms; max 21.5)
+  §10.1 navigation < 100 ms (source, idle gaps) (p95): optparse-applicative range base: ok (8.0 ms; max 22.2)
+  D-208 search after indexing ≤ 30 ms (median): optparse-applicative range head: ok (0.3 ms; max 1.6)
+  D-208 search after indexing ≤ 30 ms (median): optparse-applicative range base: ok (0.2 ms; max 0.8)
+  D-208 search after indexing ≤ 100 ms (p95): optparse-applicative range head: ok (0.8 ms; max 1.6)
+  D-208 search after indexing ≤ 100 ms (p95): optparse-applicative range base: ok (0.6 ms; max 0.8)
+  D-303 find references after indexing < 300 ms (p95): optparse-applicative range head: ok (5.0 ms; max 5.5)
+  D-303 find references after indexing < 300 ms (p95): optparse-applicative range base: ok (5.2 ms; max 7.4)
+  D-308 text search after load ≤ 50 ms (median): optparse-applicative range head: ok (0.2 ms; max 0.9)
+  D-308 text search after load ≤ 50 ms (median): optparse-applicative range base: ok (0.2 ms; max 0.8)
+  D-308 text search after load ≤ 150 ms (p95): optparse-applicative range head: ok (0.4 ms; max 0.9)
+  D-308 text search after load ≤ 150 ms (p95): optparse-applicative range base: ok (0.4 ms; max 0.8)
+  §10.1 diff after indexing < 100 ms (p95): optparse-applicative range: ok (1.2 ms; max 1.9)
+  §10.1 URL + accepting < 300 ms (median): optparse-applicative worktree: ok (27.9 ms; max 29.1)
+  §10.1 UI usable < 1 s (median): optparse-applicative worktree: ok (285.9 ms; max 338.6)
+  §10.1 on-demand module < 300 ms (p95): optparse-applicative worktree: ok (69.1 ms; max 69.1)
+  §10.1 navigation < 100 ms (back to back) (p95): optparse-applicative worktree head: ok (5.4 ms; max 7.9)
+  §10.1 navigation < 100 ms (back to back) (p95): optparse-applicative worktree base: ok (5.8 ms; max 6.9)
+  §10.1 navigation < 100 ms (idle gaps) (p95): optparse-applicative worktree head: ok (5.4 ms; max 6.4)
+  §10.1 navigation < 100 ms (idle gaps) (p95): optparse-applicative worktree base: ok (6.1 ms; max 7.3)
+  §10.1 navigation < 100 ms (source, back to back) (p95): optparse-applicative worktree head: ok (4.6 ms; max 12.8)
+  §10.1 navigation < 100 ms (source, back to back) (p95): optparse-applicative worktree base: ok (4.6 ms; max 11.4)
+  §10.1 navigation < 100 ms (source, idle gaps) (p95): optparse-applicative worktree head: ok (6.0 ms; max 9.7)
+  §10.1 navigation < 100 ms (source, idle gaps) (p95): optparse-applicative worktree base: ok (6.3 ms; max 33.9)
+  D-208 search after indexing ≤ 30 ms (median): optparse-applicative worktree head: ok (0.3 ms; max 1.3)
+  D-208 search after indexing ≤ 30 ms (median): optparse-applicative worktree base: ok (0.2 ms; max 0.7)
+  D-208 search after indexing ≤ 100 ms (p95): optparse-applicative worktree head: ok (0.7 ms; max 1.3)
+  D-208 search after indexing ≤ 100 ms (p95): optparse-applicative worktree base: ok (0.5 ms; max 0.7)
+  D-303 find references after indexing < 300 ms (p95): optparse-applicative worktree head: ok (5.2 ms; max 7.1)
+  D-303 find references after indexing < 300 ms (p95): optparse-applicative worktree base: ok (6.1 ms; max 6.8)
+  D-308 text search after load ≤ 50 ms (median): optparse-applicative worktree head: ok (0.2 ms; max 0.5)
+  D-308 text search after load ≤ 50 ms (median): optparse-applicative worktree base: ok (0.2 ms; max 0.9)
+  D-308 text search after load ≤ 150 ms (p95): optparse-applicative worktree head: ok (0.4 ms; max 0.5)
+  D-308 text search after load ≤ 150 ms (p95): optparse-applicative worktree base: ok (0.4 ms; max 0.9)
+  §10.1 diff after indexing < 100 ms (p95): optparse-applicative worktree: ok (1.0 ms; max 1.9)
+  §10.1 URL + accepting < 300 ms (median): pandoc: ok (22.7 ms; max 23.4)
+  §10.1 UI usable < 1 s (median): pandoc: ok (397.4 ms; max 478.1)
+  §10.1 on-demand module < 300 ms (p95): pandoc: ok (217.7 ms; max 217.7)
+  §10.1 navigation < 100 ms (back to back) (p95): pandoc: ok (4.6 ms; max 17.2)
+  §10.1 navigation < 100 ms (idle gaps) (p95): pandoc: ok (8.8 ms; max 88.5)
+  §10.1 navigation < 100 ms (source, back to back) (p95): pandoc: ok (5.7 ms; max 13.4)
+  §10.1 navigation < 100 ms (source, idle gaps) (p95): pandoc: ok (11.8 ms; max 44.4)
+  D-208 search after indexing ≤ 30 ms (median): pandoc: ok (1.6 ms; max 5.9)
+  D-208 search after indexing ≤ 100 ms (p95): pandoc: ok (2.7 ms; max 5.9)
+  D-303 find references after indexing < 300 ms (p95): pandoc: ok (63.6 ms; max 64.2)
+  D-308 text search after load ≤ 50 ms (median): pandoc: ok (1.5 ms; max 5.5)
+  D-308 text search after load ≤ 150 ms (p95): pandoc: ok (5.0 ms; max 5.5)
+  §10.1 URL + accepting < 300 ms (median): pandoc range: ok (29.9 ms; max 30.9)
+  §10.1 UI usable < 1 s (median): pandoc range: ok (470.9 ms; max 611.7)
+  §10.1 on-demand module < 300 ms (p95): pandoc range: ok (212.3 ms; max 212.3)
+  §10.1 navigation < 100 ms (back to back) (p95): pandoc range head: ok (5.0 ms; max 18.0)
+  §10.1 navigation < 100 ms (back to back) (p95): pandoc range base: ok (5.2 ms; max 18.1)
+  §10.1 navigation < 100 ms (idle gaps) (p95): pandoc range head: ok (7.6 ms; max 12.1)
+  §10.1 navigation < 100 ms (idle gaps) (p95): pandoc range base: ok (9.7 ms; max 97.1)
+  §10.1 navigation < 100 ms (source, back to back) (p95): pandoc range head: ok (7.9 ms; max 25.1)
+  §10.1 navigation < 100 ms (source, back to back) (p95): pandoc range base: ok (6.5 ms; max 25.1)
+  §10.1 navigation < 100 ms (source, idle gaps) (p95): pandoc range head: ok (10.4 ms; max 18.3)
+  §10.1 navigation < 100 ms (source, idle gaps) (p95): pandoc range base: ok (13.2 ms; max 20.4)
+  D-208 search after indexing ≤ 30 ms (median): pandoc range head: ok (1.9 ms; max 5.9)
+  D-208 search after indexing ≤ 30 ms (median): pandoc range base: ok (1.6 ms; max 4.9)
+  D-208 search after indexing ≤ 100 ms (p95): pandoc range head: ok (3.6 ms; max 5.9)
+  D-208 search after indexing ≤ 100 ms (p95): pandoc range base: ok (2.9 ms; max 4.9)
+  D-303 find references after indexing < 300 ms (p95): pandoc range head: ok (51.8 ms; max 68.9)
+  D-303 find references after indexing < 300 ms (p95): pandoc range base: ok (50.1 ms; max 68.6)
+  D-308 text search after load ≤ 50 ms (median): pandoc range head: ok (1.6 ms; max 6.3)
+  D-308 text search after load ≤ 50 ms (median): pandoc range base: ok (1.5 ms; max 6.8)
+  D-308 text search after load ≤ 150 ms (p95): pandoc range head: ok (5.0 ms; max 6.3)
+  D-308 text search after load ≤ 150 ms (p95): pandoc range base: ok (4.9 ms; max 6.8)
+  §10.1 diff after indexing < 100 ms (p95): pandoc range: ok (5.2 ms; max 6.6)
+  §10.1 URL + accepting < 300 ms (median): pandoc worktree: ok (27.8 ms; max 29.1)
+  §10.1 UI usable < 1 s (median): pandoc worktree: ok (500.5 ms; max 635.7)
+  §10.1 on-demand module < 300 ms (p95): pandoc worktree: ok (236.9 ms; max 236.9)
+  §10.1 navigation < 100 ms (back to back) (p95): pandoc worktree head: ok (5.5 ms; max 18.5)
+  §10.1 navigation < 100 ms (back to back) (p95): pandoc worktree base: ok (5.5 ms; max 11.8)
+  §10.1 navigation < 100 ms (idle gaps) (p95): pandoc worktree head: ok (7.1 ms; max 8.0)
+  §10.1 navigation < 100 ms (idle gaps) (p95): pandoc worktree base: ok (6.7 ms; max 11.6)
+  §10.1 navigation < 100 ms (source, back to back) (p95): pandoc worktree head: ok (6.0 ms; max 13.4)
+  §10.1 navigation < 100 ms (source, back to back) (p95): pandoc worktree base: ok (6.0 ms; max 14.3)
+  §10.1 navigation < 100 ms (source, idle gaps) (p95): pandoc worktree head: ok (8.7 ms; max 137.8)
+  §10.1 navigation < 100 ms (source, idle gaps) (p95): pandoc worktree base: ok (12.9 ms; max 139.8)
+  D-208 search after indexing ≤ 30 ms (median): pandoc worktree head: ok (1.8 ms; max 5.8)
+  D-208 search after indexing ≤ 30 ms (median): pandoc worktree base: ok (1.2 ms; max 2.7)
+  D-208 search after indexing ≤ 100 ms (p95): pandoc worktree head: ok (3.8 ms; max 5.8)
+  D-208 search after indexing ≤ 100 ms (p95): pandoc worktree base: ok (2.2 ms; max 2.7)
+  D-303 find references after indexing < 300 ms (p95): pandoc worktree head: ok (49.8 ms; max 50.5)
+  D-303 find references after indexing < 300 ms (p95): pandoc worktree base: ok (48.9 ms; max 49.5)
+  D-308 text search after load ≤ 50 ms (median): pandoc worktree head: ok (1.5 ms; max 5.5)
+  D-308 text search after load ≤ 50 ms (median): pandoc worktree base: ok (1.6 ms; max 5.6)
+  D-308 text search after load ≤ 150 ms (p95): pandoc worktree head: ok (5.0 ms; max 5.5)
+  D-308 text search after load ≤ 150 ms (p95): pandoc worktree base: ok (5.0 ms; max 5.6)
+  §10.1 diff after indexing < 100 ms (p95): pandoc worktree: ok (5.7 ms; max 6.5)
+  §10.1 URL + accepting < 300 ms (median): wire-server: ok (23.1 ms; max 23.5)
+  §10.1 UI usable < 10 s (median): wire-server: ok (704.3 ms; max 999.5)
+  §10.1 on-demand module < 300 ms (p95): wire-server: ok (298.1 ms; max 298.1)
+  §10.1 navigation < 100 ms (back to back) (p95): wire-server: ok (5.3 ms; max 22.9)
+  §10.1 navigation < 100 ms (idle gaps) (p95): wire-server: ok (12.0 ms; max 166.2)
+  §10.1 navigation < 100 ms (source, back to back) (p95): wire-server: ok (6.4 ms; max 32.5)
+  §10.1 navigation < 100 ms (source, idle gaps) (p95): wire-server: ok (13.2 ms; max 23.5)
+  D-208 search after indexing ≤ 30 ms (median): wire-server: ok (4.6 ms; max 16.4)
+  D-208 search after indexing ≤ 100 ms (p95): wire-server: ok (9.2 ms; max 16.4)
+  D-303 find references after indexing < 300 ms (p95): wire-server: ok (143.4 ms; max 247.5)
+  D-308 text search after load ≤ 50 ms (median): wire-server: ok (4.3 ms; max 20.7)
+  D-308 text search after load ≤ 150 ms (p95): wire-server: ok (11.7 ms; max 20.7)
+  §10.1 URL + accepting < 300 ms (median): wire-server range: ok (30.3 ms; max 31.9)
+  §10.1 UI usable < 10 s (median): wire-server range: ok (829.4 ms; max 1064.0)
+  §10.1 on-demand module < 300 ms (p95): wire-server range: ok (263.0 ms; max 263.0)
+  §10.1 navigation < 100 ms (back to back) (p95): wire-server range head: ok (6.4 ms; max 37.6)
+  §10.1 navigation < 100 ms (back to back) (p95): wire-server range base: ok (5.9 ms; max 37.2)
+  §10.1 navigation < 100 ms (idle gaps) (p95): wire-server range head: ok (12.8 ms; max 212.6)
+  §10.1 navigation < 100 ms (idle gaps) (p95): wire-server range base: ok (10.6 ms; max 24.9)
+  §10.1 navigation < 100 ms (source, back to back) (p95): wire-server range head: ok (6.5 ms; max 32.6)
+  §10.1 navigation < 100 ms (source, back to back) (p95): wire-server range base: ok (6.4 ms; max 33.6)
+  §10.1 navigation < 100 ms (source, idle gaps) (p95): wire-server range head: ok (13.8 ms; max 22.9)
+  §10.1 navigation < 100 ms (source, idle gaps) (p95): wire-server range base: ok (14.8 ms; max 24.0)
+  D-208 search after indexing ≤ 30 ms (median): wire-server range head: ok (5.1 ms; max 19.9)
+  D-208 search after indexing ≤ 30 ms (median): wire-server range base: ok (3.5 ms; max 11.0)
+  D-208 search after indexing ≤ 100 ms (p95): wire-server range head: ok (12.3 ms; max 19.9)
+  D-208 search after indexing ≤ 100 ms (p95): wire-server range base: ok (6.4 ms; max 11.0)
+  D-303 find references after indexing < 300 ms (p95): wire-server range head: ok (137.5 ms; max 153.9)
+  D-303 find references after indexing < 300 ms (p95): wire-server range base: ok (142.8 ms; max 156.5)
+  D-308 text search after load ≤ 50 ms (median): wire-server range head: ok (4.2 ms; max 13.1)
+  D-308 text search after load ≤ 50 ms (median): wire-server range base: ok (4.4 ms; max 12.5)
+  D-308 text search after load ≤ 150 ms (p95): wire-server range head: ok (11.7 ms; max 13.1)
+  D-308 text search after load ≤ 150 ms (p95): wire-server range base: ok (11.5 ms; max 12.5)
+  §10.1 diff after indexing < 100 ms (p95): wire-server range: ok (4.9 ms; max 11.2)
+  §10.1 URL + accepting < 300 ms (median): wire-server worktree: ok (27.5 ms; max 28.5)
+  §10.1 UI usable < 10 s (median): wire-server worktree: ok (915.6 ms; max 1076.5)
+  §10.1 on-demand module < 300 ms (p95): wire-server worktree: ok (259.3 ms; max 259.3)
+  §10.1 navigation < 100 ms (back to back) (p95): wire-server worktree head: ok (5.3 ms; max 28.6)
+  §10.1 navigation < 100 ms (back to back) (p95): wire-server worktree base: ok (5.1 ms; max 19.5)
+  §10.1 navigation < 100 ms (idle gaps) (p95): wire-server worktree head: ok (11.5 ms; max 19.5)
+  §10.1 navigation < 100 ms (idle gaps) (p95): wire-server worktree base: ok (13.1 ms; max 19.2)
+  §10.1 navigation < 100 ms (source, back to back) (p95): wire-server worktree head: ok (6.3 ms; max 31.5)
+  §10.1 navigation < 100 ms (source, back to back) (p95): wire-server worktree base: ok (6.2 ms; max 33.7)
+  §10.1 navigation < 100 ms (source, idle gaps) (p95): wire-server worktree head: ok (12.8 ms; max 21.4)
+  §10.1 navigation < 100 ms (source, idle gaps) (p95): wire-server worktree base: ok (9.5 ms; max 15.8)
+  D-208 search after indexing ≤ 30 ms (median): wire-server worktree head: ok (6.4 ms; max 19.8)
+  D-208 search after indexing ≤ 30 ms (median): wire-server worktree base: ok (4.6 ms; max 19.0)
+  D-208 search after indexing ≤ 100 ms (p95): wire-server worktree head: ok (14.2 ms; max 19.8)
+  D-208 search after indexing ≤ 100 ms (p95): wire-server worktree base: ok (14.4 ms; max 19.0)
+  D-303 find references after indexing < 300 ms (p95): wire-server worktree head: ok (137.8 ms; max 140.8)
+  D-303 find references after indexing < 300 ms (p95): wire-server worktree base: ok (136.9 ms; max 147.5)
+  D-308 text search after load ≤ 50 ms (median): wire-server worktree head: ok (4.0 ms; max 12.4)
+  D-308 text search after load ≤ 50 ms (median): wire-server worktree base: ok (4.1 ms; max 11.8)
+  D-308 text search after load ≤ 150 ms (p95): wire-server worktree head: ok (11.3 ms; max 12.4)
+  D-308 text search after load ≤ 150 ms (p95): wire-server worktree base: ok (11.4 ms; max 11.8)
+  §10.1 diff after indexing < 100 ms (p95): wire-server worktree: ok (4.9 ms; max 5.8)

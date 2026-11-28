@@ -299,7 +299,7 @@ nicer than a web diff, because every line links into the right snapshot.
 **Done when**
 - §10.1 targets hold with both sides indexed.
 - Memory measured on the large project in diff mode; budget set
-  (provisional 2 GiB, §10.2) and logged.
+  (2 GiB, §10.2, D-361) and logged.
 - Fixture repos cover the three revspec forms, renames, untracked files,
   `.cabal` changes between sides, ROOT in a subdirectory, exit code 2
   cases, CRLF and LFS files, a copied file shown as added.

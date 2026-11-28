@@ -1450,11 +1450,10 @@ appears at once and fills in progressively.
   id. A module is changed if it is on one side only, or its blob or its
   parse settings (extensions, CPP flags, ...) differ. A module moved by
   `hs-source-dirs` with the same blob and settings is not changed (D-317).
-- The memory budget is to be set from the first benchmarks. As a
-  provisional target, it should stay under 2 GiB for the large reference
-  project in diff mode, with both sides indexed. The budget is for the
-  reference projects (D-82). Hostile generated input can go over it
-  (known limits, D-216).
+- Memory budget: 2 GiB for the large reference project in diff mode,
+  with both sides indexed (D-361). The bench checks the RTS's peak heap
+  (`max_mem_in_use`). The budget is for the reference projects (D-82). Hostile
+  generated input can go over it (known limits, D-216).
 
 ### 10.3 Benchmarks may change the spec
 
@@ -1954,8 +1953,9 @@ the search box's 8 results, on a large project once the store is loaded
   D-353). Results shown as text because the parse was too slow are
   dropped too, so a reload parses them again (D-353).
 - **GC.** Big indexes may cause long GC pauses. Benchmarks pick the fix:
-  compact regions or the non-moving GC (Q-GC). M1 and M2 keep the copying
-  GC with the D-162 defaults: pauses are well under target (D-219, D-305).
+  compact regions or the non-moving GC (Q-GC). M1, M2 and M3 keep the
+  copying GC with the D-162 defaults: pauses are well under target (D-219,
+  D-305, D-362).
 - **Session state** also lives in STM: LLM threads, budgets (§6.5), SSE
   clients and preferences.
 - **Files the tool writes** (§1): the HIE cache (`$XDG_CACHE_HOME`), UI
